@@ -1,0 +1,948 @@
+#!/usr/bin/env python3
+"""Claude Code Status Line.
+
+Reads JSON from stdin (Claude Code session data) and outputs
+a multi-line ANSI-colored status display.
+
+Layout:
+  Line 1: Project    - [project name] (only if active orbit project)
+  Line 2: Location   - [dir] [git branch+status]
+  Line 3: Metrics    - [model] [tokens] [ctx%]
+  Line 4: Time       - [elapsed] [edits] [now]
+  Line 5: K8s/Ver    - [k8s context] [version] [health status]
+  Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
+"""
+
+import base64
+import json
+import os
+import platform
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+import unicodedata
+import urllib.request
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+IS_MACOS = platform.system() == "Darwin"
+
+# ============ STDERR SUPPRESSION ============
+try:
+    _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(_devnull_fd, 2)
+    os.close(_devnull_fd)
+except OSError:
+    pass
+
+# ============ CONSTANTS ============
+
+ESC = "\033"
+RESET = f"{ESC}[0m"
+
+COLORS = {
+    "dir": f"{ESC}[38;2;180;140;100m",
+    "git_clean": f"{ESC}[38;2;80;200;120m",
+    "git_dirty": f"{ESC}[38;2;220;180;50m",
+    "project": f"{ESC}[38;2;80;200;120m",
+    "k8s": f"{ESC}[38;2;150;120;180m",
+    "model": f"{ESC}[38;2;180;130;200m",
+    "tokens": f"{ESC}[38;2;100;200;200m",
+    "ctx": f"{ESC}[38;2;160;170;190m",
+    "ctx_warn": f"{ESC}[38;2;220;180;50m",
+    "ctx_urgent": f"{ESC}[38;2;255;109;0m",
+    "ctx_est": f"{ESC}[38;2;100;150;220m",
+    "time": f"{ESC}[38;2;100;180;180m",
+    "edit": f"{ESC}[38;2;200;160;120m",
+    "datetime": f"{ESC}[38;2;160;160;180m",
+    "version": f"{ESC}[38;2;130;180;220m",
+    "pipe": f"{ESC}[38;2;100;100;110m",
+    "session_usage": f"{ESC}[38;2;100;160;200m",
+    "weekly_usage": f"{ESC}[38;2;160;130;190m",
+    "opus_usage": f"{ESC}[38;2;200;160;120m",
+    "reset_time": f"{ESC}[38;2;120;120;130m",
+    "mode_personal": f"{ESC}[38;2;80;200;120m",
+    "mode_work": f"{ESC}[38;2;100;150;220m",
+    "health_ok": f"{ESC}[38;2;0;200;83m",
+    "health_degraded": f"{ESC}[38;2;255;214;0m",
+    "health_partial": f"{ESC}[38;2;255;109;0m",
+    "health_resolved": f"{ESC}[38;2;100;180;100m",
+}
+
+ICONS = {
+    "dir": "\U0001f4c1",
+    "git": "\U0001f500",
+    "project": "\U0001f4cb",
+    "k8s": "\u2638\ufe0f",
+    "model": "\U0001f916",
+    "tokens": "\U0001f522",
+    "context": "\U0001f4ca",
+    "duration": "\u23f1\ufe0f",
+    "edit": "\u270f\ufe0f",
+    "datetime": "\U0001f550",
+    "week": "\U0001f4c5",
+    "reset": "\U0001f504",
+    "version": "\U0001f4e6",
+    "health_ok": "\u2705",
+    "health_degraded": "\u26a0\ufe0f",
+    "health_partial": "\U0001f7e1",
+}
+
+PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
+
+
+SYSTEM_OVERHEAD_PERCENT = 19
+CELL_WIDTH = 24
+
+STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
+HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
+SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
+ORBIT_ACTIVE = Path.home() / ".claude" / "orbit" / "active"
+
+
+def _get_hooks_db() -> sqlite3.Connection | None:
+    """Get hooks-state DB connection. Returns None if DB doesn't exist."""
+    if not HOOKS_STATE_DB.exists():
+        return None
+    try:
+        db = sqlite3.connect(str(HOOKS_STATE_DB), timeout=1)
+        db.row_factory = sqlite3.Row
+        return db
+    except sqlite3.Error:
+        return None
+
+HEALTH_CACHE = SCRIPTS_DIR / "health-cache.json"
+HEALTH_TTL = 180
+HEALTH_URL = "https://status.claude.com/api/v2/incidents.json"
+HEALTH_COMPONENTS = {"rwppv331jlwc": "claude.ai", "yyzkbfz2thpt": "Code"}
+
+USAGE_CACHE = SCRIPTS_DIR / "usage-cache.json"
+USAGE_TTL = 300
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+
+
+# ============ DISPLAY WIDTH ============
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]|\x1b\][^\x07]*\x07")
+
+_EMOJI_RANGES = [
+    (0x1F300, 0x1F9FF),
+    (0x2600, 0x26FF),
+    (0x2700, 0x27BF),
+    (0x1F600, 0x1F64F),
+    (0x1F680, 0x1F6FF),
+    (0x1F1E0, 0x1F1FF),
+]
+
+_EMOJI_SINGLES = frozenset({
+    0x231A, 0x231B, 0x23E9, 0x23EA, 0x23EB, 0x23EC, 0x23F0, 0x23F3,
+    0x25AA, 0x25AB, 0x25B6, 0x25C0, 0x25FB, 0x25FC, 0x25FD, 0x25FE,
+    0x2614, 0x2615, 0x2648, 0x2649, 0x264A, 0x264B, 0x264C, 0x264D,
+    0x264E, 0x264F, 0x2650, 0x2651, 0x2652, 0x2653, 0x267F, 0x2693,
+    0x26A1, 0x26AA, 0x26AB, 0x26BD, 0x26BE, 0x26C4, 0x26C5, 0x26CE,
+    0x26D4, 0x26EA, 0x26F2, 0x26F3, 0x26F5, 0x26FA, 0x26FD, 0x2702,
+    0x2705, 0x2708, 0x2709, 0x270A, 0x270B, 0x270C, 0x270D, 0x270F,
+    0x2712, 0x2714, 0x2716, 0x271D, 0x2721, 0x2728, 0x2733, 0x2734,
+    0x2744, 0x2747, 0x274C, 0x274E, 0x2753, 0x2754, 0x2755, 0x2757,
+    0x2763, 0x2764, 0x2795, 0x2796, 0x2797, 0x27A1, 0x27B0, 0x27BF,
+    0x2934, 0x2935, 0x2B05, 0x2B06, 0x2B07, 0x2B1B, 0x2B1C, 0x2B50,
+    0x2B55, 0x3030, 0x303D, 0x3297, 0x3299,
+})
+
+
+def display_width(s: str) -> int:
+    """Calculate display width accounting for ANSI codes, emoji, and CJK."""
+    s = _ANSI_RE.sub("", s)
+    width = 0
+    i = 0
+    n = len(s)
+    while i < n:
+        cp = ord(s[i])
+        if cp == 0x200D:
+            i += 1
+            continue
+        has_vs16 = i + 1 < n and ord(s[i + 1]) == 0xFE0F
+        if cp in (0xFE0E, 0xFE0F):
+            i += 1
+            continue
+        is_emoji = (
+            any(lo <= cp <= hi for lo, hi in _EMOJI_RANGES)
+            or has_vs16
+            or cp in _EMOJI_SINGLES
+        )
+        if is_emoji:
+            width += 2
+        elif unicodedata.east_asian_width(s[i]) in ("W", "F"):
+            width += 2
+        else:
+            width += 1
+        i += 1
+    return width
+
+
+# ============ HELPERS ============
+
+def run_cmd(cmd: list[str], timeout: int = 5) -> str | None:
+    """Run a command, return stdout stripped or None on failure."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def _relative_time(iso_ts: str) -> str:
+    """Convert ISO timestamp to relative time string."""
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        secs = int((datetime.now(timezone.utc) - dt).total_seconds())
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except Exception:
+        return ""
+
+
+def _format_reset_time(iso_ts: str) -> str:
+    """Format ISO timestamp to compact 'thu 11am' format."""
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%a %-I%p").lower()
+    except Exception:
+        return "?"
+
+
+def _format_unix_reset(ts) -> str:
+    """Format unix timestamp to compact 'thu 11am' format."""
+    try:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        return dt.astimezone().strftime("%a %-I%p").lower()
+    except Exception:
+        return "?"
+
+
+def _parse_stdin_rate_limits(rate_limits: dict) -> dict:
+    """Parse rate_limits from statusline stdin JSON (different field names than API)."""
+    if not rate_limits:
+        return {"is_max": True}
+
+    result: dict = {}
+    if rate_limits.get("five_hour") is not None:
+        fh = rate_limits["five_hour"]
+        result["session_pct"] = str(int(fh.get("used_percentage", 0)))
+        result["session_reset"] = _format_unix_reset(fh.get("resets_at"))
+    if rate_limits.get("seven_day") is not None:
+        sd = rate_limits["seven_day"]
+        result["weekly_pct"] = str(int(sd.get("used_percentage", 0)))
+        result["weekly_reset"] = _format_unix_reset(sd.get("resets_at"))
+    if rate_limits.get("seven_day_opus") is not None:
+        opus_pct = int(rate_limits["seven_day_opus"].get("used_percentage", 0))
+        if opus_pct > 0:
+            result["opus_pct"] = str(opus_pct)
+    return result
+
+
+# ============ INPUT PARSING ============
+
+def parse_input(raw: str) -> dict:
+    """Parse Claude Code JSON input and extract display values."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+
+    model_name = data.get("model", {}).get("display_name", "Claude")
+
+    ctx = data.get("context_window", {})
+    ctx_size = ctx.get("context_window_size", 200000)
+
+    # Debug log (matches existing bash behavior)
+    try:
+        debug_file = STATE_DIR / "statusline-ctx-debug.log"
+        debug_file.write_text(
+            f"context_window keys: {list(ctx.keys())}\n"
+            f"context_window: {json.dumps(ctx, indent=2)}\n"
+            f"\nmodel object: {json.dumps(data.get('model', {}), indent=2)}\n"
+            f"Full data keys: {list(data.keys())}\n"
+            f"\ncost object: {json.dumps(data.get('cost', {}), indent=2)}\n"
+        )
+    except OSError:
+        pass
+
+    ctx_estimated = False
+    if ctx.get("used_percentage") is not None:
+        ctx_percent = min(int(ctx["used_percentage"]) + SYSTEM_OVERHEAD_PERCENT, 100)
+    else:
+        ctx_estimated = True
+        cur = ctx.get("current_usage") or {}
+        base = (cur.get("input_tokens", 0) + cur.get("cache_creation_input_tokens", 0)
+                + cur.get("cache_read_input_tokens", 0) + cur.get("output_tokens", 0))
+        current_context = base + int(ctx_size * 0.19)
+        ctx_percent = min(int((current_context / ctx_size) * 100) if ctx_size > 0 else 0, 100)
+
+    cur = ctx.get("current_usage") or {}
+    total_tokens = (cur.get("input_tokens", 0) + cur.get("cache_creation_input_tokens", 0)
+                    + cur.get("cache_read_input_tokens", 0) + cur.get("output_tokens", 0))
+    if total_tokens >= 1_000_000:
+        tokens_str = f"{total_tokens / 1_000_000:.1f}M"
+    elif total_tokens >= 1_000:
+        tokens_str = f"{total_tokens / 1_000:.1f}K"
+    else:
+        tokens_str = str(total_tokens)
+
+    cost_data = data.get("cost", {})
+    duration_ms = cost_data.get("total_duration_ms", 0)
+    duration_min = duration_ms // 60000
+    duration_sec_rem = (duration_ms % 60000) // 1000
+    if duration_min >= 60:
+        duration_str = f"{duration_min // 60}h {duration_min % 60}m"
+    else:
+        duration_str = f"{duration_min}m {duration_sec_rem}s"
+
+    session_cost = cost_data.get("total_cost_usd", 0)
+
+    return {
+        "model_name": model_name,
+        "tokens_str": tokens_str,
+        "ctx_percent": ctx_percent,
+        "ctx_estimated": ctx_estimated,
+        "duration_str": duration_str,
+        "duration_sec": duration_ms // 1000,
+        "session_id": data.get("session_id", ""),
+        "cost_str": f"${session_cost:.2f}",
+        "worktree": data.get("worktree"),
+        "rate_limits": data.get("rate_limits"),
+    }
+
+
+# ============ DEBOUNCE ============
+
+def should_debounce(session_id: str) -> bool:
+    """Return True if render should be skipped (too soon since last one)."""
+    if not session_id:
+        return False
+    debounce_file = Path(f"/tmp/.claude-statusline-{session_id}")
+    now_ms = int(time.time() * 1000)
+    if debounce_file.exists():
+        try:
+            last_ms = int(debounce_file.read_text().strip())
+            elapsed = now_ms - last_ms
+            if 0 <= elapsed < 500:
+                return True
+        except (ValueError, OSError):
+            pass
+    try:
+        debounce_file.write_text(str(now_ms))
+    except OSError:
+        pass
+    return False
+
+
+# ============ SESSION STATE ============
+
+def update_session_state(session_id: str, ctx_percent: int, tokens_str: str) -> int:
+    """Update session state in hooks-state DB. Returns edit count."""
+    if not session_id:
+        return 0
+    edit_count = 0
+    db = _get_hooks_db()
+    if db:
+        try:
+            db.execute(
+                """INSERT INTO session_state (session_id, context_percent, context_tokens, updated_at)
+                   VALUES (?, ?, ?, datetime('now', 'localtime'))
+                   ON CONFLICT(session_id) DO UPDATE SET
+                     context_percent = ?,
+                     context_tokens = ?,
+                     updated_at = datetime('now', 'localtime')""",
+                (session_id, ctx_percent, tokens_str, ctx_percent, tokens_str),
+            )
+            db.commit()
+            row = db.execute(
+                "SELECT edit_count FROM session_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row:
+                edit_count = row["edit_count"] or 0
+            db.close()
+        except sqlite3.Error:
+            pass
+    return edit_count
+
+
+def update_term_session(session_id: str) -> None:
+    """Update terminal-to-session mapping."""
+    term_id = os.environ.get("TERM_SESSION_ID") or os.environ.get("WT_SESSION", "")
+    if not session_id or not term_id:
+        return
+    db = _get_hooks_db()
+    if db:
+        try:
+            db.execute(
+                """INSERT INTO term_sessions (term_session_id, session_id, updated_at)
+                   VALUES (?, ?, datetime('now', 'localtime'))
+                   ON CONFLICT(term_session_id) DO UPDATE SET
+                     session_id = ?,
+                     updated_at = datetime('now', 'localtime')""",
+                (term_id, session_id, session_id),
+            )
+            db.commit()
+            db.close()
+        except sqlite3.Error:
+            pass
+
+
+# ============ PROJECT INFO ============
+
+def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
+    """Return (project_name, project_display)."""
+    if not session_id:
+        return "", ""
+    name = ""
+    max_age = max(duration_sec + 60, 60)
+    db = _get_hooks_db()
+    if db:
+        try:
+            row = db.execute(
+                "SELECT project_name, updated_at FROM project_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            db.close()
+            if row and row["project_name"]:
+                updated = datetime.fromisoformat(row["updated_at"])
+                age = int((datetime.now() - updated).total_seconds())
+                if age < 30 or age < max_age:
+                    name = row["project_name"]
+        except (sqlite3.Error, ValueError):
+            pass
+    if not name:
+        return "", ""
+
+    display = name
+    if ORBIT_ACTIVE.is_dir():
+        if not (ORBIT_ACTIVE / name).is_dir():
+            for parent in ORBIT_ACTIVE.iterdir():
+                if parent.is_dir() and (parent / name).is_dir():
+                    display = f"{parent.name}/{name}"
+                    break
+    return name, display
+
+
+# ============ GIT INFO ============
+
+def get_git_info() -> tuple[str, str, bool]:
+    """Return (repo_name, branch, is_dirty)."""
+    if run_cmd(["git", "rev-parse", "--git-dir"]) is None:
+        return "", "", False
+    toplevel = run_cmd(["git", "rev-parse", "--show-toplevel"])
+    repo_name = Path(toplevel).name if toplevel else ""
+    branch = run_cmd(["git", "branch", "--show-current"]) or ""
+    if not branch:
+        branch = run_cmd(["git", "rev-parse", "--short", "HEAD"]) or ""
+    porcelain = run_cmd(["git", "status", "--porcelain"])
+    return repo_name, branch, bool(porcelain)
+
+
+# ============ K8S CONTEXT ============
+
+def get_k8s_context() -> str:
+    """Return current K8s context name."""
+    ctx = run_cmd(["kubectl", "config", "current-context"])
+    return ctx or ""
+
+
+# ============ VERSION INFO ============
+
+def is_version_reviewed(version: str) -> bool:
+    """Check if /whats-new has been run for this version."""
+    reviewed_file = Path.home() / ".claude" / "cache" / "whats-new-version"
+    if not reviewed_file.exists():
+        return False
+    try:
+        return reviewed_file.read_text().strip() == version
+    except OSError:
+        return False
+
+
+def get_version_info() -> tuple[str, str]:
+    """Return (version, age_str) e.g. ('1.0.50', '3d')."""
+    out = run_cmd(["claude", "--version"])
+    if not out:
+        return "", ""
+    version = out.split()[0] if out else ""
+    if not version:
+        return "", ""
+
+    cache_file = STATE_DIR / "version-cache.json"
+    cache = {}
+    release_date = None
+    if cache_file.exists():
+        try:
+            cache = json.loads(cache_file.read_text())
+            if version in cache:
+                release_date = datetime.fromisoformat(cache[version])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if release_date is None:
+        try:
+            url = f"https://api.github.com/repos/anthropics/claude-code/releases/tags/v{version}"
+            req = urllib.request.Request(url, headers={"User-Agent": "statusline"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                pub = json.loads(resp.read()).get("published_at", "")
+                if pub:
+                    release_date = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                    cache[version] = release_date.isoformat()
+                    cache_file.parent.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_text(json.dumps(cache))
+        except Exception:
+            pass
+
+    age_str = ""
+    if release_date:
+        days = (date.today() - release_date.astimezone().date()).days
+        age_str = f"{days}d"
+    return version, age_str
+
+
+# ============ HEALTH STATUS ============
+
+_HEALTH_STATUS_MAP = {
+    "investigating": "Investigating",
+    "identified": "Identified",
+    "monitoring": "Monitoring",
+    "resolved": "Resolved",
+    "postmortem": "Resolved",
+}
+
+
+def get_health_status() -> list[dict]:
+    """Return list of health incident dicts.
+    An entry with service='OK' means all clear."""
+    # Check cache
+    if HEALTH_CACHE.exists():
+        try:
+            cache = json.loads(HEALTH_CACHE.read_text())
+            if time.time() - cache.get("timestamp", 0) < HEALTH_TTL and "incidents" in cache:
+                return cache["incidents"]
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    incidents = []
+    try:
+        with urllib.request.urlopen(HEALTH_URL, timeout=5) as r:
+            data = json.loads(r.read())
+            now = datetime.now(timezone.utc)
+            for inc in data.get("incidents", []):
+                affected = []
+                for comp in inc.get("components", []):
+                    cid = comp.get("id")
+                    if cid in HEALTH_COMPONENTS and HEALTH_COMPONENTS[cid] not in affected:
+                        affected.append(HEALTH_COMPONENTS[cid])
+                if not affected:
+                    continue
+
+                service = "Both" if len(affected) == 2 else affected[0]
+                status = inc.get("status", "")
+                resolved_at = inc.get("resolved_at")
+
+                if status not in ("resolved", "postmortem"):
+                    updates = inc.get("incident_updates", [])
+                    latest = updates[0] if updates else {}
+                    raw_status = latest.get("status", status)
+                    incidents.append({
+                        "service": service,
+                        "name": inc.get("name", "Unknown")[:35],
+                        "status": _HEALTH_STATUS_MAP.get(raw_status, raw_status.replace("_", " ").title()),
+                        "body": (latest.get("body", "") or "")[:50],
+                        "time_ago": _relative_time(
+                            latest.get("created_at", inc.get("updated_at", ""))
+                        ),
+                        "resolved": False,
+                    })
+                elif resolved_at:
+                    try:
+                        resolved_dt = datetime.fromisoformat(resolved_at.replace("Z", "+00:00"))
+                        if (now - resolved_dt).total_seconds() / 3600 <= 1:
+                            incidents.append({
+                                "service": service,
+                                "name": inc.get("name", "Unknown")[:35],
+                                "status": "Resolved",
+                                "body": "This incident has been resolved.",
+                                "time_ago": _relative_time(resolved_at),
+                                "resolved": True,
+                            })
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    if not incidents:
+        incidents = [{"service": "OK"}]
+
+    # Cache
+    try:
+        HEALTH_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        HEALTH_CACHE.write_text(json.dumps({"timestamp": time.time(), "incidents": incidents}))
+    except OSError:
+        pass
+    return incidents
+
+
+# ============ USAGE DATA ============
+
+def _get_oauth_token() -> str | None:
+    """Read OAuth token from macOS Keychain or CLAUDE_OAUTH_TOKEN env var."""
+    if IS_MACOS:
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            creds = json.loads(result.stdout.strip())
+            return creds.get("claudeAiOauth", {}).get("accessToken")
+        except Exception:
+            return None
+    else:
+        return os.environ.get("CLAUDE_OAUTH_TOKEN")
+
+
+def _parse_usage_response(data: dict) -> dict:
+    """Parse API usage response into display values."""
+    if (data.get("five_hour") is None
+            and data.get("seven_day") is None
+            and data.get("seven_day_opus") is None):
+        return {"is_max": True}
+
+    result: dict = {}
+    if data.get("five_hour") is not None:
+        result["session_pct"] = str(int(data["five_hour"].get("utilization", 0)))
+        result["session_reset"] = _format_reset_time(data["five_hour"].get("resets_at", ""))
+    if data.get("seven_day") is not None:
+        result["weekly_pct"] = str(int(data["seven_day"].get("utilization", 0)))
+        result["weekly_reset"] = _format_reset_time(data["seven_day"].get("resets_at", ""))
+    if data.get("seven_day_opus") is not None:
+        opus_pct = int(data["seven_day_opus"].get("utilization", 0))
+        if opus_pct > 0:
+            result["opus_pct"] = str(opus_pct)
+    return result
+
+
+def get_usage_data() -> dict | None:
+    """Return parsed usage data, or None on failure."""
+    if os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1":
+        return {"is_foundry": True}
+
+    # Check cache
+    if USAGE_CACHE.exists():
+        try:
+            cache = json.loads(USAGE_CACHE.read_text())
+            cached_at = datetime.fromisoformat(cache["cached_at"])
+            if (datetime.now(timezone.utc) - cached_at).total_seconds() < USAGE_TTL:
+                return _parse_usage_response(cache["data"])
+        except Exception:
+            pass
+
+    token = _get_oauth_token()
+    if not token:
+        return None
+
+    try:
+        req = urllib.request.Request(
+            USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "anthropic-beta": "oauth-2025-04-20",
+                "User-Agent": "claude-statusline/1.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        try:
+            USAGE_CACHE.write_text(json.dumps({
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+                "data": data,
+            }))
+        except OSError:
+            pass
+        return _parse_usage_response(data)
+    except Exception:
+        return None
+
+
+# ============ LINE BUILDING ============
+
+def _item(color: str, icon: str, label: str, value: str) -> str:
+    return f"{color}{icon} {label}: {value}{RESET}"
+
+
+def _join_items(items: list[str], widths: list[int], max_col1: int, max_col2: int) -> str:
+    if not items:
+        return ""
+    parts: list[str] = []
+    for i, (item, w) in enumerate(zip(items, widths)):
+        if i == 0:
+            pad = max_col1 - w
+            parts.append(item + (" " * max(pad, 0)))
+        else:
+            target = max_col2 if i == 1 else CELL_WIDTH
+            pad = target - w
+            parts.append(PIPE + item + (" " * max(pad, 0)))
+    return "".join(parts)
+
+
+def _pad_line(line: str, line_width: int, max_width: int) -> str:
+    pad = max_width - line_width
+    return line + (" " * pad) if pad > 0 else line
+
+
+# ============ iTERM TITLE ============
+
+def set_iterm_title(session_id: str, project_name: str, repo_name: str, branch: str, dir_name: str = "") -> None:
+    try:
+        tty = open("/dev/tty", "w")
+    except OSError:
+        return
+
+    action = "Claude Code"
+    db = _get_hooks_db()
+    if db:
+        try:
+            row = db.execute(
+                "SELECT action FROM session_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            db.close()
+            if row and row["action"]:
+                action = row["action"]
+        except sqlite3.Error:
+            pass
+
+    prefix = project_name or dir_name
+    title = f"{prefix}: {action}" if prefix else action
+    tty.write(f"\033]1;{title}\007")
+
+    if os.environ.get("TERM_PROGRAM") == "iTerm.app":
+        subtitle = ""
+        if project_name:
+            subtitle = project_name
+        elif repo_name and branch:
+            subtitle = f"{repo_name}({branch})"
+        elif repo_name:
+            subtitle = repo_name
+        if subtitle:
+            b64 = base64.b64encode(subtitle.encode()).decode()
+            tty.write(f"\033]1337;SetUserVar=claudeSubtitle={b64}\007")
+    tty.close()
+
+
+# ============ MAIN ============
+
+def main() -> None:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return
+
+    info = parse_input(raw)
+    session_id = info["session_id"]
+    model_name = info["model_name"]
+    tokens_str = info["tokens_str"]
+
+    # Handle empty model/tokens (startup vs exit)
+    if not session_id:
+        model_name = model_name or "Claude"
+        tokens_str = tokens_str or "0"
+    else:
+        debounce_file = Path(f"/tmp/.claude-statusline-{session_id}")
+        if not model_name or not tokens_str:
+            if debounce_file.exists():
+                return  # Exit scenario: corrupted data
+            model_name = model_name or "Claude"
+            tokens_str = tokens_str or "0"
+
+    if should_debounce(session_id):
+        return
+
+    update_term_session(session_id)
+    edit_count = update_session_state(session_id, info["ctx_percent"], tokens_str)
+    project_name, project_display = get_project_info(session_id, info["duration_sec"])
+    repo_name, branch, git_dirty = get_git_info()
+    k8s_name = get_k8s_context()
+    version, version_age = get_version_info()
+    health = get_health_status()
+    rate_limits = info.get("rate_limits")
+    usage = _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
+
+    now_dt = datetime.now().strftime("%a %b %-d, %-I:%M%p").replace("AM", "am").replace("PM", "pm")
+    dir_name = Path.cwd().name
+    if dir_name == os.environ.get("USER", ""):
+        dir_name = "~"
+    worktree = info.get("worktree")
+    if worktree and worktree.get("name"):
+        dir_name = f"{dir_name} (wt: {worktree['name']})"
+
+    # --- Build items per line ---
+
+    # Line 1: Location
+    line1 = [_item(COLORS["dir"], ICONS["dir"], "Dir", dir_name)]
+    if branch:
+        c = COLORS["git_dirty"] if git_dirty else COLORS["git_clean"]
+        line1.append(_item(c, ICONS["git"], "Git", branch))
+
+    # Line 2: Project
+    line2: list[str] = []
+    if project_name:
+        line2.append(_item(COLORS["project"], ICONS["project"], "Project", project_display))
+
+    # Line 3: Metrics
+    line3 = [
+        _item(COLORS["model"], ICONS["model"], "Model", model_name),
+        _item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str),
+    ]
+    ctx_pct = info["ctx_percent"]
+    if ctx_pct >= 80:
+        line3.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
+    elif ctx_pct >= 65:
+        line3.append(_item(COLORS["ctx_warn"], "\U0001f7e1", "Ctx", f"{ctx_pct}% (Compact recommended)"))
+    elif info["ctx_estimated"]:
+        line3.append(_item(COLORS["ctx_est"], ICONS["context"], "Ctx", f"{ctx_pct}% (Estimated)"))
+    else:
+        line3.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
+
+    # Line 4: Time
+    line4 = [
+        _item(COLORS["time"], ICONS["duration"], "Elapsed", info["duration_str"]),
+        _item(COLORS["edit"], ICONS["edit"], "Edits", str(edit_count)),
+        _item(COLORS["datetime"], ICONS["datetime"], "Now", now_dt),
+    ]
+
+    # Line K8s: K8s + Version + Health
+    line_k8s: list[str] = []
+    if k8s_name:
+        line_k8s.append(_item(COLORS["k8s"], ICONS["k8s"], "K8s", k8s_name))
+    if version:
+        age_suffix = f" ({version_age})" if version_age else ""
+        ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
+        line_k8s.append(f"{ver_color}{ICONS['version']} v{version}{age_suffix}{RESET}")
+    for inc in health:
+        if inc.get("service") == "OK":
+            line_k8s.append(f"{COLORS['health_ok']}{ICONS['health_ok']} Claude Status: OK{RESET}")
+        elif inc.get("resolved"):
+            label = f"[{inc['service']}] {inc['name']} - {inc['status']}"
+            if inc.get("body"):
+                label += f" - {inc['body']}"
+            if inc.get("time_ago"):
+                label += f" ({inc['time_ago']})"
+            line_k8s.append(f"{COLORS['health_resolved']}{ICONS['health_ok']} {label}{RESET}")
+        else:
+            st = inc.get("status", "")
+            if st == "Investigating":
+                color, icon = COLORS["health_partial"], ICONS["health_partial"]
+            elif st == "Monitoring":
+                color, icon = COLORS["health_ok"], ICONS["health_degraded"]
+            else:
+                color, icon = COLORS["health_degraded"], ICONS["health_degraded"]
+            label = f"[{inc['service']}] {inc['name']} - {st}"
+            if inc.get("body"):
+                label += f" - {inc['body']}"
+            if inc.get("time_ago"):
+                label += f" ({inc['time_ago']})"
+            line_k8s.append(f"{color}{icon} {label}{RESET}")
+
+    # Line Usage: Mode + usage stats
+    line_usage: list[str] = []
+    is_foundry = os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1"
+    if is_foundry:
+        line_usage.append(f"{COLORS['mode_work']}\u26a1 Work{RESET}")
+    else:
+        line_usage.append(f"{COLORS['mode_personal']}\U0001f3e0 Personal{RESET}")
+
+    if usage:
+        if usage.get("is_foundry"):
+            cost = info["cost_str"]
+            if cost:
+                line_usage.append(
+                    f"{COLORS['session_usage']}{ICONS['duration']} Session: {cost}{RESET}")
+            else:
+                line_usage.append(
+                    f"{COLORS['session_usage']}{ICONS['duration']} Session: {tokens_str} tokens, {info['duration_str']}{RESET}")
+        elif usage.get("is_max"):
+            line_usage.append(f"{COLORS['session_usage']}{ICONS['duration']} Session: \u221e{RESET}")
+            line_usage.append(f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: \u221e{RESET}")
+        else:
+            sp = usage.get("session_pct")
+            if sp and sp != "null":
+                sr = usage.get("session_reset", "")
+                if sr and sr != "null":
+                    line_usage.append(
+                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp}% "
+                        f"{COLORS['reset_time']}{ICONS['reset']} {sr}{RESET}")
+                else:
+                    line_usage.append(
+                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp}%{RESET}")
+            wp = usage.get("weekly_pct")
+            if wp and wp != "null":
+                wr = usage.get("weekly_reset", "")
+                if wr and wr != "null":
+                    line_usage.append(
+                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp}% "
+                        f"{COLORS['reset_time']}{ICONS['reset']} {wr}{RESET}")
+                else:
+                    line_usage.append(
+                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp}%{RESET}")
+            op = usage.get("opus_pct")
+            if op and op != "null" and op != "0":
+                line_usage.append(
+                    f"{COLORS['opus_usage']}{ICONS['model']} Opus: {op}%{RESET}")
+
+    # --- Column alignment ---
+    all_lines = [line1, line2, line3, line4, line_k8s, line_usage]
+    all_widths = [[display_width(item) for item in items] for items in all_lines]
+
+    max_col1 = CELL_WIDTH
+    max_col2 = CELL_WIDTH
+    for widths in all_widths:
+        if len(widths) > 0:
+            max_col1 = max(max_col1, widths[0])
+        if len(widths) > 1:
+            max_col2 = max(max_col2, widths[1])
+
+    joined = [_join_items(items, widths, max_col1, max_col2)
+              for items, widths in zip(all_lines, all_widths)]
+    line_widths = [display_width(j) for j in joined]
+    max_width = max(line_widths) if line_widths else 0
+
+    j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage = joined
+    w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage = line_widths
+
+    # --- Output ---
+    # Always output a fixed number of lines (6) so Claude Code allocates
+    # the full status area height from the very first render.
+    blank = " " * max_width if max_width > 0 else ""
+    out = sys.stdout
+    out.write(RESET)
+    out.write(((_pad_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n"))
+    out.write(_pad_line(j_line1, w_line1, max_width) + RESET + "\n")
+    out.write(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
+    out.write(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
+    out.write(((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n"))
+    out.write(((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n"))
+    out.write(RESET)
+    out.flush()
+
+    set_iterm_title(session_id, project_name, repo_name, branch, dir_name)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass

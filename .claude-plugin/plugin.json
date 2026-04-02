@@ -1,0 +1,9 @@
+{
+  "name": "orbit",
+  "version": "1.0.0",
+  "description": "Fast orbit project management with time tracking, file operations, and orbit-auto loop integration. Replaces 5-10+ tool calls with single MCP calls.",
+  "author": {
+    "name": "Tomer Brami"
+  },
+  "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"]
+}

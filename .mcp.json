@@ -1,0 +1,7 @@
+{
+  "pm": {
+    "type": "stdio",
+    "command": "uvx",
+    "args": ["--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server", "mcp-orbit"]
+  }
+}

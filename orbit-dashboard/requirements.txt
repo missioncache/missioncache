@@ -1,0 +1,18 @@
+# Orbit Dashboard Dependencies
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+duckdb>=1.1.0
+httpx>=0.28.0
+
+# RSS Feeds Feature
+feedparser>=6.0.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+readability-lxml>=0.8.0
+
+# Learn Doc Generation
+anthropic>=0.40.0
+python-slugify>=8.0.0
+
+# Auto Execution Streaming
+sse-starlette>=2.0.0
