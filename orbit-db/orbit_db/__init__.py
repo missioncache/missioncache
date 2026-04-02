@@ -63,7 +63,7 @@ DB_PATH = Path.home() / ".claude" / "tasks.db"
 ORBIT_ROOT = Path.home() / ".claude" / "orbit"
 
 # Non-git folder to track with shadow repo (only this folder gets shadow commits)
-SHADOW_TRACKED_FOLDER = Path.home() / "work" / "claude_dev"
+SHADOW_TRACKED_FOLDER = Path(os.environ.get("ORBIT_SHADOW_FOLDER", str(Path.home() / "work")))
 
 DEFAULT_CONFIG = {
     "idle_timeout_seconds": 300,  # 5 minutes
@@ -1884,7 +1884,7 @@ class TaskDB:
         """Encode a path to match Claude's project directory naming.
 
         Claude encodes paths by replacing '/' with '-' and '_' with '-'.
-        Example: /home/user/projects/claude_dev -> -home-user-projects-claude-dev
+        Example: /home/user/project -> -home-user-project
         """
         return path.replace("/", "-").replace("_", "-")
 
@@ -3157,7 +3157,7 @@ def main():
 
             # --- B2: Move orphaned repo-local files ---
             print("=== B2: Move orphaned repo-local files ===")
-            dev_dir = Path("/home/user/projects/claude_dev/dev")
+            dev_dir = ORBIT_ROOT
             files_moved = 0
 
             # statusline-layout-improvement files

@@ -31,17 +31,30 @@ Extract project name and mode assignments from the command arguments.
 - `all:auto` - All tasks set to autonomous
 - `1-4:auto,5:inter,6-10:auto` - Mixed assignment
 
-### Step 2: Apply Mode Changes
+### Step 2: Read Current Tasks
 
-Call the MCP tool:
-```
-mcp__plugin_orbit_pm__set_task_modes(
-    task_name="<project-name>",
-    task_ranges="1-4:auto,5-6:inter,7-10:auto"
-)
-```
+1. Get the project's orbit files:
+   ```
+   mcp__plugin_orbit_pm__get_orbit_files(project_name="<project-name>")
+   ```
 
-### Step 3: Display Results
+2. Read the tasks file to see current task list and any existing mode markers.
+
+### Step 3: Edit tasks.md Directly
+
+Parse the range:mode assignments and append mode tags to each matching task line.
+
+**Mode tag format:** `` `[auto]` `` or `` `[inter]` ``
+
+For each task line matching the range, append or replace the mode tag:
+- Before: `- [ ] 3. Design database schema`
+- After:  `- [ ] 3. Design database schema \`[auto]\``
+
+If a task already has a mode tag, replace it.
+
+Use `mcp__plugin_orbit_pm__update_tasks_file` to write the changes back.
+
+### Step 4: Display Results
 
 **Output format:**
 
@@ -50,18 +63,18 @@ mcp__plugin_orbit_pm__set_task_modes(
 
 Updated 10 tasks:
 
-| # | Task | Mode | Needs Prompt |
-|---|------|------|--------------|
-| 1 | Create user model | Auto | Yes |
-| 2 | Add login endpoint | Auto | Yes |
-| 3 | Design database | Auto | Yes |
-| 4 | Implement validation | Auto | Yes |
-| 5 | Manual review | Inter | No |
-| 6 | Design meeting | Inter | No |
-| 7 | Unit tests | Auto | Yes |
-| 8 | Integration tests | Auto | Yes |
-| 9 | Performance tests | Auto | Yes |
-| 10 | Final validation | Auto | Yes |
+| # | Task | Mode |
+|---|------|------|
+| 1 | Create user model | Auto |
+| 2 | Add login endpoint | Auto |
+| 3 | Design database | Auto |
+| 4 | Implement validation | Auto |
+| 5 | Manual review | Inter |
+| 6 | Design meeting | Inter |
+| 7 | Unit tests | Auto |
+| 8 | Integration tests | Auto |
+| 9 | Performance tests | Auto |
+| 10 | Final validation | Auto |
 
 **Project classification:** Hybrid (8 auto, 2 inter)
 
@@ -71,11 +84,9 @@ Autonomous tasks need prompts. Run:
 ```
 /orbit:prompts my-project
 ```
-
-This will generate prompts only for `[auto]` tasks.
 ```
 
-### Step 4: Suggest Prompt Generation
+### Step 5: Suggest Prompt Generation
 
 If any tasks were set to `auto` and don't have prompts yet, suggest running `/orbit:prompts`.
 
@@ -99,11 +110,11 @@ Tasks without mode markers default to interactive.
 
 ## Project Classification
 
-| Classification | Meaning | Display |
-|----------------|---------|---------|
-| Fully Interactive | All tasks interactive (or unset) | Interactive |
-| Fully Autonomous | All tasks autonomous | Autonomous |
-| Hybrid | Mix of interactive and autonomous | Hybrid |
+| Classification | Meaning |
+|----------------|---------|
+| Fully Interactive | All tasks interactive (or unset) |
+| Fully Autonomous | All tasks autonomous |
+| Hybrid | Mix of interactive and autonomous |
 
 ## Dependencies
 
@@ -113,16 +124,7 @@ Tasks can have explicit dependencies:
 - [ ] 7. Integration tests `[auto:depends=3,5]`
 ```
 
-This means task 7 can only run after tasks 3 and 5 are complete.
-
-To set dependencies:
-```
-mcp__plugin_orbit_pm__set_task_dependencies(
-    task_name="my-project",
-    task_id="7",
-    depends_on=["3", "5"]
-)
-```
+This means task 7 can only run after tasks 3 and 5 are complete. Set dependencies by editing the mode tag directly in tasks.md.
 
 ## Example Usage
 
@@ -141,6 +143,5 @@ mcp__plugin_orbit_pm__set_task_dependencies(
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__set_task_modes` | Apply mode changes to tasks.md |
-| `mcp__plugin_orbit_pm__get_project_mode_info` | Get current mode classification |
-| `mcp__plugin_orbit_pm__set_task_dependencies` | Set explicit dependencies |
+| `mcp__plugin_orbit_pm__get_orbit_files` | Get paths to project's orbit files |
+| `mcp__plugin_orbit_pm__update_tasks_file` | Write updated tasks.md with mode tags |

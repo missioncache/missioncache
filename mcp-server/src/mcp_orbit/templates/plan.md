@@ -10,6 +10,10 @@ created: {{timestamp}}
 
 {{summary}}
 
+## Research Findings
+
+{{research_findings}}
+
 ## Goals
 
 {{goals}}

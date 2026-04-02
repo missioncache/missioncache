@@ -39,7 +39,7 @@ open http://localhost:8787
 
 ### Deployment
 
-- **Launchd plist**: `~/Library/LaunchAgents/com.claude.dashboard.plist`
+- **Launchd plist**: `~/Library/LaunchAgents/com.orbit.dashboard.plist`
 - **Python**: Must use `/opt/homebrew/bin/python3.11` (not system Python)
 - **Port**: 8787
 
@@ -131,13 +131,13 @@ This ensures the dashboard shows tasks in the correct list based on actual orbit
 **Fix:**
 ```bash
 # Stop service
-launchctl unload ~/Library/LaunchAgents/com.claude.dashboard.plist
+launchctl unload ~/Library/LaunchAgents/com.orbit.dashboard.plist
 
 # Re-run migration
 /opt/homebrew/bin/python3.11 migrate_to_duckdb.py
 
 # Restart service
-launchctl load ~/Library/LaunchAgents/com.claude.dashboard.plist
+launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist
 ```
 
 ### Wrong Python version in launchd
@@ -173,7 +173,7 @@ Install for Python 3.11:
 | `~/.claude/tasks.db` | SQLite source database |
 | `~/.claude/tasks.duckdb` | DuckDB analytics database |
 | `~/.claude/statsig/stats-cache.json` | Claude Code usage stats |
-| `~/Library/LaunchAgents/com.claude.dashboard.plist` | Launchd service config |
+| `~/Library/LaunchAgents/com.orbit.dashboard.plist` | Launchd service config |
 
 ## Code Style
 

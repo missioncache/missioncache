@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @mcp.tool()
 async def create_orbit_files(
     repo_path: Annotated[str, Field(description="Repository path")],
-    task_name: Annotated[str, Field(description="Task name (kebab-case)")],
+    project_name: Annotated[str, Field(description="Project name (kebab-case)")],
     description: Annotated[
         str, Field(description="Short description (max 12 words)")
     ] = "TBD",
@@ -52,7 +52,7 @@ async def create_orbit_files(
 
         # Create the files under ORBIT_ROOT
         files = orbit.create_orbit_files(
-            task_name=task_name,
+            task_name=project_name,
             description=description,
             jira_key=jira_key,
             branch=branch,
@@ -64,12 +64,12 @@ async def create_orbit_files(
         db.scan_all_repos()
 
         # Find the created task
-        task = db.get_task_by_name(task_name)
+        task = db.get_task_by_name(project_name)
 
         return {
             "success": True,
             "task_id": task.id if task else None,
-            "task_name": task_name,
+            "task_name": project_name,
             "files": files.model_dump(),
         }
 
@@ -83,7 +83,7 @@ async def create_orbit_files(
 @mcp.tool()
 async def get_orbit_files(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[str | None, Field(description="Task name")] = None,
+    project_name: Annotated[str | None, Field(description="Project name")] = None,
 ) -> dict:
     """
     Get paths to orbit files for a task.
@@ -100,17 +100,17 @@ async def get_orbit_files(
             task = db.get_task(task_id)
             if not task:
                 raise TaskNotFoundError(task_id)
-        elif task_name:
-            task = db.get_task_by_name(task_name)
+        elif project_name:
+            task = db.get_task_by_name(project_name)
 
-        if not task and not task_name:
+        if not task and not project_name:
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": "Provide task_id or task_name",
+                "message": "Provide task_id or project_name",
             }
 
-        name = task.name if task else task_name
+        name = task.name if task else project_name
         # Pass full_path for subtasks (nested under parent directories)
         full_path = task.full_path if task else None
         files = orbit.get_orbit_files(name, full_path=full_path)

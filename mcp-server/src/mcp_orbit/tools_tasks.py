@@ -154,8 +154,8 @@ async def list_completed_tasks(
 @mcp.tool()
 async def get_task(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[
-        str | None, Field(description="Task name (alternative to ID)")
+    project_name: Annotated[
+        str | None, Field(description="Project name (alternative to ID)")
     ] = None,
     include_subtasks: Annotated[
         bool, Field(description="Include subtask details")
@@ -167,7 +167,7 @@ async def get_task(
     """
     Get full task details including progress, time, and prompt config.
 
-    Provide either task_id OR task_name (not both).
+    Provide either task_id OR project_name (not both).
     Returns all information needed for /continue-task in a single call.
     """
     db = get_db()
@@ -177,17 +177,17 @@ async def get_task(
 
         if task_id:
             task = db.get_task(task_id)
-        elif task_name:
-            task = db.get_task_by_name(task_name)
+        elif project_name:
+            task = db.get_task_by_name(project_name)
         else:
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": "Provide task_id or task_name",
+                "message": "Provide task_id or project_name",
             }
 
         if not task:
-            raise TaskNotFoundError(task_id or task_name)
+            raise TaskNotFoundError(task_id or project_name)
 
         detail = _task_to_detail(task, include_subtasks, include_updates)
         return detail.model_dump()
@@ -318,8 +318,8 @@ async def create_task(
 @mcp.tool()
 async def complete_task(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[
-        str | None, Field(description="Task name (alternative to ID)")
+    project_name: Annotated[
+        str | None, Field(description="Project name (alternative to ID)")
     ] = None,
     move_files: Annotated[bool, Field(description="Move orbit files to completed/")] = True,
 ) -> dict:
@@ -335,17 +335,17 @@ async def complete_task(
 
         if task_id:
             task = db.get_task(task_id)
-        elif task_name:
-            task = db.get_task_by_name(task_name, status="active")
+        elif project_name:
+            task = db.get_task_by_name(project_name, status="active")
         else:
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": "Provide task_id or task_name",
+                "message": "Provide task_id or project_name",
             }
 
         if not task:
-            raise TaskNotFoundError(task_id or task_name)
+            raise TaskNotFoundError(task_id or project_name)
 
         if task.status == "completed":
             raise InvalidStateError(
@@ -388,8 +388,8 @@ async def complete_task(
 @mcp.tool()
 async def reopen_task(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[
-        str | None, Field(description="Task name (alternative to ID)")
+    project_name: Annotated[
+        str | None, Field(description="Project name (alternative to ID)")
     ] = None,
     move_files: Annotated[
         bool, Field(description="Move orbit files from completed/ to active/")
@@ -407,17 +407,17 @@ async def reopen_task(
 
         if task_id:
             task = db.get_task(task_id)
-        elif task_name:
-            task = db.get_task_by_name(task_name, status="completed")
+        elif project_name:
+            task = db.get_task_by_name(project_name, status="completed")
         else:
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": "Provide task_id or task_name",
+                "message": "Provide task_id or project_name",
             }
 
         if not task:
-            raise TaskNotFoundError(task_id or task_name)
+            raise TaskNotFoundError(task_id or project_name)
 
         if task.status != "completed":
             raise InvalidStateError(

@@ -208,7 +208,7 @@ echo -e "  ${DIM}  - Claude Code usage statistics${NC}"
 echo ""
 
 # Install dashboard dependencies
-"$PYTHON" -m pip install fastapi uvicorn duckdb --quiet 2>/dev/null
+"$PYTHON" -m pip install -r "$ORBIT_REPO/orbit-dashboard/requirements.txt" --quiet 2>/dev/null
 detail "Installed dashboard dependencies"
 
 # Ask about background service
@@ -311,7 +311,7 @@ step 5 "Pre-build MCP Server"
 info "Building MCP server virtual environment..."
 
 if command -v uvx &>/dev/null; then
-    uvx --from "$ORBIT_REPO/mcp-server" mcp-orbit --help &>/dev/null 2>&1 && detail "MCP server venv built" || detail "MCP server will build on first use"
+    uvx --from "$ORBIT_REPO/mcp-server" --with "$ORBIT_REPO/orbit-db" mcp-orbit --help &>/dev/null 2>&1 && detail "MCP server venv built" || detail "MCP server will build on first use"
 else
     detail "uvx not found - MCP server will build on first use via Claude Code"
 fi

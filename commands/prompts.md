@@ -14,7 +14,7 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
 
 ## Prerequisites
 
-- Project must exist in `dev/active/<project-name>/`
+- Project must exist in `~/.claude/orbit/active/<project-name>/`
 - Project must have a `<project-name>-tasks.md` file with subtasks
 
 ## Workflow

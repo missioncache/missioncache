@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 @mcp.tool()
 async def log_iteration(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[
-        str | None, Field(description="Task name (if task_id not known)")
+    project_name: Annotated[
+        str | None, Field(description="Project name (if task_id not known)")
     ] = None,
     iteration: Annotated[int, Field(description="Iteration number")] = 1,
     status: Annotated[
@@ -51,7 +51,7 @@ async def log_iteration(
     db = get_db()
 
     try:
-        task_dir, resolved_name = _resolve_task_dir(db, task_id, task_name)
+        task_dir, resolved_name = _resolve_task_dir(db, task_id, project_name)
 
         entry = iteration_log.log_iteration(
             task_dir=task_dir,
@@ -84,7 +84,7 @@ async def log_iteration(
 @mcp.tool()
 async def log_iteration_completion(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[str | None, Field(description="Task name")] = None,
+    project_name: Annotated[str | None, Field(description="Project name")] = None,
     total_iterations: Annotated[
         int, Field(description="Total iterations completed")
     ] = 1,
@@ -99,7 +99,7 @@ async def log_iteration_completion(
     db = get_db()
 
     try:
-        task_dir, resolved_name = _resolve_task_dir(db, task_id, task_name)
+        task_dir, resolved_name = _resolve_task_dir(db, task_id, project_name)
 
         if timed_out:
             entry = iteration_log.log_timeout(
@@ -135,7 +135,7 @@ async def log_iteration_completion(
 @mcp.tool()
 async def get_iteration_status(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
-    task_name: Annotated[str | None, Field(description="Task name")] = None,
+    project_name: Annotated[str | None, Field(description="Project name")] = None,
 ) -> dict:
     """
     Get the current iteration loop status for a task.
@@ -146,7 +146,7 @@ async def get_iteration_status(
     db = get_db()
 
     try:
-        task_dir, resolved_name = _resolve_task_dir(db, task_id, task_name)
+        task_dir, resolved_name = _resolve_task_dir(db, task_id, project_name)
 
         # Get iteration log status
         status = iteration_log.get_iteration_status(task_dir, resolved_name)

@@ -13,8 +13,8 @@ Then restart your Claude Code session to pick up the changes.
 ## After Editing the Dashboard
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.claude.dashboard.plist
-launchctl load ~/Library/LaunchAgents/com.claude.dashboard.plist
+launchctl unload ~/Library/LaunchAgents/com.orbit.dashboard.plist
+launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist
 ```
 
 Or just restart the service. Frontend-only changes (index.html) take effect on browser refresh if the server reads the file dynamically.
