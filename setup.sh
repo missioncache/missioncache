@@ -363,6 +363,50 @@ with open('$SETTINGS', 'w') as f:
         detail "Updated settings.json with statusline command"
     fi
 
+    # Health monitoring configuration
+    echo ""
+    echo -e "  ${DIM}The statusline monitors Claude service health via health.claude.com.${NC}"
+    echo -e "  ${DIM}By default, Claude Code and Claude API are monitored.${NC}"
+    echo ""
+    echo -e "  ${BOLD}Available services:${NC}"
+    echo -e "    ${DIM}1)${NC} Code, Claude API ${DIM}(default)${NC}"
+    echo -e "    ${DIM}2)${NC} Code, Claude API, claude.ai"
+    echo -e "    ${DIM}3)${NC} All services ${DIM}(Code, Claude API, claude.ai, platform.claude.com, Claude for Government, Claude Cowork)${NC}"
+    echo ""
+    read -rp "  Which services to monitor? [1/2/3] (default: 1) " health_choice
+    health_choice="${health_choice:-1}"
+
+    case "$health_choice" in
+        2) HEALTH_SERVICES="Code,Claude API,claude.ai" ;;
+        3) HEALTH_SERVICES="Code,Claude API,claude.ai,platform.claude.com,Claude for Government,Claude Cowork" ;;
+        *) HEALTH_SERVICES="" ;;  # empty = use default (Code + Claude API)
+    esac
+
+    if [[ -n "$HEALTH_SERVICES" ]]; then
+        "$PYTHON" -c "
+import json
+with open('$SETTINGS') as f:
+    d = json.load(f)
+d.setdefault('env', {})['STATUSLINE_HEALTH_SERVICES'] = '$HEALTH_SERVICES'
+with open('$SETTINGS', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+        detail "Health monitoring: $HEALTH_SERVICES"
+    else
+        # Remove any previously set value so the script's built-in default applies
+        "$PYTHON" -c "
+import json
+with open('$SETTINGS') as f:
+    d = json.load(f)
+d.get('env', {}).pop('STATUSLINE_HEALTH_SERVICES', None)
+with open('$SETTINGS', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+        detail "Health monitoring: Code, Claude API (default)"
+    fi
+
+
+
     success "Statusline installed"
 else
     detail "Skipped statusline installation"

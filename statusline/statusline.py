@@ -11,6 +11,12 @@ Layout:
   Line 4: Time       - [elapsed] [edits] [now]
   Line 5: K8s/Ver    - [k8s context] [version] [health status]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
+
+Configuration (environment variables):
+  STATUSLINE_HEALTH_SERVICES  - Comma-separated services to monitor (default: "Code,Claude API")
+                                Available: Code, Claude API, claude.ai, platform.claude.com,
+                                Claude for Government, Claude Cowork
+                                Example: STATUSLINE_HEALTH_SERVICES="Code,Claude API,claude.ai"
 """
 
 import base64
@@ -24,6 +30,7 @@ import sys
 import time
 import unicodedata
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -65,6 +72,7 @@ COLORS = {
     "reset_time": f"{ESC}[38;2;120;120;130m",
     "mode_personal": f"{ESC}[38;2;80;200;120m",
     "mode_work": f"{ESC}[38;2;100;150;220m",
+    "mode_free": f"{ESC}[38;2;140;140;150m",
     "health_ok": f"{ESC}[38;2;0;200;83m",
     "health_degraded": f"{ESC}[38;2;255;214;0m",
     "health_partial": f"{ESC}[38;2;255;109;0m",
@@ -116,7 +124,25 @@ def _get_hooks_db() -> sqlite3.Connection | None:
 HEALTH_CACHE = SCRIPTS_DIR / "health-cache.json"
 HEALTH_TTL = 180
 HEALTH_URL = "https://status.claude.com/api/v2/incidents.json"
-HEALTH_COMPONENTS = {"rwppv331jlwc": "claude.ai", "yyzkbfz2thpt": "Code"}
+
+_ALL_HEALTH_COMPONENTS = {
+    "yyzkbfz2thpt": "Code",
+    "rwppv331jlwc": "claude.ai",
+    "k8w3r06qmzrp": "Claude API",
+    "0qbwn08sd68x": "platform.claude.com",
+    "0scnb50nvy53": "Claude for Government",
+    "bpp5gb3hpjcl": "Claude Cowork",
+}
+_DEFAULT_HEALTH_SERVICES = {"Code", "Claude API"}
+
+
+def _get_health_components() -> dict[str, str]:
+    env = os.environ.get("STATUSLINE_HEALTH_SERVICES")
+    wanted = {s.strip() for s in env.split(",")} if env else _DEFAULT_HEALTH_SERVICES
+    return {cid: name for cid, name in _ALL_HEALTH_COMPONENTS.items() if name in wanted}
+
+
+HEALTH_COMPONENTS = _get_health_components()
 
 USAGE_CACHE = SCRIPTS_DIR / "usage-cache.json"
 USAGE_TTL = 300
@@ -125,7 +151,7 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 # ============ DISPLAY WIDTH ============
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]|\x1b\][^\x07]*\x07")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]|\x1b\][^\x07]*\x07|\x1b\]8;[^\x1b]*\x1b\\")
 
 _EMOJI_RANGES = [
     (0x1F300, 0x1F9FF),
@@ -675,10 +701,50 @@ def get_usage_data() -> dict | None:
             pass
         return _parse_usage_response(data)
     except Exception:
-        return None
+        # OAuth token exists but usage fetch failed - signal auth without usage
+        return {"is_oauth": True}
+
+
+# ============ SUBSCRIPTION DETECTION ============
+
+
+def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
+    """Return (name, icon, color_key) based on Claude Code auth method.
+
+    Follows Claude Code's own auth precedence:
+    cloud providers > auth token > API key > OAuth subscription.
+    """
+    if os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1":
+        return "Bedrock", "\u2601\ufe0f", "mode_work"
+    if os.environ.get("CLAUDE_CODE_USE_VERTEX") == "1":
+        return "Vertex AI", "\u2601\ufe0f", "mode_work"
+    if os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1":
+        return "Foundry", "\u26a1", "mode_work"
+    if os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return "API Gateway", "\U0001f310", "mode_work"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "API Key", "\U0001f511", "mode_work"
+    # OAuth login - we know it's a claude.ai subscription but can't
+    # reliably distinguish Pro/Max/Team/Enterprise from available data.
+    if usage:
+        if usage.get("is_oauth"):
+            # OAuth token exists but usage API failed - show authenticated state
+            return "claude.ai", "\u2728", "mode_personal"
+        if usage.get("session_pct") or usage.get("weekly_pct"):
+            return "claude.ai", "\u2728", "mode_personal"
+        return "claude.ai", "\u2728", "mode_personal"
+    return "claude.ai", "\U0001f464", "mode_free"
 
 
 # ============ LINE BUILDING ============
+
+_HEALTH_LINK_URL = "https://health.claude.com"
+
+
+def _health_link(text: str) -> str:
+    """Wrap text in an OSC 8 clickable hyperlink to health.claude.com."""
+    return f"\033]8;;{_HEALTH_LINK_URL}\033\\{text}\033]8;;\033\\"
+
 
 def _item(color: str, icon: str, label: str, value: str) -> str:
     return f"{color}{icon} {label}: {value}{RESET}"
@@ -773,13 +839,26 @@ def main() -> None:
 
     update_term_session(session_id)
     edit_count = update_session_state(session_id, info["ctx_percent"], tokens_str)
-    project_name, project_display = get_project_info(session_id, info["duration_sec"])
-    repo_name, branch, git_dirty = get_git_info()
-    k8s_name = get_k8s_context()
-    version, version_age = get_version_info()
-    health = get_health_status()
+
+    # Run slow operations (subprocesses + HTTP) concurrently to stay under
+    # Claude Code's ~300ms debounce/cancel window on first render.
     rate_limits = info.get("rate_limits")
-    usage = _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        f_project = pool.submit(get_project_info, session_id, info["duration_sec"])
+        f_git = pool.submit(get_git_info)
+        f_k8s = pool.submit(get_k8s_context)
+        f_version = pool.submit(get_version_info)
+        f_health = pool.submit(get_health_status)
+        f_usage = pool.submit(
+            lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
+        )
+
+    project_name, project_display = f_project.result()
+    repo_name, branch, git_dirty = f_git.result()
+    k8s_name = f_k8s.result()
+    version, version_age = f_version.result()
+    health = f_health.result()
+    usage = f_usage.result()
 
     now_dt = datetime.now().strftime("%a %b %-d, %-I:%M%p").replace("AM", "am").replace("PM", "pm")
     dir_name = Path.cwd().name
@@ -831,17 +910,19 @@ def main() -> None:
     if version:
         age_suffix = f" ({version_age})" if version_age else ""
         ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
-        line_k8s.append(f"{ver_color}{ICONS['version']} v{version}{age_suffix}{RESET}")
+        changelog_url = "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
+        ver_link = f"\033]8;;{changelog_url}\033\\v{version}\033]8;;\033\\"
+        line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{age_suffix}{RESET}")
     for inc in health:
         if inc.get("service") == "OK":
-            line_k8s.append(f"{COLORS['health_ok']}{ICONS['health_ok']} Claude Status: OK{RESET}")
+            line_k8s.append(f"{COLORS['health_ok']}{ICONS['health_ok']} {_health_link('Claude Status: OK')}{RESET}")
         elif inc.get("resolved"):
             label = f"[{inc['service']}] {inc['name']} - {inc['status']}"
             if inc.get("body"):
                 label += f" - {inc['body']}"
             if inc.get("time_ago"):
                 label += f" ({inc['time_ago']})"
-            line_k8s.append(f"{COLORS['health_resolved']}{ICONS['health_ok']} {label}{RESET}")
+            line_k8s.append(f"{COLORS['health_resolved']}{ICONS['health_ok']} {_health_link(label)}{RESET}")
         else:
             st = inc.get("status", "")
             if st == "Investigating":
@@ -855,15 +936,12 @@ def main() -> None:
                 label += f" - {inc['body']}"
             if inc.get("time_ago"):
                 label += f" ({inc['time_ago']})"
-            line_k8s.append(f"{color}{icon} {label}{RESET}")
+            line_k8s.append(f"{color}{icon} {_health_link(label)}{RESET}")
 
-    # Line Usage: Mode + usage stats
+    # Line Usage: Subscription + usage stats
     line_usage: list[str] = []
-    is_foundry = os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1"
-    if is_foundry:
-        line_usage.append(f"{COLORS['mode_work']}\u26a1 Work{RESET}")
-    else:
-        line_usage.append(f"{COLORS['mode_personal']}\U0001f3e0 Personal{RESET}")
+    sub_name, sub_icon, sub_color = _detect_subscription(usage)
+    line_usage.append(f"{COLORS[sub_color]}{sub_icon} {sub_name}{RESET}")
 
     if usage:
         if usage.get("is_foundry"):
