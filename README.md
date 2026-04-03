@@ -15,7 +15,7 @@ Orbit is a comprehensive project management plugin for [Claude Code](https://cla
 
 ```bash
 git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit-projects-manager
+cd claude-orbit
 ./setup.sh
 ```
 
