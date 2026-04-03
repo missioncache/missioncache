@@ -1,11 +1,13 @@
 {
-  "pm": {
-    "type": "stdio",
-    "command": "uvx",
-    "args": [
-      "--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server",
-      "--with", "${CLAUDE_PLUGIN_ROOT}/orbit-db",
-      "mcp-orbit"
-    ]
+  "mcpServers": {
+    "pm": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server",
+        "--with", "${CLAUDE_PLUGIN_ROOT}/orbit-db",
+        "mcp-orbit"
+      ]
+    }
   }
 }
