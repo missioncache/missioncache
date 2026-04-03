@@ -738,11 +738,11 @@ def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
 
 # ============ LINE BUILDING ============
 
-_HEALTH_LINK_URL = "https://health.claude.com"
+_HEALTH_LINK_URL = "https://status.claude.com"
 
 
 def _health_link(text: str) -> str:
-    """Wrap text in an OSC 8 clickable hyperlink to health.claude.com."""
+    """Wrap text in an OSC 8 clickable hyperlink to status.claude.com."""
     return f"\033]8;;{_HEALTH_LINK_URL}\033\\{text}\033]8;;\033\\"
 
 
