@@ -13,3 +13,4 @@ venv/
 *.duckdb.wal
 *.db-journal
 .DS_Store
+CLAUDE.local.md
