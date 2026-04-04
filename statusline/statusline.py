@@ -347,29 +347,6 @@ def parse_input(raw: str) -> dict:
     }
 
 
-# ============ DEBOUNCE ============
-
-def should_debounce(session_id: str) -> bool:
-    """Return True if render should be skipped (too soon since last one)."""
-    if not session_id:
-        return False
-    debounce_file = Path(f"/tmp/.claude-statusline-{session_id}")
-    now_ms = int(time.time() * 1000)
-    if debounce_file.exists():
-        try:
-            last_ms = int(debounce_file.read_text().strip())
-            elapsed = now_ms - last_ms
-            if 0 <= elapsed < 500:
-                return True
-        except (ValueError, OSError):
-            pass
-    try:
-        debounce_file.write_text(str(now_ms))
-    except OSError:
-        pass
-    return False
-
-
 # ============ SESSION STATE ============
 
 def update_session_state(session_id: str, ctx_percent: int, tokens_str: str) -> int:
@@ -520,7 +497,7 @@ def get_version_info() -> tuple[str, str]:
         try:
             url = f"https://api.github.com/repos/anthropics/claude-code/releases/tags/v{version}"
             req = urllib.request.Request(url, headers={"User-Agent": "statusline"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:
                 pub = json.loads(resp.read()).get("published_at", "")
                 if pub:
                     release_date = datetime.fromisoformat(pub.replace("Z", "+00:00"))
@@ -548,6 +525,14 @@ _HEALTH_STATUS_MAP = {
 }
 
 
+def _truncate_name(name: str, limit: int = 55) -> str:
+    """Truncate incident name preserving the tail (model names live there)."""
+    if len(name) <= limit:
+        return name
+    tail = limit - 23  # 20 head + "..."
+    return name[:20] + "..." + name[-tail:]
+
+
 def get_health_status() -> list[dict]:
     """Return list of health incident dicts.
     An entry with service='OK' means all clear."""
@@ -562,7 +547,7 @@ def get_health_status() -> list[dict]:
 
     incidents = []
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=5) as r:
+        with urllib.request.urlopen(HEALTH_URL, timeout=3) as r:
             data = json.loads(r.read())
             now = datetime.now(timezone.utc)
             for inc in data.get("incidents", []):
@@ -584,9 +569,9 @@ def get_health_status() -> list[dict]:
                     raw_status = latest.get("status", status)
                     incidents.append({
                         "service": service,
-                        "name": inc.get("name", "Unknown")[:35],
+                        "name": _truncate_name(inc.get("name", "Unknown")),
                         "status": _HEALTH_STATUS_MAP.get(raw_status, raw_status.replace("_", " ").title()),
-                        "body": (latest.get("body", "") or "")[:50],
+                        "body": (latest.get("body", "") or "")[:30],
                         "time_ago": _relative_time(
                             latest.get("created_at", inc.get("updated_at", ""))
                         ),
@@ -598,9 +583,9 @@ def get_health_status() -> list[dict]:
                         if (now - resolved_dt).total_seconds() / 3600 <= 1:
                             incidents.append({
                                 "service": service,
-                                "name": inc.get("name", "Unknown")[:35],
+                                "name": _truncate_name(inc.get("name", "Unknown")),
                                 "status": "Resolved",
-                                "body": "This incident has been resolved.",
+                                "body": "",
                                 "time_ago": _relative_time(resolved_at),
                                 "resolved": True,
                             })
@@ -629,7 +614,7 @@ def _get_oauth_token() -> str | None:
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=2,
             )
             if result.returncode != 0:
                 return None
@@ -690,7 +675,7 @@ def get_usage_data() -> dict | None:
                 "User-Agent": "claude-statusline/1.0",
             },
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
         try:
             USAGE_CACHE.write_text(json.dumps({
@@ -822,20 +807,9 @@ def main() -> None:
     model_name = info["model_name"]
     tokens_str = info["tokens_str"]
 
-    # Handle empty model/tokens (startup vs exit)
-    if not session_id:
-        model_name = model_name or "Claude"
-        tokens_str = tokens_str or "0"
-    else:
-        debounce_file = Path(f"/tmp/.claude-statusline-{session_id}")
-        if not model_name or not tokens_str:
-            if debounce_file.exists():
-                return  # Exit scenario: corrupted data
-            model_name = model_name or "Claude"
-            tokens_str = tokens_str or "0"
-
-    if should_debounce(session_id):
-        return
+    # Default empty model/tokens (startup or incomplete data)
+    model_name = model_name or "Claude"
+    tokens_str = tokens_str or "0"
 
     update_term_session(session_id)
     edit_count = update_session_state(session_id, info["ctx_percent"], tokens_str)
@@ -843,22 +817,45 @@ def main() -> None:
     # Run slow operations (subprocesses + HTTP) concurrently to stay under
     # Claude Code's ~300ms debounce/cancel window on first render.
     rate_limits = info.get("rate_limits")
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        f_project = pool.submit(get_project_info, session_id, info["duration_sec"])
-        f_git = pool.submit(get_git_info)
-        f_k8s = pool.submit(get_k8s_context)
-        f_version = pool.submit(get_version_info)
-        f_health = pool.submit(get_health_status)
-        f_usage = pool.submit(
-            lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
-        )
+    pool = ThreadPoolExecutor(max_workers=5)
+    f_project = pool.submit(get_project_info, session_id, info["duration_sec"])
+    f_git = pool.submit(get_git_info)
+    f_k8s = pool.submit(get_k8s_context)
+    f_version = pool.submit(get_version_info)
+    f_health = pool.submit(get_health_status)
+    f_usage = pool.submit(
+        lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
+    )
 
-    project_name, project_display = f_project.result()
-    repo_name, branch, git_dirty = f_git.result()
-    k8s_name = f_k8s.result()
-    version, version_age = f_version.result()
-    health = f_health.result()
-    usage = f_usage.result()
+    _FUTURE_TIMEOUT = 3
+    try:
+        project_name, project_display = f_project.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        project_name, project_display = "", ""
+    try:
+        repo_name, branch, git_dirty = f_git.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        repo_name, branch, git_dirty = "", "", False
+    try:
+        k8s_name = f_k8s.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        k8s_name = ""
+    try:
+        version, version_age = f_version.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        version, version_age = "", ""
+    try:
+        health = f_health.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        health = []
+    try:
+        usage = f_usage.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        usage = None
+
+    # Release stragglers without blocking; workers self-terminate
+    # via their own internal timeouts (HTTP: 2-3s, subprocess: 2-5s).
+    pool.shutdown(wait=False, cancel_futures=True)
 
     now_dt = datetime.now().strftime("%a %b %-d, %-I:%M%p").replace("AM", "am").replace("PM", "pm")
     dir_name = Path.cwd().name
@@ -1019,8 +1016,24 @@ def main() -> None:
     set_iterm_title(session_id, project_name, repo_name, branch, dir_name)
 
 
+def _fallback_output() -> None:
+    """Print minimal 6-line output so the statusline area stays allocated."""
+    for _ in range(6):
+        sys.stdout.write(" \n")
+    sys.stdout.flush()
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception:
-        pass
+        import traceback
+        try:
+            log_path = Path.home() / ".claude" / "logs" / "statusline-errors.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a") as f:
+                f.write(f"\n--- {datetime.now().isoformat()} ---\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
+        _fallback_output()
