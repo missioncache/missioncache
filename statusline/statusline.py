@@ -11,6 +11,7 @@ Layout:
   Line 4: Time       - [elapsed] [edits] [now]
   Line 5: K8s/Ver    - [k8s context] [version] [health status]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
+  Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
 
 Configuration (environment variables):
   STATUSLINE_HEALTH_SERVICES  - Comma-separated services to monitor (default: "Code,Claude API")
@@ -77,6 +78,9 @@ COLORS = {
     "health_degraded": f"{ESC}[38;2;255;214;0m",
     "health_partial": f"{ESC}[38;2;255;109;0m",
     "health_resolved": f"{ESC}[38;2;100;180;100m",
+    "codex_label": f"{ESC}[38;2;16;163;127m",
+    "codex_session": f"{ESC}[38;2;100;200;170m",
+    "codex_weekly": f"{ESC}[38;2;160;130;190m",
 }
 
 ICONS = {
@@ -147,6 +151,11 @@ HEALTH_COMPONENTS = _get_health_components()
 USAGE_CACHE = SCRIPTS_DIR / "usage-cache.json"
 USAGE_TTL = 300
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+
+CODEX_USAGE_CACHE = SCRIPTS_DIR / "codex-usage-cache.json"
+CODEX_USAGE_TTL = 300
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
 
 
 # ============ DISPLAY WIDTH ============
@@ -690,6 +699,80 @@ def get_usage_data() -> dict | None:
         return {"is_oauth": True}
 
 
+# ============ CODEX USAGE ============
+
+
+def get_codex_usage() -> dict | None:
+    """Return parsed Codex usage data, or None if not installed."""
+    if not CODEX_AUTH_FILE.exists():
+        return None
+
+    # Check cache
+    if CODEX_USAGE_CACHE.exists():
+        try:
+            cache = json.loads(CODEX_USAGE_CACHE.read_text())
+            cached_at = datetime.fromisoformat(cache["cached_at"])
+            if (datetime.now(timezone.utc) - cached_at).total_seconds() < CODEX_USAGE_TTL:
+                return cache["parsed"]
+        except Exception:
+            pass
+
+    # Read auth token
+    try:
+        auth = json.loads(CODEX_AUTH_FILE.read_text())
+        token = auth.get("tokens", {}).get("access_token")
+        if not token:
+            return {"codex_installed": True}
+    except Exception:
+        return {"codex_installed": True}
+
+    # Fetch from API
+    try:
+        req = urllib.request.Request(
+            CODEX_USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "claude-statusline/1.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+
+        result: dict = {"codex_installed": True}
+        plan = data.get("plan_type", "")
+        if plan:
+            result["plan_type"] = plan.title()
+
+        rl = data.get("rate_limit", {})
+        pw = rl.get("primary_window")
+        if pw:
+            result["session_pct"] = str(int(pw.get("used_percent", 0)))
+            result["session_reset"] = _format_unix_reset(pw.get("reset_at"))
+        sw = rl.get("secondary_window")
+        if sw:
+            result["weekly_pct"] = str(int(sw.get("used_percent", 0)))
+            result["weekly_reset"] = _format_unix_reset(sw.get("reset_at"))
+
+        # Cache
+        try:
+            CODEX_USAGE_CACHE.write_text(json.dumps({
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+                "parsed": result,
+            }))
+        except OSError:
+            pass
+        return result
+    except Exception:
+        # API failed - try returning expired cache
+        if CODEX_USAGE_CACHE.exists():
+            try:
+                cache = json.loads(CODEX_USAGE_CACHE.read_text())
+                return cache["parsed"]
+            except Exception:
+                pass
+        return {"codex_installed": True}
+
+
 # ============ SUBSCRIPTION DETECTION ============
 
 
@@ -817,7 +900,7 @@ def main() -> None:
     # Run slow operations (subprocesses + HTTP) concurrently to stay under
     # Claude Code's ~300ms debounce/cancel window on first render.
     rate_limits = info.get("rate_limits")
-    pool = ThreadPoolExecutor(max_workers=5)
+    pool = ThreadPoolExecutor(max_workers=6)
     f_project = pool.submit(get_project_info, session_id, info["duration_sec"])
     f_git = pool.submit(get_git_info)
     f_k8s = pool.submit(get_k8s_context)
@@ -826,6 +909,7 @@ def main() -> None:
     f_usage = pool.submit(
         lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
     )
+    f_codex = pool.submit(get_codex_usage)
 
     _FUTURE_TIMEOUT = 3
     try:
@@ -852,6 +936,10 @@ def main() -> None:
         usage = f_usage.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
         usage = None
+    try:
+        codex_usage = f_codex.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        codex_usage = None
 
     # Release stragglers without blocking; workers self-terminate
     # via their own internal timeouts (HTTP: 2-3s, subprocess: 2-5s).
@@ -978,8 +1066,35 @@ def main() -> None:
                 line_usage.append(
                     f"{COLORS['opus_usage']}{ICONS['model']} Opus: {op}%{RESET}")
 
+    # Line Codex: Codex usage (only if installed)
+    line_codex: list[str] = []
+    if codex_usage and codex_usage.get("codex_installed"):
+        plan = codex_usage.get("plan_type", "")
+        label = f"Codex ({plan})" if plan else "Codex"
+        line_codex.append(f"{COLORS['codex_label']}\U0001f9e0 {label}{RESET}")
+        sp = codex_usage.get("session_pct")
+        if sp and sp != "null":
+            sr = codex_usage.get("session_reset", "")
+            if sr and sr != "null":
+                line_codex.append(
+                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp}% "
+                    f"{COLORS['reset_time']}{ICONS['reset']} {sr}{RESET}")
+            else:
+                line_codex.append(
+                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp}%{RESET}")
+        wp = codex_usage.get("weekly_pct")
+        if wp and wp != "null":
+            wr = codex_usage.get("weekly_reset", "")
+            if wr and wr != "null":
+                line_codex.append(
+                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp}% "
+                    f"{COLORS['reset_time']}{ICONS['reset']} {wr}{RESET}")
+            else:
+                line_codex.append(
+                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp}%{RESET}")
+
     # --- Column alignment ---
-    all_lines = [line1, line2, line3, line4, line_k8s, line_usage]
+    all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex]
     all_widths = [[display_width(item) for item in items] for items in all_lines]
 
     max_col1 = CELL_WIDTH
@@ -995,12 +1110,14 @@ def main() -> None:
     line_widths = [display_width(j) for j in joined]
     max_width = max(line_widths) if line_widths else 0
 
-    j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage = joined
-    w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage = line_widths
+    j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage, j_line_codex = joined
+    w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage, w_line_codex = line_widths
 
     # --- Output ---
-    # Always output a fixed number of lines (6) so Claude Code allocates
+    # Output a fixed number of lines so Claude Code allocates
     # the full status area height from the very first render.
+    # 7 lines if Codex is installed, 6 otherwise.
+    has_codex = CODEX_AUTH_FILE.exists()
     blank = " " * max_width if max_width > 0 else ""
     out = sys.stdout
     out.write(RESET)
@@ -1010,6 +1127,8 @@ def main() -> None:
     out.write(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
     out.write(((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n"))
     out.write(((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n"))
+    if has_codex:
+        out.write(((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n"))
     out.write(RESET)
     out.flush()
 
@@ -1017,8 +1136,9 @@ def main() -> None:
 
 
 def _fallback_output() -> None:
-    """Print minimal 6-line output so the statusline area stays allocated."""
-    for _ in range(6):
+    """Print minimal output so the statusline area stays allocated."""
+    lines = 7 if CODEX_AUTH_FILE.exists() else 6
+    for _ in range(lines):
         sys.stdout.write(" \n")
     sys.stdout.flush()
 
