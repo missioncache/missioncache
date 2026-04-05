@@ -1,0 +1,18 @@
+[project]
+name = "claude-orbit-tests"
+version = "0.0.0"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "mcp-server/tests",
+    "orbit-db/tests",
+    "orbit-auto/tests",
+    "orbit-dashboard/tests",
+    "hooks/tests",
+    "statusline/tests",
+]
+addopts = "-v --tb=short -x --import-mode=importlib"
