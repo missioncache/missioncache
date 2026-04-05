@@ -4526,6 +4526,16 @@ async def hook_qa_review(body: dict):
     return {}
 
 
+@app.post("/api/hooks/task-created")
+async def hook_task_created(body: dict):
+    """HTTP hook: fires when TaskCreate tool is used. Triggers DB sync."""
+    try:
+        db = get_db()
+        db.sync_from_sqlite()
+    except Exception:
+        pass
+    return {}
+
 
 
 
