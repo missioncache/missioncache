@@ -38,18 +38,7 @@
 
 ## MCP Server Configuration
 
-`.mcp.json`:
-```json
-{
-  "pm": {
-    "type": "stdio",
-    "command": "uvx",
-    "args": ["--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server", "mcp-orbit"]
-  }
-}
-```
-
-Tools appear as `mcp__plugin_orbit_pm__*` in Claude Code.
+MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServers` key. Tools appear as `mcp__plugin_orbit_pm__*` in Claude Code.
 
 ## Adding a New MCP Tool
 

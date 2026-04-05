@@ -5,5 +5,16 @@
   "author": {
     "name": "Tomer Brami"
   },
-  "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"]
+  "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"],
+  "mcpServers": {
+    "pm": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server",
+        "--with", "${CLAUDE_PLUGIN_ROOT}/orbit-db",
+        "mcp-orbit"
+      ]
+    }
+  }
 }
