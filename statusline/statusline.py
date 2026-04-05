@@ -14,6 +14,7 @@ Layout:
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
 
 Configuration (environment variables):
+  STATUSLINE_CODEX            - Show Codex usage line (default: "true", set "false" to hide)
   STATUSLINE_HEALTH_SERVICES  - Comma-separated services to monitor (default: "Code,Claude API")
                                 Available: Code, Claude API, claude.ai, platform.claude.com,
                                 Claude for Government, Claude Cowork
@@ -156,6 +157,7 @@ CODEX_USAGE_CACHE = SCRIPTS_DIR / "codex-usage-cache.json"
 CODEX_USAGE_TTL = 300
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
+CODEX_ENABLED = os.environ.get("STATUSLINE_CODEX", "true").lower() != "false"
 
 
 # ============ DISPLAY WIDTH ============
@@ -704,7 +706,7 @@ def get_usage_data() -> dict | None:
 
 def get_codex_usage() -> dict | None:
     """Return parsed Codex usage data, or None if not installed."""
-    if not CODEX_AUTH_FILE.exists():
+    if not CODEX_ENABLED or not CODEX_AUTH_FILE.exists():
         return None
 
     # Check cache
@@ -1117,7 +1119,7 @@ def main() -> None:
     # Output a fixed number of lines so Claude Code allocates
     # the full status area height from the very first render.
     # 7 lines if Codex is installed, 6 otherwise.
-    has_codex = CODEX_AUTH_FILE.exists()
+    has_codex = CODEX_ENABLED and CODEX_AUTH_FILE.exists()
     blank = " " * max_width if max_width > 0 else ""
     out = sys.stdout
     out.write(RESET)
@@ -1137,7 +1139,7 @@ def main() -> None:
 
 def _fallback_output() -> None:
     """Print minimal output so the statusline area stays allocated."""
-    lines = 7 if CODEX_AUTH_FILE.exists() else 6
+    lines = 7 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 6
     for _ in range(lines):
         sys.stdout.write(" \n")
     sys.stdout.flush()
