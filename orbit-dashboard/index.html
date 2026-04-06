@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Orbit Dashboard</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%23b18cff'/><stop offset='100%25' stop-color='%234da6ff'/></linearGradient></defs><rect width='32' height='32' rx='6' fill='url(%23g)'/><text x='16' y='21' font-family='system-ui,sans-serif' font-size='12' font-weight='bold' fill='white' text-anchor='middle'>OD</text></svg>">
+    <link rel="icon" type="image/png" href="/static/logo_icon.png">
+    <script>(function(){var t=localStorage.getItem('orbit-theme')||'dark';if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -51,6 +52,98 @@
 
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+        }
+
+        /* Light theme overrides */
+        [data-theme="light"] {
+            --bg-primary: #f4f4f8;
+            --bg-secondary: #e4e4ec;
+            --bg-card: rgba(255, 255, 255, 0.85);
+            --bg-card-solid: #ffffff;
+            --bg-card-hover: rgba(245, 245, 250, 0.95);
+            --text-primary: #1a1a2e;
+            --text-secondary: #555570;
+            --text-muted: #8888a0;
+            --glow-purple: rgba(177, 140, 255, 0.15);
+            --glow-blue: rgba(77, 166, 255, 0.15);
+            --glow-orange: rgba(255, 107, 74, 0.15);
+            --glow-green: rgba(61, 232, 160, 0.15);
+            --border: rgba(0, 0, 0, 0.1);
+            --border-light: rgba(0, 0, 0, 0.06);
+            --bg-tertiary: rgba(240, 240, 245, 0.95);
+            --bg-hover: rgba(0, 0, 0, 0.04);
+        }
+
+        [data-theme="light"] .sidebar {
+            background: linear-gradient(180deg, rgba(248, 248, 252, 0.98) 0%, rgba(240, 240, 245, 0.98) 100%);
+        }
+
+        [data-theme="light"] .bg-gradient {
+            background:
+                radial-gradient(ellipse at 10% 10%, rgba(177, 140, 255, 0.06) 0%, transparent 40%),
+                radial-gradient(ellipse at 90% 20%, rgba(255, 107, 74, 0.05) 0%, transparent 35%),
+                radial-gradient(ellipse at 80% 80%, rgba(61, 232, 160, 0.04) 0%, transparent 40%),
+                radial-gradient(ellipse at 20% 90%, rgba(77, 166, 255, 0.05) 0%, transparent 35%),
+                radial-gradient(ellipse at 50% 50%, rgba(255, 112, 184, 0.03) 0%, transparent 50%);
+        }
+
+        [data-theme="light"] .glass-card {
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        }
+
+        [data-theme="light"] .glass-card::before {
+            background: var(--gradient-purple-blue);
+            opacity: 0;
+        }
+
+        [data-theme="light"] .glass-card::after {
+            display: none;
+        }
+
+        [data-theme="light"] .glass-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        [data-theme="light"] .stat-card {
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        [data-theme="light"] .loading-overlay {
+            background: rgba(244, 244, 248, 0.95);
+        }
+
+        [data-theme="light"] .nav-item:hover {
+            background: rgba(0, 0, 0, 0.04);
+        }
+
+        [data-theme="light"] .nav-item.active {
+            background: rgba(177, 140, 255, 0.12);
+        }
+
+        [data-theme="light"] table thead th {
+            background: rgba(244, 244, 248, 0.8);
+            color: var(--text-secondary);
+        }
+
+        [data-theme="light"] table tbody tr:hover {
+            background: rgba(0, 0, 0, 0.02);
+        }
+
+        [data-theme="light"] .period-btn {
+            color: var(--text-secondary);
+        }
+
+        [data-theme="light"] .heatmap-cell {
+            border-color: rgba(0, 0, 0, 0.04);
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        [data-theme="light"] ::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.15);
         }
 
         * {
@@ -117,38 +210,9 @@
         .sidebar-logo {
             display: flex;
             align-items: center;
-            gap: 12px;
             padding-bottom: 24px;
             border-bottom: 1px solid var(--border);
             margin-bottom: 24px;
-        }
-
-        .logo-icon {
-            width: 36px;
-            height: 36px;
-            background: var(--gradient-purple-blue);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 14px;
-            box-shadow: 0 4px 15px var(--glow-purple);
-            animation: logoPulse 3s ease-in-out infinite;
-        }
-
-        @keyframes logoPulse {
-            0%, 100% { box-shadow: 0 4px 15px var(--glow-purple); }
-            50% { box-shadow: 0 4px 25px var(--glow-blue); }
-        }
-
-        .sidebar-logo-text {
-            font-size: 15px;
-            font-weight: 700;
-            background: var(--gradient-purple-blue);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
         }
 
         .sidebar-nav {
@@ -218,6 +282,45 @@
             opacity: 1;
         }
 
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+
+        .theme-toggle:hover {
+            background: rgba(177, 140, 255, 0.1);
+            color: var(--text-primary);
+            border-color: var(--accent-purple);
+        }
+
+        .theme-toggle svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Dark mode: show sun icon (switch to light) */
+        .theme-icon-sun { display: block; }
+        .theme-icon-moon { display: none; }
+
+        /* Light mode: show moon icon (switch to dark) */
+        [data-theme="light"] .theme-icon-sun { display: none; }
+        [data-theme="light"] .theme-icon-moon { display: block; }
+
         .main-content {
             flex: 1;
             margin-left: 220px;
@@ -234,57 +337,6 @@
         }
 
         .view.active {
-            display: block;
-        }
-
-        /* ============================================
-           Productivity Sub-Navigation Tabs
-           ============================================ */
-        .productivity-tabs {
-            display: flex;
-            gap: 8px;
-            padding: 12px 0;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .productivity-tab {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 18px;
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 10px;
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.25s ease;
-        }
-
-        .productivity-tab:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-primary);
-        }
-
-        .productivity-tab.active {
-            background: rgba(177, 140, 255, 0.15);
-            border-color: var(--accent-purple);
-            color: var(--accent-purple);
-        }
-
-        .productivity-tab svg {
-            width: 16px;
-            height: 16px;
-            stroke-width: 2;
-        }
-
-        .productivity-subview {
-            display: none;
-        }
-
-        .productivity-subview.active {
             display: block;
         }
 
@@ -543,8 +595,12 @@
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 0;
+            padding: 16px 24px 0;
             gap: 12px;
+            max-width: 1800px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         @media (max-width: 1200px) {
@@ -587,7 +643,7 @@
         }
 
         /* ============================================
-           Today's Productivity (Task List)
+           Today's Activity (Task List)
            ============================================ */
         .task-list {
             display: flex;
@@ -1413,91 +1469,6 @@
         }
 
         /* ============================================
-           Pull Requests Card - Enhanced
-           ============================================ */
-        .pr-summary {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-
-        .pr-stat {
-            background: linear-gradient(135deg, rgba(30, 30, 50, 0.6) 0%, rgba(20, 20, 35, 0.6) 100%);
-            border: 1px solid var(--border-light);
-            border-radius: 12px;
-            padding: 16px;
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-
-        .pr-stat:hover {
-            transform: translateY(-2px);
-            border-color: rgba(177, 140, 255, 0.3);
-        }
-
-        .pr-stat-value {
-            font-size: 28px;
-            font-weight: 700;
-            text-shadow: 0 0 30px currentColor;
-        }
-
-        .pr-stat-value.merged { color: var(--accent-green); }
-        .pr-stat-value.open { color: var(--accent-blue); }
-        .pr-stat-value.today { color: var(--accent-orange); }
-        .pr-stat-value.review { color: var(--accent-purple); }
-
-        .pr-stat-label {
-            font-size: 10px;
-            color: var(--text-muted);
-            margin-top: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .pr-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .pr-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            background: rgba(25, 25, 40, 0.5);
-            border: 1px solid var(--border-light);
-            border-radius: 10px;
-            font-size: 12px;
-            transition: all 0.2s ease;
-        }
-
-        .pr-item:hover {
-            background: rgba(177, 140, 255, 0.08);
-            border-color: rgba(177, 140, 255, 0.2);
-        }
-
-        .pr-title {
-            color: var(--text-primary);
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .pr-repo {
-            color: var(--accent-cyan);
-            margin-left: 12px;
-            font-size: 11px;
-        }
-
-        .pr-time {
-            color: var(--text-secondary);
-            margin-left: 12px;
-        }
-
-        /* ============================================
            Tables (Active Tasks, Completions) - Enhanced
            ============================================ */
         .table-container {
@@ -1773,16 +1744,15 @@
         }
 
         .loading-logo {
-            width: 64px;
-            height: 64px;
-            background: linear-gradient(135deg, var(--accent-orange), var(--accent-purple));
+            width: 80px;
+            height: 80px;
             border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            font-size: 24px;
             margin-bottom: 24px;
+            padding: 8px;
+            overflow: hidden;
             animation: pulse 1.5s ease-in-out infinite;
         }
 
@@ -1933,9 +1903,6 @@
 
         @media (max-width: 1024px) {
             .stats-header {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            .pr-summary {
                 grid-template-columns: repeat(2, 1fr);
             }
             /* Period comparison: compact vertical cards */
@@ -4285,7 +4252,7 @@
 
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
-        <div class="loading-logo">PH</div>
+        <div class="loading-logo"><img src="/static/logo_icon.png" alt="Orbit" style="width: 100%; height: 100%; object-fit: contain;"></div>
         <div class="loading-progress">
             <div class="loading-progress-bar" id="loadingProgressBar" style="width: 0%"></div>
         </div>
@@ -4298,18 +4265,21 @@
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
             <div class="sidebar-logo">
-                <div class="logo-icon">OD</div>
-                <span class="sidebar-logo-text">Orbit Dashboard</span>
+                <img id="sidebarLogo" src="/static/orbit_logo_white.png" alt="Orbit Dashboard" style="height: 28px; width: auto;">
             </div>
             <div class="sidebar-nav">
-                <a class="nav-item active" data-view="productivity" href="#productivity">
+                <a class="nav-item active" data-view="projects" href="#projects">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                        <path d="M9 11l3 3L22 4"/>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
                     </svg>
-                    Productivity
+                    Projects
+                </a>
+                <a class="nav-item" data-view="activity" href="#activity">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                    </svg>
+                    Activity
                 </a>
                 <a class="nav-item" data-view="usage" href="#usage">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -4325,52 +4295,96 @@
                     Auto
                 </a>
             </div>
+            <div class="sidebar-footer">
+                <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
+                    <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/>
+                        <line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/>
+                        <line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                    <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                </button>
+            </div>
         </nav>
 
         <!-- Main Content Area -->
         <main class="main-content">
-            <!-- Productivity View -->
-            <div class="view active" id="productivityView">
+            <!-- Dashboard Toolbar (shared) -->
+            <div class="dashboard-toolbar">
+                <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
+                    <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 4v6h6M23 20v-6h-6"/>
+                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                    </svg>
+                    Refresh
+                </button>
+                <div class="last-refresh" id="lastRefresh">Last updated: --</div>
+            </div>
+
+            <!-- Projects View (DEFAULT) -->
+            <div class="view active" id="projectsView">
                 <div class="container">
-                    <!-- Dashboard Toolbar -->
-                    <div class="dashboard-toolbar">
-                        <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
-                            <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 4v6h6M23 20v-6h-6"/>
-                                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-                            </svg>
-                            Refresh
-                        </button>
-                        <div class="last-refresh" id="lastRefresh">Last updated: --</div>
+
+                    <!-- Active Tasks Table -->
+                    <div class="glass-card" id="activeTasksCard">
+                        <div class="card-loading-overlay" data-loader="tasks"><div class="card-spinner"></div></div>
+                        <div class="card-header">
+                            <span class="card-title">Active Projects</span>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="col-task">Task</th>
+                                        <th class="col-repo">Repo</th>
+                                        <th class="col-description">Description</th>
+                                        <th class="col-progress">Progress</th>
+                                        <th class="col-time">Time</th>
+                                        <th class="col-updated">Updated</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="activeTasksBody"></tbody>
+                            </table>
+                        </div>
                     </div>
 
-                    <!-- Productivity Sub-Navigation -->
-                    <div class="productivity-tabs">
-                        <button class="productivity-tab active" data-subtab="activity">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                            </svg>
-                            Activity
-                        </button>
-                        <button class="productivity-tab" data-subtab="tasks">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path d="M9 11l3 3L22 4"/>
-                                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                            </svg>
-                            Tasks
-                        </button>
-                        <button class="productivity-tab" data-subtab="prs">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <circle cx="18" cy="18" r="3"/>
-                                <circle cx="6" cy="6" r="3"/>
-                                <path d="M6 21V9a9 9 0 0 0 9 9"/>
-                            </svg>
-                            PRs
-                        </button>
+                    <!-- Recent Completions Table -->
+                    <div class="glass-card" id="completedTasksCard">
+                        <div class="card-loading-overlay" data-loader="completed"><div class="card-spinner"></div></div>
+                        <div class="card-header">
+                            <span class="card-title">Completed Projects</span>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="col-task">Task</th>
+                                        <th class="col-repo">Repo</th>
+                                        <th class="col-description">Description</th>
+                                        <th class="col-summary">Summary</th>
+                                        <th class="col-time">Time</th>
+                                        <th class="col-updated">Completed</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="completedTasksBody"></tbody>
+                            </table>
+                        </div>
                     </div>
 
-                    <!-- Activity Sub-View (DEFAULT) -->
-                    <div class="productivity-subview active" id="activitySubview">
+                </div>
+            </div><!-- End Projects View -->
+
+            <!-- Activity View -->
+            <div class="view" id="activityView">
+                <div class="container">
 
                     <!-- Header Stats -->
                     <div class="stats-header">
@@ -4396,14 +4410,14 @@
                         </div>
                     </div>
 
-                    <!-- Today's Productivity + Hourly Activity (Side by Side) -->
+                    <!-- Today's Activity + Hourly Activity (Side by Side) -->
                     <div class="cards-row">
-                        <!-- Today's Productivity Card -->
+                        <!-- Today's Activity Card -->
                         <div class="glass-card" id="todayCard">
                             <div class="card-loading-overlay" data-loader="today"><div class="card-spinner"></div></div>
                             <div class="card-header">
                                 <div>
-                                    <span class="card-title">Today's Productivity</span>
+                                    <span class="card-title">Today's Activity</span>
                                     <span class="card-subtitle" id="todayDate"></span>
                                 </div>
                                 <div class="date-nav">
@@ -4533,97 +4547,8 @@
                         </div>
                     </div>
 
-                    </div><!-- End Activity Sub-View -->
-
-                    <!-- Tasks Sub-View -->
-                    <div class="productivity-subview" id="tasksSubview">
-
-                    <!-- Active Tasks Table -->
-                    <div class="glass-card" id="activeTasksCard">
-                        <div class="card-loading-overlay" data-loader="tasks"><div class="card-spinner"></div></div>
-                        <div class="card-header">
-                            <span class="card-title">Active Projects</span>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th class="col-task">Task</th>
-                                        <th class="col-repo">Repo</th>
-                                        <th class="col-description">Description</th>
-                                        <th class="col-progress">Progress</th>
-                                        <th class="col-time">Time</th>
-                                        <th class="col-updated">Updated</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="activeTasksBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- Recent Completions Table -->
-                    <div class="glass-card" id="completedTasksCard">
-                        <div class="card-loading-overlay" data-loader="completed"><div class="card-spinner"></div></div>
-                        <div class="card-header">
-                            <span class="card-title">Completed Projects</span>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th class="col-task">Task</th>
-                                        <th class="col-repo">Repo</th>
-                                        <th class="col-description">Description</th>
-                                        <th class="col-summary">Summary</th>
-                                        <th class="col-time">Time</th>
-                                        <th class="col-updated">Completed</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="completedTasksBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    </div><!-- End Tasks Sub-View -->
-
-                    <!-- PRs Sub-View -->
-                    <div class="productivity-subview" id="prsSubview">
-
-                    <!-- Pull Requests Card -->
-                    <div class="glass-card" id="prCard">
-                        <div class="card-loading-overlay" data-loader="prs"><div class="card-spinner"></div></div>
-                        <div class="card-header">
-                            <span class="card-title">Pull Requests</span>
-                            <div class="period-toggle">
-                                <button class="period-btn active" data-days="7" onclick="setPRDays(7)">7d</button>
-                                <button class="period-btn" data-days="30" onclick="setPRDays(30)">30d</button>
-                            </div>
-                        </div>
-                        <div class="pr-summary" id="prSummary">
-                            <div class="pr-stat">
-                                <div class="pr-stat-value merged" id="prMerged">--</div>
-                                <div class="pr-stat-label">Merged</div>
-                            </div>
-                            <div class="pr-stat">
-                                <div class="pr-stat-value open" id="prOpen">--</div>
-                                <div class="pr-stat-label">Open</div>
-                            </div>
-                            <div class="pr-stat">
-                                <div class="pr-stat-value today" id="prToday">--</div>
-                                <div class="pr-stat-label">Today</div>
-                            </div>
-                            <div class="pr-stat">
-                                <div class="pr-stat-value review" id="prAvgReview">--</div>
-                                <div class="pr-stat-label">Avg Review</div>
-                            </div>
-                        </div>
-                        <div class="pr-list" id="prList"></div>
-                    </div>
-
-                    </div><!-- End PRs Sub-View -->
-
                 </div>
-            </div><!-- End Productivity View -->
+            </div><!-- End Activity View -->
 
             <!-- Usage View -->
             <div class="view" id="usageView">
@@ -4967,7 +4892,6 @@
         // =============================================================================
         let currentDate = new Date();
         let historyDays = 7;
-        let prDays = 7;
         let charts = {};
         let taskColorMap = {};
         let nextColorIndex = 0;
@@ -4976,9 +4900,8 @@
         let cachedDailyTotals = null;
         let cachedDailyByDate = null;
 
-        // Productivity subview state
-        let currentProductivitySubview = 'activity';
-        const productivityDataLoaded = { activity: false, tasks: false, prs: false };
+        // View data loaded state
+        const dataLoaded = { projects: false, activity: false };
 
         // =============================================================================
         // Card Loading Manager
@@ -5014,19 +4937,28 @@
 
             btn.classList.add('refreshing');
 
-            // Reset data loaded state for current subview and reload
-            productivityDataLoaded[currentProductivitySubview] = false;
-            await loadProductivitySubviewData(currentProductivitySubview);
+            const currentView = getCurrentView();
+            if (currentView === 'projects') {
+                dataLoaded.projects = false;
+                await loadProjectsData();
+            } else if (currentView === 'activity') {
+                dataLoaded.activity = false;
+                await loadActivityData();
+            }
             updateLastRefresh();
 
             btn.classList.remove('refreshing');
+        }
+
+        function getCurrentView() {
+            return window.location.hash.slice(1) || 'projects';
         }
 
         // =============================================================================
         // Loading Manager
         // =============================================================================
         const LoadingManager = {
-            totalSteps: 2,  // Default for activity subview
+            totalSteps: 2,  // Default for projects view
             completedSteps: 0,
             completedStepNames: new Set(),
             isInitialLoad: true,
@@ -5034,17 +4966,15 @@
 
             steps: {
                 today: { name: "Today's stats", weight: 50 },
-                tasks: { name: 'Active tasks', weight: 50 },
+                tasks: { name: 'Active projects', weight: 50 },
                 history: { name: 'Activity history', weight: 50 },
-                completed: { name: 'Completed tasks', weight: 50 },
-                prs: { name: 'Pull requests', weight: 100 }
+                completed: { name: 'Completed projects', weight: 50 },
             },
 
-            // Steps for each productivity subview
-            subviewSteps: {
+            // Steps for each view
+            viewSteps: {
+                projects: ['tasks', 'completed'],
                 activity: ['today', 'history'],
-                tasks: ['tasks', 'completed'],
-                prs: ['prs']
             },
 
             stepCompleted(key) {
@@ -5091,12 +5021,12 @@
                 document.getElementById('loadingOverlay').classList.remove('hidden');
             },
 
-            reset(subview = 'activity') {
+            reset(view = 'projects') {
                 this.completedSteps = 0;
                 this.completedStepNames.clear();
                 this.errors = [];
-                // Set total steps based on subview
-                this.totalSteps = this.subviewSteps[subview]?.length || 2;
+                // Set total steps based on view
+                this.totalSteps = this.viewSteps[view]?.length || 2;
                 document.getElementById('loadingProgressBar').style.width = '0%';
                 document.getElementById('loadingStatus').textContent = 'Loading dashboard...';
                 document.getElementById('loadingError').style.display = 'none';
@@ -5104,9 +5034,11 @@
             },
 
             retry() {
-                this.reset(currentProductivitySubview);
+                const view = getCurrentView();
+                this.reset(view);
                 this.show();
-                loadProductivitySubviewData(currentProductivitySubview);
+                if (view === 'projects') loadProjectsData();
+                else if (view === 'activity') loadActivityData();
             }
         };
 
@@ -5288,56 +5220,28 @@
         // Navigation
         // =============================================================================
         function initNavigation() {
-            // Main navigation (sidebar)
             const navItems = document.querySelectorAll('.nav-item');
             navItems.forEach(item => {
                 item.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const viewId = item.dataset.view;
-                    if (viewId === 'productivity') {
-                        window.location.hash = 'productivity/' + currentProductivitySubview;
-                    } else {
-                        window.location.hash = viewId;
-                    }
+                    window.location.hash = item.dataset.view;
                 });
             });
 
-            // Productivity sub-tabs
-            const subTabs = document.querySelectorAll('.productivity-tab');
-            subTabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    const subviewId = tab.dataset.subtab;
-                    window.location.hash = 'productivity/' + subviewId;
-                });
-            });
-
-            // Handle initial hash
             handleHashChange();
-
-            // Listen for hash changes
             window.addEventListener('hashchange', handleHashChange);
         }
 
         function handleHashChange() {
-            const hash = window.location.hash.slice(1) || 'productivity/activity';
+            let hash = window.location.hash.slice(1) || 'projects';
 
-            // Parse the hash for view and optional subview
-            const parts = hash.split('/');
-            const viewId = parts[0] || 'productivity';
-            const subviewId = parts[1];
-
-            // Handle bare #productivity → redirect to #productivity/activity
-            if (viewId === 'productivity' && !subviewId) {
-                window.location.hash = 'productivity/activity';
+            // Legacy hash redirects - catch all productivity/* variants
+            if (hash === 'productivity' || hash.startsWith('productivity/')) {
+                window.location.hash = hash.startsWith('productivity/activity') ? 'activity' : 'projects';
                 return;
             }
 
-            switchView(viewId);
-
-            // Handle productivity subview
-            if (viewId === 'productivity' && subviewId) {
-                switchProductivitySubview(subviewId);
-            }
+            switchView(hash);
         }
 
         function switchView(viewId) {
@@ -5350,7 +5254,15 @@
             if (view) view.classList.add('active');
             if (nav) nav.classList.add('active');
 
-            // Load data for specific views (lazy loading with indicators)
+            // Lazy load data for each view
+            if (viewId === 'projects' && !dataLoaded.projects) {
+                if (LoadingManager.isInitialLoad) LoadingManager.reset('projects');
+                loadProjectsData();
+            }
+            if (viewId === 'activity' && !dataLoaded.activity) {
+                if (LoadingManager.isInitialLoad) LoadingManager.reset('activity');
+                loadActivityData();
+            }
             if (viewId === 'usage' && !usageStats) {
                 showViewLoading('usageView', 'Loading usage data...');
                 loadUsageData()
@@ -5365,65 +5277,24 @@
             }
         }
 
-        function switchProductivitySubview(subviewId) {
-            // Validate subview
-            if (!['activity', 'tasks', 'prs'].includes(subviewId)) {
-                subviewId = 'activity';
-            }
-
-            currentProductivitySubview = subviewId;
-
-            // Update tab active states
-            document.querySelectorAll('.productivity-tab').forEach(tab => {
-                tab.classList.toggle('active', tab.dataset.subtab === subviewId);
-            });
-
-            // Show/hide subview containers
-            document.querySelectorAll('.productivity-subview').forEach(sv => {
-                sv.classList.remove('active');
-            });
-            const subview = document.getElementById(subviewId + 'Subview');
-            if (subview) subview.classList.add('active');
-
-            // Load data if not already loaded
-            loadProductivitySubviewData(subviewId);
+        async function loadProjectsData() {
+            CardLoader.show('tasks');
+            CardLoader.show('completed');
+            await Promise.all([
+                fetchActiveTasks(),
+                fetchCompletedTasks()
+            ]);
+            dataLoaded.projects = true;
         }
 
-        async function loadProductivitySubviewData(subviewId) {
-            if (productivityDataLoaded[subviewId]) return;
-
-            // Reset LoadingManager for initial load with correct subview
-            if (LoadingManager.isInitialLoad) {
-                LoadingManager.reset(subviewId);
-            }
-
-            switch (subviewId) {
-                case 'activity':
-                    CardLoader.show('today');
-                    CardLoader.show('history');
-                    await Promise.all([
-                        fetchTodayStats(),
-                        fetchHistory(historyDays)
-                    ]);
-                    productivityDataLoaded.activity = true;
-                    break;
-
-                case 'tasks':
-                    CardLoader.show('tasks');
-                    CardLoader.show('completed');
-                    await Promise.all([
-                        fetchActiveTasks(),
-                        fetchCompletedTasks()
-                    ]);
-                    productivityDataLoaded.tasks = true;
-                    break;
-
-                case 'prs':
-                    CardLoader.show('prs');
-                    await fetchPRStats(prDays);
-                    productivityDataLoaded.prs = true;
-                    break;
-            }
+        async function loadActivityData() {
+            CardLoader.show('today');
+            CardLoader.show('history');
+            await Promise.all([
+                fetchTodayStats(),
+                fetchHistory(historyDays)
+            ]);
+            dataLoaded.activity = true;
         }
 
         // =============================================================================
@@ -5521,31 +5392,6 @@
                 LoadingManager.stepFailed('history', error);
             } finally {
                 CardLoader.hide('history');
-            }
-        }
-
-        async function fetchPRStats(days) {
-            CardLoader.show('prs');
-            try {
-                const response = await fetch(API_BASE + `/api/stats/prs?days=${days}`);
-                const data = await response.json();
-                renderPRStats(data);
-                LoadingManager.stepCompleted('prs');
-            } catch (error) {
-                console.error('Error fetching PR stats:', error);
-                LoadingManager.stepFailed('prs', error);
-                // Show error state in PR card
-                document.getElementById('prMerged').textContent = '--';
-                document.getElementById('prOpen').textContent = '--';
-                document.getElementById('prToday').textContent = '--';
-                document.getElementById('prAvgReview').textContent = '--';
-                document.getElementById('prList').innerHTML = `
-                    <div class="empty-state" style="padding: 16px;">
-                        <div class="empty-state-text">Unable to load PR data</div>
-                    </div>
-                `;
-            } finally {
-                CardLoader.hide('prs');
             }
         }
 
@@ -6327,89 +6173,6 @@
             }).join('');
         }
 
-        function renderPRStats(data) {
-            // Handle error state
-            if (!data || !data.available) {
-                document.getElementById('prMerged').textContent = '--';
-                document.getElementById('prOpen').textContent = '--';
-                document.getElementById('prToday').textContent = '--';
-                document.getElementById('prAvgReview').textContent = '--';
-                document.getElementById('prList').innerHTML = `
-                    <div class="empty-state" style="padding: 16px;">
-                        <div class="empty-state-text">${data?.error || 'PR data unavailable'}</div>
-                    </div>
-                `;
-                return;
-            }
-
-            // Update summary stats
-            const summary = data.summary || {};
-            document.getElementById('prMerged').textContent = summary.merged_count || 0;
-            document.getElementById('prOpen').textContent = summary.open_count || 0;
-            document.getElementById('prToday').textContent = summary.today_count || 0;
-
-            // Format avg review time
-            const avgHours = summary.avg_review_hours;
-            if (avgHours !== null && avgHours !== undefined) {
-                if (avgHours < 1) {
-                    document.getElementById('prAvgReview').textContent = `${Math.round(avgHours * 60)}m`;
-                } else if (avgHours < 24) {
-                    document.getElementById('prAvgReview').textContent = `${Math.round(avgHours)}h`;
-                } else {
-                    document.getElementById('prAvgReview').textContent = `${Math.round(avgHours / 24)}d`;
-                }
-            } else {
-                document.getElementById('prAvgReview').textContent = '--';
-            }
-
-            // Render PR lists
-            const prList = document.getElementById('prList');
-            const mergedPRs = data.merged || [];
-            const openPRs = data.open || [];
-
-            if (mergedPRs.length === 0 && openPRs.length === 0) {
-                prList.innerHTML = `
-                    <div class="empty-state" style="padding: 16px;">
-                        <div class="empty-state-icon">🔄</div>
-                        <div class="empty-state-text">No pull requests found</div>
-                    </div>
-                `;
-                return;
-            }
-
-            let html = '';
-
-            // Open PRs first (more urgent)
-            if (openPRs.length > 0) {
-                html += '<div class="pr-section-header" style="font-size: 11px; color: var(--text-muted); margin: 8px 0 4px; text-transform: uppercase;">Open</div>';
-                openPRs.slice(0, 5).forEach(pr => {
-                    html += `
-                        <a href="${pr.url}" target="_blank" class="pr-item" style="text-decoration: none;">
-                            <span class="pr-title" title="${pr.title}">${pr.title}</span>
-                            <span class="pr-repo">${pr.repo}</span>
-                            <span class="pr-time">${pr.time_ago}</span>
-                        </a>
-                    `;
-                });
-            }
-
-            // Merged PRs
-            if (mergedPRs.length > 0) {
-                html += '<div class="pr-section-header" style="font-size: 11px; color: var(--text-muted); margin: 12px 0 4px; text-transform: uppercase;">Merged</div>';
-                mergedPRs.slice(0, 5).forEach(pr => {
-                    html += `
-                        <a href="${pr.url}" target="_blank" class="pr-item" style="text-decoration: none;">
-                            <span class="pr-title" title="${pr.title}">${pr.title}</span>
-                            <span class="pr-repo">${pr.repo}</span>
-                            <span class="pr-time">${pr.time_ago}</span>
-                        </a>
-                    `;
-                });
-            }
-
-            prList.innerHTML = html;
-        }
-
         // =============================================================================
         // Period Toggles
         // =============================================================================
@@ -6420,15 +6183,6 @@
             });
             showSectionLoading('historyCard');
             fetchHistory(days).then(() => hideSectionLoading('historyCard'));
-        }
-
-        function setPRDays(days) {
-            prDays = days;
-            document.querySelectorAll('#prCard .period-btn').forEach(btn => {
-                btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
-            });
-            showSectionLoading('prCard');
-            fetchPRStats(days).then(() => hideSectionLoading('prCard'));
         }
 
         // =============================================================================
@@ -7517,26 +7271,52 @@
         // =============================================================================
         // Initialization
         // =============================================================================
-        async function loadAllData() {
-            resetTaskColors();
-            updateDateDisplay();
+        // =============================================================================
+        // Theme Toggle
+        // =============================================================================
+        function getTheme() {
+            return localStorage.getItem('orbit-theme') || 'dark';
+        }
 
-            // Only load data for the current productivity subview
-            // Other subviews are lazy-loaded when accessed
-            await loadProductivitySubviewData(currentProductivitySubview);
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                document.documentElement.removeAttribute('data-theme');
+            } else {
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+            const logo = document.getElementById('sidebarLogo');
+            if (logo) {
+                logo.src = theme === 'light'
+                    ? '/static/orbit_logo_black.png'
+                    : '/static/orbit_logo_white.png';
+            }
+        }
+
+        function toggleTheme() {
+            const next = getTheme() === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('orbit-theme', next);
+            applyTheme(next);
         }
 
         function init() {
-            // LoadingManager.reset() is called in loadProductivitySubviewData() with the correct subview
+            // Apply theme
+            applyTheme(getTheme());
+
             initNavigation();
-            // Initial data load is handled by initNavigation() → handleHashChange() → loadProductivitySubviewData()
+            // Initial data load is handled by initNavigation() -> handleHashChange() -> switchView()
             updateLastRefresh();
 
-            // Auto-refresh every 15 minutes - only refresh current subview
+            // Auto-refresh every 15 minutes
             setInterval(async () => {
                 if (!LoadingManager.isInitialLoad) {
-                    productivityDataLoaded[currentProductivitySubview] = false;
-                    await loadProductivitySubviewData(currentProductivitySubview);
+                    const view = getCurrentView();
+                    if (view === 'projects') {
+                        dataLoaded.projects = false;
+                        await loadProjectsData();
+                    } else if (view === 'activity') {
+                        dataLoaded.activity = false;
+                        await loadActivityData();
+                    }
                     updateLastRefresh();
                 }
             }, REFRESH_INTERVAL);
@@ -7559,9 +7339,10 @@
                 }
             });
 
-            // Keyboard shortcuts
+            // Keyboard shortcuts (date navigation only in activity view)
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT') return;
+                if (getCurrentView() !== 'activity') return;
                 switch(e.key) {
                     case 'ArrowLeft': navigateDate(-1); break;
                     case 'ArrowRight': navigateDate(1); break;

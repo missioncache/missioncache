@@ -45,15 +45,14 @@ open http://localhost:8787
 
 ## API Reference
 
-### Productivity APIs
+### Project & Activity APIs
 
 ```
 GET /api/tasks/active      # Active tasks (excludes orphans with orbit files in completed/)
 GET /api/tasks/completed   # Completed tasks + orphans (orbit files in completed/)
-GET /api/stats/today       # Today's productivity (tasks, LOC, sessions)
+GET /api/stats/today       # Today's activity (tasks, LOC, sessions)
 GET /api/stats/day?date=   # Historical day stats
 GET /api/stats/history?days=N  # Aggregate with heatmap, trends
-GET /api/stats/prs?days=N  # PR statistics via gh CLI
 GET /api/task/{id}/files   # Task orbit files (plan, context, tasks.md)
 ```
 
@@ -75,14 +74,15 @@ GET /health        # Health check
 
 ## Frontend Views
 
-### #productivity (default)
+### #projects (default)
+- Active projects table (clickable for modal)
+- Completed projects table
+
+### #activity
 - Header stats card (time, LOC, commits, tasks)
-- Today's productivity with date navigation
+- Today's activity with date navigation
 - Hourly activity bar chart + timeline
 - Activity history with heatmap and trends
-- Active tasks table (clickable for modal)
-- Completed tasks table
-- PR list (7d/30d toggle)
 
 ### #usage
 - API usage limits (session, weekly, opus)
@@ -181,4 +181,4 @@ Install for Python 3.11:
 - Type hints on all function signatures
 - FastAPI with Pydantic models for request validation
 - Single HTML file with embedded CSS/JS (no build tools)
-- CSS variables for theming, dark mode only
+- CSS variables for theming, dark/light toggle with localStorage persistence
