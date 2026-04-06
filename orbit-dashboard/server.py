@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shutil
+
 import sqlite3
 import subprocess
 import sys
@@ -32,6 +32,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Add lib to path for imports
@@ -97,6 +98,12 @@ def _init_hooks_state_db() -> None:
             validated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
     """)
+    # Migrate: add action summary columns
+    for col in ("action_summary", "summary_updated_at"):
+        try:
+            db.execute(f"ALTER TABLE session_state ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass  # Already exists
     db.close()
 
 
@@ -1059,7 +1066,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
 
 
 # =============================================================================
-# Productivity APIs (DuckDB)
+# Project & Activity APIs (DuckDB)
 # =============================================================================
 
 
@@ -1524,7 +1531,7 @@ async def api_task_prompt(task_id: int, subtask_id: str):
 
 @app.get("/api/stats/today")
 async def api_stats_today():
-    """Get today's productivity statistics.
+    """Get today's activity statistics.
 
     Uses SQLite for real-time session data (where heartbeats are written),
     and DuckDB for historical data. Also includes Claude Code activity
@@ -1641,7 +1648,7 @@ async def api_stats_today():
 async def api_stats_day(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
 ):
-    """Get productivity statistics for a specific date.
+    """Get activity statistics for a specific date.
 
     Includes both orbit task activity and Claude Code activity from JSONL files.
     """
@@ -1731,7 +1738,7 @@ async def api_stats_day(
 
 @app.get("/api/stats/history")
 async def api_stats_history(days: int = 7):
-    """Get historical productivity statistics.
+    """Get historical activity statistics.
 
     Uses 5-minute cache to avoid expensive repeated queries.
     Includes Claude Code activity from JSONL session files.
@@ -1854,199 +1861,6 @@ async def api_stats_history(days: int = 7):
     _history_cache_timestamp[days] = datetime.now()
 
     return {**result, "cached": False, "timestamp": datetime.now().isoformat()}
-
-
-# =============================================================================
-# Pull Request Stats (GitHub CLI)
-# =============================================================================
-
-
-def find_gh_cli() -> str | None:
-    """Find the gh CLI executable."""
-    return shutil.which("gh")
-
-
-def get_pr_stats(days: int = 7) -> dict[str, Any]:
-    """Get PR statistics using the gh CLI (search API for global results)."""
-    gh = find_gh_cli()
-    if not gh:
-        return {"error": "GitHub CLI not found", "available": False}
-
-    result = {
-        "available": True,
-        "days": days,
-        "summary": {
-            "merged_count": 0,
-            "open_count": 0,
-            "today_count": 0,
-            "avg_review_hours": None,
-        },
-        "merged": [],
-        "open": [],
-    }
-
-    try:
-        # Get merged PRs using gh search prs (works globally, not just in current repo)
-        since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        merged_cmd = [
-            gh,
-            "search",
-            "prs",
-            "--author",
-            "@me",
-            "--merged",
-            f"--merged-at",
-            f">={since_date}",
-            "--json",
-            "number,title,repository,url,createdAt,closedAt",
-            "--limit",
-            "50",
-        ]
-        merged_result = subprocess.run(
-            merged_cmd, capture_output=True, text=True, timeout=30
-        )
-
-        if merged_result.returncode == 0 and merged_result.stdout.strip():
-            merged_prs = json.loads(merged_result.stdout)
-            result["summary"]["merged_count"] = len(merged_prs)
-
-            # Calculate avg review time and today count
-            today = datetime.now().strftime("%Y-%m-%d")
-            review_times = []
-            for pr in merged_prs:
-                # Parse repo name from repository object
-                repo_info = pr.get("repository", {})
-                repo_name = repo_info.get("name", "")
-                if not repo_name and pr.get("url"):
-                    parts = pr["url"].split("/")
-                    if len(parts) >= 5:
-                        repo_name = parts[-3]
-
-                # For search results, closedAt is the merge time for merged PRs
-                merged_at = pr.get("closedAt", "")
-                created_at = pr.get("createdAt", "")
-
-                # Count PRs merged today
-                if merged_at and merged_at.startswith(today):
-                    result["summary"]["today_count"] += 1
-
-                # Calculate review time (time from creation to merge)
-                if merged_at and created_at:
-                    try:
-                        merged_dt = datetime.fromisoformat(
-                            merged_at.replace("Z", "+00:00")
-                        )
-                        created_dt = datetime.fromisoformat(
-                            created_at.replace("Z", "+00:00")
-                        )
-                        hours = (merged_dt - created_dt).total_seconds() / 3600
-                        review_times.append(hours)
-                    except Exception:
-                        pass
-
-                # Format time ago
-                time_ago = ""
-                if merged_at:
-                    try:
-                        merged_dt = datetime.fromisoformat(
-                            merged_at.replace("Z", "+00:00")
-                        )
-                        delta = datetime.now(timezone.utc) - merged_dt
-                        if delta.days > 0:
-                            time_ago = f"{delta.days}d ago"
-                        elif delta.seconds >= 3600:
-                            time_ago = f"{delta.seconds // 3600}h ago"
-                        else:
-                            time_ago = f"{delta.seconds // 60}m ago"
-                    except Exception:
-                        pass
-
-                result["merged"].append(
-                    {
-                        "number": pr.get("number"),
-                        "title": pr.get("title", ""),
-                        "repo": repo_name,
-                        "url": pr.get("url", ""),
-                        "merged_at": merged_at,
-                        "time_ago": time_ago,
-                    }
-                )
-
-            if review_times:
-                result["summary"]["avg_review_hours"] = round(
-                    sum(review_times) / len(review_times), 1
-                )
-
-        # Get open PRs using gh search prs
-        open_cmd = [
-            gh,
-            "search",
-            "prs",
-            "--author",
-            "@me",
-            "--state",
-            "open",
-            "--json",
-            "number,title,repository,url,createdAt",
-            "--limit",
-            "20",
-        ]
-        open_result = subprocess.run(
-            open_cmd, capture_output=True, text=True, timeout=30
-        )
-
-        if open_result.returncode == 0 and open_result.stdout.strip():
-            open_prs = json.loads(open_result.stdout)
-            result["summary"]["open_count"] = len(open_prs)
-
-            for pr in open_prs:
-                repo_info = pr.get("repository", {})
-                repo_name = repo_info.get("name", "")
-                if not repo_name and pr.get("url"):
-                    parts = pr["url"].split("/")
-                    if len(parts) >= 5:
-                        repo_name = parts[-3]
-
-                created_at = pr.get("createdAt", "")
-                time_ago = ""
-                if created_at:
-                    try:
-                        created_dt = datetime.fromisoformat(
-                            created_at.replace("Z", "+00:00")
-                        )
-                        delta = datetime.now(timezone.utc) - created_dt
-                        if delta.days > 0:
-                            time_ago = f"{delta.days}d ago"
-                        elif delta.seconds >= 3600:
-                            time_ago = f"{delta.seconds // 3600}h ago"
-                        else:
-                            time_ago = f"{delta.seconds // 60}m ago"
-                    except Exception:
-                        pass
-
-                result["open"].append(
-                    {
-                        "number": pr.get("number"),
-                        "title": pr.get("title", ""),
-                        "repo": repo_name,
-                        "url": pr.get("url", ""),
-                        "created_at": created_at,
-                        "time_ago": time_ago,
-                    }
-                )
-
-    except subprocess.TimeoutExpired:
-        return {"error": "GitHub CLI timed out", "available": False}
-    except Exception as e:
-        return {"error": str(e), "available": False}
-
-    return result
-
-
-@app.get("/api/stats/prs")
-async def api_stats_prs(days: int = 7):
-    """Get PR statistics from GitHub."""
-    return get_pr_stats(days=days)
 
 
 @app.get("/api/repos")
@@ -4294,6 +4108,14 @@ async def api_auto_output_stream(
 
 
 # =============================================================================
+# Static Assets
+# =============================================================================
+
+assets_dir = Path(__file__).parent.parent / "assets"
+if assets_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(assets_dir)), name="static")
+
+# =============================================================================
 # Dashboard & Utility Endpoints
 # =============================================================================
 
@@ -4367,6 +4189,134 @@ async def hook_heartbeat(body: dict):
         pass  # Non-blocking
 
     return {}
+
+
+# Action summary constants
+_SUMMARY_DEBOUNCE_SEC = 30
+_SUMMARY_MAX_CHARS = 40
+_SUMMARY_MIN_PROMPT_LEN = 15
+
+
+_CLAUDE_CLI = str(Path.home() / ".local" / "bin" / "claude")
+_SUMMARY_TIMEOUT_SEC = 15
+
+
+def _update_summary_timestamp(session_id: str) -> None:
+    """Update summary_updated_at without changing the summary text."""
+    try:
+        db = _get_hooks_state_db()
+        db.execute(
+            """INSERT INTO session_state (session_id, summary_updated_at, updated_at)
+               VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+               ON CONFLICT(session_id) DO UPDATE SET
+                 summary_updated_at = datetime('now', 'localtime'),
+                 updated_at = datetime('now', 'localtime')""",
+            (session_id,),
+        )
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
+
+async def _generate_action_summary(session_id: str, prompt: str) -> None:
+    """Generate a short session action summary via claude CLI + Haiku.
+
+    Uses the claude CLI in print mode with the user's existing subscription auth.
+    Invoked with --no-session-persistence to avoid polluting session history.
+    Runs as fire-and-forget background task.
+    """
+    try:
+        # Debounce check
+        db = _get_hooks_state_db()
+        row = db.execute(
+            "SELECT summary_updated_at FROM session_state WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        db.close()
+        # Always update timestamp (so statusline shows when last prompt was)
+        _update_summary_timestamp(session_id)
+
+        if row and row["summary_updated_at"]:
+            last = datetime.fromisoformat(row["summary_updated_at"])
+            if (datetime.now() - last).total_seconds() < _SUMMARY_DEBOUNCE_SEC:
+                return  # Skip Haiku call, but timestamp already updated
+
+        cli_prompt = (
+            "TASK: Output ONLY a short present-participle phrase (2-5 words) "
+            "describing the user's action below. No sentences, no explanation, no "
+            "quotes. Examples: 'fixing auth bug', 'adding tests', 'debugging CI'.\n\n"
+            "USER ACTION: " + prompt[:300]
+        )
+
+        # asyncio subprocess - args list, no shell (safe from injection)
+        proc = await asyncio.create_subprocess_exec(
+            _CLAUDE_CLI, "-p",
+            "--model", "haiku",
+            "--output-format", "text",
+            "--no-session-persistence",
+            "--permission-mode", "bypassPermissions",
+            cli_prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=_SUMMARY_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            return
+
+        if proc.returncode != 0 or not stdout:
+            return
+
+        raw = stdout.decode().strip().split("\n")[0]  # First line only
+        summary = raw[:_SUMMARY_MAX_CHARS]
+        # Reject confused model responses (full sentences, not phrases)
+        if not summary or summary.startswith(("I ", "I'", "Sure", "Here")):
+            return
+
+        db = _get_hooks_state_db()
+        db.execute(
+            """INSERT INTO session_state (session_id, action_summary, summary_updated_at, updated_at)
+               VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+               ON CONFLICT(session_id) DO UPDATE SET
+                 action_summary = ?,
+                 summary_updated_at = datetime('now', 'localtime'),
+                 updated_at = datetime('now', 'localtime')""",
+            (session_id, summary, summary),
+        )
+        db.commit()
+        db.close()
+    except Exception:
+        pass  # Non-blocking
+
+
+@app.post("/api/hooks/action-summary")
+async def hook_action_summary(body: dict):
+    """HTTP hook: generate AI summary of session action on UserPromptSubmit."""
+    prompt = (body.get("prompt") or "").strip()
+    session_id = body.get("session_id", "")
+
+    if not session_id or len(prompt) < _SUMMARY_MIN_PROMPT_LEN:
+        return {}
+    if any(p.search(prompt) for p in _HEARTBEAT_SKIP_PATTERNS):
+        return {}
+
+    # Cancel any in-flight summary for this session (dedup)
+    prev = _inflight_summaries.pop(session_id, None)
+    if prev and not prev.done():
+        prev.cancel()
+
+    task = asyncio.create_task(_generate_action_summary(session_id, prompt))
+    _inflight_summaries[session_id] = task
+    task.add_done_callback(lambda t: _inflight_summaries.pop(session_id, None))
+    return {}
+
+
+# per-session dedup: at most one in-flight summary task per session
+_inflight_summaries: dict[str, asyncio.Task] = {}
 
 
 @app.post("/api/hooks/edit-count")
@@ -4614,4 +4564,4 @@ async def stream_updates():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8787)
+    uvicorn.run(app, host="127.0.0.1", port=8787)

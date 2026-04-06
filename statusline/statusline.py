@@ -83,6 +83,8 @@ COLORS = {
     "codex_session": f"{ESC}[38;2;100;200;170m",
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
     "extra_usage": f"{ESC}[38;2;220;170;80m",
+    "summary": f"{ESC}[38;2;140;180;220m",
+    "fast_mode": f"{ESC}[38;2;255;120;20m",
 }
 
 ICONS = {
@@ -103,6 +105,7 @@ ICONS = {
     "health_degraded": "\u26a0\ufe0f",
     "health_partial": "\U0001f7e1",
     "extra": "\U0001f4b3",
+    "summary": "\U0001f4ac",
 }
 
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
@@ -114,6 +117,7 @@ CELL_WIDTH = 24
 STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
 HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
 SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
+SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 ORBIT_ACTIVE = Path.home() / ".claude" / "orbit" / "active"
 
 
@@ -485,6 +489,29 @@ def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
     return name, display
 
 
+# ============ ACTION SUMMARY ============
+
+def get_action_summary(session_id: str) -> tuple[str, str]:
+    """Return (summary_text, time_str) for the session's action summary."""
+    if not session_id:
+        return "", ""
+    db = _get_hooks_db()
+    if db:
+        try:
+            row = db.execute(
+                "SELECT action_summary, summary_updated_at FROM session_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            db.close()
+            if row and row["action_summary"] and row["summary_updated_at"]:
+                dt = datetime.fromisoformat(row["summary_updated_at"])
+                time_str = dt.strftime("%b %-d %H:%M")  # "Apr 6 23:08"
+                return row["action_summary"], time_str
+        except (sqlite3.Error, KeyError, ValueError):
+            pass
+    return "", ""
+
+
 # ============ GIT INFO ============
 
 def get_git_info() -> tuple[str, str, bool]:
@@ -703,15 +730,21 @@ def get_usage_data() -> dict | None:
     if os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1":
         return {"is_foundry": True}
 
-    # Check cache
+    # Check cache (read once, reuse for stale fallback)
+    cached = None
     if USAGE_CACHE.exists():
         try:
-            cache = json.loads(USAGE_CACHE.read_text())
-            cached_at = datetime.fromisoformat(cache["cached_at"])
-            if (datetime.now(timezone.utc) - cached_at).total_seconds() < USAGE_TTL:
-                return _parse_usage_response(cache["data"])
+            cached = json.loads(USAGE_CACHE.read_text())
         except Exception:
             pass
+    if cached:
+        try:
+            cached_at = datetime.fromisoformat(cached["cached_at"])
+            if (datetime.now(timezone.utc) - cached_at).total_seconds() < USAGE_TTL:
+                return _parse_usage_response(cached["data"])
+        except Exception:
+            pass
+    stale_data = cached.get("data") if cached else None
 
     token = _get_oauth_token()
     if not token:
@@ -737,7 +770,9 @@ def get_usage_data() -> dict | None:
             pass
         return _parse_usage_response(data)
     except Exception:
-        # OAuth token exists but usage fetch failed - signal auth without usage
+        # API failed (429, timeout, etc.) - fall back to stale cache if available
+        if stale_data:
+            return _parse_usage_response(stale_data)
         return {"is_oauth": True}
 
 
@@ -816,6 +851,15 @@ def get_codex_usage() -> dict | None:
 
 
 # ============ SUBSCRIPTION DETECTION ============
+
+
+def _is_fast_mode() -> bool:
+    """Check if Claude Code fast mode is enabled via settings.json."""
+    try:
+        settings = json.loads(SETTINGS_FILE.read_text())
+        return bool(settings.get("fastMode"))
+    except Exception:
+        return False
 
 
 def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
@@ -917,6 +961,17 @@ def set_iterm_title(session_id: str, project_name: str, repo_name: str, branch: 
         if subtitle:
             b64 = base64.b64encode(subtitle.encode()).decode()
             tty.write(f"\033]1337;SetUserVar=claudeSubtitle={b64}\007")
+    elif os.environ.get("CMUX_WORKSPACE_ID"):
+        if project_name:
+            cmux_bin = os.environ.get("CMUX_CLAUDE_HOOK_CMUX_BIN", "cmux")
+            try:
+                subprocess.Popen(
+                    [cmux_bin, "workspace-action", "--action", "set-description",
+                     "--description", project_name],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except OSError:
+                pass
     tty.close()
 
 
@@ -954,12 +1009,17 @@ def main() -> None:
     # Always fetch extra_usage from API (300s cache) - stdin doesn't include it
     f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
+    f_summary = pool.submit(get_action_summary, session_id)
 
     _FUTURE_TIMEOUT = 3
     try:
         project_name, project_display = f_project.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
         project_name, project_display = "", ""
+    try:
+        action_summary, summary_time = f_summary.result(timeout=_FUTURE_TIMEOUT)
+    except Exception:
+        action_summary, summary_time = "", ""
     try:
         repo_name, branch, git_dirty = f_git.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1014,10 +1074,14 @@ def main() -> None:
         c = COLORS["git_dirty"] if git_dirty else COLORS["git_clean"]
         line1.append(_item(c, ICONS["git"], "Git", branch))
 
-    # Line 2: Project
+    # Line 2: Project + Action Summary
     line2: list[str] = []
     if project_name:
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", project_display))
+    if summary_time:
+        line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", summary_time))
+    if action_summary:
+        line2.append(f"{COLORS['summary']}{ICONS['summary']} {action_summary[0].upper()}{action_summary[1:]}{RESET}")
 
     # Line 3: Metrics
     line3 = [
@@ -1033,12 +1097,14 @@ def main() -> None:
         line3.append(_item(COLORS["ctx_est"], ICONS["context"], "Ctx", f"{ctx_pct}% (Estimated)"))
     else:
         line3.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
+    if _is_fast_mode():
+        line3.append(f"{COLORS['fast_mode']}\u26a1 Fast mode activated{RESET}")
 
     # Line 4: Time
     line4 = [
         _item(COLORS["time"], ICONS["duration"], "Elapsed", info["duration_str"]),
-        _item(COLORS["edit"], ICONS["edit"], "Edits", str(edit_count)),
         _item(COLORS["datetime"], ICONS["datetime"], "Now", now_dt),
+        _item(COLORS["edit"], ICONS["edit"], "Edits", str(edit_count)),
     ]
 
     # Line K8s: K8s + Version + Health
@@ -1188,8 +1254,8 @@ def main() -> None:
     out.write(RESET)
     out.write(((_pad_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n"))
     out.write(_pad_line(j_line1, w_line1, max_width) + RESET + "\n")
-    out.write(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
     out.write(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
+    out.write(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
     out.write(((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n"))
     out.write(((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n"))
     if has_codex:
