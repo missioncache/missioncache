@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/orbit_logo_white.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/orbit_logo_black.png">
+    <img src="assets/orbit_logo_black.png" alt="Orbit" width="300">
+  </picture>
+</p>
+
 # Orbit - Project Manager for Claude Code
 
 Orbit is a comprehensive project management plugin for [Claude Code](https://claude.ai/code). It provides structured task tracking, autonomous execution, time analytics, and a web dashboard - all integrated directly into your Claude Code workflow.
