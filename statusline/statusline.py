@@ -82,6 +82,7 @@ COLORS = {
     "codex_label": f"{ESC}[38;2;16;163;127m",
     "codex_session": f"{ESC}[38;2;100;200;170m",
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
+    "extra_usage": f"{ESC}[38;2;220;170;80m",
 }
 
 ICONS = {
@@ -101,6 +102,7 @@ ICONS = {
     "health_ok": "\u2705",
     "health_degraded": "\u26a0\ufe0f",
     "health_partial": "\U0001f7e1",
+    "extra": "\U0001f4b3",
 }
 
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
@@ -262,6 +264,41 @@ def _format_unix_reset(ts) -> str:
         return dt.astimezone().strftime("%a %-I%p").lower()
     except Exception:
         return "?"
+
+
+def _parse_extra_usage(extra: dict | None) -> dict | None:
+    """Parse extra_usage block into display values. Returns None if disabled."""
+    if not extra or not extra.get("is_enabled"):
+        return None
+    monthly_limit = extra.get("monthly_limit", 0)
+    if monthly_limit <= 0:
+        return None
+    used_credits = extra.get("used_credits") or 0.0
+    used_dollars = used_credits / 100
+    limit_dollars = monthly_limit / 100
+
+    utilization = extra.get("utilization")
+    if utilization is not None:
+        used_pct = int(utilization)
+    elif used_credits == 0:
+        used_pct = 0
+    else:
+        used_pct = min(int((used_credits / monthly_limit) * 100), 100)
+
+    today = date.today()
+    if today.month == 12:
+        reset_date = date(today.year + 1, 1, 1)
+    else:
+        reset_date = date(today.year, today.month + 1, 1)
+    reset_str = reset_date.strftime("%b %-d").lower()
+
+    fmt = lambda d: f"${d:.0f}" if d == int(d) else f"${d:.2f}"
+    return {
+        "extra_spent": fmt(used_dollars),
+        "extra_limit": fmt(limit_dollars),
+        "extra_pct": str(used_pct),
+        "extra_reset": reset_str,
+    }
 
 
 def _parse_stdin_rate_limits(rate_limits: dict) -> dict:
@@ -639,22 +676,25 @@ def _get_oauth_token() -> str | None:
 
 def _parse_usage_response(data: dict) -> dict:
     """Parse API usage response into display values."""
+    result: dict = {}
     if (data.get("five_hour") is None
             and data.get("seven_day") is None
             and data.get("seven_day_opus") is None):
-        return {"is_max": True}
-
-    result: dict = {}
-    if data.get("five_hour") is not None:
-        result["session_pct"] = str(int(data["five_hour"].get("utilization", 0)))
-        result["session_reset"] = _format_reset_time(data["five_hour"].get("resets_at", ""))
-    if data.get("seven_day") is not None:
-        result["weekly_pct"] = str(int(data["seven_day"].get("utilization", 0)))
-        result["weekly_reset"] = _format_reset_time(data["seven_day"].get("resets_at", ""))
-    if data.get("seven_day_opus") is not None:
-        opus_pct = int(data["seven_day_opus"].get("utilization", 0))
-        if opus_pct > 0:
-            result["opus_pct"] = str(opus_pct)
+        result["is_max"] = True
+    else:
+        if data.get("five_hour") is not None:
+            result["session_pct"] = str(int(data["five_hour"].get("utilization", 0)))
+            result["session_reset"] = _format_reset_time(data["five_hour"].get("resets_at", ""))
+        if data.get("seven_day") is not None:
+            result["weekly_pct"] = str(int(data["seven_day"].get("utilization", 0)))
+            result["weekly_reset"] = _format_reset_time(data["seven_day"].get("resets_at", ""))
+        if data.get("seven_day_opus") is not None:
+            opus_pct = int(data["seven_day_opus"].get("utilization", 0))
+            if opus_pct > 0:
+                result["opus_pct"] = str(opus_pct)
+    extra = _parse_extra_usage(data.get("extra_usage"))
+    if extra:
+        result.update(extra)
     return result
 
 
@@ -911,6 +951,8 @@ def main() -> None:
     f_usage = pool.submit(
         lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
     )
+    # Always fetch extra_usage from API (300s cache) - stdin doesn't include it
+    f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
 
     _FUTURE_TIMEOUT = 3
@@ -938,6 +980,15 @@ def main() -> None:
         usage = f_usage.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
         usage = None
+    if f_extra:
+        try:
+            extra_data = f_extra.result(timeout=_FUTURE_TIMEOUT)
+            if extra_data and usage:
+                for k in ("extra_spent", "extra_limit", "extra_pct", "extra_reset"):
+                    if k in extra_data:
+                        usage[k] = extra_data[k]
+        except Exception:
+            pass
     try:
         codex_usage = f_codex.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1067,6 +1118,18 @@ def main() -> None:
             if op and op != "null" and op != "0":
                 line_usage.append(
                     f"{COLORS['opus_usage']}{ICONS['model']} Opus: {op}%{RESET}")
+        # Extra usage (independent of rate-limit plan type)
+        if not usage.get("is_foundry"):
+            es = usage.get("extra_spent")
+            if es is not None:
+                ep = usage.get("extra_pct", "?")
+                elim = usage.get("extra_limit", "?")
+                erset = usage.get("extra_reset", "")
+                extra_text = f"{es}/{elim} spent ({ep}% used)"
+                if erset:
+                    extra_text += f" {COLORS['reset_time']}{ICONS['reset']} {erset}"
+                line_usage.append(
+                    f"{COLORS['extra_usage']}{ICONS['extra']} Extra: {extra_text}{RESET}")
 
     # Line Codex: Codex usage (only if installed)
     line_codex: list[str] = []
