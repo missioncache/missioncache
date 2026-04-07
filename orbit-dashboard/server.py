@@ -98,8 +98,8 @@ def _init_hooks_state_db() -> None:
             validated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
     """)
-    # Migrate: add action summary columns
-    for col in ("action_summary", "summary_updated_at"):
+    # Migrate: add last_prompt_at column
+    for col in ("last_prompt_at",):
         try:
             db.execute(f"ALTER TABLE session_state ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
@@ -4170,6 +4170,10 @@ async def hook_heartbeat(body: dict):
 
     Replaces activity-tracker.sh -> npx tsx -> python3 orbit_db chain.
     """
+    # Skip in subagent context
+    if body.get("agent_id"):
+        return {}
+
     prompt = (body.get("prompt") or "").strip()
 
     # Skip prompts matching skip patterns
@@ -4188,135 +4192,23 @@ async def hook_heartbeat(body: dict):
     except Exception:
         pass  # Non-blocking
 
-    return {}
-
-
-# Action summary constants
-_SUMMARY_DEBOUNCE_SEC = 30
-_SUMMARY_MAX_CHARS = 40
-_SUMMARY_MIN_PROMPT_LEN = 15
-
-
-_CLAUDE_CLI = str(Path.home() / ".local" / "bin" / "claude")
-_SUMMARY_TIMEOUT_SEC = 15
-
-
-def _update_summary_timestamp(session_id: str) -> None:
-    """Update summary_updated_at without changing the summary text."""
-    try:
-        db = _get_hooks_state_db()
-        db.execute(
-            """INSERT INTO session_state (session_id, summary_updated_at, updated_at)
-               VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'))
-               ON CONFLICT(session_id) DO UPDATE SET
-                 summary_updated_at = datetime('now', 'localtime'),
-                 updated_at = datetime('now', 'localtime')""",
-            (session_id,),
-        )
-        db.commit()
-        db.close()
-    except Exception:
-        pass
-
-
-async def _generate_action_summary(session_id: str, prompt: str) -> None:
-    """Generate a short session action summary via claude CLI + Haiku.
-
-    Uses the claude CLI in print mode with the user's existing subscription auth.
-    Invoked with --no-session-persistence to avoid polluting session history.
-    Runs as fire-and-forget background task.
-    """
-    try:
-        # Debounce check
-        db = _get_hooks_state_db()
-        row = db.execute(
-            "SELECT summary_updated_at FROM session_state WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        db.close()
-        # Always update timestamp (so statusline shows when last prompt was)
-        _update_summary_timestamp(session_id)
-
-        if row and row["summary_updated_at"]:
-            last = datetime.fromisoformat(row["summary_updated_at"])
-            if (datetime.now() - last).total_seconds() < _SUMMARY_DEBOUNCE_SEC:
-                return  # Skip Haiku call, but timestamp already updated
-
-        cli_prompt = (
-            "TASK: Output ONLY a short present-participle phrase (2-5 words) "
-            "describing the user's action below. No sentences, no explanation, no "
-            "quotes. Examples: 'fixing auth bug', 'adding tests', 'debugging CI'.\n\n"
-            "USER ACTION: " + prompt[:300]
-        )
-
-        # asyncio subprocess - args list, no shell (safe from injection)
-        proc = await asyncio.create_subprocess_exec(
-            _CLAUDE_CLI, "-p",
-            "--model", "haiku",
-            "--output-format", "text",
-            "--no-session-persistence",
-            "--permission-mode", "bypassPermissions",
-            cli_prompt,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+    if session_id:
         try:
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=_SUMMARY_TIMEOUT_SEC,
+            hdb = _get_hooks_state_db()
+            hdb.execute(
+                """INSERT INTO session_state (session_id, last_prompt_at, updated_at)
+                   VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+                   ON CONFLICT(session_id) DO UPDATE SET
+                     last_prompt_at = datetime('now', 'localtime'),
+                     updated_at = datetime('now', 'localtime')""",
+                (session_id,),
             )
-        except asyncio.TimeoutError:
-            proc.kill()
-            return
+            hdb.commit()
+            hdb.close()
+        except Exception:
+            pass
 
-        if proc.returncode != 0 or not stdout:
-            return
-
-        raw = stdout.decode().strip().split("\n")[0]  # First line only
-        summary = raw[:_SUMMARY_MAX_CHARS]
-        # Reject confused model responses (full sentences, not phrases)
-        if not summary or summary.startswith(("I ", "I'", "Sure", "Here")):
-            return
-
-        db = _get_hooks_state_db()
-        db.execute(
-            """INSERT INTO session_state (session_id, action_summary, summary_updated_at, updated_at)
-               VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
-               ON CONFLICT(session_id) DO UPDATE SET
-                 action_summary = ?,
-                 summary_updated_at = datetime('now', 'localtime'),
-                 updated_at = datetime('now', 'localtime')""",
-            (session_id, summary, summary),
-        )
-        db.commit()
-        db.close()
-    except Exception:
-        pass  # Non-blocking
-
-
-@app.post("/api/hooks/action-summary")
-async def hook_action_summary(body: dict):
-    """HTTP hook: generate AI summary of session action on UserPromptSubmit."""
-    prompt = (body.get("prompt") or "").strip()
-    session_id = body.get("session_id", "")
-
-    if not session_id or len(prompt) < _SUMMARY_MIN_PROMPT_LEN:
-        return {}
-    if any(p.search(prompt) for p in _HEARTBEAT_SKIP_PATTERNS):
-        return {}
-
-    # Cancel any in-flight summary for this session (dedup)
-    prev = _inflight_summaries.pop(session_id, None)
-    if prev and not prev.done():
-        prev.cancel()
-
-    task = asyncio.create_task(_generate_action_summary(session_id, prompt))
-    _inflight_summaries[session_id] = task
-    task.add_done_callback(lambda t: _inflight_summaries.pop(session_id, None))
     return {}
-
-
-# per-session dedup: at most one in-flight summary task per session
-_inflight_summaries: dict[str, asyncio.Task] = {}
 
 
 @app.post("/api/hooks/edit-count")

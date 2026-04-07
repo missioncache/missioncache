@@ -83,7 +83,6 @@ COLORS = {
     "codex_session": f"{ESC}[38;2;100;200;170m",
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
     "extra_usage": f"{ESC}[38;2;220;170;80m",
-    "summary": f"{ESC}[38;2;140;180;220m",
     "fast_mode": f"{ESC}[38;2;255;120;20m",
 }
 
@@ -105,7 +104,6 @@ ICONS = {
     "health_degraded": "\u26a0\ufe0f",
     "health_partial": "\U0001f7e1",
     "extra": "\U0001f4b3",
-    "summary": "\U0001f4ac",
 }
 
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
@@ -489,27 +487,26 @@ def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
     return name, display
 
 
-# ============ ACTION SUMMARY ============
+# ============ LAST ACTION TIME ============
 
-def get_action_summary(session_id: str) -> tuple[str, str]:
-    """Return (summary_text, time_str) for the session's action summary."""
+def get_last_action_time(session_id: str) -> str:
+    """Return formatted time of last prompt for this session."""
     if not session_id:
-        return "", ""
+        return ""
     db = _get_hooks_db()
     if db:
         try:
             row = db.execute(
-                "SELECT action_summary, summary_updated_at FROM session_state WHERE session_id = ?",
+                "SELECT last_prompt_at FROM session_state WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
             db.close()
-            if row and row["action_summary"] and row["summary_updated_at"]:
-                dt = datetime.fromisoformat(row["summary_updated_at"])
-                time_str = dt.strftime("%b %-d %H:%M")  # "Apr 6 23:08"
-                return row["action_summary"], time_str
+            if row and row["last_prompt_at"]:
+                dt = datetime.fromisoformat(row["last_prompt_at"])
+                return dt.strftime("%b %-d %H:%M")
         except (sqlite3.Error, KeyError, ValueError):
             pass
-    return "", ""
+    return ""
 
 
 # ============ GIT INFO ============
@@ -1009,7 +1006,7 @@ def main() -> None:
     # Always fetch extra_usage from API (300s cache) - stdin doesn't include it
     f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
-    f_summary = pool.submit(get_action_summary, session_id)
+    f_last_time = pool.submit(get_last_action_time, session_id)
 
     _FUTURE_TIMEOUT = 3
     try:
@@ -1017,9 +1014,9 @@ def main() -> None:
     except Exception:
         project_name, project_display = "", ""
     try:
-        action_summary, summary_time = f_summary.result(timeout=_FUTURE_TIMEOUT)
+        last_action_time = f_last_time.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
-        action_summary, summary_time = "", ""
+        last_action_time = ""
     try:
         repo_name, branch, git_dirty = f_git.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1074,14 +1071,12 @@ def main() -> None:
         c = COLORS["git_dirty"] if git_dirty else COLORS["git_clean"]
         line1.append(_item(c, ICONS["git"], "Git", branch))
 
-    # Line 2: Project + Action Summary
+    # Line 2: Project + Last Action time
     line2: list[str] = []
     if project_name:
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", project_display))
-    if summary_time:
-        line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", summary_time))
-    if action_summary:
-        line2.append(f"{COLORS['summary']}{ICONS['summary']} {action_summary[0].upper()}{action_summary[1:]}{RESET}")
+    if last_action_time:
+        line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 
     # Line 3: Metrics
     line3 = [
