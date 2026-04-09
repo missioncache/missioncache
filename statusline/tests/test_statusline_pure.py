@@ -22,6 +22,7 @@ from statusline import (
     _join_items,
     _pad_line,
     _parse_stdin_rate_limits,
+    _parse_task_progress,
     _parse_usage_response,
     _relative_time,
     display_width,
@@ -450,3 +451,73 @@ class TestJoinItemsPadLine:
         assert padded == "hello" + " " * 15
         # No padding needed when already at max
         assert _pad_line(line, 20, 20) == "hello"
+
+
+# ============ _parse_task_progress (orbit project progress bracket) ============
+
+
+class TestParseTaskProgress:
+    def test_normal_fraction(self):
+        content = (
+            "- [x] 1. done\n"
+            "- [x] 2. also done\n"
+            "- [x] 3. finished\n"
+            "- [ ] 4. todo\n"
+            "- [ ] 5. another\n"
+        )
+        assert _parse_task_progress(content) == "[3/5]"
+
+    def test_all_complete(self):
+        content = "- [x] 1. a\n- [x] 2. b\n- [x] 3. c\n- [x] 4. d\n- [x] 5. e\n"
+        assert _parse_task_progress(content) == "[5/5]"
+
+    def test_none_complete(self):
+        content = "\n".join(f"- [ ] {i}. todo" for i in range(1, 8)) + "\n"
+        assert _parse_task_progress(content) == "[0/7]"
+
+    def test_template_placeholder(self):
+        assert _parse_task_progress("- [ ] TBD") == "[TBD]"
+
+    def test_template_placeholder_with_leading_whitespace(self):
+        assert _parse_task_progress("  - [ ] TBD\n") == "[TBD]"
+
+    def test_empty_content(self):
+        assert _parse_task_progress("") == "[TBD]"
+
+    def test_only_headings_and_prose(self):
+        content = (
+            "# My Project - Tasks\n"
+            "\n"
+            "**Status:** In Progress\n"
+            "\n"
+            "Some prose that is not a checklist.\n"
+        )
+        assert _parse_task_progress(content) == "[TBD]"
+
+    def test_real_task_with_tbd_in_text(self):
+        # A real task whose description happens to contain "TBD" should count
+        # as a real task, not the placeholder.
+        content = "- [ ] 1. TBD: figure out the auth flow"
+        assert _parse_task_progress(content) == "[0/1]"
+
+    def test_mixed_nesting_counted_flat(self):
+        # All checklist items are counted regardless of indentation.
+        content = (
+            "- [x] 1. parent done\n"
+            "  - [x] 1.1. child done\n"
+            "  - [ ] 1.2. child todo\n"
+            "- [ ] 2. parent todo\n"
+        )
+        assert _parse_task_progress(content) == "[2/4]"
+
+    def test_completed_checkbox_case_insensitive(self):
+        content = "- [X] upper\n- [x] lower\n- [ ] todo\n"
+        assert _parse_task_progress(content) == "[2/3]"
+
+    def test_asterisk_bullets_counted(self):
+        content = "* [x] 1. done\n* [ ] 2. todo\n"
+        assert _parse_task_progress(content) == "[1/2]"
+
+    def test_uppercase_tbd_placeholder(self):
+        assert _parse_task_progress("- [ ] tbd") == "[TBD]"
+        assert _parse_task_progress("- [ ] TBD  ") == "[TBD]"

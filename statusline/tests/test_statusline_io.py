@@ -95,3 +95,47 @@ class TestGetHealthStatusCache:
         result = mod.get_health_status()
         # Should NOT contain the stale incident
         assert result == [{"service": "OK"}]
+
+
+# ── _get_project_progress ─────────────────────────────────────────────────
+
+
+class TestGetProjectProgress:
+    def test_reads_real_tasks_file(self, tmp_path):
+        """Reads the tasks.md file and returns a space-prefixed fraction."""
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+        (project_dir / "my-project-tasks.md").write_text(
+            "- [x] 1. done\n"
+            "- [x] 2. done\n"
+            "- [ ] 3. todo\n"
+            "- [ ] 4. todo\n"
+            "- [ ] 5. todo\n"
+        )
+
+        assert mod._get_project_progress(project_dir, "my-project") == " [2/5]"
+
+    def test_template_placeholder_returns_tbd(self, tmp_path):
+        """A fresh project with only the template placeholder shows [TBD]."""
+        project_dir = tmp_path / "fresh-project"
+        project_dir.mkdir()
+        (project_dir / "fresh-project-tasks.md").write_text("- [ ] TBD\n")
+
+        assert mod._get_project_progress(project_dir, "fresh-project") == " [TBD]"
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        """Missing tasks file returns empty string (statusline falls back)."""
+        project_dir = tmp_path / "nonexistent"
+        # Do NOT create the directory or file.
+
+        assert mod._get_project_progress(project_dir, "nonexistent") == ""
+
+    def test_unreadable_path_returns_empty(self, tmp_path):
+        """An OSError while reading returns empty (defensive fallback)."""
+        # Point the helper at a directory where the "tasks file" is itself a
+        # directory - read_text() raises OSError (IsADirectoryError).
+        project_dir = tmp_path / "weird"
+        project_dir.mkdir()
+        (project_dir / "weird-tasks.md").mkdir()  # collision
+
+        assert mod._get_project_progress(project_dir, "weird") == ""

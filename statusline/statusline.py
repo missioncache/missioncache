@@ -453,6 +453,52 @@ def update_term_session(session_id: str) -> None:
 
 # ============ PROJECT INFO ============
 
+def _parse_task_progress(tasks_content: str) -> str:
+    """Parse task progress from tasks.md content.
+
+    Returns a bracket string to append to the project name:
+      "[3/22]"  - normal fraction (completed / total checklist items)
+      "[TBD]"   - no real tasks defined yet (empty file or only template placeholder)
+
+    Counts ALL checklist items flatly, including nested subtasks, matching
+    the reference implementation in mcp-server/src/mcp_orbit/orbit.py:407.
+    """
+    completed = len(
+        re.findall(r"^\s*[-*]\s*\[x\]", tasks_content, re.MULTILINE | re.IGNORECASE)
+    )
+    pending_items = re.findall(
+        r"^\s*[-*]\s*\[\s*\]\s*(.*)$", tasks_content, re.MULTILINE
+    )
+    pending = len(pending_items)
+    total = completed + pending
+
+    # Empty file or no checklists at all - defensive handling.
+    if total == 0:
+        return "[TBD]"
+
+    # Template placeholder: single pending item with text exactly "TBD".
+    if completed == 0 and pending == 1:
+        if re.match(r"^\s*TBD\s*$", pending_items[0], re.IGNORECASE):
+            return "[TBD]"
+
+    return f"[{completed}/{total}]"
+
+
+def _get_project_progress(project_dir: Path, project_name: str) -> str:
+    """Read the tasks file in project_dir and return the progress bracket.
+
+    Returns a leading-space-prefixed bracket ready for concatenation, e.g.
+    " [3/22]" or " [TBD]". Returns "" if the tasks file is missing or
+    unreadable (statusline falls back to showing just the project name).
+    """
+    tasks_file = project_dir / f"{project_name}-tasks.md"
+    try:
+        content = tasks_file.read_text()
+    except OSError:
+        return ""
+    return f" {_parse_task_progress(content)}"
+
+
 def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
     """Return (project_name, project_display)."""
     if not session_id:
@@ -478,12 +524,16 @@ def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
         return "", ""
 
     display = name
+    project_dir = ORBIT_ACTIVE / name
     if ORBIT_ACTIVE.is_dir():
-        if not (ORBIT_ACTIVE / name).is_dir():
+        if not project_dir.is_dir():
             for parent in ORBIT_ACTIVE.iterdir():
-                if parent.is_dir() and (parent / name).is_dir():
+                nested = parent / name
+                if parent.is_dir() and nested.is_dir():
                     display = f"{parent.name}/{name}"
+                    project_dir = nested
                     break
+    display = f"{display}{_get_project_progress(project_dir, name)}"
     return name, display
 
 
