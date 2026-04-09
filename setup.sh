@@ -412,6 +412,52 @@ else
     detail "Skipped statusline installation"
 fi
 
+# ─── Step 7: Claude Rules ────────────────────────────────────────────────────
+step 7 "Claude Rules"
+echo -e "  ${DIM}Orbit ships rule files that teach Claude how to use the plugin effectively:${NC}"
+echo -e "  ${DIM}  - Skill reference, context preservation patterns${NC}"
+echo -e "  ${DIM}  - Session resolution logic for statusline integration${NC}"
+echo -e "  ${DIM}  - Compatible with any terminal (Ghostty, iTerm2, Windows Terminal)${NC}"
+echo -e "  ${DIM}Installs to ~/.claude/rules/ as symlinks so updates flow automatically.${NC}"
+echo ""
+
+if ask_yn "Install Orbit rule files into ~/.claude/rules/?" "Y"; then
+    RULES_SRC="$ORBIT_REPO/rules"
+    RULES_DST="$HOME/.claude/rules"
+    mkdir -p "$RULES_DST"
+
+    if [[ -d "$RULES_SRC" ]]; then
+        (
+            shopt -s nullglob
+            for src in "$RULES_SRC"/*.md; do
+                fname=$(basename "$src")
+                link="$RULES_DST/$fname"
+                if [[ -L "$link" ]]; then
+                    current_target=$(readlink "$link")
+                    if [[ "$current_target" == "$src" ]]; then
+                        detail "Already linked: $fname"
+                        continue
+                    fi
+                    rm "$link"
+                elif [[ -f "$link" ]]; then
+                    mv "$link" "$link.bak"
+                    detail "Backed up existing $fname -> $fname.bak"
+                elif [[ -e "$link" ]]; then
+                    warn "$link exists but is not a regular file - skipping $fname"
+                    continue
+                fi
+                ln -s "$src" "$link"
+                detail "Linked $fname -> $src"
+            done
+        )
+        success "Rule files installed"
+    else
+        warn "Rules directory not found at $RULES_SRC - skipping"
+    fi
+else
+    detail "Skipped rule installation"
+fi
+
 # ─── Open Dashboard ──────────────────────────────────────────────────────────
 echo ""
 info "Opening Orbit Dashboard..."

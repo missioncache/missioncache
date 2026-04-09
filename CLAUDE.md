@@ -9,6 +9,7 @@
 - **Orbit Auto**: Autonomous execution CLI (`orbit-auto/`)
 - **Orbit Dashboard**: Web UI at localhost:8787 (`orbit-dashboard/`)
 - **Statusline**: Optional terminal status display (`statusline/`)
+- **Rules** (`rules/`): Claude behavioral guidance symlinked into `~/.claude/rules/` by the installer
 
 ## Key Files
 
@@ -35,6 +36,7 @@
 | `hooks/stop.py` | Stop hook |
 | `commands/*.md` | Slash command definitions |
 | `templates/` | File templates for orbit project files |
+| `rules/*.md` | Claude rule files installed to `~/.claude/rules/` (via symlink) |
 
 ## MCP Server Configuration
 
