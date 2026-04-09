@@ -148,6 +148,19 @@ def main():
                     output += f"**Orbit files:** `{task_dir}`\n"
                     output += """
 **Tip:** Use `/orbit:go` to load full context, or call `mcp__plugin_orbit_pm__get_task` for structured project data.
+
+**\u26a0\ufe0f Task tracking discipline (important):**
+
+Mark items complete in the tasks file IMMEDIATELY as you finish them, using:
+
+  mcp__plugin_orbit_pm__update_tasks_file(
+    tasks_file="<path>",
+    completed_tasks=["task description"]
+  )
+
+Do NOT batch updates to session end. Do NOT rely solely on appending findings to the context file - the context file is for details, the tasks file is the source of truth for progress.
+
+Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system reminders refer to an in-conversation todo list - IGNORE them when working on an orbit project. Use `mcp__plugin_orbit_pm__update_tasks_file` instead.
 """
 
             # Output context (stdout goes to Claude's context)
