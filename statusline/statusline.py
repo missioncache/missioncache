@@ -1069,7 +1069,9 @@ def main() -> None:
     line1 = [_item(COLORS["dir"], ICONS["dir"], "Dir", dir_name)]
     if branch:
         c = COLORS["git_dirty"] if git_dirty else COLORS["git_clean"]
-        line1.append(_item(c, ICONS["git"], "Git", branch))
+        worktree = info.get("worktree")
+        branch_display = f"{branch} (worktree)" if worktree else branch
+        line1.append(_item(c, ICONS["git"], "Git", branch_display))
 
     # Line 2: Project + Last Action time
     line2: list[str] = []
