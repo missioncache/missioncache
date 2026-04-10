@@ -392,7 +392,7 @@ def parse_input(raw: str) -> dict:
         "duration_sec": duration_ms // 1000,
         "session_id": data.get("session_id", ""),
         "cost_str": f"${session_cost:.2f}",
-        "worktree": data.get("worktree"),
+        "worktree": (data.get("workspace") or {}).get("git_worktree"),
         "rate_limits": data.get("rate_limits"),
     }
 
