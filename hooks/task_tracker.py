@@ -179,7 +179,7 @@ def main() -> None:
             return
 
         divergent_tasks = {num: pending[num] for num in divergent_nums}
-        print(build_reminder(divergent_tasks, str(tasks_file)))
+        print(json.dumps({"systemMessage": build_reminder(divergent_tasks, str(tasks_file))}))
 
     except ImportError:
         # orbit_db not available, skip silently
