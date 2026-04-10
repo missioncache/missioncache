@@ -844,6 +844,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         "total_count": 0,
         "last_updated": None,
         "orbit_in_completed": False,  # True if orbit files found in completed/
+        "target_repo": None,  # Actual working repo extracted from context/plan
         # Per-task mode fields
         "project_mode": "interactive",  # "interactive", "autonomous", or "hybrid"
         "task_modes": [],  # List of {task_id, title, mode, completed}
@@ -1056,6 +1057,31 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
                     if len(result["description"]) > 100:
                         result["description"] = result["description"][:97] + "..."
 
+                # Extract target repo from context metadata or description
+                # Priority 1: Explicit **Target Repo:** or **Repo:** field
+                repo_field = re.search(
+                    r"\*\*(?:Target\s+)?Repo:\*\*\s*(.+?)(?:\n|$)",
+                    ctx_content,
+                    re.IGNORECASE,
+                )
+                if repo_field:
+                    repo_val = repo_field.group(1).strip()
+                    # Extract just the repo name (last part of owner/repo)
+                    if "/" in repo_val:
+                        result["target_repo"] = repo_val.split("/")[-1]
+                    else:
+                        result["target_repo"] = repo_val
+
+                # Priority 2: Extract owner/repo in parentheses from context
+                # e.g. "(myorg/web-app)"
+                if not result["target_repo"]:
+                    gh_repo = re.search(
+                        r"\([\w.-]+/([\w][\w.-]+)\)",
+                        ctx_content,
+                    )
+                    if gh_repo:
+                        result["target_repo"] = gh_repo.group(1)
+
             except Exception:
                 pass
 
@@ -1167,6 +1193,10 @@ async def api_tasks_active(repo_id: int = None):
             task_dict["inter_count"] = progress.get("inter_count", 0)
             task_dict["auto_remaining"] = progress.get("auto_remaining", 0)
             task_dict["inter_remaining"] = progress.get("inter_remaining", 0)
+            # Override repo_name with target_repo if available
+            target_repo = progress.get("target_repo")
+            if target_repo:
+                task_dict["repo_name"] = target_repo
         else:
             task_dict["description"] = ""
             task_dict["remaining_summary"] = ""
@@ -1325,6 +1355,10 @@ async def api_tasks_completed(days: int = 30):
             progress = parse_orbit_progress(repo.path, task.full_path)
             task_dict["description"] = progress.get("description", "")
             task_dict["summary"] = progress.get("summary", "")
+            # Override repo_name with target_repo if available
+            target_repo = progress.get("target_repo")
+            if target_repo:
+                task_dict["repo_name"] = target_repo
         else:
             task_dict["description"] = ""
             task_dict["summary"] = ""
