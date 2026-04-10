@@ -78,7 +78,8 @@ class ClaudeRunner:
 
         # Build command
         # Note: --verbose is required when using --print with --output-format=stream-json
-        cmd = ["claude", "--print", "--output-format", "stream-json", "--verbose"]
+        # --exclude-dynamic-system-prompt-sections improves prompt-cache hits across parallel workers.
+        cmd = ["claude", "--print", "--output-format", "stream-json", "--verbose", "--exclude-dynamic-system-prompt-sections"]
         if session_name:
             cmd.extend(["--name", session_name])
 
