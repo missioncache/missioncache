@@ -4208,7 +4208,9 @@ async def hook_heartbeat(body: dict):
     if body.get("agent_id"):
         return {}
 
-    prompt = (body.get("prompt") or "").strip()
+    prompt_raw = body.get("prompt") or ""
+    # When the user attaches images, Claude Code sends prompt as a list of content blocks
+    prompt = prompt_raw.strip() if isinstance(prompt_raw, str) else ""
 
     # Skip prompts matching skip patterns
     if any(p.search(prompt) for p in _HEARTBEAT_SKIP_PATTERNS):
