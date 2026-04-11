@@ -1129,6 +1129,42 @@ async def api_tasks(
     }
 
 
+def _get_jsonl_task_times(task_ids: list[int]) -> dict[int, int]:
+    """Get JSONL-based session time per task by matching cwd to repo path.
+
+    Scopes to sessions occurring after the task was created to avoid
+    over-counting when multiple tasks share the same repo.
+    """
+    import sqlite3
+
+    db_path = Path.home() / ".claude" / "tasks.db"
+    if not db_path.exists() or not task_ids:
+        return {}
+
+    try:
+        placeholders = ",".join(["?"] * len(task_ids))
+        with sqlite3.connect(str(db_path)) as conn:
+            rows = conn.execute(
+                f"""SELECT t.id, SUM(c.duration_seconds) as total
+                    FROM tasks t
+                    JOIN repositories r ON t.repo_id = r.id
+                    JOIN claude_session_cache c ON c.cwd = r.path
+                    WHERE t.id IN ({placeholders})
+                      AND c.duration_seconds > 0
+                      AND c.date >= DATE(t.created_at)
+                    GROUP BY t.id""",
+                task_ids,
+            ).fetchall()
+        return {row[0]: int(row[1]) for row in rows}
+    except sqlite3.Error as e:
+        print(f"[WARN] Failed to query JSONL task times: {e}")
+        return {}
+
+
+def _effective_time(task_id: int, heartbeat_times: dict, jsonl_times: dict) -> int:
+    return max(heartbeat_times.get(task_id, 0), jsonl_times.get(task_id, 0))
+
+
 @app.get("/api/tasks/active")
 async def api_tasks_active(repo_id: int = None):
     """Get active tasks with hierarchy and orbit progress info."""
@@ -1141,14 +1177,16 @@ async def api_tasks_active(repo_id: int = None):
 
     task_ids = [t.id for t in tasks]
     times = db.get_batch_task_times(task_ids, period="all")
+    jsonl_times = _get_jsonl_task_times(task_ids)
 
     # Cache repos for efficiency
     repos_cache: dict[int, Any] = {}
 
     for task in tasks:
         task_dict = task.to_dict()
-        task_dict["time_spent_seconds"] = times.get(task.id, 0)
-        task_dict["time_spent_formatted"] = db.format_duration(times.get(task.id, 0))
+        etime = _effective_time(task.id, times, jsonl_times)
+        task_dict["time_spent_seconds"] = etime
+        task_dict["time_spent_formatted"] = db.format_duration(etime)
         task_dict["last_worked_ago"] = db.format_time_ago(task.last_worked_on)
         task_dict["jira_url"] = get_jira_url(task.jira_key)
 
@@ -1320,12 +1358,14 @@ async def api_tasks_completed(days: int = 30):
 
     task_ids = [t.id for t in tasks]
     times = db.get_batch_task_times(task_ids, period="all")
+    jsonl_times_completed = _get_jsonl_task_times(task_ids)
 
     result = []
     for task in tasks:
         task_dict = task.to_dict()
-        task_dict["time_spent_seconds"] = times.get(task.id, 0)
-        task_dict["time_spent_formatted"] = db.format_duration(times.get(task.id, 0))
+        etime = _effective_time(task.id, times, jsonl_times_completed)
+        task_dict["time_spent_seconds"] = etime
+        task_dict["time_spent_formatted"] = db.format_duration(etime)
         task_dict["completed_ago"] = db.format_time_ago(task.completed_at)
 
         repo = None
@@ -1368,10 +1408,11 @@ async def api_task_detail(task_id: int):
         return {"error": "Task not found", "task_id": task_id}
 
     task_dict = task.to_dict()
-    task_dict["time_spent_seconds"] = db.get_task_time(task_id)
-    task_dict["time_spent_formatted"] = db.format_duration(
-        task_dict["time_spent_seconds"]
-    )
+    hb_times = {task_id: db.get_task_time(task_id)}
+    jl_times = _get_jsonl_task_times([task_id])
+    etime = _effective_time(task_id, hb_times, jl_times)
+    task_dict["time_spent_seconds"] = etime
+    task_dict["time_spent_formatted"] = db.format_duration(etime)
     task_dict["jira_url"] = get_jira_url(task.jira_key)
 
     # Get repo info
@@ -1385,11 +1426,12 @@ async def api_task_detail(task_id: int):
     if subtasks:
         subtask_ids = [s.id for s in subtasks]
         subtask_times = db.get_batch_task_times(subtask_ids)
+        subtask_jsonl_times = _get_jsonl_task_times(subtask_ids)
         task_dict["subtasks"] = [
             {
                 **s.to_dict(),
-                "time_spent_seconds": subtask_times.get(s.id, 0),
-                "time_spent_formatted": db.format_duration(subtask_times.get(s.id, 0)),
+                "time_spent_seconds": _effective_time(s.id, subtask_times, subtask_jsonl_times),
+                "time_spent_formatted": db.format_duration(_effective_time(s.id, subtask_times, subtask_jsonl_times)),
             }
             for s in subtasks
         ]
@@ -1850,7 +1892,8 @@ async def api_stats_history(days: int = 7):
     # Replace daily with merged
     daily = merged_daily
 
-    # Also merge into daily_by_date
+    # Merge Claude data into daily_by_date, adding Claude-only dates
+    daily_by_date_dates = {d["date"] for d in daily_by_date}
     for day in daily_by_date:
         date = day.get("date")
         claude_data = claude_by_date.get(date, {})
@@ -1858,6 +1901,20 @@ async def api_stats_history(days: int = 7):
         day["claude_tool_calls"] = claude_data.get("claude_tool_calls", 0)
         day["claude_tokens"] = claude_data.get("claude_tokens", 0)
         day["claude_seconds"] = claude_data.get("claude_seconds", 0)
+    for date_str, claude_data in claude_by_date.items():
+        if date_str not in daily_by_date_dates:
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            daily_by_date.append({
+                "date": date_str,
+                "dow": d.weekday() + 1 if d.weekday() < 6 else 0,
+                "total_minutes": 0,
+                "session_count": 0,
+                "claude_messages": claude_data.get("claude_messages", 0),
+                "claude_tool_calls": claude_data.get("claude_tool_calls", 0),
+                "claude_tokens": claude_data.get("claude_tokens", 0),
+                "claude_seconds": claude_data.get("claude_seconds", 0),
+            })
+    daily_by_date.sort(key=lambda x: x["date"])
 
     # Calculate totals
     total_seconds = sum(d["total_seconds"] for d in daily)

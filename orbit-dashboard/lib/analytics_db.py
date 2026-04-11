@@ -3212,7 +3212,7 @@ def group_untracked_by_cwd(sessions: list[dict]) -> list[dict]:
         for s in group:
             if s.get("first_event_time") and s.get("last_event_time"):
                 timeline_sessions.append({
-                    "task_name": f"Claude Code - {dir_name}",
+                    "task_name": f"Untracked Session - {dir_name}",
                     "start_time": s["first_event_time"],
                     "end_time": s["last_event_time"],
                     "duration_seconds": s.get("duration_seconds", 0),
