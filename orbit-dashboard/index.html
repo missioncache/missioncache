@@ -2131,6 +2131,8 @@
             font-size: 13px;
             color: var(--text-muted);
         }
+
+        /* ============================================
            Learning Center Styles
            ============================================ */
         .learning-header {
@@ -5141,6 +5143,27 @@
         }
 
         function renderTaskItem(task) {
+            if (task.is_untracked) {
+                const color = getTaskColor(task.name);
+                return `
+                    <div class="task-item" style="opacity: 0.75; border-left: 3px solid ${color};">
+                        <div class="task-info">
+                            <div class="task-name-row">
+                                <span class="status-badge" style="background: rgba(100,160,200,0.15); color: var(--accent-blue);">○ Untracked</span>
+                                <span class="task-name">${escapeHtml(task.name)}</span>
+                            </div>
+                            <div class="task-meta">
+                                <span class="repo-badge" style="opacity: 0.7;">${task.message_count || 0} messages</span>
+                                <span class="repo-badge" style="opacity: 0.7;">${task.session_count || 1} session${(task.session_count || 1) > 1 ? 's' : ''}</span>
+                            </div>
+                        </div>
+                        <div class="task-stats">
+                            <span class="task-time">${task.time_formatted}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
             const statusClass = task.status === 'completed' ? 'completed' : 'active';
             const statusLabel = task.status === 'completed' ? '✓ Done' : '● Active';
             const color = getTaskColor(task.name);
@@ -5881,6 +5904,7 @@
             showSectionLoading('historyCard');
             fetchHistory(days).then(() => hideSectionLoading('historyCard'));
         }
+
         // =============================================================================
         // Task Detail Modal Functions
         // =============================================================================

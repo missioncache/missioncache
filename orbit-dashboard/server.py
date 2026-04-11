@@ -41,6 +41,7 @@ from lib.analytics_db import (
     get_claude_daily_activity,
     merge_hourly_activity,
     ClaudeSessionCache,
+    group_untracked_by_cwd,
     parse_tasks_md,
     import_tasks_md,
 )
@@ -1547,6 +1548,19 @@ async def api_task_prompt(task_id: int, subtask_id: str):
         return {"error": True, "message": str(e)}
 
 
+def _merge_untracked_sessions(
+    tasks_list: list[dict], sessions_list: list[dict], date: str
+) -> None:
+    """Merge untracked Claude Code sessions into task and session lists (in-place)."""
+    cache = ClaudeSessionCache()
+    untracked_raw = cache.get_untracked_sessions(date)
+    untracked_groups = group_untracked_by_cwd(untracked_raw)
+    for group in untracked_groups:
+        tasks_list.append(group)
+        sessions_list.extend(group.get("sessions", []))
+    sessions_list.sort(key=lambda s: s.get("start_time", ""))
+
+
 @app.get("/api/stats/today")
 async def api_stats_today():
     """Get today's activity statistics.
@@ -1622,13 +1636,17 @@ async def api_stats_today():
             }
         )
 
+    # Limit tracked tasks, then add untracked (always included)
+    tasks_today = tasks_today[:10]
+    _merge_untracked_sessions(tasks_today, sessions, today_date)
+
     # Get repo breakdown from sessions
     repo_breakdown = {}
     for s in sessions:
         repo = s.get("repo_name") or "unknown"
         if repo not in repo_breakdown:
             repo_breakdown[repo] = {"seconds": 0, "sessions": 0}
-        repo_breakdown[repo]["seconds"] += s["duration_seconds"]
+        repo_breakdown[repo]["seconds"] += s.get("duration_seconds", 0)
         repo_breakdown[repo]["sessions"] += 1
 
     repo_breakdown_list = [
@@ -1656,7 +1674,7 @@ async def api_stats_today():
         "hourly_activity": hourly,
         "repo_breakdown": repo_breakdown_list,
         "loc_by_repo": loc_stats["by_repo"],
-        "tasks_today": tasks_today[:10],
+        "tasks_today": tasks_today,
         "sessions": sessions,  # For timeline visualization
         "timestamp": datetime.now().isoformat(),
     }
@@ -1731,6 +1749,10 @@ async def api_stats_day(
             }
         )
 
+    # Limit tracked tasks, then add untracked (always included)
+    tasks_today = tasks_today[:10]
+    _merge_untracked_sessions(tasks_today, sessions, date)
+
     return {
         "date": date,
         "total_seconds": total_seconds,
@@ -1748,7 +1770,7 @@ async def api_stats_day(
         "claude_session_count": claude_session_count,
         "hourly_activity": hourly,
         "loc_by_repo": loc_stats["by_repo"],
-        "tasks_today": tasks_today[:10],  # Match today endpoint's limit
+        "tasks_today": tasks_today,
         "sessions": sessions,  # For timeline visualization
         "timestamp": datetime.now().isoformat(),
     }
@@ -1907,6 +1929,8 @@ async def api_repos():
         "timestamp": datetime.now().isoformat(),
     }
 
+
+# =============================================================================
 # Orbit-Auto Loop Monitoring APIs
 # =============================================================================
 

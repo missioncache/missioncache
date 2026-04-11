@@ -3160,6 +3160,81 @@ class ClaudeSessionCache:
         conn.commit()
         conn.close()
 
+    def get_untracked_sessions(self, date: str) -> list[dict]:
+        """Get Claude Code sessions that have no corresponding orbit session.
+
+        Returns JSONL-tracked sessions that aren't covered by orbit heartbeat
+        sessions, filtering out very short sessions (< 60s).
+        """
+        import sqlite3
+
+        if not self.db_path.exists():
+            return []
+
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT c.session_id, c.cwd, c.project_path,
+                   c.duration_seconds, c.message_count, c.tool_call_count,
+                   c.first_event_time, c.last_event_time
+            FROM claude_session_cache c
+            LEFT JOIN sessions s ON c.session_id = s.session_id
+            WHERE c.date = ?
+              AND s.id IS NULL
+              AND c.duration_seconds > 60
+            ORDER BY c.first_event_time
+        """,
+            (date,),
+        ).fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+
+def group_untracked_by_cwd(sessions: list[dict]) -> list[dict]:
+    """Group untracked sessions by working directory into task-like entries."""
+    from collections import defaultdict
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for s in sessions:
+        key = s.get("cwd") or s.get("project_path") or "unknown"
+        groups[key].append(s)
+
+    result = []
+    for cwd, group in groups.items():
+        p = Path(cwd) if cwd != "unknown" else None
+        dir_name = f"{p.parent.name}/{p.name}" if p and p.parent.name else (p.name if p else "unknown")
+        total_seconds = sum(s.get("duration_seconds", 0) for s in group)
+        total_messages = sum(s.get("message_count", 0) for s in group)
+
+        timeline_sessions = []
+        for s in group:
+            if s.get("first_event_time") and s.get("last_event_time"):
+                timeline_sessions.append({
+                    "task_name": f"Claude Code - {dir_name}",
+                    "start_time": s["first_event_time"],
+                    "end_time": s["last_event_time"],
+                    "duration_seconds": s.get("duration_seconds", 0),
+                    "is_untracked": True,
+                })
+
+        result.append({
+            "id": None,
+            "name": dir_name,
+            "status": "untracked",
+            "is_untracked": True,
+            "time_seconds": total_seconds,
+            "time_formatted": AnalyticsDB.format_duration(total_seconds),
+            "message_count": total_messages,
+            "session_count": len(group),
+            "cwd": cwd,
+            "sessions": timeline_sessions,
+        })
+
+    result.sort(key=lambda x: x["time_seconds"], reverse=True)
+    return result
+
 
 def refresh_claude_session_cache(
     date: str | None = None, use_cache: bool = True
