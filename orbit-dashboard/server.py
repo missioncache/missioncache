@@ -4,9 +4,8 @@ Orbit Dashboard - Task & Analytics Dashboard
 
 A FastAPI server that provides:
 1. Task APIs - Task tracking, time analytics (DuckDB)
-2. Claude Code Usage APIs - Stats, projects, usage limits
-3. Plans APIs - Parallel execution monitoring
-4. Auto APIs - Orbit-auto execution tracking
+2. Plans APIs - Parallel execution monitoring
+3. Auto APIs - Orbit-auto execution tracking
 
 Port: 8787
 """
@@ -21,13 +20,11 @@ import sqlite3
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -202,14 +199,11 @@ app.add_middleware(
 
 # Paths
 CLAUDE_DIR = Path.home() / ".claude"
-STATS_FILE = CLAUDE_DIR / "stats-cache.json"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 ORBIT_DB_SCRIPT = CLAUDE_DIR / "scripts" / "orbit_db.py"
-USAGE_CACHE_FILE = CLAUDE_DIR / "usage-limits-cache.json"
 HOOKS_STATE_DB = CLAUDE_DIR / "hooks-state.db"
 
 # Cache TTLs
-USAGE_CACHE_TTL_SECONDS = 300  # 5 minutes
 REFRESH_INTERVAL = 30  # seconds for SSE
 
 # JIRA URL mapping
@@ -234,16 +228,6 @@ def format_duration_ms(ms: float) -> str:
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
-
-
-def format_reset_time(iso_timestamp: str) -> str:
-    """Format ISO timestamp to human-readable format."""
-    try:
-        dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
-        local_dt = dt.astimezone()
-        return local_dt.strftime("%a %-I:%M %p")
-    except Exception:
-        return "unknown"
 
 
 def get_jira_url(jira_key: str | None) -> str | None:
@@ -1923,283 +1907,6 @@ async def api_repos():
         "timestamp": datetime.now().isoformat(),
     }
 
-
-# =============================================================================
-# Claude Code Usage APIs
-# =============================================================================
-
-
-def get_oauth_token() -> Optional[str]:
-    """Read OAuth token from macOS Keychain."""
-    try:
-        result = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                "Claude Code-credentials",
-                "-w",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        creds = json.loads(result.stdout.strip())
-        return creds.get("claudeAiOauth", {}).get("accessToken")
-    except Exception:
-        return None
-
-
-def load_usage_cache() -> Optional[dict]:
-    """Load cached usage data if still valid."""
-    try:
-        if not USAGE_CACHE_FILE.exists():
-            return None
-        cache = json.loads(USAGE_CACHE_FILE.read_text())
-        cached_at = datetime.fromisoformat(cache["cached_at"])
-        age_seconds = (datetime.now(timezone.utc) - cached_at).total_seconds()
-        if age_seconds < USAGE_CACHE_TTL_SECONDS:
-            return cache["data"]
-        return None
-    except Exception:
-        return None
-
-
-def save_usage_cache(data: dict) -> None:
-    """Save usage data to cache."""
-    try:
-        cache = {
-            "cached_at": datetime.now(timezone.utc).isoformat(),
-            "data": data,
-        }
-        USAGE_CACHE_FILE.write_text(json.dumps(cache, indent=2))
-    except Exception:
-        pass
-
-
-def fetch_usage_from_api(token: str) -> Optional[dict]:
-    """Fetch usage data from Anthropic API."""
-    try:
-        req = urllib.request.Request(
-            "https://api.anthropic.com/api/oauth/usage",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": "orbit-dashboard/2.0",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode())
-    except Exception:
-        return None
-
-
-def format_usage_data(data: dict, from_cache: bool = False) -> dict[str, Any]:
-    """Format raw usage data into structured response."""
-    result = {
-        "available": True,
-        "from_cache": from_cache,
-        "session": None,
-        "weekly": None,
-        "weekly_opus": None,
-    }
-
-    if data.get("five_hour") is not None:
-        result["session"] = {
-            "utilization": data["five_hour"].get("utilization", 0),
-            "resets_at": data["five_hour"].get("resets_at"),
-            "resets_at_formatted": format_reset_time(
-                data["five_hour"].get("resets_at", "")
-            ),
-        }
-
-    if data.get("seven_day") is not None:
-        result["weekly"] = {
-            "utilization": data["seven_day"].get("utilization", 0),
-            "resets_at": data["seven_day"].get("resets_at"),
-            "resets_at_formatted": format_reset_time(
-                data["seven_day"].get("resets_at", "")
-            ),
-        }
-
-    if data.get("seven_day_opus") is not None:
-        result["weekly_opus"] = {
-            "utilization": data["seven_day_opus"].get("utilization", 0),
-            "resets_at": data["seven_day_opus"].get("resets_at"),
-            "resets_at_formatted": format_reset_time(
-                data["seven_day_opus"].get("resets_at", "")
-            ),
-        }
-
-    return result
-
-
-@app.get("/api/usage/limits")
-async def api_usage_limits():
-    """Get Claude Code usage limits from Anthropic API."""
-    cached_data = load_usage_cache()
-    if cached_data:
-        return format_usage_data(cached_data, from_cache=True)
-
-    token = get_oauth_token()
-    if not token:
-        return {"error": "OAuth token not found", "available": False}
-
-    data = fetch_usage_from_api(token)
-    if not data:
-        return {"error": "Failed to fetch usage data", "available": False}
-
-    save_usage_cache(data)
-    return format_usage_data(data, from_cache=False)
-
-
-@app.get("/api/usage/stats")
-async def api_usage_stats():
-    """Get stats from Claude Code stats-cache.json."""
-    if not STATS_FILE.exists():
-        return {"error": "Stats file not found", "path": str(STATS_FILE)}
-
-    try:
-        with open(STATS_FILE, "r") as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON: {e}"}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# Foundry pricing per 1M tokens (input, output)
-FOUNDRY_PRICING = {
-    "claude-sonnet-4-5-20250929": (3.0, 15.0),
-    "claude-opus-4-5-20251101": (5.0, 25.0),
-    "claude-opus-4-20250514": (15.0, 75.0),
-    "claude-haiku-4-5-20250514": (1.0, 5.0),
-}
-
-
-def calculate_foundry_usage() -> dict | None:
-    """Calculate token count and cost from stats-cache.json for Foundry API."""
-    try:
-        if not STATS_FILE.exists():
-            return None
-        stats = json.loads(STATS_FILE.read_text())
-    except Exception:
-        return None
-
-    # Sum today's tokens
-    today = datetime.now().strftime("%Y-%m-%d")
-    tokens_today = 0
-    for entry in stats.get("dailyModelTokens", []):
-        if entry.get("date") == today:
-            tokens_today = sum(entry.get("tokensByModel", {}).values())
-
-    # Calculate total cost from modelUsage
-    cost = 0.0
-    total_input = 0
-    total_output = 0
-    for model, usage in stats.get("modelUsage", {}).items():
-        input_tokens = usage.get("inputTokens", 0)
-        output_tokens = usage.get("outputTokens", 0)
-        total_input += input_tokens
-        total_output += output_tokens
-        rate = FOUNDRY_PRICING.get(model, (5.0, 25.0))  # Default to Opus 4.5 pricing
-        cost += (input_tokens / 1_000_000) * rate[0]
-        cost += (output_tokens / 1_000_000) * rate[1]
-
-    return {
-        "tokens_today": tokens_today,
-        "cost_total": round(cost, 2),
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_tokens": total_input + total_output,
-    }
-
-
-@app.get("/api/usage/foundry")
-async def api_usage_foundry():
-    """Get example Foundry API usage stats (tokens + cost)."""
-    data = calculate_foundry_usage()
-    if not data:
-        return {"error": "Stats file not found", "available": False}
-    return {"available": True, **data}
-
-
-MODE_FILE = CLAUDE_DIR / "usage-mode.json"
-
-
-@app.get("/api/usage/mode")
-async def api_usage_mode():
-    """Get current usage mode (private vs foundry).
-
-    Returns the active mode from usage-mode.json which is maintained
-    by the sync-usage-mode.py SessionStart hook.
-    """
-    if not MODE_FILE.exists():
-        return {"mode": "private", "switched_at": None, "initialized": False}
-
-    try:
-        data = json.loads(MODE_FILE.read_text())
-        return {
-            "mode": data.get("mode", "private"),
-            "switched_at": data.get("switched_at"),
-            "initialized": True,
-        }
-    except Exception as e:
-        return {"mode": "private", "switched_at": None, "error": str(e)}
-
-
-@app.get("/api/usage/projects")
-async def api_usage_projects():
-    """Get per-project Claude Code usage breakdown."""
-    if not PROJECTS_DIR.exists():
-        return {"error": "Projects directory not found", "projects": {}}
-
-    projects = {}
-
-    for project_dir in PROJECTS_DIR.iterdir():
-        if not project_dir.is_dir():
-            continue
-
-        project_name = project_dir.name
-        entries = []
-
-        # Read all JSONL files
-        for jsonl_file in project_dir.glob("*.jsonl"):
-            try:
-                with open(jsonl_file, "r") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                entries.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                continue
-            except Exception:
-                continue
-
-        if not entries:
-            continue
-
-        # Calculate metrics
-        messages = len([e for e in entries if e.get("type") in ("user", "assistant")])
-        sessions = len(set(e.get("sessionId") for e in entries if e.get("sessionId")))
-
-        projects[project_name] = {
-            "messages": messages,
-            "sessions": sessions,
-            "entry_count": len(entries),
-        }
-
-    return {
-        "projects": projects,
-        "count": len(projects),
-        "timestamp": datetime.now().isoformat(),
-    }
-
-
-# =============================================================================
 # Orbit-Auto Loop Monitoring APIs
 # =============================================================================
 
@@ -4176,7 +3883,6 @@ async def api_all():
             "today": db.get_today_stats(),
             "active_task_count": len(db.get_active_tasks()),
         },
-        "usage": await api_usage_limits(),
         "timestamp": datetime.now().isoformat(),
         "refresh_interval": REFRESH_INTERVAL,
     }
@@ -4465,7 +4171,6 @@ async def event_generator():
         db = get_db()
         data = {
             "productivity": db.get_today_stats(),
-            "usage": format_usage_data(load_usage_cache() or {}, from_cache=True),
             "timestamp": datetime.now().isoformat(),
         }
         yield f"data: {json.dumps(data)}\n\n"

@@ -1,6 +1,6 @@
 # Orbit Dashboard
 
-Dashboard for productivity tracking and Claude Code usage stats.
+Dashboard for productivity tracking and task analytics.
 
 ## Quick Start
 
@@ -56,14 +56,6 @@ GET /api/stats/history?days=N  # Aggregate with heatmap, trends
 GET /api/task/{id}/files   # Task orbit files (plan, context, tasks.md)
 ```
 
-### Claude Code Usage APIs
-
-```
-GET /api/usage/stats       # From ~/.claude/statsig/stats-cache.json
-GET /api/usage/projects    # Per-project breakdown
-GET /api/usage/limits      # Anthropic API limits
-```
-
 ### Utility APIs
 
 ```
@@ -83,13 +75,6 @@ GET /health        # Health check
 - Today's activity with date navigation
 - Hourly activity bar chart + timeline
 - Activity history with heatmap and trends
-
-### #usage
-- API usage limits (session, weekly, opus)
-- Current session info
-- Stats grid (sessions, messages, tokens, cost)
-- Charts: daily activity, model usage, token breakdown, hourly activity
-- Projects breakdown table
 
 ## Orbit Location Detection
 
@@ -172,7 +157,6 @@ Install for Python 3.11:
 |----------|---------|
 | `~/.claude/tasks.db` | SQLite source database |
 | `~/.claude/tasks.duckdb` | DuckDB analytics database |
-| `~/.claude/statsig/stats-cache.json` | Claude Code usage stats |
 | `~/Library/LaunchAgents/com.orbit.dashboard.plist` | Launchd service config |
 
 ## Code Style
