@@ -511,6 +511,12 @@
             margin-bottom: 20px;
         }
 
+        .card-header-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
         .card-title {
             font-size: 15px;
             font-weight: 600;
@@ -3383,9 +3389,17 @@
             text-decoration: underline;
         }
 
+        .md-rendered ul li:has(> input[type="checkbox"]) {
+            list-style-type: none;
+            margin-left: -20px;
+        }
+
         .md-rendered input[type="checkbox"] {
             accent-color: var(--accent-green);
             margin-right: 6px;
+            vertical-align: middle;
+            position: relative;
+            top: -1px;
         }
 
         .md-rendered img {
@@ -3466,6 +3480,7 @@
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 16px;
+            position: relative;
         }
 
         .structure-graph-legend {
@@ -3476,8 +3491,46 @@
             color: var(--text-secondary);
         }
 
-        #structureGraphSvg {
+        .structure-graph-viewport {
+            max-height: 450px;
+            overflow: auto;
             border-radius: 8px;
+            position: relative;
+        }
+
+        .structure-graph-viewport svg {
+            display: block;
+            transform-origin: top left;
+            transition: transform 0.15s ease;
+        }
+
+        .structure-graph-zoom-controls {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 4px;
+            z-index: 2;
+        }
+
+        .structure-graph-zoom-controls button {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .structure-graph-zoom-controls button:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
         }
 
         .structure-summary {
@@ -4207,7 +4260,7 @@
                             <table>
                                 <thead>
                                     <tr>
-                                        <th class="col-task">Task</th>
+                                        <th class="col-task">Project</th>
                                         <th class="col-description">Description</th>
                                         <th class="col-progress">Progress</th>
                                         <th class="col-time">Time</th>
@@ -4229,7 +4282,7 @@
                             <table>
                                 <thead>
                                     <tr>
-                                        <th class="col-task">Task</th>
+                                        <th class="col-task">Project</th>
                                         <th class="col-description">Description</th>
                                         <th class="col-summary">Summary</th>
                                         <th class="col-time">Time</th>
@@ -4317,10 +4370,16 @@
                         <div class="card-loading-overlay" data-loader="history"><div class="card-spinner"></div></div>
                         <div class="card-header">
                             <span class="card-title">Activity History</span>
-                            <div class="period-toggle">
-                                <button class="period-btn active" data-days="7" onclick="setHistoryDays(7)">7d</button>
-                                <button class="period-btn" data-days="14" onclick="setHistoryDays(14)">14d</button>
-                                <button class="period-btn" data-days="30" onclick="setHistoryDays(30)">30d</button>
+                            <div class="card-header-controls">
+                                <div class="period-toggle" id="historySourceToggle">
+                                    <button class="period-btn active" data-source="all" onclick="setHistorySource('all')">All</button>
+                                    <button class="period-btn" data-source="tracked" onclick="setHistorySource('tracked')">Tracked Only</button>
+                                </div>
+                                <div class="period-toggle">
+                                    <button class="period-btn active" data-days="7" onclick="setHistoryDays(7)">7d</button>
+                                    <button class="period-btn" data-days="14" onclick="setHistoryDays(14)">14d</button>
+                                    <button class="period-btn" data-days="30" onclick="setHistoryDays(30)">30d</button>
+                                </div>
                             </div>
                         </div>
 
@@ -4594,6 +4653,8 @@
         // =============================================================================
         let currentDate = new Date();
         let historyDays = 7;
+        let historySource = 'all'; // 'all' or 'tracked'
+        let cachedHistoryData = null;
         let charts = {};
         let taskColorMap = {};
         let nextColorIndex = 0;
@@ -4935,15 +4996,70 @@
         }
 
         function handleHashChange() {
-            let hash = window.location.hash.slice(1) || 'projects';
+            let rawHash = window.location.hash.slice(1) || 'projects';
 
             // Legacy hash redirects - catch all productivity/* variants
-            if (hash === 'productivity' || hash.startsWith('productivity/')) {
-                window.location.hash = hash.startsWith('productivity/activity') ? 'activity' : 'projects';
+            if (rawHash === 'productivity' || rawHash.startsWith('productivity/')) {
+                window.location.hash = rawHash.startsWith('productivity/activity') ? 'activity' : 'projects';
                 return;
             }
 
+            // Parse query params from hash (e.g., #projects?task=name&tab=tasks)
+            let hash = rawHash;
+            let hashParams = {};
+            const qIndex = rawHash.indexOf('?');
+            if (qIndex !== -1) {
+                hash = rawHash.substring(0, qIndex);
+                hashParams = Object.fromEntries(new URLSearchParams(rawHash.substring(qIndex + 1)));
+            }
+
             switchView(hash);
+
+            if (hashParams.task) {
+                openTaskByName(hashParams.task, hashParams.tab || 'tasks');
+            }
+        }
+
+        async function openTaskByName(taskName, defaultTab) {
+            try {
+                let found = await findTaskByName(taskName, '/api/tasks/active');
+                if (!found) {
+                    found = await findTaskByName(taskName, '/api/tasks/completed?days=90');
+                }
+                if (found) {
+                    await openTaskModal(found.id, found.name, found.repo_name || '');
+                    if (defaultTab && defaultTab !== 'tasks') {
+                        switchTaskTab(defaultTab);
+                    }
+                } else {
+                    console.warn(`Project "${taskName}" not found in active or completed tasks`);
+                }
+            } catch (error) {
+                console.error('Error opening project via deep link:', error);
+            }
+            // Clean URL to avoid re-triggering on refresh
+            if (window.location.hash.includes('?')) {
+                history.replaceState(null, '', '#' + (window.location.hash.split('?')[0].slice(1) || 'projects'));
+            }
+        }
+
+        async function findTaskByName(taskName, endpoint) {
+            const response = await fetch(API_BASE + endpoint);
+            if (!response.ok) {
+                console.error(`API ${endpoint} returned ${response.status}`);
+                return null;
+            }
+            const data = await response.json();
+            const tasks = data.tasks || [];
+            for (const task of tasks) {
+                if (task.name === taskName) return task;
+                if (task.subtasks) {
+                    for (const sub of task.subtasks) {
+                        if (sub.name === taskName) return sub;
+                    }
+                }
+            }
+            return null;
         }
 
         function switchView(viewId) {
@@ -5080,8 +5196,8 @@
             CardLoader.show('history');
             try {
                 const response = await fetch(API_BASE + `/api/stats/history?days=${days}`);
-                const data = await response.json();
-                renderHistory(data);
+                cachedHistoryData = await response.json();
+                renderHistory(cachedHistoryData);
                 LoadingManager.stepCompleted('history');
             } catch (error) {
                 console.error('Error fetching history:', error);
@@ -5149,7 +5265,7 @@
                     <div class="task-item" style="opacity: 0.75; border-left: 3px solid ${color};">
                         <div class="task-info">
                             <div class="task-name-row">
-                                <span class="status-badge" style="background: rgba(100,160,200,0.15); color: var(--accent-blue);">○ Untracked</span>
+                                <span class="status-badge" style="background: rgba(100,160,200,0.15); color: var(--accent-blue);">○ Untracked Session</span>
                                 <span class="task-name">${escapeHtml(task.name)}</span>
                             </div>
                             <div class="task-meta">
@@ -5317,15 +5433,22 @@
                 data.sessions.forEach(s => {
                     const start = new Date(s.start_time);
                     const end = s.end_time ? new Date(s.end_time) : new Date();
-                    const startMinute = start.getHours() * 60 + start.getMinutes() - startHour * 60;
-                    const endMinute = end.getHours() * 60 + end.getMinutes() - startHour * 60;
+
+                    // Clip cross-midnight sessions to today's 0-24 range
+                    const startMinute = Math.max(0, start.getHours() * 60 + start.getMinutes());
+                    const endMinute = (end.toDateString() !== start.toDateString())
+                        ? 24 * 60
+                        : end.getHours() * 60 + end.getMinutes();
+
+                    if (endMinute <= startMinute) return;
 
                     const left = Math.max(0, (startMinute / totalMinutes) * 100);
                     const width = Math.min(100 - left, ((endMinute - startMinute) / totalMinutes) * 100);
 
-                    // Calculate duration
-                    const durationMs = end - start;
-                    const durationMins = Math.round(durationMs / 60000);
+                    // Use actual tracked duration if available, otherwise compute from wall clock
+                    const durationMins = s.duration_seconds
+                        ? Math.round(s.duration_seconds / 60)
+                        : Math.round((end - start) / 60000);
                     const durationFormatted = durationMins >= 60
                         ? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`
                         : `${durationMins}m`;
@@ -5777,11 +5900,17 @@
                     const dateLabel = `${d.getMonth() + 1}/${d.getDate()}`;
                     const fullLabel = `${dayNames[item.dow]} ${dateLabel}`;
 
+                    const trackedMins = item.total_minutes;
+                    const claudeMins = (item.claude_seconds || 0) / 60;
+                    const effectiveMins = historySource === 'all'
+                        ? Math.max(trackedMins, claudeMins)
+                        : trackedMins;
+
                     labels.push(dateLabel);
-                    minutes.push(item.total_minutes);
+                    minutes.push(effectiveMins);
                     sessionCounts.push(item.session_count);
-                    hasData.push(item.total_minutes > 0);
-                    tooltipData.push({ label: fullLabel, mins: item.total_minutes, sessions: item.session_count, date: item.date });
+                    hasData.push(effectiveMins > 0);
+                    tooltipData.push({ label: fullLabel, mins: effectiveMins, sessions: item.session_count, date: item.date });
 
                     // Color by day of week
                     const color = dowColors[item.dow];
@@ -5898,11 +6027,23 @@
         // =============================================================================
         function setHistoryDays(days) {
             historyDays = days;
-            document.querySelectorAll('#historyCard .period-btn').forEach(btn => {
+            document.querySelectorAll('#historyCard .period-btn[data-days]').forEach(btn => {
                 btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
             });
             showSectionLoading('historyCard');
             fetchHistory(days).then(() => hideSectionLoading('historyCard'));
+        }
+
+        function setHistorySource(source) {
+            historySource = source;
+            document.querySelectorAll('#historySourceToggle .period-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.source === source);
+            });
+            if (cachedHistoryData) {
+                renderHistory(cachedHistoryData);
+            } else {
+                fetchHistory(historyDays);
+            }
         }
 
         // =============================================================================
@@ -5928,11 +6069,11 @@
             loading.classList.remove('hidden');
             content.style.display = 'none';
 
-            // Reset tabs - default to 'context' view
+            // Reset tabs - default to 'tasks' view
             document.querySelectorAll('.task-modal-tabs .tab-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.tab === 'context');
+                btn.classList.toggle('active', btn.dataset.tab === 'tasks');
             });
-            currentTaskTab = 'context';
+            currentTaskTab = 'tasks';
 
             try {
                 const response = await fetch(API_BASE + `/api/task/${taskId}/files`);
@@ -6191,7 +6332,14 @@
                                 <span class="legend-item"><span class="legend-dot pending"></span> Ready</span>
                                 <span class="legend-item"><span class="legend-dot wait"></span> Blocked</span>
                             </div>
-                            <svg id="structureGraphSvg" width="100%" height="300"></svg>
+                            <div class="structure-graph-zoom-controls">
+                                <button onclick="zoomStructureGraph(1)" title="Zoom in">+</button>
+                                <button onclick="zoomStructureGraph(-1)" title="Zoom out">-</button>
+                                <button onclick="zoomStructureGraph(0)" title="Reset zoom">R</button>
+                            </div>
+                            <div class="structure-graph-viewport">
+                                <svg id="structureGraphSvg" width="100%" height="300"></svg>
+                            </div>
                         </div>
                         ` : ''}
                         <table class="structure-table">
@@ -6218,6 +6366,7 @@
                 `;
 
                 // Render graph immediately if there are dependencies
+                structureGraphZoom = 1;
                 if (hasGraph) {
                     renderStructureGraph({ nodes: graphNodes, links: graphLinks });
                 }
@@ -6362,6 +6511,28 @@
                 });
             });
         }
+
+        let structureGraphZoom = 1;
+        function zoomStructureGraph(direction) {
+            const svg = document.querySelector('#structureGraphSvg');
+            if (!svg) return;
+            if (direction === 0) {
+                structureGraphZoom = 1;
+            } else {
+                structureGraphZoom = Math.max(0.3, Math.min(3, structureGraphZoom + direction * 0.2));
+            }
+            svg.style.transform = `scale(${structureGraphZoom})`;
+        }
+
+        // Mouse wheel zoom on the graph viewport
+        document.addEventListener('wheel', function(e) {
+            const viewport = e.target.closest('.structure-graph-viewport');
+            if (!viewport) return;
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                zoomStructureGraph(e.deltaY < 0 ? 1 : -1);
+            }
+        }, { passive: false });
 
         async function togglePromptView(subtaskId, rowEl) {
             // Remove any existing expanded prompt row

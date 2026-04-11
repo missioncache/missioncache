@@ -31,10 +31,12 @@ import subprocess
 import sys
 import time
 import unicodedata
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 IS_MACOS = platform.system() == "Darwin"
 
@@ -499,10 +501,16 @@ def _get_project_progress(project_dir: Path, project_name: str) -> str:
     return f" {_parse_task_progress(content)}"
 
 
-def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
-    """Return (project_name, project_display)."""
+class ProjectInfo(NamedTuple):
+    name: str = ""
+    display: str = ""
+    progress: str = ""
+
+
+def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
+    """Return ProjectInfo(name, display, progress)."""
     if not session_id:
-        return "", ""
+        return ProjectInfo()
     name = ""
     max_age = max(duration_sec + 60, 60)
     db = _get_hooks_db()
@@ -521,7 +529,7 @@ def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
         except (sqlite3.Error, ValueError):
             pass
     if not name:
-        return "", ""
+        return ProjectInfo()
 
     display = name
     project_dir = ORBIT_ACTIVE / name
@@ -533,8 +541,8 @@ def get_project_info(session_id: str, duration_sec: int) -> tuple[str, str]:
                     display = f"{parent.name}/{name}"
                     project_dir = nested
                     break
-    display = f"{display}{_get_project_progress(project_dir, name)}"
-    return name, display
+    progress = _get_project_progress(project_dir, name)
+    return ProjectInfo(name, display, progress)
 
 
 # ============ LAST ACTION TIME ============
@@ -940,11 +948,19 @@ def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
 # ============ LINE BUILDING ============
 
 _HEALTH_LINK_URL = "https://status.claude.com"
+_DASHBOARD_URL = os.environ.get("ORBIT_DASHBOARD_URL", "http://localhost:8787")
 
 
 def _health_link(text: str) -> str:
     """Wrap text in an OSC 8 clickable hyperlink to status.claude.com."""
     return f"\033]8;;{_HEALTH_LINK_URL}\033\\{text}\033]8;;\033\\"
+
+
+def _osc8_link(url: str, text: str) -> str:
+    """Wrap text in an OSC 8 clickable hyperlink."""
+    clean_url = url.replace("\033", "").replace("\x07", "")
+    clean_text = re.sub(r"[\x00-\x1f\x7f]", "", text)
+    return f"\033]8;;{clean_url}\033\\{clean_text}\033]8;;\033\\"
 
 
 def _item(color: str, icon: str, label: str, value: str) -> str:
@@ -1060,9 +1076,9 @@ def main() -> None:
 
     _FUTURE_TIMEOUT = 3
     try:
-        project_name, project_display = f_project.result(timeout=_FUTURE_TIMEOUT)
+        project_name, project_display, project_progress = f_project.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
-        project_name, project_display = "", ""
+        project_name, project_display, project_progress = "", "", ""
     try:
         last_action_time = f_last_time.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1126,7 +1142,13 @@ def main() -> None:
     # Line 2: Project + Last Action time
     line2: list[str] = []
     if project_name:
-        line2.append(_item(COLORS["project"], ICONS["project"], "Project", project_display))
+        linked_name = _osc8_link(f"{_DASHBOARD_URL}/#projects", project_display)
+        if project_progress:
+            progress_url = f"{_DASHBOARD_URL}/#projects?task={urllib.parse.quote(project_name, safe='')}&tab=tasks"
+            linked_value = f"{linked_name} {_osc8_link(progress_url, project_progress.strip())}"
+        else:
+            linked_value = linked_name
+        line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 

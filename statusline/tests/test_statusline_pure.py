@@ -19,6 +19,7 @@ from statusline import (
     _get_health_components,
     _health_link,
     _item,
+    _osc8_link,
     _join_items,
     _pad_line,
     _parse_stdin_rate_limits,
@@ -423,6 +424,24 @@ class TestHealthLink:
         # OSC 8 format: ESC ]8;; URL ESC \ text ESC ]8;; ESC \
         assert "\033]8;;https://health.claude.com\033\\" in result
         assert result.endswith("\033]8;;\033\\")
+
+
+# ============ _osc8_link (2 tests) ============
+
+
+class TestOsc8Link:
+    def test_wraps_text_in_osc8_hyperlink(self):
+        result = _osc8_link("http://localhost:8787/#projects", "my-project")
+        assert "my-project" in result
+        assert "http://localhost:8787/#projects" in result
+        assert "\033]8;;http://localhost:8787/#projects\033\\" in result
+        assert result.endswith("\033]8;;\033\\")
+
+    def test_strips_control_characters(self):
+        result = _osc8_link("http://example.com", "bad\033name\x07here")
+        assert "\033]8;;http://example.com\033\\" in result
+        assert "badnamehere" in result
+        assert "\x07" not in result.split("\033]8;;")[1].split("\033\\")[1]
 
 
 # ============ _item (1 test) ============
