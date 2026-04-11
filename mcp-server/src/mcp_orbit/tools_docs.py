@@ -48,7 +48,9 @@ async def create_orbit_files(
         # Ensure repo is registered
         repo = db.get_repo_by_path(repo_path)
         if not repo:
-            db.add_repo(repo_path)
+            repo_id = db.add_repo(repo_path)
+        else:
+            repo_id = repo.id
 
         # Create the files under ORBIT_ROOT
         files = orbit.create_orbit_files(
@@ -63,8 +65,12 @@ async def create_orbit_files(
         # Scan to register task in database
         db.scan_all_repos()
 
-        # Find the created task
-        task = db.get_task_by_name(project_name)
+        # Find the created task by its known full_path (avoids name-only ambiguity)
+        task = db.find_task_by_full_path(f"active/{project_name}")
+        if not task:
+            task = db.get_task_by_name(project_name)
+        if task and task.repo_id != repo_id:
+            db.update_task_repo(task.id, repo_id)
 
         return {
             "success": True,

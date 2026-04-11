@@ -977,7 +977,7 @@ class TaskDB:
             ).fetchone()
             return Task.from_row(row) if row else None
 
-    def _find_task_by_full_path(self, full_path: str) -> Optional[Task]:
+    def find_task_by_full_path(self, full_path: str) -> Optional[Task]:
         """Find a task by full_path across all repos."""
         with self.connection() as conn:
             row = conn.execute(
@@ -1219,6 +1219,14 @@ class TaskDB:
             conn.commit()
         return self.get_task(task_id)
 
+    def update_task_repo(self, task_id: int, repo_id: int) -> None:
+        """Reassign a task to a different repository."""
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET repo_id = ? WHERE id = ?", (repo_id, task_id)
+            )
+            conn.commit()
+
     def find_task_for_cwd(
         self, cwd: Union[str, Path], session_id: Optional[str] = None
     ) -> Optional[Task]:
@@ -1283,12 +1291,12 @@ class TaskDB:
                 # Check for subtask
                 if len(parts) >= 2:
                     full_path = f"active/{parts[0]}/{parts[1]}"
-                    task = self._find_task_by_full_path(full_path)
+                    task = self.find_task_by_full_path(full_path)
                     if task:
                         return task
                 # Try parent task
                 full_path = f"active/{task_name}"
-                task = self._find_task_by_full_path(full_path)
+                task = self.find_task_by_full_path(full_path)
                 if task:
                     return task
         except ValueError:

@@ -1444,15 +1444,15 @@ class AnalyticsDB:
         with self.connection() as conn:
             rows = conn.execute(
                 f"""SELECT
-                       r.short_name as repo_name,
+                       COALESCE(r.short_name, 'Unknown') as repo_name,
                        r.id as repo_id,
                        SUM(s.duration_seconds) as total_seconds,
                        COUNT(DISTINCT t.id) as task_count
                    FROM sessions s
                    JOIN tasks t ON s.task_id = t.id
-                   JOIN repositories r ON t.repo_id = r.id
+                   LEFT JOIN repositories r ON t.repo_id = r.id
                    WHERE s.start_time >= now() - INTERVAL '{days}' DAY
-                   GROUP BY r.id, r.short_name
+                   GROUP BY COALESCE(r.short_name, 'Unknown'), r.id
                    ORDER BY total_seconds DESC"""
             ).fetchall()
 
