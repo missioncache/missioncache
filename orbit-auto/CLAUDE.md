@@ -53,7 +53,7 @@ orbit-auto/
 +-- CLAUDE.md                  # This file
 ```
 
-## Dev-Docs Integration
+## Orbit Files Integration
 
 ### Task Directory Structure
 When running orbit-auto, tasks are organized in the centralized orbit directory:
@@ -113,7 +113,7 @@ Orbit Auto logs execution runs to the task database for visualization in the Orb
 - **Output viewer**: Browse execution logs with filtering by level, worker, and subtask
 - **SSE streaming**: Live log updates during running executions
 
-### Optimized Prompts (Dev-Docs Feature)
+### Optimized Prompts (Orbit Feature)
 
 The orbit plugin can generate optimized prompts for each subtask with agent/skill references. Prompts can be executed manually or via orbit-auto. This enables:
 
