@@ -4660,7 +4660,6 @@
         let nextColorIndex = 0;
         let lastRefreshTime = null;
         let dailyTotalsViewMode = 'aggregated'; // 'aggregated' or 'byDate'
-        let cachedDailyTotals = null;
         let cachedDailyByDate = null;
 
         // View data loaded state
@@ -5254,7 +5253,7 @@
 
             // Activity timeline
             if (data.sessions) {
-                renderActivityTimeline(data.sessions);
+                renderActivityTimeline(data.sessions, tasks);
             }
         }
 
@@ -5322,11 +5321,13 @@
             const ctx = document.getElementById('hourlyChart');
             if (!ctx) return;
 
-            // Prepare data for 24 hours
+            // Prepare data for 24 hours (use max of orbit-tracked and Claude JSONL seconds)
             const hours = Array.from({ length: 24 }, (_, i) => i);
             const values = hours.map(h => {
                 const entry = hourlyData.find(e => e.hour === h);
-                return entry ? Math.round(entry.total_seconds / 60) : 0;
+                if (!entry) return 0;
+                const secs = Math.max(entry.total_seconds || 0, entry.claude_seconds || 0);
+                return Math.round(secs / 60);
             });
 
             // Check if there's any activity
@@ -5384,7 +5385,7 @@
                     scales: {
                         x: {
                             display: false,
-                            grid: { display: false }
+                            grid: { display: false },
                         },
                         y: {
                             display: false,
@@ -5395,7 +5396,7 @@
             });
         }
 
-        function renderActivityTimeline(sessions) {
+        function renderActivityTimeline(sessions, tasksToday) {
             const container = document.getElementById('activityTimeline');
             if (!container) return;
 
@@ -5408,15 +5409,24 @@
                 return;
             }
 
+            // Build task status lookup from tasksToday
+            const taskStatusMap = {};
+            if (tasksToday) {
+                tasksToday.forEach(t => {
+                    taskStatusMap[t.name] = t.is_untracked ? 'untracked' : (t.status || 'active');
+                });
+            }
+
             // Group sessions by task
             const taskSessions = {};
             sessions.forEach(s => {
                 const key = s.task_name || 'Unknown';
                 if (!taskSessions[key]) {
-                    taskSessions[key] = { sessions: [], totalSeconds: 0 };
+                    taskSessions[key] = { sessions: [], totalSeconds: 0, isUntracked: false };
                 }
                 taskSessions[key].sessions.push(s);
                 taskSessions[key].totalSeconds += s.duration_seconds || 0;
+                if (s.is_untracked) taskSessions[key].isUntracked = true;
             });
 
             const startHour = 0;
@@ -5433,14 +5443,32 @@
                 data.sessions.forEach(s => {
                     const start = new Date(s.start_time);
                     const end = s.end_time ? new Date(s.end_time) : new Date();
+                    const viewDate = currentDate ? currentDate.toDateString() : new Date().toDateString();
 
-                    // Clip cross-midnight sessions to today's 0-24 range
-                    const startMinute = Math.max(0, start.getHours() * 60 + start.getMinutes());
-                    const endMinute = (end.toDateString() !== start.toDateString())
-                        ? 24 * 60
-                        : end.getHours() * 60 + end.getMinutes();
+                    // Clip cross-midnight sessions to the viewed day's 0-24 range
+                    let startMinute, endMinute;
+                    const startIsBeforeView = start.toDateString() !== viewDate;
+                    const endIsAfterView = end.toDateString() !== viewDate;
+
+                    if (startIsBeforeView && !endIsAfterView) {
+                        startMinute = 0;
+                        endMinute = end.getHours() * 60 + end.getMinutes();
+                    } else if (!startIsBeforeView && endIsAfterView) {
+                        startMinute = start.getHours() * 60 + start.getMinutes();
+                        endMinute = 24 * 60;
+                    } else if (startIsBeforeView && endIsAfterView) {
+                        startMinute = 0;
+                        endMinute = 24 * 60;
+                    } else {
+                        startMinute = start.getHours() * 60 + start.getMinutes();
+                        endMinute = end.getHours() * 60 + end.getMinutes();
+                    }
 
                     if (endMinute <= startMinute) return;
+
+                    // Skip idle sessions: active time < 10% of wall-clock span
+                    const spanSeconds = (endMinute - startMinute) * 60;
+                    if (s.duration_seconds && spanSeconds > 0 && s.duration_seconds / spanSeconds < 0.1) return;
 
                     const left = Math.max(0, (startMinute / totalMinutes) * 100);
                     const width = Math.min(100 - left, ((endMinute - startMinute) / totalMinutes) * 100);
@@ -5469,13 +5497,31 @@
                         onmouseleave="hideTimelineTooltip()"></div>`;
                 });
 
+                // Determine status badge and display name
+                let statusBadge = '';
+                let displayName = taskName;
+                if (data.isUntracked) {
+                    statusBadge = '<span class="status-badge" style="background: rgba(100,160,200,0.15); color: var(--accent-blue); font-size: 9px; padding: 2px 7px;">○ Untracked</span>';
+                    displayName = taskName.replace(/^Untracked Session - /, '');
+                } else {
+                    const status = taskStatusMap[taskName] || 'active';
+                    if (status === 'completed') {
+                        statusBadge = '<span class="status-badge completed" style="font-size: 9px; padding: 2px 7px;">✓ Done</span>';
+                    } else {
+                        statusBadge = '<span class="status-badge active" style="font-size: 9px; padding: 2px 7px;">● Active</span>';
+                    }
+                }
+
+                const truncatedName = displayName.length > 40 ? displayName.slice(0, 37) + '...' : displayName;
+
                 html += `
                     <div class="timeline-row">
                         <div class="timeline-bars">${barsHtml}</div>
                         <div class="timeline-label">
                             <div class="timeline-label-left">
                                 <div class="timeline-color-dot" style="background: ${color}"></div>
-                                ${wrapWithCopyIcon(taskName.length > 28 ? taskName.slice(0, 25) + '...' : taskName, taskName)}
+                                ${statusBadge}
+                                ${wrapWithCopyIcon(truncatedName, displayName)}
                             </div>
                             <span class="timeline-time-badge">${timeFormatted}</span>
                         </div>
@@ -5677,7 +5723,6 @@
             renderHourlyHeatmap(data.hourly_heatmap || []);
 
             // Render daily work totals (bar chart by day of week or by date)
-            cachedDailyTotals = data.daily_totals || [];
             cachedDailyByDate = data.daily_by_date || [];
             renderDailyTotals();
 
@@ -5853,10 +5898,17 @@
             let labels, minutes, sessionCounts, hasData, backgroundColors, borders, tooltipData;
 
             if (dailyTotalsViewMode === 'aggregated') {
-                // Aggregated by day of week (7 bars)
-                const dataByDow = {};
-                (cachedDailyTotals || []).forEach(item => {
-                    dataByDow[item.dow] = item;
+                // Aggregated by day of week (7 bars) - use daily_by_date to include Claude time
+                const dowBuckets = Array.from({ length: 7 }, () => ({ totalMins: 0, sessions: 0, count: 0 }));
+                (cachedDailyByDate || []).forEach(item => {
+                    const trackedMins = item.total_minutes || 0;
+                    const claudeMins = (item.claude_seconds || 0) / 60;
+                    const effectiveMins = historySource === 'all'
+                        ? Math.max(trackedMins, claudeMins)
+                        : trackedMins;
+                    dowBuckets[item.dow].totalMins += effectiveMins;
+                    dowBuckets[item.dow].sessions += item.session_count || 0;
+                    dowBuckets[item.dow].count++;
                 });
 
                 labels = dayNames;
@@ -5866,12 +5918,12 @@
                 tooltipData = [];
 
                 for (let dow = 0; dow < 7; dow++) {
-                    const item = dataByDow[dow];
-                    if (item) {
-                        minutes.push(item.total_minutes);
-                        sessionCounts.push(item.session_count);
+                    const bucket = dowBuckets[dow];
+                    if (bucket.count > 0) {
+                        minutes.push(Math.round(bucket.totalMins * 10) / 10);
+                        sessionCounts.push(bucket.sessions);
                         hasData.push(true);
-                        tooltipData.push({ label: dayNames[dow], mins: item.total_minutes, sessions: item.session_count });
+                        tooltipData.push({ label: dayNames[dow], mins: Math.round(bucket.totalMins * 10) / 10, sessions: bucket.sessions });
                     } else {
                         minutes.push(0);
                         sessionCounts.push(0);
