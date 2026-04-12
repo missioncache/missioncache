@@ -2,9 +2,11 @@
 """
 UserPromptSubmit hook - Records heartbeats for time tracking.
 
-Runs silently on every prompt, recording activity for the current task
-via orbit_db's heartbeat-auto command. Skips slash commands, shell
-commands, and empty prompts.
+Runs silently on every prompt, recording activity for the current task.
+Skips slash commands, shell commands, and empty prompts.
+
+Heartbeat writes go through a bounded subprocess so prompt submission is
+never blocked by SQLite lock contention on the orbit task database.
 """
 
 import json
@@ -12,6 +14,11 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+# Plugin-bundled orbit-db, made importable from the subprocess via PYTHONPATH
+# so marketplace installs work without requiring a system `pip install`.
+_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
 
 SKIP_PATTERNS = [
     re.compile(r"^/\w+"),        # Slash commands
@@ -52,13 +59,20 @@ def main():
     cwd = data.get("cwd", "") or os.getcwd()
     session_id = data.get("session_id", "")
 
+    env = {**os.environ, "CLAUDE_SESSION_ID": session_id}
+    if _BUNDLED_ORBIT_DB.is_dir():
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{_BUNDLED_ORBIT_DB}{os.pathsep}{existing}" if existing else str(_BUNDLED_ORBIT_DB)
+        )
+
     try:
         subprocess.run(
-            ["python3", "-m", "orbit_db", "heartbeat-auto"],
+            [sys.executable, "-m", "orbit_db", "heartbeat-auto"],
             cwd=cwd,
             timeout=2,
             capture_output=True,
-            env={**os.environ, "CLAUDE_SESSION_ID": session_id},
+            env=env,
         )
     except (subprocess.TimeoutExpired, OSError):
         pass

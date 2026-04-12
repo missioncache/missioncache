@@ -12,11 +12,16 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Bundled orbit-db path for marketplace installs (no system pip install).
+_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
+if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+
 
 def main():
     """Save context before compaction."""
     try:
-        from orbit_db import TaskDB
+        from orbit_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         cwd = os.getcwd()

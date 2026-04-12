@@ -75,7 +75,7 @@ MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServe
    ```
 
 2. Add instructions for Claude to follow when command is invoked
-3. Reinstall plugin: `claude plugins install orbit@local`
+3. Reinstall plugin (maintainer dev loop uses the local marketplace): `claude plugins install orbit@local`
 
 ## Database
 
@@ -111,6 +111,15 @@ orbit-auto --dry-run my-project
 
 ## Installation
 
+Two paths depending on context:
+
+**Public user install** (plugin core only, via GitHub marketplace):
+```
+/plugin marketplace add tomerbr1/claude-orbit
+/plugin install orbit@claude-orbit
+```
+
+**Maintainer/full install** (clone + all extras + local marketplace for fast iteration):
 ```bash
 ./setup.sh
 ```
@@ -121,6 +130,8 @@ pip install -e ./orbit-db
 pip install -e ./orbit-auto
 claude plugins install orbit@local
 ```
+
+The `@local` suffix refers to the local marketplace `setup.sh` creates under `~/.claude/plugins/local-marketplace/`. The `@claude-orbit` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist, but `setup.sh` will detect an existing GitHub marketplace install and skip the local-marketplace step to avoid duplicate plugin registrations.
 
 ## Dependencies
 

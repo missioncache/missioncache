@@ -21,6 +21,11 @@ import re
 import sys
 from pathlib import Path
 
+# Bundled orbit-db path for marketplace installs (no system pip install).
+_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
+if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+
 # Skip patterns - do not check for divergence on these prompts (match
 # activity_tracker.py:16-25 behavior for consistency).
 SKIP_PATTERNS = [
@@ -123,7 +128,7 @@ def main() -> None:
     session_id = data.get("session_id", "")
 
     try:
-        from orbit_db import TaskDB
+        from orbit_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         task = db.find_task_for_cwd(cwd, session_id)

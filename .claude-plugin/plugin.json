@@ -5,6 +5,9 @@
   "author": {
     "name": "Tomer Brami"
   },
+  "homepage": "https://github.com/tomerbr1/claude-orbit",
+  "repository": "https://github.com/tomerbr1/claude-orbit.git",
+  "license": "MIT",
   "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"],
   "mcpServers": {
     "pm": {

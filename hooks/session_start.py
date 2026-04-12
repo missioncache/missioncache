@@ -12,6 +12,55 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Bundled orbit-db path for marketplace installs (no system pip install).
+_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
+if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+
+
+OWNERSHIP_MARKER = "<!-- orbit-plugin:managed"
+
+
+def install_bundled_rules() -> None:
+    """Install plugin rules into ~/.claude/rules/ without clobbering user edits.
+
+    Marketplace installs have no external bootstrap step, so this hook is how
+    rule files reach ~/.claude/rules/. We write-if-different so plugin updates
+    propagate automatically, but only for files that are demonstrably plugin-
+    owned. Ownership is signaled by an HTML-comment marker on the first line
+    of the source file (`OWNERSHIP_MARKER`); the destination is updated only
+    when it is missing, is a legacy symlink from setup.sh, or already starts
+    with the same marker. A user who removes the marker from their installed
+    copy takes ownership of that file and the hook stops touching it.
+    """
+    src_dir = Path(__file__).resolve().parent.parent / "rules"
+    if not src_dir.is_dir():
+        return
+    dst_dir = Path.home() / ".claude" / "rules"
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for src in src_dir.glob("*.md"):
+            new_content = src.read_text()
+            if not new_content.startswith(OWNERSHIP_MARKER):
+                # Source file isn't marked plugin-managed; skip it entirely.
+                continue
+            dst = dst_dir / src.name
+            if dst.is_symlink():
+                # Legacy symlink from setup.sh - replace with a real file so
+                # the marker-based ownership check works going forward.
+                dst.unlink()
+            elif dst.exists():
+                existing = dst.read_text()
+                if not existing.startswith(OWNERSHIP_MARKER):
+                    # User has taken ownership (removed the marker). Leave alone.
+                    continue
+                if existing == new_content:
+                    # Already up to date.
+                    continue
+            dst.write_text(new_content)
+    except OSError:
+        pass
+
 
 def write_pending_task(task_name: str, cwd: str) -> None:
     """Write pending-task.json for activity-tracker hook integration."""
@@ -96,8 +145,11 @@ def main():
     if session_id:
         write_term_session_mapping(session_id)
 
+    # Always attempt to refresh rule files, even if orbit_db is unavailable.
+    install_bundled_rules()
+
     try:
-        from orbit_db import TaskDB
+        from orbit_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         cwd = os.getcwd()

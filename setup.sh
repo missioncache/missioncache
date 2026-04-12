@@ -88,11 +88,50 @@ fi
 
 # ─── Step 1: Core Plugin ─────────────────────────────────────────────────────
 step 1 "Core Plugin"
-info "Installing Orbit plugin for Claude Code..."
 
-# Create data directories
+# Create data directories (always - these are shared between quick and full installs)
 mkdir -p "$ORBIT_ROOT/active" "$ORBIT_ROOT/completed"
 detail "Created $ORBIT_ROOT/{active,completed}/"
+
+# Detect existing marketplace install so users running setup.sh after a quick
+# install don't get a duplicate local-marketplace entry.
+SETTINGS="$HOME/.claude/settings.json"
+EXISTING_PLUGIN=""
+if [[ -f "$SETTINGS" ]]; then
+    EXISTING_PLUGIN=$("$PYTHON" -c "
+import json
+try:
+    d = json.load(open('$SETTINGS'))
+    ep = d.get('enabledPlugins', {})
+    for key in ep:
+        if key.startswith('orbit@') and key != 'orbit@local' and ep[key]:
+            print(key)
+            break
+except Exception:
+    pass
+" 2>/dev/null)
+fi
+
+SKIP_LOCAL_MARKETPLACE=0
+if [[ -n "$EXISTING_PLUGIN" ]]; then
+    warn "Orbit is already installed via $EXISTING_PLUGIN."
+    detail "Continuing without installing orbit@local will leave the rest of setup.sh"
+    detail "(orbit-db, dashboard, orbit-auto, statusline) pointing at THIS checkout while"
+    detail "your Claude Code session still runs plugin code from $EXISTING_PLUGIN. That's"
+    detail "fine for a user who wants the extras, but it means 'setup.sh' will NOT test the"
+    detail "plugin code in this clone. Maintainers doing a dev loop should install orbit@local."
+    echo ""
+    if ask_yn "Install orbit@local from this clone alongside $EXISTING_PLUGIN?" "Y"; then
+        info "Installing orbit@local from this clone..."
+    else
+        SKIP_LOCAL_MARKETPLACE=1
+        detail "Skipping local marketplace - plugin code will stay on $EXISTING_PLUGIN"
+        detail "To uninstall the marketplace copy later: claude plugins uninstall $EXISTING_PLUGIN"
+    fi
+fi
+
+if [[ $SKIP_LOCAL_MARKETPLACE -eq 0 ]]; then
+    [[ -z "$EXISTING_PLUGIN" ]] && info "Installing Orbit plugin for Claude Code..."
 
 # Set up local marketplace
 mkdir -p "$MARKETPLACE/plugins" "$MARKETPLACE/.claude-plugin"
@@ -182,6 +221,8 @@ with open('$SETTINGS', 'w') as f:
 else
     warn "Skipped plugin install (Claude CLI not found)"
 fi
+
+fi  # close EXISTING_PLUGIN guard
 
 success "Core plugin installed"
 

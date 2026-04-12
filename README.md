@@ -58,23 +58,44 @@ Orbit exists because no single existing tool integrates all three. See [How Orbi
 
 ## Install
 
+Orbit ships in two flavors. Pick based on whether you also want the dashboard, the autonomous execution CLI, and the statusline.
+
+### Quick install (plugin core)
+
+This gives you the Claude Code integration: slash commands, MCP tools, lifecycle hooks, and the orbit rule file. It is enough to plan projects, track them across sessions, and resume them via `/orbit:go`. It does **not** include the dashboard, `orbit-auto` CLI, or statusline.
+
+In Claude Code:
+
+```
+/plugin marketplace add tomerbr1/claude-orbit
+/plugin install orbit@claude-orbit
+```
+
+Restart your Claude Code session. Updates flow via `/plugin update orbit@claude-orbit`.
+
+**Requirements:** Claude Code with `uvx` available on `PATH`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
+
+### Full install (plugin core + dashboard + orbit-auto + statusline)
+
+This clones the repo and runs an interactive setup script that also installs the local web dashboard, the `orbit-auto` CLI, and the statusline. Pick this if you want to visualize your time breakdown, run autonomous task execution with live streaming, or have orbit's multi-line status block at the bottom of Claude Code.
+
 ```bash
 git clone https://github.com/tomerbr1/claude-orbit.git
 cd claude-orbit
 ./setup.sh
 ```
 
-The interactive setup script will:
+The interactive script will:
 
-1. Install the Orbit plugin for Claude Code (slash commands, MCP tools, hooks)
-2. Set up the task database at `~/.claude/tasks.db`
-3. Install the Orbit Dashboard (local web UI at `localhost:8787`)
-4. Install the Orbit Auto CLI
-5. Optionally install the statusline
+1. Register orbit in a local marketplace and install the plugin core
+2. `pip install -e` the `orbit-db` package so `orbit-auto` can log execution runs to the dashboard
+3. Install the Orbit Dashboard and wire it up as a background service (launchd on macOS, systemd on Linux)
+4. `pip install -e` the `orbit-auto` CLI
+5. Optionally install the statusline and configure health monitoring
 
-**Requirements:** Python 3.11+, Claude Code CLI, pip.
+**Requirements:** Python 3.11+, Claude Code CLI, `pip`.
 
-**Minimal install?** Steps 1 and 2 are enough. Skip the dashboard, auto CLI, and statusline if you only want the project files and slash commands. Orbit's plugin works standalone.
+**Which should I pick?** Start with the quick install if you just want the project workbench. Upgrade to the full install any time - the two paths coexist, and the full install's `setup.sh` will detect an existing plugin install and only add the missing extras.
 
 ## Your First Project
 

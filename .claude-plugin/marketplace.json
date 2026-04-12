@@ -1,0 +1,16 @@
+{
+  "name": "claude-orbit",
+  "owner": {
+    "name": "Tomer Brami"
+  },
+  "description": "One workbench for your Claude Code projects. Plan, execute, track, and resume - without losing state.",
+  "plugins": [
+    {
+      "name": "orbit",
+      "source": ".",
+      "description": "Project management with time tracking, autonomous execution, and context preservation",
+      "category": "productivity",
+      "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"]
+    }
+  ]
+}
