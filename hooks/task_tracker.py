@@ -110,7 +110,12 @@ def main() -> None:
     if data.get("agent_id"):
         return
 
-    prompt = data.get("prompt", "")
+    raw_prompt = data.get("prompt", "")
+    if isinstance(raw_prompt, list):
+        raw_prompt = " ".join(
+            b.get("text", "") for b in raw_prompt if isinstance(b, dict) and b.get("type") == "text"
+        )
+    prompt = raw_prompt if isinstance(raw_prompt, str) else ""
     if should_skip(prompt):
         return
 
@@ -179,7 +184,7 @@ def main() -> None:
             return
 
         divergent_tasks = {num: pending[num] for num in divergent_nums}
-        print(json.dumps({"systemMessage": build_reminder(divergent_tasks, str(tasks_file))}))
+        print(build_reminder(divergent_tasks, str(tasks_file)))
 
     except ImportError:
         # orbit_db not available, skip silently

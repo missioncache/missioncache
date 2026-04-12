@@ -40,7 +40,12 @@ def main():
     if data.get("agent_id"):
         return
 
-    prompt = data.get("prompt", "")
+    raw_prompt = data.get("prompt", "")
+    if isinstance(raw_prompt, list):
+        raw_prompt = " ".join(
+            b.get("text", "") for b in raw_prompt if isinstance(b, dict) and b.get("type") == "text"
+        )
+    prompt = raw_prompt if isinstance(raw_prompt, str) else ""
     if should_skip(prompt):
         return
 
