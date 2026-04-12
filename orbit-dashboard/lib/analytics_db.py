@@ -951,7 +951,9 @@ class AnalyticsDB:
             cursor = conn.execute(
                 """SELECT s.id, s.task_id, t.name as task_name, t.full_path,
                           t.parent_id, p.name as parent_name,
-                          s.start_time, s.end_time, s.duration_seconds,
+                          datetime(s.start_time, 'localtime') as start_time,
+                          datetime(s.end_time, 'localtime') as end_time,
+                          s.duration_seconds,
                           r.short_name as repo_name
                    FROM sessions s
                    JOIN tasks t ON s.task_id = t.id

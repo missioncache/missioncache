@@ -1928,6 +1928,11 @@ async def api_stats_history(days: int = 7):
     total_claude_seconds = sum(d.get("claude_seconds", 0) for d in claude_daily)
     total_claude_sessions = sum(d.get("claude_session_count", 0) for d in daily)
 
+    # Override trends time with merged total (trends query is orbit-only)
+    if total_seconds > trends.get("time", {}).get("current", 0):
+        trends["time"]["current"] = total_seconds
+        trends["time"]["current_formatted"] = db.format_duration(total_seconds)
+
     result = {
         "days": days,
         "daily_activity": daily,
