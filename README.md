@@ -314,14 +314,14 @@ The plugin is the minimum viable install. Everything else is opt-in, and each co
 
 ## Documentation
 
-Deep dives for each component will live in `docs/`:
+Deep dives for each component live in `docs/`:
 
-- **Dashboard** *(coming soon)* - web UI walkthrough, API reference, customization
+- [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
+- [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - **Orbit Auto** *(coming soon)* - DAG scheduling, iteration logs, worker configuration
 - **MCP Tools** *(coming soon)* - full list of tools and parameters
 - **Statusline** *(coming soon)* - configuration, theming, custom icons
 - **Hooks** *(coming soon)* - SessionStart, PreCompact, Stop configuration
-- **Architecture** *(coming soon)* - component boundaries, database schema, extension points
 
 ## Contributing
 
