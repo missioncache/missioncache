@@ -265,6 +265,25 @@ For readers who know [GSD](https://github.com/gsd-build/get-shit-done) or [Super
 
 **Honest takeaway:** GSD pioneered the "fresh context per task" pattern and remains the reference for aggressive context-rot elimination. Superpowers is a methodology, not a system, and it **composes with orbit**: you can use Superpowers skills inside an orbit-managed project to get TDD enforcement and structured planning on top of orbit's project state and time tracking. Orbit's unique contribution is integrating autonomous execution with persistent project state and analytics in a single tool.
 
+### vs. native Claude Code features
+
+For readers coming from [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams), the native statusline, or Claude's built-in analytics:
+
+| Capability | Orbit | Agent Teams | Native Statusline | Native Analytics |
+|---|---|---|---|---|
+| Status | Stable | Experimental (v2.1.32+) | Stable | GA (Teams / Enterprise) |
+| Zero install | no (plugin) | yes | yes | yes |
+| Persistent project state between invocations | yes (plan, context, tasks files) | no | N/A | no |
+| Task list with dependencies | yes (DAG-scheduled) | yes (flat, shared) | N/A | no |
+| Multi-session orchestration | orbit-auto (parallel, DAG) | yes (2 to 16 sessions) | N/A | no |
+| Time tracking per project | yes (heartbeats, JSONL merge) | no | no | no (contribution metrics only) |
+| Local dashboard with analytics | yes | no | N/A | cloud-only |
+| Project-aware statusline | yes (OSC 8 deep links into dashboard) | no | generic (model, tokens, git) | N/A |
+| Self-hosted | yes | yes | yes | no |
+| Available to individual users | yes | yes | yes | Teams / Enterprise plans only |
+
+**Honest takeaway:** Agent Teams is the most direct native competitor for the "run Claude autonomously across multiple sessions" use case. Its strengths are zero install and improving with every Claude Code release - that is a real risk to orbit over time. Its current limits: it is still experimental, it has no persistent state between invocations, no dashboard, no time tracking, no per-task analytics, and a 16-session ceiling. Native analytics is GitHub-scoped, cloud-hosted, and only on paid Teams or Enterprise plans. Orbit's statusline is project-aware with OSC 8 deep links into the local dashboard; the native statusline is a generic token/model/git display. Today orbit wins on persistence, analytics, and the integrated experience. If Agent Teams adds persistent state and a dashboard, that story gets harder - tracked as a known long-term risk.
+
 ### When to use something else
 
 Orbit is not the right answer for every workflow. Use one of these instead if:
@@ -274,6 +293,7 @@ Orbit is not the right answer for every workflow. Use one of these instead if:
 - **You want cross-domain memory that outlives any single project:** [MemPalace](https://www.mempalace.tech/) or [claude-mem](https://github.com/thedotmack/claude-mem)
 - **You want aggressive context-rot elimination with fresh contexts per task:** [GSD / GSD-2](https://github.com/gsd-build/get-shit-done)
 - **You want Anthropic's official Kanban and workplace memory with zero setup:** [Productivity Plugin](https://claude.com/plugins/productivity)
+- **You want zero-install native multi-session orchestration with no persistent state between runs:** [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) (experimental, ships with Claude Code)
 - **You want all of the above integrated into one workbench for a specific project:** Orbit
 
 ## Architecture
