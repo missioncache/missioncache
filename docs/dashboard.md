@@ -170,7 +170,7 @@ The `/api/tasks/active` response shape is the largest; the relevant fields are:
       "name": "orbit-public-release",
       "status": "active",
       "repo_name": "claude-orbit",
-      "repo_path": "/home/user/projects/claude-orbit",
+      "repo_path": "/Users/alice/projects/claude-orbit",
       "jira_key": null,
       "time_spent_seconds": 480,
       "time_spent_formatted": "8m",
@@ -315,7 +315,7 @@ The dashboard is deliberately minimal about configuration - there are very few k
 | Statusline link base | `ORBIT_DASHBOARD_URL` env var | Set in shell init |
 | Dark/light theme | Frontend only | Toggle in the top-right of the UI (persisted in localStorage) |
 
-The JIRA URL mapping deserves a note: the dashboard will turn any `jira_key` field into a clickable link using this mapping, so if you are on a non-example or non-example JIRA you will want to extend the dict. The default entries are there because orbit was originally built inside example/example and the mapping was never parameterized.
+The JIRA URL mapping is empty by default. The dashboard turns any `jira_key` field into a clickable link only when the prefix matches an entry in `JIRA_URLS`, so until you populate it your task badges will show the JIRA key as plain text. Add an entry per prefix you use (e.g. `"PROJ-": "https://your-jira.example.com/browse/"`) to wire up your own JIRA. A user-facing settings screen for managing this mapping at runtime is planned (see the `dashboard-settings-screen` follow-up task).
 
 ### launchd deployment (macOS)
 

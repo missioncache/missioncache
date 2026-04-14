@@ -108,20 +108,20 @@ mcp__plugin_orbit_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ### Selection Table
 
 ```
-### This Repo (zts-qa-aip-master)
+### This Repo (my-app)
 
-| # | Project                  | JIRA       | Last Worked | Time   |
-|---|--------------------------|------------|-------------|--------|
-| 1 | resilient-port-forwarding| PROJ-143965  | 2h ago      | 1h 15m |
-| 2 | ai-al-nightly-runs-fixes| PROJ-141605  | 1d ago      | 8h 30m |
+| # | Project           | JIRA      | Last Worked | Time   |
+|---|-------------------|-----------|-------------|--------|
+| 1 | auth-refactor     | PROJ-123  | 2h ago      | 1h 15m |
+| 2 | kafka-consumer-fix| PROJ-124  | 1d ago      | 8h 30m |
 
 ### Other Repos
 
-| # | Project                  | Repo              | JIRA       | Last Worked | Time   |
-|---|--------------------------|-------------------|------------|-------------|--------|
-| 3 | learning-hub-split       | claude_dev        | -          | 3h ago      | 2h 45m |
-| 4 | slack-presence-fixes     | claude_dev        | -          | 1d ago      | 5h 10m |
-| 5 | webserver-dynamic-routes | etp-qa-webserver  | PROJ-143710  | 2d ago      | 3h 20m |
+| # | Project              | Repo         | JIRA      | Last Worked | Time   |
+|---|----------------------|--------------|-----------|-------------|--------|
+| 3 | docs-rewrite         | website      | -         | 3h ago      | 2h 45m |
+| 4 | login-rate-limit     | website      | -         | 1d ago      | 5h 10m |
+| 5 | api-gateway          | backend-svc  | PROJ-125  | 2d ago      | 3h 20m |
 
 Which project? (number or name)
 ```

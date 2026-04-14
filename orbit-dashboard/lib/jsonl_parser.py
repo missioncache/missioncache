@@ -488,8 +488,8 @@ def get_all_sessions_for_date(date: str | None = None) -> list[SessionMetrics]:
 def decode_project_path(encoded_path: str) -> str:
     """Decode the project directory name to a readable path.
 
-    Claude Code encodes paths like: -home-user-projects-claude-dev
-    This converts to: /home/user/projects/claude_dev
+    Claude Code encodes paths like: -Users-alice-projects-demo
+    This converts to: /Users/alice/projects/demo
     """
     if encoded_path.startswith("-"):
         # Remove leading dash and replace remaining dashes with slashes
@@ -502,7 +502,7 @@ def decode_project_path(encoded_path: str) -> str:
 def get_project_short_name(encoded_path: str) -> str:
     """Extract short project name from encoded path.
 
-    Example: -home-user-projects-claude-dev -> claude-dev
+    Example: -Users-alice-projects-demo -> demo
     """
     parts = encoded_path.rstrip("-").split("-")
     if parts:

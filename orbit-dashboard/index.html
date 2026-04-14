@@ -976,6 +976,15 @@
             text-decoration: underline;
         }
 
+        .jira-link-plain {
+            color: var(--text-secondary);
+            cursor: default;
+        }
+
+        .jira-link-plain:hover {
+            text-decoration: none;
+        }
+
         .task-tags {
             display: flex;
             gap: 4px;
@@ -5297,7 +5306,7 @@
                         </div>
                         <div class="task-meta">
                             ${task.repo_name ? `<span class="repo-badge">${task.repo_name}</span>` : ''}
-                            ${task.jira_key ? `<a href="${task.jira_url || '#'}" class="jira-link" target="_blank" onclick="event.stopPropagation()">${task.jira_key}</a>` : ''}
+                            ${task.jira_key ? (task.jira_url ? `<a href="${task.jira_url}" class="jira-link" target="_blank" onclick="event.stopPropagation()">${task.jira_key}</a>` : `<span class="jira-link jira-link-plain">${task.jira_key}</span>`) : ''}
                             ${task.tags && task.tags.length > 0 ? `
                                 <div class="task-tags">
                                     ${task.tags.slice(0, 2).map(t => `<span class="task-tag">${t}</span>`).join('')}
@@ -5569,9 +5578,12 @@
             }
 
             tbody.innerHTML = displayTasks.map(task => {
-                // Build JIRA link if available
+                // Build JIRA badge: clickable anchor when jira_url is configured,
+                // plain span otherwise (prevents broken href="#" navigation).
                 const jiraLink = task.jira_key
-                    ? `<a href="${task.jira_url || '#'}" class="jira-link" target="_blank" title="${task.jira_key}">${task.jira_key}</a>`
+                    ? (task.jira_url
+                        ? `<a href="${task.jira_url}" class="jira-link" target="_blank" title="${task.jira_key}">${task.jira_key}</a>`
+                        : `<span class="jira-link jira-link-plain" title="${task.jira_key}">${task.jira_key}</span>`)
                     : '';
 
                 // Build description (show full text)
@@ -6641,14 +6653,7 @@
 
         function renderMarkdown(content) {
             marked.setOptions({ gfm: true, breaks: true });
-            let html = marked.parse(content);
-            // Post-process: JIRA links (Cloud + On-Prem)
-            // Use negative lookbehind to avoid matching inside href attributes
-            html = html.replace(/(?<!\/)(?<!="|')\b(GC-\d+|AI-\d+)\b/g,
-                '<a href="https://example.atlassian.net/browse/$1" class="jira-link" target="_blank">$1</a>');
-            html = html.replace(/(?<!\/)(?<!="|')\b(PROJ-\d+|PROJ2-\d+)\b/g,
-                '<a href="https://example.com/jira/browse/$1" class="jira-link" target="_blank">$1</a>');
-            return html;
+            return marked.parse(content);
         }
 
         // Close modal on ESC key

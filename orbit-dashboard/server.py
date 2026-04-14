@@ -204,11 +204,17 @@ HOOKS_STATE_DB = CLAUDE_DIR / "hooks-state.db"
 # Cache TTLs
 REFRESH_INTERVAL = 30  # seconds for SSE
 
-# JIRA URL mapping
-JIRA_URLS = {
-    "PROJ-": "https://example.com/jira/browse/",
-    "GC-": "https://example.atlassian.net/browse/",
-}
+# JIRA URL mapping: prefix -> base URL.
+#
+# Populated at runtime by the dashboard settings screen (tracked as a
+# follow-up task in the orbit-public-release project). DO NOT delete this
+# constant even when empty - `get_jira_url()` is the single resolution point
+# that will load from user-configured mappings once the settings screen ships,
+# and every task list endpoint depends on it.
+#
+# Each entry maps a JIRA key prefix (e.g. "PROJ-") to the base URL that
+# `get_jira_url()` prepends to produce a clickable link.
+JIRA_URLS: dict[str, str] = {}
 
 
 # =============================================================================
@@ -229,7 +235,12 @@ def format_duration_ms(ms: float) -> str:
 
 
 def get_jira_url(jira_key: str | None) -> str | None:
-    """Get full JIRA URL from key."""
+    """Look up the full JIRA URL for a key via the `JIRA_URLS` mapping.
+
+    Returns None when `jira_key` is empty, when no prefix matches, or when
+    `JIRA_URLS` has not been populated yet (the empty-default state). Callers
+    and frontend templates must handle the None case.
+    """
     if not jira_key:
         return None
     for prefix, base_url in JIRA_URLS.items():
@@ -241,9 +252,6 @@ def get_jira_url(jira_key: str | None) -> str | None:
 # =============================================================================
 # Git LOC Statistics
 # =============================================================================
-
-# Known user email addresses for commit filtering
-USER_EMAILS = ["noreply@users.noreply.github.com", "noreply@users.noreply.github.com"]
 
 # Grace period for correlating commits to sessions (30 minutes)
 COMMIT_GRACE_PERIOD_SECONDS = 30 * 60
@@ -264,10 +272,27 @@ def get_commits_with_loc(repo_path: str, date: str) -> list[dict]:
         return []
 
     try:
-        # Build author filter for user's commits only
-        author_args = []
-        for email in USER_EMAILS:
-            author_args.extend(["--author", email])
+        # Filter to commits authored by the current user (per repo's git config).
+        # If user.email is unset/unreadable, return no commits. Running git log
+        # with no --author filter would report EVERY contributor's commits as
+        # the current user's LOC on a shared repo - a silent wrong-answer bug.
+        try:
+            email_result = subprocess.run(
+                ["git", "-C", repo_path, "config", "user.email"],
+                capture_output=True, text=True, timeout=2,
+            )
+            user_email = email_result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            user_email = ""
+
+        if not user_email:
+            return []
+
+        # Match the email wrapped in angle brackets for exact match against the
+        # "Name <email>" author line. git's --author is a regex, so we escape
+        # metachars (`.`, `+`, etc.) to avoid substring-match false positives
+        # like `me@foo.com` matching `someone@foo.com.au`.
+        author_args = ["--author", f"<{re.escape(user_email)}>"]
 
         # git log with numstat format:
         # commit_hash|timestamp
@@ -1055,7 +1080,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
                         result["target_repo"] = repo_val
 
                 # Priority 2: Extract owner/repo in parentheses from context
-                # e.g. "(myorg/web-app)"
+                # e.g. "(myorg/myrepo)"
                 if not result["target_repo"]:
                     gh_repo = re.search(
                         r"\([\w.-]+/([\w][\w.-]+)\)",

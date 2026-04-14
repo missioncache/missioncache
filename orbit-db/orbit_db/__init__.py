@@ -133,18 +133,6 @@ DEFAULT_TAG_KEYWORDS = {
     "patch",
     "update",
     "improve",
-    # Team-specific (example/example)
-    "REDACTED",
-    "REDACTED",
-    "REDACTED",
-    "gc",
-    "example",
-    "REDACTED",
-    "dns",
-    "feed",
-    "example",
-    "REDACTED",
-    "REDACTED",
     # Scrum Master tasks
     "sprint",
     "standup",

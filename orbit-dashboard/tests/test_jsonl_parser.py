@@ -78,8 +78,8 @@ class TestExtractToolCalls:
 
 class TestDecodeProjectPath:
     def test_encoded_path(self):
-        result = decode_project_path("-home-user-projects-claude-dev")
-        assert result == "/home/user/projects/claude/dev"
+        result = decode_project_path("-Users-alice-projects-demo")
+        assert result == "/Users/alice/projects/demo"
 
     def test_plain_name(self):
         result = decode_project_path("my-project")
@@ -91,8 +91,8 @@ class TestDecodeProjectPath:
 
 class TestGetProjectShortName:
     def test_encoded_path(self):
-        result = get_project_short_name("-home-user-projects-claude-dev")
-        assert result == "dev"
+        result = get_project_short_name("-Users-alice-projects-demo")
+        assert result == "demo"
 
     def test_single_segment(self):
         result = get_project_short_name("project")

@@ -1123,9 +1123,10 @@ class AnalyticsDB:
                         "parent_id": row["parent_id"],
                         "parent_name": row["parent_name"],
                         "jira_key": row["jira_key"],
-                        "jira_url": f"https://example.com/jira/browse/{row['jira_key']}"
-                        if row["jira_key"]
-                        else None,
+                        # analytics_db has no access to server.py's JIRA_URLS
+                        # mapping; callers in server.py resolve jira_url via
+                        # get_jira_url() before returning to the frontend.
+                        "jira_url": None,
                         "tags": json.loads(row["tags"]) if row["tags"] else [],
                         "repo_name": row["repo_name"],
                         "time_seconds": time_seconds,
