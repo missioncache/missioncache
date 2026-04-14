@@ -1605,9 +1605,14 @@ class TaskDB:
                     (task_id,),
                 ).fetchone()
             elif period == "today":
+                # start_time is stored as a naive local-time ISO string (Python datetime.now()),
+                # so date(start_time) already extracts the local calendar date. Applying 'localtime'
+                # here would re-interpret the input as UTC and add the TZ offset, crossing midnight
+                # for late-evening sessions in east-of-UTC zones (known timezone-window bug).
+                # The 'localtime' modifier is still needed on 'now' because SQLite's now is UTC.
                 row = conn.execute(
                     """SELECT COALESCE(SUM(duration_seconds), 0) as total FROM sessions
-                       WHERE task_id = ? AND date(start_time, 'localtime') = date('now', 'localtime')""",
+                       WHERE task_id = ? AND date(start_time) = date('now', 'localtime')""",
                     (task_id,),
                 ).fetchone()
             else:
@@ -1657,10 +1662,11 @@ class TaskDB:
             placeholders = ",".join("?" * len(task_ids))
 
             if period == "today":
+                # See get_task_time() above for why 'localtime' is dropped from date(start_time).
                 query = f"""
                     SELECT task_id, COALESCE(SUM(duration_seconds), 0) as total
                     FROM sessions
-                    WHERE task_id IN ({placeholders}) AND date(start_time, 'localtime') = date('now', 'localtime')
+                    WHERE task_id IN ({placeholders}) AND date(start_time) = date('now', 'localtime')
                     GROUP BY task_id
                 """
             elif period == "week":
