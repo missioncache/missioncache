@@ -36,16 +36,7 @@ make test        # full suite, verbose
 make test-fast   # stop at first failure, quiet
 ```
 
-This runs all six component test suites: `mcp-server`, `orbit-db`, `orbit-auto`, `orbit-dashboard`, `hooks`, `statusline`. Expect around 245 passing tests on a clean checkout.
-
-### Known pre-existing failures
-
-Two tests currently fail on `main` as of the v0 public release. They are **not** caused by your changes and should not block your PR:
-
-- `statusline/tests/test_statusline_pure.py::TestParseInput::test_full_json` - drifted worktree field path and `health.claude.com` vs `status.claude.com` URL. Flagged for fixing separately.
-- `orbit-db/tests/test_heartbeats.py::TestGetTaskTime::test_get_task_time_today` - timezone or date-boundary bug in `get_task_time(period="today")` returning yesterday's session. Flagged for fixing separately.
-
-If you add a new test that fails, that counts. If one of these two is still failing when you push, that's fine.
+This runs all six component test suites: `mcp-server`, `orbit-db`, `orbit-auto`, `orbit-dashboard`, `hooks`, `statusline`. Expect 284 passing tests on a clean checkout. `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
 
 ## Pull request standards
 
