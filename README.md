@@ -318,10 +318,10 @@ Deep dives for each component live in `docs/`:
 
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
-- **Orbit Auto** *(coming soon)* - DAG scheduling, iteration logs, worker configuration
-- **MCP Tools** *(coming soon)* - full list of tools and parameters
-- **Statusline** *(coming soon)* - configuration, theming, custom icons
-- **Hooks** *(coming soon)* - SessionStart, PreCompact, Stop configuration
+- [**Orbit Auto**](docs/orbit-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
+- [**MCP Tools**](docs/mcp-tools.md) - all 30 tools by module, error handling, extension patterns
+- [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
+- [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks
 
 ## Contributing
 
@@ -329,7 +329,7 @@ Pull requests welcome. Development setup, testing conventions, and PR standards 
 
 ## License
 
-MIT. See `LICENSE` *(coming soon)*.
+MIT. See [`LICENSE`](LICENSE).
 
 ## Credits
 
