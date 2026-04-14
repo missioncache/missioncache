@@ -207,7 +207,7 @@ class TestParseInput:
             },
             "cost": {"total_duration_ms": 120000, "total_cost_usd": 1.23},
             "session_id": "test-session",
-            "worktree": {"name": "feat-branch"},
+            "workspace": {"git_worktree": {"name": "feat-branch"}},
             "rate_limits": {"five_hour": {"used_percentage": 20, "resets_at": 0}},
         }
         result = parse_input(json.dumps(data))
@@ -287,7 +287,7 @@ class TestParseInput:
         assert result["cost_str"] == "$3.46"
 
     def test_worktree_passthrough(self):
-        data = {"worktree": {"name": "my-worktree", "path": "/some/path"}}
+        data = {"workspace": {"git_worktree": {"name": "my-worktree", "path": "/some/path"}}}
         result = parse_input(json.dumps(data))
         assert result["worktree"] == {"name": "my-worktree", "path": "/some/path"}
 
@@ -420,9 +420,9 @@ class TestHealthLink:
     def test_wraps_in_osc8_hyperlink(self):
         result = _health_link("Status OK")
         assert "Status OK" in result
-        assert "https://health.claude.com" in result
+        assert "https://status.claude.com" in result
         # OSC 8 format: ESC ]8;; URL ESC \ text ESC ]8;; ESC \
-        assert "\033]8;;https://health.claude.com\033\\" in result
+        assert "\033]8;;https://status.claude.com\033\\" in result
         assert result.endswith("\033]8;;\033\\")
 
 
