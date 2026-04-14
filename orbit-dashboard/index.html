@@ -3401,14 +3401,48 @@
         .md-rendered ul li:has(> input[type="checkbox"]) {
             list-style-type: none;
             margin-left: -20px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            line-height: 1.5;
         }
 
+        /* Custom checkbox rendering: marked.js emits disabled checkboxes for `- [x]`
+           and `- [ ]` list items, and browsers dim disabled form controls to ~50%
+           opacity, which makes the accent-color-filled checked state visually
+           indistinguishable from the empty unchecked state. Drawing the checkbox
+           ourselves via appearance:none guarantees clear checked-vs-unchecked
+           contrast in both themes and consistent baseline alignment with the text. */
         .md-rendered input[type="checkbox"] {
-            accent-color: var(--accent-green);
-            margin-right: 6px;
-            vertical-align: middle;
+            appearance: none;
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border: 1.5px solid var(--text-muted);
+            border-radius: 3px;
+            background: transparent;
+            cursor: default;
+            flex-shrink: 0;
+            margin: 3px 0 0 0;
             position: relative;
-            top: -1px;
+            opacity: 1;
+        }
+
+        .md-rendered input[type="checkbox"]:checked {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        .md-rendered input[type="checkbox"]:checked::after {
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 0;
+            width: 4px;
+            height: 9px;
+            border: solid #0a0a14;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
         }
 
         .md-rendered img {
@@ -3554,6 +3588,7 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
+            table-layout: auto;
         }
 
         .structure-table th {
@@ -3570,6 +3605,28 @@
             padding: 8px 12px;
             border-bottom: 1px solid var(--border-light);
             color: var(--text-secondary);
+        }
+
+        /* Column sizing: Task column takes the remaining space, other columns
+           shrink to fit their content. The width:1% + nowrap trick is a standard
+           way to force auto table layout to size columns by their content. The
+           # column will expand dynamically if a task_id like "2.3" needs more room. */
+        .structure-table th:nth-child(1),
+        .structure-table td:nth-child(1),
+        .structure-table th:nth-child(3),
+        .structure-table td:nth-child(3),
+        .structure-table th:nth-child(4),
+        .structure-table td:nth-child(4),
+        .structure-table th:nth-child(5),
+        .structure-table td:nth-child(5) {
+            width: 1%;
+            white-space: nowrap;
+        }
+
+        .structure-table td.structure-prompt-cell {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
         }
 
         .structure-table tr:hover {
@@ -3635,64 +3692,6 @@
         .blocking-summary-count {
             font-weight: 600;
             color: var(--text-primary);
-        }
-
-        /* Expandable prompt rows in structure table */
-        .prompt-expand-row td {
-            padding: 0 !important;
-            border-bottom: 2px solid var(--accent-purple);
-        }
-
-        .prompt-expand-content {
-            background: rgba(0, 0, 0, 0.25);
-            border-left: 3px solid var(--accent-purple);
-            max-height: 400px;
-            overflow-y: auto;
-            padding: 16px 20px;
-        }
-
-        .prompt-expand-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--border-light);
-        }
-
-        .prompt-expand-header .prompt-filename {
-            font-family: var(--font-mono);
-            font-size: 12px;
-            color: var(--accent-purple);
-        }
-
-        .prompt-expand-header .prompt-close-btn {
-            background: none;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            padding: 2px 8px;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-
-        .prompt-expand-header .prompt-close-btn:hover {
-            background: var(--border);
-            color: var(--text-primary);
-        }
-
-        .structure-table tr.has-prompt {
-            cursor: pointer;
-        }
-
-        .structure-table tr.has-prompt:hover {
-            background: rgba(177, 140, 255, 0.08);
-        }
-
-        .structure-table tr.prompt-active {
-            background: rgba(177, 140, 255, 0.12);
-            border-left: 3px solid var(--accent-purple);
         }
 
         /* Learning Analytics */
@@ -6316,19 +6315,14 @@
                     if (tm.completed) rowClasses.push('completed-task');
                     if (tm.is_blocked && !tm.completed) rowClasses.push('blocked-task');
                     if (blockingTaskIds.has(tm.task_id) && !tm.completed) rowClasses.push('blocking-task');
-                    if (tm.has_prompt) rowClasses.push('has-prompt');
-
-                    const clickHandler = tm.has_prompt
-                        ? `onclick="togglePromptView('${tm.task_id}', this)"`
-                        : '';
 
                     return `
-                        <tr class="${rowClasses.join(' ')}" ${clickHandler}>
+                        <tr class="${rowClasses.join(' ')}">
                             <td>${tm.task_id}</td>
                             <td>${escapeHtml(tm.title)}</td>
                             <td>${modeIcon} ${tm.mode === 'auto' ? 'Auto' : 'Inter'}</td>
                             <td>${statusDisplay}</td>
-                            <td>${promptInfo}</td>
+                            <td class="structure-prompt-cell">${promptInfo}</td>
                         </tr>
                     `;
                 }).join('');
@@ -6597,53 +6591,6 @@
                 zoomStructureGraph(e.deltaY < 0 ? 1 : -1);
             }
         }, { passive: false });
-
-        async function togglePromptView(subtaskId, rowEl) {
-            // Remove any existing expanded prompt row
-            const existing = document.querySelector('.prompt-expand-row');
-            const wasActive = rowEl.classList.contains('prompt-active');
-
-            // Clean up previous state
-            document.querySelectorAll('.structure-table tr.prompt-active').forEach(r => r.classList.remove('prompt-active'));
-            if (existing) existing.remove();
-
-            // Toggle off if clicking the same row
-            if (wasActive) return;
-
-            // Mark row as active
-            rowEl.classList.add('prompt-active');
-
-            // Create expand row
-            const expandRow = document.createElement('tr');
-            expandRow.className = 'prompt-expand-row';
-            const td = document.createElement('td');
-            td.setAttribute('colspan', '5');
-            td.innerHTML = '<div class="prompt-expand-content"><div style="color: var(--text-secondary); padding: 16px;">Loading prompt...</div></div>';
-            expandRow.appendChild(td);
-            rowEl.after(expandRow);
-
-            try {
-                const response = await fetch(`${API_BASE}/api/task/${currentTaskId}/prompt/${subtaskId}`);
-                const data = await response.json();
-
-                if (data.error) {
-                    td.innerHTML = `<div class="prompt-expand-content"><div style="color: var(--accent-red); padding: 16px;">${data.message}</div></div>`;
-                    return;
-                }
-
-                td.innerHTML = `
-                    <div class="prompt-expand-content">
-                        <div class="prompt-expand-header">
-                            <span class="prompt-filename">${data.filename}</span>
-                            <button class="prompt-close-btn" onclick="togglePromptView('${subtaskId}', document.querySelector('.structure-table tr.prompt-active'))">Close</button>
-                        </div>
-                        <div class="md-rendered">${renderMarkdown(data.content)}</div>
-                    </div>
-                `;
-            } catch (error) {
-                td.innerHTML = `<div class="prompt-expand-content"><div style="color: var(--accent-red); padding: 16px;">Failed to load prompt: ${error.message}</div></div>`;
-            }
-        }
 
         function escapeHtml(text) {
             const div = document.createElement('div');
