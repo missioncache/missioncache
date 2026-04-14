@@ -3694,6 +3694,181 @@
             color: var(--text-primary);
         }
 
+        /* Settings view */
+        .settings-card {
+            max-width: 900px;
+        }
+
+        .settings-card .card-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .settings-card .card-subtitle code {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+
+        .settings-section {
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        .settings-section:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .settings-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 6px 0;
+        }
+
+        .settings-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: 0 0 14px 0;
+            line-height: 1.5;
+        }
+
+        .settings-hint code {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+
+        .settings-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .settings-row input[type="text"],
+        .settings-row input[type="email"],
+        .settings-row input[type="url"] {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .settings-row input[type="text"]:focus,
+        .settings-row input[type="email"]:focus,
+        .settings-row input[type="url"]:focus {
+            outline: none;
+            border-color: var(--accent-purple);
+        }
+
+        .settings-row .settings-row-prefix {
+            flex: 0 0 120px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .settings-row .settings-row-path {
+            flex: 0 0 280px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .settings-row label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .settings-row-delete {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+
+        .settings-row-delete:hover {
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+
+        .settings-row-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .settings-btn-primary,
+        .settings-btn-secondary {
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .settings-btn-primary {
+            background: var(--accent-purple);
+            color: white;
+            border-color: var(--accent-purple);
+        }
+
+        .settings-btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .settings-btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+        }
+
+        .settings-btn-secondary:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-purple);
+        }
+
+        .settings-save-status {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .settings-save-status.success {
+            color: var(--accent-green);
+        }
+
+        .settings-save-status.error {
+            color: var(--accent-red);
+        }
+
         /* Learning Analytics */
         .learning-analytics {
             margin-top: 32px;
@@ -4219,6 +4394,13 @@
                     </svg>
                     Auto
                 </a>
+                <a class="nav-item" data-view="settings" href="#settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    Settings
+                </a>
             </div>
             <div class="sidebar-footer">
                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
@@ -4547,6 +4729,53 @@
                     </div>
                 </div>
             </div><!-- End Auto View -->
+
+            <!-- Settings View -->
+            <div class="view" id="settingsView">
+                <div class="container">
+                    <div class="glass-card settings-card">
+                        <div class="card-header">
+                            <h2>Settings</h2>
+                            <div class="card-subtitle">Stored in <code>~/.claude/orbit-dashboard-config.json</code>. Changes take effect immediately.</div>
+                        </div>
+
+                        <!-- JIRA URL mappings -->
+                        <div class="settings-section">
+                            <h3>JIRA URL mappings</h3>
+                            <p class="settings-hint">Map JIRA key prefixes to your tracker URL. Each entry turns keys like <code>PROJ-123</code> into clickable links in task lists, project modals, and rendered markdown.</p>
+                            <div id="jiraRowsContainer" class="settings-rows"></div>
+                            <div class="settings-row-actions">
+                                <button class="settings-btn-secondary" onclick="addJiraRow()">+ Add mapping</button>
+                                <button class="settings-btn-primary" onclick="saveJiraSettings()">Save JIRA mappings</button>
+                                <span id="jiraSaveStatus" class="settings-save-status"></span>
+                            </div>
+                        </div>
+
+                        <!-- Author email allowlist -->
+                        <div class="settings-section">
+                            <h3>Author email allowlist</h3>
+                            <p class="settings-hint">List of email addresses treated as "me" when counting commits per repo. When this list is empty, the dashboard falls back to each repo's <code>git config user.email</code>.</p>
+                            <div id="emailRowsContainer" class="settings-rows"></div>
+                            <div class="settings-row-actions">
+                                <button class="settings-btn-secondary" onclick="addEmailRow()">+ Add email</button>
+                                <button class="settings-btn-primary" onclick="saveEmailSettings()">Save emails</button>
+                                <span id="emailSaveStatus" class="settings-save-status"></span>
+                            </div>
+                        </div>
+
+                        <!-- Repo display overrides -->
+                        <div class="settings-section">
+                            <h3>Repo display names and visibility</h3>
+                            <p class="settings-hint">Override the display name shown in task lists and hide repos you don't want to see in aggregations.</p>
+                            <div id="repoRowsContainer" class="settings-rows"></div>
+                            <div class="settings-row-actions">
+                                <button class="settings-btn-primary" onclick="saveRepoSettings()">Save repo overrides</button>
+                                <span id="repoSaveStatus" class="settings-save-status"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- End Settings View -->
         </main>
     </div><!-- End App Layout -->
 
@@ -5094,6 +5323,9 @@
                     .catch(e => console.error('Auto load error:', e))
                     .finally(() => hideViewLoading('autoView'));
             }
+            if (viewId === 'settings') {
+                loadSettingsData();
+            }
         }
 
         async function loadProjectsData() {
@@ -5114,6 +5346,218 @@
                 fetchHistory(historyDays)
             ]);
             dataLoaded.activity = true;
+        }
+
+        // =============================================================================
+        // Settings View
+        // =============================================================================
+        // Cached JIRA mapping used by renderMarkdown() to turn bare keys like
+        // PROJ-123 into clickable links. Populated by loadSettingsData() and by
+        // ensureJiraUrlsLoaded() (lazy loader triggered the first time any task
+        // modal opens on a page load that skipped the Settings view).
+        let cachedJiraUrls = null;
+
+        async function loadSettingsData() {
+            try {
+                const [settingsRes, reposRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/settings`),
+                    fetch(`${API_BASE}/api/repos`),
+                ]);
+                const settings = await settingsRes.json();
+                const reposData = await reposRes.json();
+                cachedJiraUrls = settings.jira_urls || {};
+                renderJiraRows(settings.jira_urls || {});
+                renderEmailRows(settings.author_emails || []);
+                renderRepoRows(reposData.repositories || [], settings.repos || {});
+            } catch (err) {
+                console.error('Failed to load settings:', err);
+            }
+        }
+
+        async function ensureJiraUrlsLoaded() {
+            if (cachedJiraUrls !== null) return cachedJiraUrls;
+            try {
+                const res = await fetch(`${API_BASE}/api/settings`);
+                const data = await res.json();
+                cachedJiraUrls = data.jira_urls || {};
+            } catch (err) {
+                cachedJiraUrls = {};
+            }
+            return cachedJiraUrls;
+        }
+
+        // Build a row via DOM APIs: no innerHTML with interpolated strings,
+        // so no XSS risk from user-provided values even without escapeHtml.
+        function buildRowInput(type, placeholder, value, extraClass = '') {
+            const input = document.createElement('input');
+            input.type = type;
+            input.placeholder = placeholder;
+            input.value = value;
+            if (extraClass) input.className = extraClass;
+            return input;
+        }
+
+        function buildRowDeleteButton() {
+            const btn = document.createElement('button');
+            btn.className = 'settings-row-delete';
+            btn.textContent = 'Remove';
+            btn.addEventListener('click', () => btn.parentElement.remove());
+            return btn;
+        }
+
+        function createJiraRow(prefix = '', url = '') {
+            const row = document.createElement('div');
+            row.className = 'settings-row';
+            row.appendChild(buildRowInput('text', 'PREFIX-', prefix, 'settings-row-prefix'));
+            row.appendChild(buildRowInput('url', 'https://your-jira/browse/', url));
+            row.appendChild(buildRowDeleteButton());
+            return row;
+        }
+
+        function renderJiraRows(mapping) {
+            const container = document.getElementById('jiraRowsContainer');
+            container.replaceChildren();
+            const entries = Object.entries(mapping);
+            if (entries.length === 0) {
+                container.appendChild(createJiraRow());
+                return;
+            }
+            for (const [prefix, url] of entries) {
+                container.appendChild(createJiraRow(prefix, url));
+            }
+        }
+
+        function addJiraRow() {
+            document.getElementById('jiraRowsContainer').appendChild(createJiraRow());
+        }
+
+        async function saveJiraSettings() {
+            const rows = document.querySelectorAll('#jiraRowsContainer .settings-row');
+            const mapping = {};
+            for (const row of rows) {
+                const inputs = row.querySelectorAll('input');
+                const prefix = inputs[0].value.trim();
+                const url = inputs[1].value.trim();
+                if (prefix && url) {
+                    mapping[prefix] = url;
+                }
+            }
+            await saveSettingsSection('/api/settings/jira', { jira_urls: mapping }, 'jiraSaveStatus');
+            cachedJiraUrls = mapping;
+        }
+
+        function createEmailRow(email = '') {
+            const row = document.createElement('div');
+            row.className = 'settings-row';
+            row.appendChild(buildRowInput('email', 'me@example.com', email));
+            row.appendChild(buildRowDeleteButton());
+            return row;
+        }
+
+        function renderEmailRows(emails) {
+            const container = document.getElementById('emailRowsContainer');
+            container.replaceChildren();
+            if (emails.length === 0) {
+                container.appendChild(createEmailRow());
+                return;
+            }
+            for (const email of emails) {
+                container.appendChild(createEmailRow(email));
+            }
+        }
+
+        function addEmailRow() {
+            document.getElementById('emailRowsContainer').appendChild(createEmailRow());
+        }
+
+        async function saveEmailSettings() {
+            const inputs = document.querySelectorAll('#emailRowsContainer input');
+            const emails = [];
+            for (const input of inputs) {
+                const val = input.value.trim();
+                if (val) emails.push(val);
+            }
+            await saveSettingsSection('/api/settings/author-emails', { author_emails: emails }, 'emailSaveStatus');
+        }
+
+        function createRepoRow(repo, override) {
+            const row = document.createElement('div');
+            row.className = 'settings-row';
+            row.dataset.path = repo.path;
+
+            const label = document.createElement('span');
+            label.className = 'settings-row-path';
+            label.title = repo.path;
+            label.textContent = repo.short_name;
+            row.appendChild(label);
+
+            const displayInput = buildRowInput('text', repo.short_name, override.display_name || '');
+            row.appendChild(displayInput);
+
+            const checkboxLabel = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = !!override.hidden;
+            checkboxLabel.appendChild(checkbox);
+            checkboxLabel.appendChild(document.createTextNode(' Hidden'));
+            row.appendChild(checkboxLabel);
+
+            return row;
+        }
+
+        function renderRepoRows(repos, overrides) {
+            const container = document.getElementById('repoRowsContainer');
+            container.replaceChildren();
+            if (repos.length === 0) {
+                const hint = document.createElement('div');
+                hint.className = 'settings-hint';
+                hint.textContent = 'No repositories tracked yet.';
+                container.appendChild(hint);
+                return;
+            }
+            for (const repo of repos) {
+                container.appendChild(createRepoRow(repo, overrides[repo.path] || {}));
+            }
+        }
+
+        async function saveRepoSettings() {
+            const rows = document.querySelectorAll('#repoRowsContainer .settings-row');
+            const overrides = {};
+            for (const row of rows) {
+                const path = row.dataset.path;
+                const displayInput = row.querySelector('input[type="text"]');
+                const hiddenInput = row.querySelector('input[type="checkbox"]');
+                const displayName = displayInput.value.trim();
+                const hidden = hiddenInput.checked;
+                // Only store rows that actually override something
+                if (displayName || hidden) {
+                    overrides[path] = {
+                        display_name: displayName || null,
+                        hidden: hidden,
+                    };
+                }
+            }
+            await saveSettingsSection('/api/settings/repos', { repos: overrides }, 'repoSaveStatus');
+        }
+
+        async function saveSettingsSection(endpoint, body, statusElId) {
+            const status = document.getElementById(statusElId);
+            status.textContent = 'Saving...';
+            status.className = 'settings-save-status';
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                status.textContent = 'Saved';
+                status.className = 'settings-save-status success';
+                setTimeout(() => { status.textContent = ''; }, 2500);
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'settings-save-status error';
+            }
         }
 
         // =============================================================================
@@ -6600,7 +7044,30 @@
 
         function renderMarkdown(content) {
             marked.setOptions({ gfm: true, breaks: true });
-            return marked.parse(content);
+            let html = marked.parse(content);
+            // Post-process bare JIRA keys (e.g. PROJ-123) into clickable links.
+            // The mapping comes from ~/.claude/orbit-dashboard-config.json via
+            // the Settings view; see cachedJiraUrls. If the cache hasn't been
+            // warmed yet (happens on the very first render before init finishes)
+            // we return the plain HTML and the next render will have links.
+            const mapping = cachedJiraUrls || {};
+            if (Object.keys(mapping).length === 0) return html;
+            // Sort prefixes longest-first so PROJ2- matches before PROJ-
+            const prefixes = Object.keys(mapping).sort((a, b) => b.length - a.length);
+            // Build one alternation with the prefixes escaped for regex safety
+            const alt = prefixes.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+            // Negative lookbehind skips keys that are already inside href=".." or
+            // just after a / (which would mean the key is already part of a URL path).
+            const re = new RegExp(`(?<!\\/)(?<!="|')\\b(${alt}\\d+)\\b`, 'g');
+            html = html.replace(re, (match, key) => {
+                for (const prefix of prefixes) {
+                    if (key.startsWith(prefix)) {
+                        return `<a href="${mapping[prefix]}${key}" class="jira-link" target="_blank">${key}</a>`;
+                    }
+                }
+                return match;
+            });
+            return html;
         }
 
         // Close modal on ESC key
@@ -6779,6 +7246,10 @@
             initNavigation();
             // Initial data load is handled by initNavigation() -> handleHashChange() -> switchView()
             updateLastRefresh();
+
+            // Warm the JIRA-mapping cache so renderMarkdown() can turn bare
+            // JIRA keys into clickable links on the first modal open.
+            ensureJiraUrlsLoaded();
 
             // Auto-refresh every 15 minutes
             setInterval(async () => {

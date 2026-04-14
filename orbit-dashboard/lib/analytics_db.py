@@ -1123,9 +1123,9 @@ class AnalyticsDB:
                         "parent_id": row["parent_id"],
                         "parent_name": row["parent_name"],
                         "jira_key": row["jira_key"],
-                        # analytics_db has no access to server.py's JIRA_URLS
-                        # mapping; callers in server.py resolve jira_url via
-                        # get_jira_url() before returning to the frontend.
+                        # jira_url is resolved by callers in server.py via
+                        # get_jira_url() so the settings-driven JIRA URLs
+                        # mapping stays the single source of truth.
                         "jira_url": None,
                         "tags": json.loads(row["tags"]) if row["tags"] else [],
                         "repo_name": row["repo_name"],

@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 # Add lib to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
+from lib import config
 from lib.analytics_db import (
     AnalyticsDB,
     get_db,
@@ -204,19 +205,6 @@ HOOKS_STATE_DB = CLAUDE_DIR / "hooks-state.db"
 # Cache TTLs
 REFRESH_INTERVAL = 30  # seconds for SSE
 
-# JIRA URL mapping: prefix -> base URL.
-#
-# Populated at runtime by the dashboard settings screen (tracked as a
-# follow-up task in the orbit-public-release project). DO NOT delete this
-# constant even when empty - `get_jira_url()` is the single resolution point
-# that will load from user-configured mappings once the settings screen ships,
-# and every task list endpoint depends on it.
-#
-# Each entry maps a JIRA key prefix (e.g. "PROJ-") to the base URL that
-# `get_jira_url()` prepends to produce a clickable link.
-JIRA_URLS: dict[str, str] = {}
-
-
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -235,15 +223,15 @@ def format_duration_ms(ms: float) -> str:
 
 
 def get_jira_url(jira_key: str | None) -> str | None:
-    """Look up the full JIRA URL for a key via the `JIRA_URLS` mapping.
+    """Look up the full JIRA URL for a key via the user-configured mapping.
 
     Returns None when `jira_key` is empty, when no prefix matches, or when
-    `JIRA_URLS` has not been populated yet (the empty-default state). Callers
-    and frontend templates must handle the None case.
+    the settings file has not defined any JIRA URLs yet. Callers and
+    frontend templates must handle the None case.
     """
     if not jira_key:
         return None
-    for prefix, base_url in JIRA_URLS.items():
+    for prefix, base_url in config.get_jira_urls().items():
         if jira_key.startswith(prefix):
             return base_url + jira_key
     return None
@@ -272,27 +260,36 @@ def get_commits_with_loc(repo_path: str, date: str) -> list[dict]:
         return []
 
     try:
-        # Filter to commits authored by the current user (per repo's git config).
-        # If user.email is unset/unreadable, return no commits. Running git log
-        # with no --author filter would report EVERY contributor's commits as
-        # the current user's LOC on a shared repo - a silent wrong-answer bug.
-        try:
-            email_result = subprocess.run(
-                ["git", "-C", repo_path, "config", "user.email"],
-                capture_output=True, text=True, timeout=2,
-            )
-            user_email = email_result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            user_email = ""
+        # Filter to commits authored by "me". Precedence:
+        #   1. Explicit allowlist from settings (config.get_author_emails())
+        #   2. Per-repo `git config user.email` fallback
+        # If neither yields an email, return no commits. Running git log with
+        # no --author filter would report EVERY contributor's commits as the
+        # current user's LOC on a shared repo - a silent wrong-answer bug.
+        allowlist = config.get_author_emails()
+        if allowlist:
+            user_emails = allowlist
+        else:
+            try:
+                email_result = subprocess.run(
+                    ["git", "-C", repo_path, "config", "user.email"],
+                    capture_output=True, text=True, timeout=2,
+                )
+                repo_email = email_result.stdout.strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                repo_email = ""
+            user_emails = [repo_email] if repo_email else []
 
-        if not user_email:
+        if not user_emails:
             return []
 
-        # Match the email wrapped in angle brackets for exact match against the
-        # "Name <email>" author line. git's --author is a regex, so we escape
-        # metachars (`.`, `+`, etc.) to avoid substring-match false positives
-        # like `me@foo.com` matching `someone@foo.com.au`.
-        author_args = ["--author", f"<{re.escape(user_email)}>"]
+        # Match each email wrapped in angle brackets for exact match against
+        # the "Name <email>" author line. git's --author is a regex, so we
+        # escape metachars and alternate with `|` to build a multi-email OR.
+        # Escaped brackets avoid substring false positives like `me@foo.com`
+        # matching `someone@foo.com.au`.
+        author_pattern = "|".join(f"<{re.escape(e)}>" for e in user_emails)
+        author_args = ["--author", author_pattern]
 
         # git log with numstat format:
         # commit_hash|timestamp
@@ -1553,6 +1550,8 @@ async def api_stats_today():
     sessions = db.get_sessions_from_sqlite(today_date)
     task_hourly = db.get_hourly_activity_from_sqlite(today_date)
     tasks_today_raw = db.get_tasks_today_from_sqlite(today_date)
+    for t in tasks_today_raw:
+        t["jira_url"] = get_jira_url(t.get("jira_key"))
 
     # Get Claude Code activity from JSONL files
     claude_hourly = get_claude_hourly_activity(today_date)
@@ -1671,6 +1670,8 @@ async def api_stats_day(
     task_hourly = db.get_hourly_activity(date)
     sessions = db.get_sessions_for_timeline(date)  # Timeline data
     tasks_raw = db.get_tasks_today_from_sqlite(date)  # Get tasks for this date
+    for t in tasks_raw:
+        t["jira_url"] = get_jira_url(t.get("jira_key"))
 
     # Get Claude Code activity from JSONL files
     claude_hourly = get_claude_hourly_activity(date)
@@ -2367,6 +2368,59 @@ async def api_auto_output_stream(
 assets_dir = Path(__file__).parent.parent / "assets"
 if assets_dir.exists():
     app.mount("/static", StaticFiles(directory=str(assets_dir)), name="static")
+
+# =============================================================================
+# Settings Endpoints
+# =============================================================================
+
+
+class JiraUrlsPayload(BaseModel):
+    jira_urls: dict[str, str]
+
+
+class AuthorEmailsPayload(BaseModel):
+    author_emails: list[str]
+
+
+class RepoOverridesPayload(BaseModel):
+    repos: dict[str, dict[str, Any]]
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """Return all Tier 1 settings in one payload.
+
+    Used by the Settings view on initial load and by the markdown
+    renderer to fetch `jira_urls` for the in-content JIRA regex pass.
+    """
+    return {
+        "jira_urls": config.get_jira_urls(),
+        "author_emails": config.get_author_emails(),
+        "repos": config.get_repo_overrides(),
+        "dashboard_url": config.get_dashboard_url(),
+    }
+
+
+@app.put("/api/settings/jira")
+async def update_jira_settings(payload: JiraUrlsPayload):
+    """Replace the JIRA prefix-to-URL mapping."""
+    config.set_jira_urls(payload.jira_urls)
+    return {"ok": True, "jira_urls": config.get_jira_urls()}
+
+
+@app.put("/api/settings/author-emails")
+async def update_author_emails(payload: AuthorEmailsPayload):
+    """Replace the author email allowlist used for commit attribution."""
+    config.set_author_emails(payload.author_emails)
+    return {"ok": True, "author_emails": config.get_author_emails()}
+
+
+@app.put("/api/settings/repos")
+async def update_repo_overrides(payload: RepoOverridesPayload):
+    """Replace the per-repo display name and visibility overrides."""
+    config.set_repo_overrides(payload.repos)
+    return {"ok": True, "repos": config.get_repo_overrides()}
+
 
 # =============================================================================
 # Dashboard & Utility Endpoints
