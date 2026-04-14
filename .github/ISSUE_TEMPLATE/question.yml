@@ -1,0 +1,42 @@
+name: Question
+description: Ask how to do something in orbit or get help with setup
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a question, please check the [README](../../README.md) and the contributor docs under [`docs/`](../../docs/) - your answer may already be there.
+
+        If you still need help, fill in the details below.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: A short description of your goal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Commands run, configuration changes, docs read. Helps avoid suggestions you've already ruled out.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        If the question is install-related or behavior-related, paste:
+        ```
+        sw_vers 2>/dev/null || uname -a
+        python3 --version
+        claude --version 2>/dev/null || echo "claude CLI not found"
+        ```
+      render: shell
+    validations:
+      required: false

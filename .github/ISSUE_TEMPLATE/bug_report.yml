@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in orbit isn't working the way it should
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the details below so the issue can be reproduced and fixed.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of what went wrong.
+      placeholder: When I did X, orbit did Y instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps that reliably reproduce the issue on a clean install.
+      placeholder: |
+        1. Run `/orbit:new my-project`
+        2. Open the dashboard at http://localhost:8787
+        3. Click on the project name
+        4. Observe: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you thought would happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Paste the output of the following commands so the install and versions are visible:
+        ```
+        sw_vers 2>/dev/null || uname -a
+        python3 --version
+        claude --version 2>/dev/null || echo "claude CLI not found"
+        cd ~/.claude/plugins/claude-orbit 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo "orbit not found at standard path"
+        ```
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Any error messages, stack traces, or dashboard console output. Feel free to scrub anything sensitive before pasting.
+      render: shell
+    validations:
+      required: false
