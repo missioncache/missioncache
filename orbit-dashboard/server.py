@@ -7,13 +7,14 @@ A FastAPI server that provides:
 2. Plans APIs - Parallel execution monitoring
 3. Auto APIs - Orbit-auto execution tracking
 
-Port: 8787
+Port: 8787 (override with ORBIT_DASHBOARD_PORT env var)
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 
 import sqlite3
@@ -2740,4 +2741,5 @@ async def stream_updates():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8787)
+    port = int(os.environ.get("ORBIT_DASHBOARD_PORT", "8787"))
+    uvicorn.run(app, host="127.0.0.1", port=port)
