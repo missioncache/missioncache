@@ -90,13 +90,56 @@ Read the key files:
 
 ### Step 4: Register Session for Time Tracking
 
-**CRITICAL:** Write pending-task.json for activity tracking AND register project in statusline via hub API:
+Write pending-task.json for activity tracking and register the project against the current Claude session so the statusline picks it up. Uses the filesystem resolver (works on any terminal, including Ghostty and cmux) with a legacy term-session fallback. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
+
+Replace `<project-name>` with the actual project name and `<repo-path>` with the repo path from project details, then run:
 
 ```bash
-echo '{"projectName": "<project-name>", "cwd": "<repo-path>", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ~/.claude/hooks/state/pending-task.json && SESSION_ID=$(curl -s "http://localhost:8787/api/hooks/term-session/${TERM_SESSION_ID:-$WT_SESSION}" --connect-timeout 1 --max-time 2 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null) && [ -z "$SESSION_ID" ] && SESSION_ID=$(sqlite3 ~/.claude/hooks-state.db "SELECT session_id FROM term_sessions WHERE term_session_id = '${TERM_SESSION_ID:-$WT_SESSION}'" 2>/dev/null); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 && echo "done" || echo "done"
-```
+PROJECT_NAME='<project-name>'
+REPO_PATH='<repo-path>'
 
-Replace `<project-name>` with the actual project name and `<repo-path>` with the repo path from project details.
+# Activity tracking pointer (read by session_start hook on next session).
+echo "{\"projectName\": \"$PROJECT_NAME\", \"cwd\": \"$REPO_PATH\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > ~/.claude/hooks/state/pending-task.json
+
+# Primary: most-recently-modified transcript in ~/.claude/projects/<sanitized-cwd>/ = current session.
+CWD_KEY=$(pwd | sed 's|/|-|g')
+SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+
+# Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal only).
+if [ -z "$SESSION_ID" ]; then
+  TERM_KEY="${TERM_SESSION_ID:-$WT_SESSION}"
+  if [ -n "$TERM_KEY" ]; then
+    SESSION_ID=$(curl -s "http://localhost:8787/api/hooks/term-session/${TERM_KEY}" --connect-timeout 1 --max-time 2 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
+    [ -z "$SESSION_ID" ] && SESSION_ID=$(TERM_KEY="$TERM_KEY" python3 -c '
+import os, sqlite3
+conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
+row = conn.execute("SELECT session_id FROM term_sessions WHERE term_session_id = ?", (os.environ["TERM_KEY"],)).fetchone()
+print(row[0] if row else "")
+' 2>/dev/null)
+  fi
+fi
+
+# Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
+if [ -n "$SESSION_ID" ]; then
+  PROJECT_JSON=$(python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
+  curl -s -X POST http://localhost:8787/api/hooks/project \
+    -H "Content-Type: application/json" \
+    -d "$PROJECT_JSON" \
+    --connect-timeout 1 --max-time 2 >/dev/null 2>&1 \
+  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
+import os, sqlite3
+conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
+conn.execute(
+    "INSERT INTO project_state (session_id, project_name, updated_at) "
+    "VALUES (?, ?, datetime(\"now\", \"localtime\")) "
+    "ON CONFLICT(session_id) DO UPDATE SET project_name = excluded.project_name, "
+    "updated_at = datetime(\"now\", \"localtime\")",
+    (os.environ["SESSION_ID"], os.environ["PROJECT_NAME"]),
+)
+conn.commit()
+' 2>/dev/null
+fi
+```
 
 Then record initial heartbeat:
 ```

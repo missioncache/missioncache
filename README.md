@@ -73,7 +73,7 @@ In Claude Code:
 
 Restart your Claude Code session. Updates flow via `/plugin update orbit@claude-orbit`.
 
-**Requirements:** Claude Code with `uvx` available on `PATH`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
+**Requirements:** Claude Code with `uvx` available on `PATH`. If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
 
 ### Full install (plugin core + dashboard + orbit-auto + statusline)
 
@@ -145,6 +145,8 @@ You pick up without reconstructing anything.
 <!-- SCREENSHOT: /orbit:go output showing reload summary -->
 
 ### Run it autonomously
+
+*Requires the full install (`./setup.sh`). If you picked the quick install, skip to "Finish it".*
 
 If your tasks are decomposed enough, hand the whole project to Orbit Auto:
 

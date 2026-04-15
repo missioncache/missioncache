@@ -68,7 +68,13 @@ for cmd in python3.11 python3.12 python3.13 python3.14 python3; do
     fi
 done
 if [[ -z "$PYTHON" ]]; then
-    fail "Python 3.11+ is required but not found"
+    warn "Python 3.11+ is required but not found"
+    detail "Tried: python3.11, python3.12, python3.13, python3.14, python3"
+    detail "Install options:"
+    detail "  macOS (Homebrew):  brew install python@3.11"
+    detail "  Ubuntu/Debian:     sudo apt install python3.11 python3.11-venv"
+    detail "  Other:             https://www.python.org/downloads/"
+    exit 1
 fi
 success "Python $($PYTHON --version 2>&1 | awk '{print $2}')"
 
@@ -77,6 +83,16 @@ if ! "$PYTHON" -m pip --version &>/dev/null; then
     fail "pip is required but not found (try: $PYTHON -m ensurepip)"
 fi
 success "pip"
+
+# uvx (needed by the plugin MCP server at runtime; dashboard/orbit-auto don't need it)
+if command -v uvx &>/dev/null; then
+    success "uvx"
+else
+    warn "uvx not found - the orbit MCP server needs it to run slash commands"
+    detail "Install with: pip install uv"
+    detail "    or:       curl -LsSf https://astral.sh/uv/install.sh | sh"
+    detail "Continuing - dashboard, orbit-auto, and statusline don't need uvx"
+fi
 
 # Claude Code CLI
 if command -v claude &>/dev/null; then
@@ -230,11 +246,12 @@ success "Core plugin installed"
 step 2 "Orbit Database"
 info "Installing orbit-db for task tracking..."
 
-"$PYTHON" -m pip install -e "$ORBIT_REPO/orbit-db" --quiet 2>/dev/null
+"$PYTHON" -m pip install -e "$ORBIT_REPO/orbit-db" --quiet
 detail "Installed orbit-db (editable mode)"
 
-# Initialize database if it doesn't exist
-"$PYTHON" -c "from orbit_db import TaskDB; TaskDB()" 2>/dev/null
+# Initialize database if it doesn't exist. This also verifies the install is importable -
+# if pip reported success but the package is broken, this will surface the real error.
+"$PYTHON" -c "from orbit_db import TaskDB; TaskDB()"
 detail "Database initialized at ~/.claude/tasks.db"
 
 success "Orbit database ready"
@@ -249,7 +266,7 @@ echo -e "  ${DIM}  - Claude Code usage statistics${NC}"
 echo ""
 
 # Install dashboard dependencies
-"$PYTHON" -m pip install -r "$ORBIT_REPO/orbit-dashboard/requirements.txt" --quiet 2>/dev/null
+"$PYTHON" -m pip install -r "$ORBIT_REPO/orbit-dashboard/requirements.txt" --quiet
 detail "Installed dashboard dependencies"
 
 # Ask about background service
@@ -336,8 +353,12 @@ echo -e "  ${DIM}  - Parallel execution with dependency-aware scheduling${NC}"
 echo -e "  ${DIM}  - Integrated with Orbit Dashboard monitoring${NC}"
 echo ""
 
-"$PYTHON" -m pip install -e "$ORBIT_REPO/orbit-auto" --quiet 2>/dev/null
+"$PYTHON" -m pip install -e "$ORBIT_REPO/orbit-auto" --quiet
 detail "Installed orbit-auto (editable mode)"
+
+# Verify the package actually imports before claiming success.
+"$PYTHON" -c "import orbit_auto"
+detail "orbit-auto package verified"
 
 if command -v orbit-auto &>/dev/null; then
     detail "CLI command available: orbit-auto"
