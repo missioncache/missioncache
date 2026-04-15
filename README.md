@@ -28,6 +28,7 @@ Orbit is the project layer for [Claude Code](https://claude.ai/code). Every orbi
 
 - [Why Orbit](#why-orbit)
 - [Install](#install)
+- [Upgrading](#upgrading)
 - [Your First Project](#your-first-project)
 - [Features](#features)
 - [How Orbit compares](#how-orbit-compares)
@@ -58,26 +59,11 @@ Orbit exists because no single existing tool integrates all three. See [How Orbi
 
 ## Install
 
-Orbit ships in two flavors. Pick based on whether you also want the dashboard, the autonomous execution CLI, and the statusline.
+Orbit ships in two flavors. Pick based on whether you want the full workbench experience (recommended) or just the plugin core.
 
-### Quick install (plugin core)
+### Full install (recommended)
 
-This gives you the Claude Code integration: slash commands, MCP tools, lifecycle hooks, and the orbit rule file. It is enough to plan projects, track them across sessions, and resume them via `/orbit:go`. It does **not** include the dashboard, `orbit-auto` CLI, or statusline.
-
-In Claude Code:
-
-```
-/plugin marketplace add tomerbr1/claude-orbit
-/plugin install orbit@claude-orbit
-```
-
-Restart your Claude Code session. Updates flow via `/plugin update orbit@claude-orbit`.
-
-**Requirements:** Claude Code with `uvx` available on `PATH`. If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
-
-### Full install (plugin core + dashboard + orbit-auto + statusline)
-
-This clones the repo and runs an interactive setup script that also installs the local web dashboard, the `orbit-auto` CLI, and the statusline. Pick this if you want to visualize your time breakdown, run autonomous task execution with live streaming, or have orbit's multi-line status block at the bottom of Claude Code.
+Gets you everything: the plugin core (slash commands, MCP tools, hooks, rules), the local dashboard at `localhost:8787`, the `orbit-auto` CLI for autonomous execution, and the multi-line statusline. This is the experience Orbit was designed to deliver.
 
 ```bash
 git clone https://github.com/tomerbr1/claude-orbit.git
@@ -93,9 +79,78 @@ The interactive script will:
 4. `pip install -e` the `orbit-auto` CLI
 5. Optionally install the statusline and configure health monitoring
 
-**Requirements:** Python 3.11+, Claude Code CLI, `pip`.
+**Requirements:** Python 3.11+, Claude Code CLI, `pip`, and `uvx` on your `PATH` (needed by the plugin's MCP server). If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 
-**Which should I pick?** Start with the quick install if you just want the project workbench. Upgrade to the full install any time - the two paths coexist, and the full install's `setup.sh` will detect an existing plugin install and only add the missing extras.
+### Plugin-only install
+
+If you only want the plugin core (slash commands, MCP tools, lifecycle hooks, orbit rules) and don't need the dashboard, `orbit-auto` CLI, or statusline, you can install Orbit as a pure Claude Code plugin via the marketplace.
+
+In Claude Code:
+
+```
+/plugin marketplace add tomerbr1/claude-orbit
+/plugin install orbit@claude-orbit
+```
+
+Restart your Claude Code session.
+
+**Requirements:** Claude Code with `uvx` available on `PATH`. If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
+
+**What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.claude/tasks.db`, and all 30+ MCP tools.
+
+## Upgrading
+
+### Full install
+
+The full install points every component at your git clone via symlinks and editable pip installs, so most of an upgrade is just `git pull`:
+
+```bash
+cd claude-orbit
+git pull
+```
+
+That alone refreshes `orbit-db`, `orbit-auto`, and the statusline immediately. Two components need an extra step:
+
+**Plugin code** (commands, hooks, MCP server, templates, rules) - Claude Code caches plugin content, so you need to refresh the cache and restart your session:
+
+```bash
+claude plugins install orbit@local
+```
+
+Then restart Claude Code.
+
+**Dashboard** (server code or dependencies) - the background service is a running Python process and needs to be restarted to pick up new code. If the dashboard's `requirements.txt` changed, reinstall dependencies first.
+
+On macOS:
+```bash
+python3 -m pip install -r orbit-dashboard/requirements.txt   # if deps changed
+launchctl unload ~/Library/LaunchAgents/com.orbit.dashboard.plist
+launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist
+```
+
+On Linux:
+```bash
+python3 -m pip install -r orbit-dashboard/requirements.txt   # if deps changed
+systemctl --user restart orbit-dashboard
+```
+
+**One-command alternative:** re-running `./setup.sh` is idempotent - it detects existing installs, refreshes the plugin cache, and restarts the dashboard service for you. It's the same interactive flow as the initial install, just heavier than the manual steps above.
+
+```bash
+cd claude-orbit
+git pull
+./setup.sh
+```
+
+### Plugin-only install
+
+From Claude Code:
+
+```
+/plugin update orbit@claude-orbit
+```
+
+Restart your Claude Code session.
 
 ## Your First Project
 
