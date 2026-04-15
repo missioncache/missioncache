@@ -85,12 +85,18 @@ PROJECTS = [
         "jira_key": "ENG-4821",
         "priority": 2,
         "branch": "feat/api-gateway-rewrite",
-        "description": "Replace Express-based API gateway with Fastify to cut p99 latency",
+        "description": "Replace Express-based API gateway with Fastify to cut p99 latency by 30-40%",
+        "remaining": "Write path migration, staging rollout, then HTTP/2 follow-up",
         "started_days_ago": 8,
         "last_active_hours_ago": 2,
         "pattern": "heavy",
         "tasks_total": 12,
         "tasks_done": 7,
+        # Dependency graph as {task_num: [deps]}. Tasks not listed have no deps.
+        "prompt_deps": {
+            2: [1], 3: [2], 4: [2], 5: [3, 4], 6: [5],
+            7: [6], 8: [7], 9: [8], 10: [9], 11: [10], 12: [11],
+        },
     },
     {
         "name": "auth-refactor",
@@ -100,11 +106,16 @@ PROJECTS = [
         "priority": 1,
         "branch": "feat/auth-refactor",
         "description": "Split monolithic auth module into JWT issuance and session services",
+        "remaining": "Extract session module, update 3 legacy routes, drop shim",
         "started_days_ago": 1,
         "last_active_hours_ago": 1,
         "pattern": "fresh",
         "tasks_total": 8,
         "tasks_done": 3,
+        "prompt_deps": {
+            2: [1], 3: [1], 4: [2, 3], 5: [4],
+            6: [4], 7: [5, 6], 8: [7],
+        },
     },
     {
         "name": "docs-site-migration",
@@ -114,11 +125,15 @@ PROJECTS = [
         "priority": None,
         "branch": "migration/to-vitepress",
         "description": "Migrate public docs site from Docusaurus to VitePress",
+        "remaining": "Port remaining 11 MDX pages, wire Algolia, test URL redirects",
         "started_days_ago": 5,
         "last_active_hours_ago": 8,
         "pattern": "moderate",
         "tasks_total": 6,
         "tasks_done": 4,
+        "prompt_deps": {
+            2: [1], 3: [1], 4: [2, 3], 5: [4], 6: [5],
+        },
     },
     {
         "name": "kafka-consumer-fix",
@@ -128,12 +143,16 @@ PROJECTS = [
         "priority": 3,
         "branch": "fix/consumer-rebalance",
         "description": "Fix consumer rebalance storm during broker restart",
+        "remaining": "Finish static-membership rollout + 3-broker-restart validation",
         "started_days_ago": 2,
         "last_active_hours_ago": 30,
         "pattern": "scattered",
         "tasks_total": 4,
         "tasks_done": 1,
         "has_auto_run": True,
+        "prompt_deps": {
+            2: [1], 3: [1], 4: [2, 3],
+        },
     },
     {
         "name": "circuit-breaker-tuning",
@@ -143,6 +162,7 @@ PROJECTS = [
         "priority": None,
         "branch": "fix/circuit-breaker",
         "description": "Tune circuit breaker thresholds for upstream timeouts",
+        "summary": "Shipped. p99 downstream errors dropped from 2.1% to 0.4%; per-upstream breaker adopted as default",
         "started_days_ago": 28,
         "completed_days_ago": 25,
         "pattern": "completed-short",
@@ -157,6 +177,7 @@ PROJECTS = [
         "priority": None,
         "branch": "poc/feature-store",
         "description": "Evaluate Feast vs Tecton for offline/online feature parity",
+        "summary": "Recommended Feast. Lower integration cost, serving latency within budget (15ms p99)",
         "started_days_ago": 14,
         "completed_days_ago": 7,
         "pattern": "completed-long",
@@ -498,8 +519,15 @@ Feast for phase 1. Revisit Tecton if serving latency becomes a bottleneck.
 
 
 # Tasks files - hierarchical checklist
-def make_tasks_file(name: str, total: int, done: int) -> str:
-    """Generate a tasks.md with `done` items checked out of `total`."""
+def make_tasks_file(project: dict) -> str:
+    """Generate a tasks.md from a PROJECTS entry.
+
+    Emits a `**Remaining:**` metadata line when the project has a `remaining`
+    field; the dashboard parses it into the Active Projects progress column.
+    """
+    name = project["name"]
+    total = project["tasks_total"]
+    done = project["tasks_done"]
     tasks_by_project = {
         "api-gateway-rewrite": [
             "Audit Express gateway - routes, middleware, custom handlers",
@@ -561,6 +589,12 @@ def make_tasks_file(name: str, total: int, done: int) -> str:
     items = tasks_by_project[name]
     assert len(items) == total, f"{name}: task list length {len(items)} != {total}"
     lines = [f"# {name.replace('-', ' ').title()} - Tasks", ""]
+    if project.get("remaining"):
+        lines.append(f"**Remaining:** {project['remaining']}")
+        lines.append("")
+    if project.get("summary"):
+        lines.append(f"**Summary:** {project['summary']}")
+        lines.append("")
     for i, item in enumerate(items, start=1):
         mark = "x" if i <= done else " "
         lines.append(f"- [{mark}] {i}. {item}")
@@ -857,18 +891,14 @@ def seed_auto_execution(
     log_entries = [
         (0, None, None, "info",    "Starting orbit-auto execution on kafka-consumer-fix"),
         (2, None, None, "info",    "Parsed 4 subtasks from tasks.md"),
-        (3, None, None, "info",    "Dependency graph: 4.1 -> 4.2, 4.3 -> 4.4"),
+        (3, None, None, "info",    "Dependency graph: 1 -> 2, 1 -> 3, {2,3} -> 4"),
         (5, None, None, "info",    "Dispatching 2 workers"),
-        (8, 1, "4.1",  "info",    "Worker 1 picked up subtask 4.1 (Reproduce the rebalance storm)"),
-        (9, 2, "4.3",  "info",    "Worker 2 picked up subtask 4.3 (Design Deployment path)"),
-        (180, 1, "4.1", "success", "Subtask 4.1 complete (3m 0s, 8 tool calls)"),
-        (190, 1, "4.2", "info",    "Worker 1 picked up subtask 4.2 (Switch to static membership)"),
-        (420, 2, "4.3", "success", "Subtask 4.3 complete (6m 51s, 14 tool calls)"),
-        (445, 2, "4.4", "info",    "Worker 2 picked up subtask 4.4 (3-restart validation), blocked on 4.2"),
-        (445, 2, "4.4", "warn",    "Subtask 4.4 waiting for dependency 4.2"),
-        (1400, 1, "4.2", "success", "Subtask 4.2 complete (20m 10s, 31 tool calls)"),
-        (1410, 2, "4.4", "info",    "Dependency 4.2 resolved, resuming 4.4"),
-        (2400, 2, "4.4", "success", "Subtask 4.4 complete (16m 30s, 19 tool calls)"),
+        (8, 1, "2",  "info",    "Worker 1 picked up subtask 2 (Switch to static membership)"),
+        (9, 2, "3",  "info",    "Worker 2 picked up subtask 3 (Design Deployment path)"),
+        (180, 1, "2", "success", "Subtask 2 complete (3m 0s, 8 tool calls)"),
+        (420, 2, "3", "success", "Subtask 3 complete (6m 51s, 14 tool calls)"),
+        (425, 1, "4", "info",    "Worker 1 picked up subtask 4 (3-broker-restart validation)"),
+        (2400, 1, "4", "success", "Subtask 4 complete (33m 0s, 19 tool calls)"),
         (2405, None, None, "info",    "All subtasks complete"),
         (2520, None, None, "success", "Execution finished in 42m 00s"),
     ]
@@ -888,17 +918,37 @@ def seed_auto_execution(
 # =============================================================================
 
 def write_orbit_files(demo_home: Path) -> None:
-    """Create plan.md, context.md, tasks.md under $HOME/.claude/orbit/<status>/<name>/."""
+    """Create plan.md, context.md, tasks.md, and prompt files under
+    $HOME/.claude/orbit/<status>/<name>/.
+    """
     for p in PROJECTS:
         status_dir = "active" if p["status"] == "active" else "completed"
         task_dir = demo_home / ".claude" / "orbit" / status_dir / p["name"]
         task_dir.mkdir(parents=True, exist_ok=True)
 
         (task_dir / f"{p['name']}-plan.md").write_text(PLANS[p["name"]])
-        (task_dir / f"{p['name']}-context.md").write_text(CONTEXTS[p["name"]])
-        (task_dir / f"{p['name']}-tasks.md").write_text(
-            make_tasks_file(p["name"], p["tasks_total"], p["tasks_done"])
+
+        # Inject a `## Description` section after the H1 title so the dashboard's
+        # parse_orbit_progress can populate the Active Projects description column.
+        ctx_lines = CONTEXTS[p["name"]].splitlines()
+        ctx = "\n".join(
+            ctx_lines[:2] + ["## Description", "", p["description"], ""] + ctx_lines[2:]
         )
+        (task_dir / f"{p['name']}-context.md").write_text(ctx)
+
+        (task_dir / f"{p['name']}-tasks.md").write_text(make_tasks_file(p))
+
+        # Prompt files with YAML frontmatter drive the auto DAG edges.
+        # Without them the D3 force simulation has no forceLink and nodes scatter.
+        deps_map = p.get("prompt_deps") or {}
+        if deps_map:
+            prompts_dir = task_dir / "prompts"
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+            for task_num in range(1, p["tasks_total"] + 1):
+                deps = deps_map.get(task_num, [])
+                (prompts_dir / f"task-{task_num:02d}-prompt.md").write_text(
+                    f"---\ndepends_on: {json.dumps(deps)}\n---\n"
+                )
 
 
 # =============================================================================
@@ -933,7 +983,8 @@ def main() -> None:
         print(f"  seeded {hb_count} heartbeats across {sess_count} sessions")
 
         seed_auto_execution(conn, task_ids)
-        print("  seeded 1 orbit-auto execution with 16 log lines")
+        log_count = conn.execute("SELECT count(*) FROM auto_execution_logs").fetchone()[0]
+        print(f"  seeded 1 orbit-auto execution with {log_count} log lines")
 
         seed_claude_jsonl_files(conn, demo_home, task_ids)
         tracked = sum(1 for e in CLAUDE_SESSIONS if "task" in e)
