@@ -699,11 +699,11 @@ class AnalyticsDB:
             # Get stats
             today = datetime.now().strftime("%Y-%m-%d")
             result["sessions_today"] = sqlite_conn.execute(
-                "SELECT COUNT(*) FROM sessions WHERE DATE(start_time, 'localtime') = ?",
+                "SELECT COUNT(*) FROM sessions WHERE DATE(start_time) = ?",
                 (today,),
             ).fetchone()[0]
             result["heartbeats_today"] = sqlite_conn.execute(
-                "SELECT COUNT(*) FROM heartbeats WHERE DATE(timestamp, 'localtime') = ?",
+                "SELECT COUNT(*) FROM heartbeats WHERE DATE(timestamp) = ?",
                 (today,),
             ).fetchone()[0]
             result["total_sessions"] = sqlite_conn.execute(
@@ -907,15 +907,13 @@ class AnalyticsDB:
 
             today = datetime.now().strftime("%Y-%m-%d")
 
-            # Count today's sessions (convert UTC to local time for comparison)
             sessions_today = conn.execute(
-                "SELECT COUNT(*) FROM sessions WHERE DATE(start_time, 'localtime') = ?",
+                "SELECT COUNT(*) FROM sessions WHERE DATE(start_time) = ?",
                 (today,),
             ).fetchone()[0]
 
-            # Count today's heartbeats (convert UTC to local time for comparison)
             heartbeats_today = conn.execute(
-                "SELECT COUNT(*) FROM heartbeats WHERE DATE(timestamp, 'localtime') = ?",
+                "SELECT COUNT(*) FROM heartbeats WHERE DATE(timestamp) = ?",
                 (today,),
             ).fetchone()[0]
 
@@ -951,15 +949,15 @@ class AnalyticsDB:
             cursor = conn.execute(
                 """SELECT s.id, s.task_id, t.name as task_name, t.full_path,
                           t.parent_id, p.name as parent_name,
-                          datetime(s.start_time, 'localtime') as start_time,
-                          datetime(s.end_time, 'localtime') as end_time,
+                          datetime(s.start_time) as start_time,
+                          datetime(s.end_time) as end_time,
                           s.duration_seconds,
                           r.short_name as repo_name
                    FROM sessions s
                    JOIN tasks t ON s.task_id = t.id
                    LEFT JOIN tasks p ON t.parent_id = p.id
                    LEFT JOIN repositories r ON t.repo_id = r.id
-                   WHERE DATE(s.start_time, 'localtime') = ?
+                   WHERE DATE(s.start_time) = ?
                    ORDER BY s.start_time""",
                 (date,),
             )
@@ -1014,11 +1012,11 @@ class AnalyticsDB:
                 date = datetime.now().strftime("%Y-%m-%d")
 
             cursor = conn.execute(
-                """SELECT CAST(strftime('%H', start_time, 'localtime') AS INTEGER) as hour,
+                """SELECT CAST(strftime('%H', start_time) AS INTEGER) as hour,
                           SUM(duration_seconds) as total_seconds,
                           COUNT(*) as session_count
                    FROM sessions
-                   WHERE DATE(start_time, 'localtime') = ?
+                   WHERE DATE(start_time) = ?
                    GROUP BY hour
                    ORDER BY hour""",
                 (date,),
@@ -1066,7 +1064,7 @@ class AnalyticsDB:
                    JOIN tasks t ON s.task_id = t.id
                    LEFT JOIN tasks p ON t.parent_id = p.id
                    LEFT JOIN repositories r ON t.repo_id = r.id
-                   WHERE DATE(s.start_time, 'localtime') = ?
+                   WHERE DATE(s.start_time) = ?
                    GROUP BY t.id""",
                 (date,),
             )
@@ -1082,7 +1080,7 @@ class AnalyticsDB:
                    FROM task_updates u
                    JOIN tasks t ON u.task_id = t.id
                    LEFT JOIN tasks p ON t.parent_id = p.id
-                   WHERE DATE(u.created_at, 'localtime') = ?
+                   WHERE DATE(u.created_at) = ?
                      AND t.type = 'non-coding'
                    GROUP BY t.id""",
                 (date,),
