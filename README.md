@@ -214,7 +214,7 @@ orbit-auto auth-refactor --dry-run    # show execution plan without running
 
 Auto runs each task in a separate Claude Code invocation, respects task dependencies, and streams iteration events to the dashboard.
 
-<!-- SCREENSHOT: orbit-auto execution view on the dashboard with DAG -->
+![Orbit Auto dashboard showing the task dependency DAG and live execution log](assets/dashboard_auto_screenshot.jpg)
 
 ### Finish it
 
@@ -242,19 +242,21 @@ Orbit's `PreCompact` hook auto-saves project state before Claude Code compacts t
 
 A FastAPI + vanilla JS single-page app at `localhost:8787`. Shows active and completed projects with time tracking, per-repo breakdowns, hourly heatmaps, a weekly activity view, Orbit Auto execution monitoring with DAG visualization, and untracked Claude Code sessions alongside the tracked ones. Dual-database under the hood: SQLite for writes, DuckDB for analytics reads.
 
-<!-- SCREENSHOT: dashboard home with project list and time analytics -->
+![Dashboard Projects view with active and completed projects, descriptions, progress, and time tracking](assets/dashboard_projects_screenshot.jpg)
+
+![Dashboard Activity view with today's sessions, hourly chart, weekly heatmap, and repository breakdown](assets/dashboard_activity_screenshot.jpg)
 
 ### Autonomous execution with Orbit Auto
 
 A standalone CLI that runs a project's tasks to completion in parallel. DAG scheduling respects task dependencies so dependent work waits for its prerequisites. Default eight workers, configurable with `-w N` or `--sequential`. Every iteration is logged with a timestamp, the task, the agent that ran it, and the outcome, and streamed live to the dashboard.
 
-<!-- SCREENSHOT: orbit-auto execution view with iteration log -->
+![Orbit Auto execution view with DAG and streaming iteration log](assets/dashboard_auto_screenshot.jpg)
 
 ### Rich multi-line statusline
 
 An optional terminal display showing the active project with progress fraction, git branch and status, Claude model, context usage, API limits, and last action time. OSC 8 hyperlinks open directly into the dashboard's project view from your terminal. Configurable, dark-mode friendly, low-latency.
 
-<!-- SCREENSHOT: statusline in iTerm showing project + git + model + usage -->
+![Orbit multi-line statusline showing project, git, model, tokens, session limits, and edits](assets/statusline_screenshot.jpg)
 
 ### A full MCP tool suite for Claude
 
