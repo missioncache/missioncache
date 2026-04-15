@@ -7338,7 +7338,7 @@
                 <div class="auto-project-card ${selectedAutoProject === project.name ? 'selected' : ''}"
                      onclick="selectAutoProject('${project.name}')">
                     <div class="auto-project-name">${project.name}</div>
-                    <div class="auto-project-repo">${project.repo}</div>
+                    <div class="auto-project-repo">${project.repo_name || ''}</div>
                     <div class="auto-project-progress">
                         <div class="auto-progress-bar">
                             <div class="auto-progress-fill" style="width: ${project.progress.percent}%"></div>

@@ -1965,9 +1965,11 @@ async def api_auto_projects():
     - Task list with status (completed/pending/wait)
     - Dependencies parsed from prompts (if available)
     - Graph data for D3.js visualization
+    - Repo short_name (looked up from the task DB)
     """
     projects = []
     active_dir = ORBIT_ROOT / "active"
+    db = get_sqlite_db()
 
     if active_dir.exists():
         for project_dir in active_dir.iterdir():
@@ -2005,6 +2007,14 @@ async def api_auto_projects():
             if prompts_dir.exists():
                 links = _parse_prompt_dependencies(prompts_dir)
 
+            # Look up repo short_name from the task DB
+            repo_name = None
+            task_row = db.get_task_by_name(project_dir.name)
+            if task_row and task_row.repo_id:
+                repo = db.get_repo(task_row.repo_id)
+                if repo:
+                    repo_name = repo.short_name
+
             # Calculate progress
             completed = sum(1 for t in tasks if t["completed"])
             total = len(tasks)
@@ -2013,6 +2023,7 @@ async def api_auto_projects():
                 {
                     "name": project_dir.name,
                     "path": str(project_dir),
+                    "repo_name": repo_name,
                     "progress": {
                         "completed": completed,
                         "total": total,
