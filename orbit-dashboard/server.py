@@ -1062,8 +1062,11 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
                     if len(result["description"]) > 100:
                         result["description"] = result["description"][:97] + "..."
 
-                # Extract target repo from context metadata or description
-                # Priority 1: Explicit **Target Repo:** or **Repo:** field
+                # Extract target repo from an explicit **Target Repo:** or **Repo:**
+                # field in context. The previous fallback that scanned for any
+                # `(owner/repo)` parenthetical was removed because it false-matched
+                # on prose like "(8/10)" or "(Sunday/Monday)" and displayed those
+                # fragments as repo names in the dashboard.
                 repo_field = re.search(
                     r"\*\*(?:Target\s+)?Repo:\*\*\s*(.+?)(?:\n|$)",
                     ctx_content,
@@ -1076,16 +1079,6 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
                         result["target_repo"] = repo_val.split("/")[-1]
                     else:
                         result["target_repo"] = repo_val
-
-                # Priority 2: Extract owner/repo in parentheses from context
-                # e.g. "(myorg/myrepo)"
-                if not result["target_repo"]:
-                    gh_repo = re.search(
-                        r"\([\w.-]+/([\w][\w.-]+)\)",
-                        ctx_content,
-                    )
-                    if gh_repo:
-                        result["target_repo"] = gh_repo.group(1)
 
             except Exception:
                 pass
