@@ -7,7 +7,7 @@ from pydantic import Field
 
 from .app import mcp
 from .db import get_db, repo_to_dict
-from .errors import OrbitError, TaskNotFoundError
+from .errors import ErrorCode, OrbitError, TaskNotFoundError, ValidationError
 from .helpers import _validate_path
 from .models import HeartbeatResult, ProcessHeartbeatsResult
 
@@ -181,6 +181,78 @@ async def add_repo(
         return e.to_dict()
     except Exception as e:
         logger.exception("Error adding repo")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def set_task_repo(
+    repo_path: Annotated[str, Field(description="New repository path for the task")],
+    task_id: Annotated[int | None, Field(description="Task ID")] = None,
+    task_name: Annotated[
+        str | None, Field(description="Task name (alternative to task_id)")
+    ] = None,
+) -> dict:
+    """
+    Reassign a task to a different repository.
+
+    Use this when a task was created with the wrong repo (for example, when
+    /orbit:new captured the wrong working directory) or when the project's
+    source of truth has moved. The repo at `repo_path` must already be
+    registered - call add_repo first if it is not.
+
+    Provide either task_id OR task_name.
+    """
+    db = get_db()
+
+    try:
+        # Resolve task by id or name
+        if task_id:
+            task = db.get_task(task_id)
+            if not task:
+                raise TaskNotFoundError(task_id)
+        elif task_name:
+            task = db.get_task_by_name(task_name)
+            if not task:
+                raise TaskNotFoundError(task_name)
+        else:
+            raise ValidationError("Provide task_id or task_name")
+
+        # Resolve repo by path
+        _validate_path(repo_path, "repo_path")
+        repo = db.get_repo_by_path(repo_path)
+        if not repo:
+            raise OrbitError(
+                ErrorCode.REPO_NOT_FOUND,
+                f"Repository at {repo_path!r} is not registered. Call add_repo first.",
+                {"repo_path": repo_path},
+            )
+
+        previous_repo_id = task.repo_id
+        if previous_repo_id == repo.id:
+            return {
+                "task_id": task.id,
+                "task_name": task.name,
+                "repo_id": repo.id,
+                "repo_short_name": repo.short_name,
+                "changed": False,
+                "message": "Task is already assigned to that repo",
+            }
+
+        db.update_task_repo(task.id, repo.id)
+
+        return {
+            "task_id": task.id,
+            "task_name": task.name,
+            "previous_repo_id": previous_repo_id,
+            "repo_id": repo.id,
+            "repo_short_name": repo.short_name,
+            "changed": True,
+        }
+
+    except OrbitError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error setting task repo")
         return {"error": True, "message": str(e)}
 
 

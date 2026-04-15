@@ -44,15 +44,47 @@ Ask the user to pick a project by number or name.
 
 ## Repo Mismatch Check
 
-**CRITICAL:** After the user selects a project, compare the project's `repo_path` with the current working directory.
+**CRITICAL:** After the user selects a project, compare the project's `repo_path` with the current working directory (use `git rev-parse --show-toplevel` to get the cwd's git root).
 
-If they differ:
+If they differ, ask the user to choose how to proceed via `AskUserQuestion`:
+
 ```
-This project belongs to <repo_name> (<repo_path>).
-You're currently in <cwd>. Continue here anyway?
+AskUserQuestion(questions=[{
+    "question": "This project is recorded as belonging to <repo_name> (<repo_path>), but you're currently in <cwd_repo>. How should I handle this?",
+    "header": "Repo Mismatch",
+    "multiSelect": false,
+    "options": [
+        {
+            "label": "Continue here for this session only",
+            "description": "Resume the project without changing the recorded repo. The mismatch warning will fire again next time."
+        },
+        {
+            "label": "Update the project's repo to match my current location",
+            "description": "Rewrite the task's repo association in the database so future /orbit:go calls work cleanly. Use this when the project was created with the wrong repo (e.g. /orbit:new captured the wrong cwd) or when the project's source of truth has moved."
+        },
+        {
+            "label": "Cancel",
+            "description": "Abort /orbit:go without resuming."
+        }
+    ]
+}])
 ```
 
-Wait for user confirmation before proceeding. This prevents accidentally working on a project in the wrong repo context.
+**If the user picks "Update the project's repo to match my current location":**
+
+Call the `set_task_repo` MCP tool with the current repo path:
+```
+mcp__plugin_orbit_pm__set_task_repo(
+    task_id=<task_id>,
+    repo_path="<cwd git root from git rev-parse --show-toplevel>"
+)
+```
+
+If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo first via `add_repo`, then retry. Otherwise proceed with the resume flow as if there was no mismatch.
+
+**If the user picks "Cancel":** stop and do nothing.
+
+**If the user picks "Continue here for this session only":** proceed with the resume flow without touching the database.
 
 ## Workflow
 
@@ -203,3 +235,4 @@ Ready to continue. What would you like to work on?
 | `mcp__plugin_orbit_pm__get_orbit_files` | Get file paths |
 | `mcp__plugin_orbit_pm__get_orbit_progress` | Get checklist progress |
 | `mcp__plugin_orbit_pm__record_heartbeat` | Start time tracking |
+| `mcp__plugin_orbit_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
