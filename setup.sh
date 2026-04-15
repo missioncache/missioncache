@@ -249,10 +249,11 @@ info "Installing orbit-db for task tracking..."
 "$PYTHON" -m pip install -e "$ORBIT_REPO/orbit-db" --quiet
 detail "Installed orbit-db (editable mode)"
 
-# Initialize database if it doesn't exist. This also verifies the install is importable -
-# if pip reported success but the package is broken, this will surface the real error.
-"$PYTHON" -c "from orbit_db import TaskDB; TaskDB()"
-detail "Database initialized at ~/.claude/tasks.db"
+# Initialize the database. `TaskDB()` alone is lazy and does not touch the filesystem -
+# the schema is only created when a connection is first needed. `python -m orbit_db init`
+# calls `TaskDB().initialize()` which runs SCHEMA_SQL and actually creates the file.
+# This also verifies the package is importable and the schema runs cleanly.
+"$PYTHON" -m orbit_db init
 
 success "Orbit database ready"
 
@@ -373,7 +374,11 @@ step 5 "Pre-build MCP Server"
 info "Building MCP server virtual environment..."
 
 if command -v uvx &>/dev/null; then
-    uvx --from "$ORBIT_REPO/mcp-server" --with "$ORBIT_REPO/orbit-db" mcp-orbit --help &>/dev/null 2>&1 && detail "MCP server venv built" || detail "MCP server will build on first use"
+    # `</dev/null` is critical: mcp-orbit is a FastMCP server that reads stdin on startup,
+    # and without this redirect the subprocess inherits and consumes setup.sh's stdin,
+    # breaking any subsequent `read` prompts in Step 6/7 (and producing "press enter twice"
+    # symptoms on a real interactive TTY).
+    uvx --from "$ORBIT_REPO/mcp-server" --with "$ORBIT_REPO/orbit-db" mcp-orbit --help </dev/null &>/dev/null 2>&1 && detail "MCP server venv built" || detail "MCP server will build on first use"
 else
     detail "uvx not found - MCP server will build on first use via Claude Code"
 fi
@@ -408,10 +413,16 @@ if ask_yn "Would you like to install the statusline?" "Y"; then
     done
     detail "Created symlinks in ~/.claude/scripts/"
 
-    # Update settings.json with statusline command
+    # Update settings.json with statusline command.
+    # Create an empty settings.json if the user has never run Claude Code yet - both this
+    # write and the health-services write below assume the file exists.
     SETTINGS="$HOME/.claude/settings.json"
-    if [[ -f "$SETTINGS" ]]; then
-        "$PYTHON" -c "
+    if [[ ! -f "$SETTINGS" ]]; then
+        mkdir -p "$(dirname "$SETTINGS")"
+        echo "{}" > "$SETTINGS"
+        detail "Created empty settings.json"
+    fi
+    "$PYTHON" -c "
 import json
 with open('$SETTINGS') as f:
     d = json.load(f)
@@ -422,8 +433,7 @@ d['statusLine'] = {
 with open('$SETTINGS', 'w') as f:
     json.dump(d, f, indent=2)
 "
-        detail "Updated settings.json with statusline command"
-    fi
+    detail "Updated settings.json with statusline command"
 
     # Health monitoring configuration
     echo ""
