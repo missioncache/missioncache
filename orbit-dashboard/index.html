@@ -3539,10 +3539,14 @@
             overflow: auto;
             border-radius: 8px;
             position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .structure-graph-viewport svg {
             display: block;
+            margin: auto;
             transform-origin: top left;
             transition: transform 0.15s ease;
         }
@@ -4045,9 +4049,19 @@
             background: var(--accent-orange);
         }
 
-        #autoGraphSvg {
-            background: var(--bg-secondary);
+        .auto-graph-viewport {
+            max-height: 550px;
+            overflow: auto;
             border-radius: 8px;
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #autoGraphSvg {
+            display: block;
+            margin: auto;
         }
 
         /* D3 Graph Node Styles */
@@ -4688,7 +4702,9 @@
                                 <span class="legend-item"><span class="legend-dot wait"></span> Wait</span>
                             </div>
                         </div>
-                        <svg id="autoGraphSvg" width="100%" height="500" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet"></svg>
+                        <div class="auto-graph-viewport">
+                            <svg id="autoGraphSvg"></svg>
+                        </div>
                     </div>
 
                     <!-- Execution Output Viewer -->
@@ -6878,70 +6894,78 @@
             }
         }
 
-        function renderStructureGraph(graphData) {
-            const svg = d3.select('#structureGraphSvg');
-            const container = document.querySelector('.structure-graph-section');
-            const width = container.offsetWidth - 32;
+        // =============================================================================
+        // Shared DAG layout: deterministic horizontal layered layout.
+        // Used by both the Orbit Auto tab graph and the Projects Structure modal.
+        // =============================================================================
+        function renderLayeredDAG(svgSelector, graphData, options = {}) {
+            const { enableHighlight = false, minHeight = 300 } = options;
+
+            const layerSpacing = 100;
+            const nodeSpacing = 60;
+            const nodeRadius = 15;
+            const padding = { top: 40, bottom: 40, left: 40, right: 40 };
+
+            const svg = d3.select(svgSelector);
+            svg.selectAll('*').remove();
+
             const { nodes, links } = graphData;
-
-            // Create node map for quick lookup
             const nodeMap = new Map(nodes.map(n => [n.id, n]));
+            const validLinks = links
+                .filter(l => nodeMap.has(l.source) && nodeMap.has(l.target))
+                .map(l => ({ source: l.source, target: l.target }));
 
-            // Filter to valid links only
-            const validLinks = links.filter(l => nodeMap.has(l.source) && nodeMap.has(l.target));
-
-            // Build adjacency for topological sort (source blocks target)
-            const inDegree = new Map(nodes.map(n => [n.id, 0]));
-            const children = new Map(nodes.map(n => [n.id, []]));
-            for (const l of validLinks) {
-                inDegree.set(l.target, (inDegree.get(l.target) || 0) + 1);
-                children.get(l.source)?.push(l.target);
-            }
-
-            // Assign layers via longest-path (top-down)
+            // Longest-path layering with visited-set cycle guard. On a detected
+            // cycle we return depth 0 for the backedge to break recursion.
+            // Orbit task DAGs are acyclic by construction; the guard exists to
+            // prevent infinite recursion on malformed input.
             const layer = new Map();
+            const visiting = new Set();
             function assignLayer(id) {
                 if (layer.has(id)) return layer.get(id);
+                if (visiting.has(id)) return 0;
+                visiting.add(id);
                 const parents = validLinks.filter(l => l.target === id).map(l => l.source);
                 const lvl = parents.length === 0 ? 0 : Math.max(...parents.map(assignLayer)) + 1;
+                visiting.delete(id);
                 layer.set(id, lvl);
                 return lvl;
             }
             nodes.forEach(n => assignLayer(n.id));
 
-            // Group nodes by layer
             const layers = {};
             nodes.forEach(n => {
                 const l = layer.get(n.id);
                 if (!layers[l]) layers[l] = [];
                 layers[l].push(n);
             });
-
             const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
-            const maxLayer = layerKeys.length;
-            const layerHeight = 70;
-            const height = Math.max(200, maxLayer * layerHeight + 60);
-            const padding = { top: 30, bottom: 30 };
+            const layerCount = layerKeys.length;
+            const maxNodesInLayer = Math.max(1, ...Object.values(layers).map(arr => arr.length));
 
-            svg.selectAll('*').remove();
-            svg.attr('width', width).attr('height', height);
+            // Horizontal: x advances by layer, y distributes within layer.
+            const width = padding.left + padding.right + Math.max(0, layerCount - 1) * layerSpacing;
+            const height = Math.max(minHeight, padding.top + padding.bottom + maxNodesInLayer * nodeSpacing);
 
-            // Position nodes
             const positions = new Map();
             layerKeys.forEach((l, li) => {
                 const nodesInLayer = layers[l];
-                const y = padding.top + li * layerHeight;
-                const spacing = width / (nodesInLayer.length + 1);
+                const x = padding.left + li * layerSpacing;
+                const usableHeight = height - padding.top - padding.bottom;
                 nodesInLayer.forEach((n, ni) => {
-                    positions.set(n.id, { x: spacing * (ni + 1), y });
+                    const y = padding.top + usableHeight * (ni + 1) / (nodesInLayer.length + 1);
+                    positions.set(n.id, { x, y });
                 });
             });
 
-            // Arrow marker
+            svg.attr('width', width).attr('height', height);
+
+            // Per-SVG unique marker id so two graphs on the same page do not collide.
+            const markerId = 'layeredDagArrow-' + svgSelector.replace(/[^a-z0-9]/gi, '');
             svg.append('defs').append('marker')
-                .attr('id', 'dagArrow')
+                .attr('id', markerId)
                 .attr('viewBox', '0 -5 10 10')
-                .attr('refX', 22)
+                .attr('refX', nodeRadius + 5)
                 .attr('refY', 0)
                 .attr('orient', 'auto')
                 .attr('markerWidth', 6)
@@ -6950,68 +6974,55 @@
                 .attr('d', 'M 0,-4 L 8,0 L 0,4')
                 .attr('fill', 'rgba(90, 90, 112, 0.7)');
 
-            // Draw links as bezier curves
-            const linkGroup = svg.append('g');
-            validLinks.forEach(l => {
-                const s = positions.get(l.source);
-                const t = positions.get(l.target);
-                if (!s || !t) return;
-                const midY = (s.y + t.y) / 2;
-                linkGroup.append('path')
-                    .attr('d', `M ${s.x} ${s.y} C ${s.x} ${midY}, ${t.x} ${midY}, ${t.x} ${t.y}`)
-                    .attr('fill', 'none')
-                    .attr('stroke', 'rgba(90, 90, 112, 0.5)')
-                    .attr('stroke-width', 1.5)
-                    .attr('marker-end', 'url(#dagArrow)');
-            });
-
-            // Status colors
-            const statusColors = {
-                completed: '#3de8a0',
-                pending: '#b18cff',
-                wait: '#ff5252'
-            };
-
-            // Draw nodes as pills (rounded rects) sized to fit text
-            const nodeGroup = svg.append('g');
-            nodes.forEach(n => {
-                const pos = positions.get(n.id);
-                if (!pos) return;
-                const g = nodeGroup.append('g').attr('transform', `translate(${pos.x},${pos.y})`);
-
-                // Measure text width to size the pill
-                const charWidth = 7;
-                const textLen = n.id.length;
-                const pillWidth = Math.max(28, textLen * charWidth + 14);
-                const pillHeight = 24;
-
-                g.append('rect')
-                    .attr('x', -pillWidth / 2)
-                    .attr('y', -pillHeight / 2)
-                    .attr('width', pillWidth)
-                    .attr('height', pillHeight)
-                    .attr('rx', pillHeight / 2)
-                    .attr('ry', pillHeight / 2)
-                    .attr('fill', statusColors[n.status] || '#5a5a70')
-                    .attr('opacity', 0.9);
-
-                g.append('text')
-                    .attr('dy', 4)
-                    .attr('text-anchor', 'middle')
-                    .attr('fill', '#fff')
-                    .attr('font-size', '11px')
-                    .attr('font-weight', '600')
-                    .text(n.id);
-
-                // Tooltip on hover
-                g.on('mouseover', function(event) {
-                    showNodeTooltip(event, n);
-                }).on('mouseout', function() {
-                    hideNodeTooltip();
-                }).on('mousemove', function(event) {
-                    moveNodeTooltip(event);
+            const linkSelection = svg.append('g')
+                .selectAll('path')
+                .data(validLinks)
+                .join('path')
+                .attr('class', 'link')
+                .attr('fill', 'none')
+                .attr('marker-end', `url(#${markerId})`)
+                .attr('d', d => {
+                    const s = positions.get(d.source);
+                    const t = positions.get(d.target);
+                    const midX = (s.x + t.x) / 2;
+                    return `M ${s.x} ${s.y} C ${midX} ${s.y}, ${midX} ${t.y}, ${t.x} ${t.y}`;
                 });
+
+            const nodeSelection = svg.append('g')
+                .selectAll('g')
+                .data(nodes)
+                .join('g')
+                .attr('class', 'node')
+                .attr('transform', d => {
+                    const p = positions.get(d.id);
+                    return `translate(${p.x},${p.y})`;
+                });
+
+            nodeSelection.append('circle')
+                .attr('r', nodeRadius)
+                .attr('class', d => d.status);
+
+            nodeSelection.append('text')
+                .attr('dy', 4)
+                .attr('text-anchor', 'middle')
+                .attr('fill', '#fff')
+                .attr('font-size', '11px')
+                .attr('font-weight', '600')
+                .text(d => d.id);
+
+            nodeSelection.on('mouseover', function(event, d) {
+                if (enableHighlight) highlightNode(d, nodes, validLinks, linkSelection, nodeSelection);
+                showNodeTooltip(event, d);
+            }).on('mouseout', function() {
+                if (enableHighlight) unhighlightAll(linkSelection, nodeSelection);
+                hideNodeTooltip();
+            }).on('mousemove', function(event) {
+                moveNodeTooltip(event);
             });
+        }
+
+        function renderStructureGraph(graphData) {
+            renderLayeredDAG('#structureGraphSvg', graphData);
         }
 
         let structureGraphZoom = 1;
@@ -7302,7 +7313,6 @@
         let autoDataLoaded = false;
         let autoProjects = [];
         let selectedAutoProject = null;
-        let autoSimulation = null;
 
         async function fetchAutoData() {
             try {
@@ -7362,118 +7372,10 @@
         }
 
         function renderAutoGraph(graphData) {
-            // Use the SVG's own viewBox as the force-simulation coordinate space
-            // so the center is stable regardless of container width or resize.
-            const svg = d3.select('#autoGraphSvg');
-            const { width, height } = svg.node().viewBox.baseVal;
-
-            // Clear previous
-            svg.selectAll('*').remove();
-
-            const { nodes, links } = graphData;
-
-            // Create node map for quick lookup
-            const nodeMap = new Map(nodes.map(n => [n.id, n]));
-
-            // Prepare link data (filter to valid links only)
-            const validLinks = links.filter(l => nodeMap.has(l.source) && nodeMap.has(l.target))
-                .map(l => ({
-                    source: l.source,
-                    target: l.target
-                }));
-
-            // Create simulation
-            if (autoSimulation) autoSimulation.stop();
-
-            autoSimulation = d3.forceSimulation(nodes)
-                .force('link', d3.forceLink(validLinks).id(d => d.id).distance(80))
-                .force('charge', d3.forceManyBody().strength(-200))
-                .force('center', d3.forceCenter(width / 2, height / 2))
-                .force('collision', d3.forceCollide().radius(35));
-
-            // Create arrow marker
-            svg.append('defs').append('marker')
-                .attr('id', 'arrowhead')
-                .attr('viewBox', '-0 -5 10 10')
-                .attr('refX', 20)
-                .attr('refY', 0)
-                .attr('orient', 'auto')
-                .attr('markerWidth', 6)
-                .attr('markerHeight', 6)
-                .append('path')
-                .attr('d', 'M 0,-5 L 10,0 L 0,5')
-                .attr('fill', '#5a5a70');
-
-            // Create links
-            const link = svg.append('g')
-                .selectAll('line')
-                .data(validLinks)
-                .join('line')
-                .attr('class', 'link')
-                .attr('marker-end', 'url(#arrowhead)');
-
-            // Create nodes
-            const node = svg.append('g')
-                .selectAll('g')
-                .data(nodes)
-                .join('g')
-                .attr('class', 'node')
-                .call(d3.drag()
-                    .on('start', dragstarted)
-                    .on('drag', dragged)
-                    .on('end', dragended));
-
-            // Node circles
-            node.append('circle')
-                .attr('r', 15)
-                .attr('class', d => d.status)
-                .on('mouseover', (event, d) => highlightNode(d, nodes, validLinks, link, node))
-                .on('mouseout', () => unhighlightAll(link, node));
-
-            // Node labels
-            node.append('text')
-                .attr('dy', 4)
-                .attr('text-anchor', 'middle')
-                .text(d => d.id);
-
-            // Tooltip on hover
-            node.on('mouseover', function(event, d) {
-                highlightNode(d, nodes, validLinks, link, node);
-                showNodeTooltip(event, d);
-            }).on('mouseout', function() {
-                unhighlightAll(link, node);
-                hideNodeTooltip();
-            }).on('mousemove', function(event) {
-                moveNodeTooltip(event);
+            renderLayeredDAG('#autoGraphSvg', graphData, {
+                enableHighlight: true,
+                minHeight: 400,
             });
-
-            // Update positions on tick
-            autoSimulation.on('tick', () => {
-                link
-                    .attr('x1', d => d.source.x)
-                    .attr('y1', d => d.source.y)
-                    .attr('x2', d => d.target.x)
-                    .attr('y2', d => d.target.y);
-
-                node.attr('transform', d => `translate(${d.x},${d.y})`);
-            });
-
-            function dragstarted(event) {
-                if (!event.active) autoSimulation.alphaTarget(0.3).restart();
-                event.subject.fx = event.subject.x;
-                event.subject.fy = event.subject.y;
-            }
-
-            function dragged(event) {
-                event.subject.fx = event.x;
-                event.subject.fy = event.y;
-            }
-
-            function dragended(event) {
-                if (!event.active) autoSimulation.alphaTarget(0);
-                event.subject.fx = null;
-                event.subject.fy = null;
-            }
         }
 
         function highlightNode(d, nodes, links, linkSelection, nodeSelection) {
