@@ -715,15 +715,18 @@ def calculate_blocking_info(task_modes: list[dict[str, Any]]) -> dict[str, Any]:
         tm["blocked_by"] = None
         tm["blocker_mode"] = None
 
+        # Compute the full dependency chain (explicit + sequential). We persist
+        # this on every task - including completed ones - so the UI can render
+        # historical edges. `blocked_by` alone is not enough because it gets
+        # cleared once a task completes.
+        all_deps = _get_sequential_dependencies(task_id, task_modes)
+        all_deps.extend(explicit_deps)
+        all_deps = list(dict.fromkeys(all_deps))
+        tm["depends_on"] = all_deps
+
         if completed:
             # Completed tasks are never blocked
             continue
-
-        # Get all dependencies (explicit + sequential)
-        all_deps = _get_sequential_dependencies(task_id, task_modes)
-        all_deps.extend(explicit_deps)
-        # Deduplicate while preserving order
-        all_deps = list(dict.fromkeys(all_deps))
 
         # Check each dependency
         for dep_id in all_deps:

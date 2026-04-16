@@ -6825,9 +6825,9 @@
                     title: tm.title,
                     status: tm.completed ? 'completed' : tm.is_blocked ? 'wait' : 'pending'
                 }));
-                const graphLinks = data.task_modes
-                    .filter(tm => tm.blocked_by)
-                    .map(tm => ({ source: tm.blocked_by, target: tm.task_id }));
+                const graphLinks = data.task_modes.flatMap(tm =>
+                    (tm.depends_on || []).map(dep => ({ source: dep, target: tm.task_id }))
+                );
 
                 const hasGraph = graphLinks.length > 0;
 
