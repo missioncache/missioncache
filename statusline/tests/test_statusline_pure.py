@@ -220,7 +220,7 @@ class TestParseInput:
     def test_empty_invalid_json(self):
         result = parse_input("")
         assert result["model_name"] == "Claude"
-        assert result["tokens_str"] == "0"
+        assert result["tokens_str"] == "\u21910/\u21930"
         # Empty input still gets SYSTEM_OVERHEAD_PERCENT (19%) added
         assert result["ctx_percent"] == 19
         assert result["ctx_estimated"] is True
@@ -240,7 +240,7 @@ class TestParseInput:
             }
         }
         result = parse_input(json.dumps(data))
-        assert result["tokens_str"] == "600"
+        assert result["tokens_str"] == "\u2191500/\u2193100"
 
     def test_tokens_k_threshold(self):
         data = {
@@ -254,7 +254,7 @@ class TestParseInput:
             }
         }
         result = parse_input(json.dumps(data))
-        assert result["tokens_str"] == "5.0K"
+        assert result["tokens_str"] == "\u21915.0K/\u21930"
 
     def test_tokens_m_threshold(self):
         data = {
@@ -268,7 +268,7 @@ class TestParseInput:
             }
         }
         result = parse_input(json.dumps(data))
-        assert result["tokens_str"] == "1.5M"
+        assert result["tokens_str"] == "\u21911.5M/\u21930"
 
     def test_duration_formatting(self):
         # Under 60 minutes

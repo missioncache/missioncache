@@ -7,7 +7,7 @@ a multi-line ANSI-colored status display.
 Layout:
   Line 1: Project    - [project name] (only if active orbit project)
   Line 2: Location   - [dir] [git branch+status]
-  Line 3: Metrics    - [model] [tokens] [ctx%]
+  Line 3: Metrics    - [model] [effort] [tokens] [ctx%]
   Line 4: Time       - [elapsed] [edits] [now]
   Line 5: K8s/Ver    - [k8s context] [version] [health status]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
@@ -86,6 +86,7 @@ COLORS = {
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
     "extra_usage": f"{ESC}[38;2;220;170;80m",
     "fast_mode": f"{ESC}[38;2;255;120;20m",
+    "effort": f"{ESC}[38;2;200;130;200m",
 }
 
 ICONS = {
@@ -94,6 +95,7 @@ ICONS = {
     "project": "\U0001f4cb",
     "k8s": "\u2638\ufe0f",
     "model": "\U0001f916",
+    "effort": "\U0001f3af",
     "tokens": "\U0001f522",
     "context": "\U0001f4ca",
     "duration": "\u23f1\ufe0f",
@@ -328,6 +330,25 @@ def _parse_stdin_rate_limits(rate_limits: dict) -> dict:
 
 # ============ INPUT PARSING ============
 
+def _fmt_token_count(n: int) -> str:
+    """Format a token count with K/M suffixes to match the legacy tokens_str style."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _get_effort_level() -> str | None:
+    """Return the user's `/effort` setting from settings.json, or None if unset."""
+    try:
+        settings = json.loads(SETTINGS_FILE.read_text())
+    except Exception:
+        return None
+    value = settings.get("effortLevel")
+    return value if isinstance(value, str) and value else None
+
+
 def parse_input(raw: str) -> dict:
     """Parse Claude Code JSON input and extract display values."""
     try:
@@ -365,14 +386,10 @@ def parse_input(raw: str) -> dict:
         ctx_percent = min(int((current_context / ctx_size) * 100) if ctx_size > 0 else 0, 100)
 
     cur = ctx.get("current_usage") or {}
-    total_tokens = (cur.get("input_tokens", 0) + cur.get("cache_creation_input_tokens", 0)
-                    + cur.get("cache_read_input_tokens", 0) + cur.get("output_tokens", 0))
-    if total_tokens >= 1_000_000:
-        tokens_str = f"{total_tokens / 1_000_000:.1f}M"
-    elif total_tokens >= 1_000:
-        tokens_str = f"{total_tokens / 1_000:.1f}K"
-    else:
-        tokens_str = str(total_tokens)
+    input_total = (cur.get("input_tokens", 0) + cur.get("cache_creation_input_tokens", 0)
+                   + cur.get("cache_read_input_tokens", 0))
+    output_total = cur.get("output_tokens", 0)
+    tokens_str = f"\u2191{_fmt_token_count(input_total)}/\u2193{_fmt_token_count(output_total)}"
 
     cost_data = data.get("cost", {})
     duration_ms = cost_data.get("total_duration_ms", 0)
@@ -1155,8 +1172,11 @@ def main() -> None:
     # Line 3: Metrics
     line3 = [
         _item(COLORS["model"], ICONS["model"], "Model", model_name),
-        _item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str),
     ]
+    effort_level = _get_effort_level()
+    if effort_level:
+        line3.append(_item(COLORS["effort"], ICONS["effort"], "Effort", effort_level))
+    line3.append(_item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str))
     ctx_pct = info["ctx_percent"]
     if ctx_pct >= 80:
         line3.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
