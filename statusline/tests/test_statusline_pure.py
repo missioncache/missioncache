@@ -1,7 +1,8 @@
 """Pure function tests for statusline.py.
 
 No file I/O, no network, no mocking except monkeypatch for env vars
-in _detect_subscription and _get_health_components.
+in _detect_subscription and for the dashboard config path in
+_load_statusline_config.
 """
 
 import json
@@ -16,9 +17,9 @@ from statusline import (
     _detect_subscription,
     _format_reset_time,
     _format_unix_reset,
-    _get_health_components,
     _health_link,
     _item,
+    _load_statusline_config,
     _osc8_link,
     _join_items,
     _pad_line,
@@ -390,27 +391,43 @@ class TestDetectSubscription:
         assert color == "mode_personal"
 
 
-# ============ _get_health_components (3 tests) ============
+# ============ _load_statusline_config (4 tests) ============
 
 
-class TestGetHealthComponents:
-    def test_no_env_var_defaults(self, monkeypatch):
-        monkeypatch.delenv("STATUSLINE_HEALTH_SERVICES", raising=False)
-        result = _get_health_components()
-        names = set(result.values())
-        assert names == {"Code", "Claude API"}
+class TestLoadStatuslineConfig:
+    def test_missing_file_returns_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', tmp_path / 'missing.json')
+        cfg = _load_statusline_config()
+        assert cfg == {
+            "codex": True,
+            "subscription_usage": True,
+            "subscription_type": True,
+            "claude_status": True,
+            "claude_status_services": ["Code", "Claude API"],
+        }
 
-    def test_custom_services(self, monkeypatch):
-        monkeypatch.setenv("STATUSLINE_HEALTH_SERVICES", "Code,claude.ai")
-        result = _get_health_components()
-        names = set(result.values())
-        assert names == {"Code", "claude.ai"}
+    def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
+        f = tmp_path / 'config.json'
+        f.write_text(json.dumps({"statusline": {"codex": False}}))
+        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        cfg = _load_statusline_config()
+        assert cfg["codex"] is False
+        assert cfg["subscription_usage"] is True
+        assert cfg["claude_status_services"] == ["Code", "Claude API"]
 
-    def test_unknown_service_ignored(self, monkeypatch):
-        monkeypatch.setenv("STATUSLINE_HEALTH_SERVICES", "Code,NonExistent")
-        result = _get_health_components()
-        names = set(result.values())
-        assert names == {"Code"}
+    def test_custom_services(self, tmp_path, monkeypatch):
+        f = tmp_path / 'config.json'
+        f.write_text(json.dumps({"statusline": {"claude_status_services": ["Code", "claude.ai"]}}))
+        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        cfg = _load_statusline_config()
+        assert cfg["claude_status_services"] == ["Code", "claude.ai"]
+
+    def test_bad_json_returns_defaults(self, tmp_path, monkeypatch):
+        f = tmp_path / 'config.json'
+        f.write_text("{not valid json")
+        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        cfg = _load_statusline_config()
+        assert cfg["codex"] is True
 
 
 # ============ _health_link (1 test) ============

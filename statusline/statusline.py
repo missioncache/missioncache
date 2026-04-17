@@ -13,12 +13,12 @@ Layout:
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
 
-Configuration (environment variables):
-  STATUSLINE_CODEX            - Show Codex usage line (default: "true", set "false" to hide)
-  STATUSLINE_HEALTH_SERVICES  - Comma-separated services to monitor (default: "Code,Claude API")
-                                Available: Code, Claude API, claude.ai, platform.claude.com,
-                                Claude for Government, Claude Cowork
-                                Example: STATUSLINE_HEALTH_SERVICES="Code,Claude API,claude.ai"
+Configuration:
+  All visibility toggles (Codex line, Claude subscription usage/type, Claude
+  status, status service filter) are managed through the orbit dashboard
+  Settings screen. The statusline reads them from
+  ~/.claude/orbit-dashboard-config.json on each invocation. Defaults apply
+  when the file or its `statusline` section is missing.
 """
 
 import base64
@@ -146,16 +146,44 @@ _ALL_HEALTH_COMPONENTS = {
     "0scnb50nvy53": "Claude for Government",
     "bpp5gb3hpjcl": "Claude Cowork",
 }
-_DEFAULT_HEALTH_SERVICES = {"Code", "Claude API"}
+
+_DASHBOARD_CONFIG_FILE = Path.home() / ".claude" / "orbit-dashboard-config.json"
+_DEFAULT_STATUSLINE_CONFIG = {
+    "codex": True,
+    "subscription_usage": True,
+    "subscription_type": True,
+    "claude_status": True,
+    "claude_status_services": ["Code", "Claude API"],
+}
 
 
-def _get_health_components() -> dict[str, str]:
-    env = os.environ.get("STATUSLINE_HEALTH_SERVICES")
-    wanted = {s.strip() for s in env.split(",")} if env else _DEFAULT_HEALTH_SERVICES
-    return {cid: name for cid, name in _ALL_HEALTH_COMPONENTS.items() if name in wanted}
+def _load_statusline_config() -> dict:
+    """Read statusline visibility config from the dashboard config file.
+
+    A missing file, bad JSON, or missing `statusline` section all fall back
+    to defaults - the statusline must keep rendering even without a dashboard.
+    """
+    try:
+        data = json.loads(_DASHBOARD_CONFIG_FILE.read_text())
+    except Exception:
+        return dict(_DEFAULT_STATUSLINE_CONFIG)
+    section = data.get("statusline")
+    if not isinstance(section, dict):
+        return dict(_DEFAULT_STATUSLINE_CONFIG)
+    merged = dict(_DEFAULT_STATUSLINE_CONFIG)
+    for k in _DEFAULT_STATUSLINE_CONFIG:
+        if k in section:
+            merged[k] = section[k]
+    return merged
 
 
-HEALTH_COMPONENTS = _get_health_components()
+STATUSLINE_CONFIG = _load_statusline_config()
+
+HEALTH_COMPONENTS = {
+    cid: name
+    for cid, name in _ALL_HEALTH_COMPONENTS.items()
+    if name in set(STATUSLINE_CONFIG["claude_status_services"])
+}
 
 USAGE_CACHE = SCRIPTS_DIR / "usage-cache.json"
 USAGE_TTL = 300
@@ -165,7 +193,7 @@ CODEX_USAGE_CACHE = SCRIPTS_DIR / "codex-usage-cache.json"
 CODEX_USAGE_TTL = 300
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
-CODEX_ENABLED = os.environ.get("STATUSLINE_CODEX", "true").lower() != "false"
+CODEX_ENABLED = STATUSLINE_CONFIG["codex"]
 
 
 # ============ DISPLAY WIDTH ============
@@ -682,7 +710,11 @@ def _truncate_name(name: str, limit: int = 55) -> str:
 
 def get_health_status() -> list[dict]:
     """Return list of health incident dicts.
-    An entry with service='OK' means all clear."""
+    An entry with service='OK' means all clear.
+    Returns [] immediately when the Claude status line is disabled in config,
+    so the HTTP call to status.claude.com is skipped entirely."""
+    if not STATUSLINE_CONFIG["claude_status"]:
+        return []
     # Check cache
     if HEALTH_CACHE.exists():
         try:
@@ -1233,10 +1265,11 @@ def main() -> None:
 
     # Line Usage: Subscription + usage stats
     line_usage: list[str] = []
-    sub_name, sub_icon, sub_color = _detect_subscription(usage)
-    line_usage.append(f"{COLORS[sub_color]}{sub_icon} {sub_name}{RESET}")
+    if STATUSLINE_CONFIG["subscription_type"]:
+        sub_name, sub_icon, sub_color = _detect_subscription(usage)
+        line_usage.append(f"{COLORS[sub_color]}{sub_icon} {sub_name}{RESET}")
 
-    if usage:
+    if usage and STATUSLINE_CONFIG["subscription_usage"]:
         if usage.get("is_foundry"):
             cost = info["cost_str"]
             if cost:
