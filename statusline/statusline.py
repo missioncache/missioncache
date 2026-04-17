@@ -86,6 +86,7 @@ COLORS = {
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
     "extra_usage": f"{ESC}[38;2;220;170;80m",
     "fast_mode": f"{ESC}[38;2;255;120;20m",
+    "upgrade": f"{ESC}[38;2;255;180;60m",
 }
 
 ICONS = {
@@ -636,45 +637,84 @@ def is_version_reviewed(version: str) -> bool:
         return False
 
 
+_LATEST_RELEASE_TTL = 21600  # 6 hours
+
+
 def get_version_info() -> tuple[str, str]:
-    """Return (version, age_str) e.g. ('1.0.50', '3d')."""
+    """Return (installed, latest_if_newer_age).
+
+    - installed: output of `claude --version`, e.g. "2.1.113".
+    - latest_if_newer_age: "v2.1.114 (2d)"-style string when a newer release
+      exists, otherwise empty. The caller uses its emptiness to decide whether
+      to render the upgrade indicator at all.
+    """
     out = run_cmd(["claude", "--version"])
     if not out:
         return "", ""
-    version = out.split()[0] if out else ""
-    if not version:
+    installed = out.split()[0] if out else ""
+    if not installed:
         return "", ""
 
     cache_file = STATE_DIR / "version-cache.json"
-    cache = {}
-    release_date = None
+    cache: dict = {}
     if cache_file.exists():
         try:
             cache = json.loads(cache_file.read_text())
-            if version in cache:
-                release_date = datetime.fromisoformat(cache[version])
         except (json.JSONDecodeError, OSError):
-            pass
+            cache = {}
+    cache_dirty = False
 
-    if release_date is None:
+    # Latest release lookup - time-bounded cache to avoid hitting GitHub on
+    # every prompt. Older per-version entries (keyed by version string) are
+    # kept for the installed-version age path below.
+    latest_version = ""
+    latest_date: datetime | None = None
+    latest_entry = cache.get("__latest__")
+    if isinstance(latest_entry, dict):
+        checked_at = latest_entry.get("checked_at", 0)
+        if isinstance(checked_at, (int, float)) and time.time() - checked_at < _LATEST_RELEASE_TTL:
+            latest_version = latest_entry.get("version", "") or ""
+            pub_str = latest_entry.get("published_at", "")
+            if isinstance(pub_str, str) and pub_str:
+                try:
+                    latest_date = datetime.fromisoformat(pub_str)
+                except ValueError:
+                    latest_version, latest_date = "", None
+    if not latest_version:
         try:
-            url = f"https://api.github.com/repos/anthropics/claude-code/releases/tags/v{version}"
-            req = urllib.request.Request(url, headers={"User-Agent": "statusline"})
+            req = urllib.request.Request(
+                "https://api.github.com/repos/anthropics/claude-code/releases/latest",
+                headers={"User-Agent": "statusline"},
+            )
             with urllib.request.urlopen(req, timeout=2) as resp:
-                pub = json.loads(resp.read()).get("published_at", "")
-                if pub:
-                    release_date = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                    cache[version] = release_date.isoformat()
-                    cache_file.parent.mkdir(parents=True, exist_ok=True)
-                    cache_file.write_text(json.dumps(cache))
+                data = json.loads(resp.read())
+                tag = data.get("tag_name", "").lstrip("v")
+                pub = data.get("published_at", "")
+                if tag and pub:
+                    latest_version = tag
+                    latest_date = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                    cache["__latest__"] = {
+                        "version": latest_version,
+                        "published_at": latest_date.isoformat(),
+                        "checked_at": time.time(),
+                    }
+                    cache_dirty = True
         except Exception:
             pass
 
-    age_str = ""
-    if release_date:
-        days = (date.today() - release_date.astimezone().date()).days
-        age_str = f"{days}d"
-    return version, age_str
+    if cache_dirty:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(cache))
+        except OSError:
+            pass
+
+    if latest_version and latest_version != installed:
+        age = ""
+        if latest_date:
+            age = f" ({(date.today() - latest_date.astimezone().date()).days}d)"
+        return installed, f"v{latest_version}{age}"
+    return installed, ""
 
 
 # ============ HEALTH STATUS ============
@@ -1129,9 +1169,9 @@ def main() -> None:
     except Exception:
         k8s_name = ""
     try:
-        version, version_age = f_version.result(timeout=_FUTURE_TIMEOUT)
+        version, version_upgrade = f_version.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
-        version, version_age = "", ""
+        version, version_upgrade = "", ""
     try:
         health = f_health.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1216,11 +1256,15 @@ def main() -> None:
     if k8s_name:
         line_k8s.append(_item(COLORS["k8s"], ICONS["k8s"], "K8s", k8s_name))
     if version:
-        age_suffix = f" ({version_age})" if version_age else ""
         ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
         changelog_url = "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
         ver_link = f"\033]8;;{changelog_url}\033\\v{version}\033]8;;\033\\"
-        line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{age_suffix}{RESET}")
+        if version_upgrade:
+            # `version_upgrade` is pre-formatted as "v<tag> (Xd)" by get_version_info
+            upgrade_link = f"\033]8;;{changelog_url}\033\\{version_upgrade}\033]8;;\033\\"
+            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}  {COLORS['upgrade']}\u2b06 {upgrade_link}{RESET}")
+        else:
+            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
     for inc in health:
         if inc.get("service") == "OK":
             line_k8s.append(f"{COLORS['health_ok']}{ICONS['health_ok']} {_health_link('Claude Status: OK')}{RESET}")
