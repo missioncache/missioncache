@@ -435,19 +435,6 @@ with open('$SETTINGS', 'w') as f:
 "
     detail "Updated settings.json with statusline command"
 
-    # Clean up any legacy env-var-based statusline config from prior installs.
-    # Visibility + service selection now live in the dashboard Settings screen.
-    "$PYTHON" -c "
-import json
-with open('$SETTINGS') as f:
-    d = json.load(f)
-env = d.get('env', {})
-env.pop('STATUSLINE_HEALTH_SERVICES', None)
-env.pop('STATUSLINE_CODEX', None)
-with open('$SETTINGS', 'w') as f:
-    json.dump(d, f, indent=2)
-"
-
     echo ""
     echo -e "  ${DIM}Statusline visibility (Codex, Claude subscription, Claude status,${NC}"
     echo -e "  ${DIM}status services) is configured from the dashboard Settings screen:${NC}"
