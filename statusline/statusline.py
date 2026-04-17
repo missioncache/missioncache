@@ -7,8 +7,8 @@ a multi-line ANSI-colored status display.
 Layout:
   Line 1: Project    - [project name] (only if active orbit project)
   Line 2: Location   - [dir] [git branch+status]
-  Line 3: Metrics    - [model] [effort] [tokens] [ctx%]
-  Line 4: Time       - [elapsed] [edits] [now]
+  Line 3: Metrics    - [model] [tokens] [ctx%]
+  Line 4: Session    - [elapsed] [edits]
   Line 5: K8s/Ver    - [k8s context] [version] [health status]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
@@ -86,7 +86,6 @@ COLORS = {
     "codex_weekly": f"{ESC}[38;2;160;130;190m",
     "extra_usage": f"{ESC}[38;2;220;170;80m",
     "fast_mode": f"{ESC}[38;2;255;120;20m",
-    "effort": f"{ESC}[38;2;200;130;200m",
 }
 
 ICONS = {
@@ -95,7 +94,6 @@ ICONS = {
     "project": "\U0001f4cb",
     "k8s": "\u2638\ufe0f",
     "model": "\U0001f916",
-    "effort": "\U0001f3af",
     "tokens": "\U0001f522",
     "context": "\U0001f4ca",
     "duration": "\u23f1\ufe0f",
@@ -365,16 +363,6 @@ def _fmt_token_count(n: int) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}K"
     return str(n)
-
-
-def _get_effort_level() -> str | None:
-    """Return the user's `/effort` setting from settings.json, or None if unset."""
-    try:
-        settings = json.loads(SETTINGS_FILE.read_text())
-    except Exception:
-        return None
-    value = settings.get("effortLevel")
-    return value if isinstance(value, str) and value else None
 
 
 def parse_input(raw: str) -> dict:
@@ -1170,7 +1158,6 @@ def main() -> None:
     # via their own internal timeouts (HTTP: 2-3s, subprocess: 2-5s).
     pool.shutdown(wait=False, cancel_futures=True)
 
-    now_dt = datetime.now().strftime("%a %b %-d, %-I:%M%p").replace("AM", "am").replace("PM", "pm")
     dir_name = Path.cwd().name
     if dir_name == os.environ.get("USER", ""):
         dir_name = "~"
@@ -1204,11 +1191,8 @@ def main() -> None:
     # Line 3: Metrics
     line3 = [
         _item(COLORS["model"], ICONS["model"], "Model", model_name),
+        _item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str),
     ]
-    effort_level = _get_effort_level()
-    if effort_level:
-        line3.append(_item(COLORS["effort"], ICONS["effort"], "Effort", effort_level))
-    line3.append(_item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str))
     ctx_pct = info["ctx_percent"]
     if ctx_pct >= 80:
         line3.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
@@ -1221,10 +1205,9 @@ def main() -> None:
     if _is_fast_mode():
         line3.append(f"{COLORS['fast_mode']}\u26a1 Fast mode activated{RESET}")
 
-    # Line 4: Time
+    # Line 4: Session
     line4 = [
         _item(COLORS["time"], ICONS["duration"], "Elapsed", info["duration_str"]),
-        _item(COLORS["datetime"], ICONS["datetime"], "Now", now_dt),
         _item(COLORS["edit"], ICONS["edit"], "Edits", str(edit_count)),
     ]
 
