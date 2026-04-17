@@ -11,7 +11,14 @@ Schema (all keys optional; missing keys use defaults):
       "jira_urls":     {"PROJ-": "https://example.com/jira/browse/", ...},
       "author_emails": ["me@example.com", "work@example.com"],
       "repos":         {"/abs/path": {"display_name": "My Project", "hidden": false}},
-      "dashboard_url": "http://localhost:8787"
+      "dashboard_url": "http://localhost:8787",
+      "statusline": {
+          "codex":                  true,
+          "subscription_usage":     true,
+          "subscription_type":      true,
+          "claude_status":          true,
+          "claude_status_services": ["Code", "Claude API"]
+      }
     }
 
 Writes go through an atomic tempfile + os.replace pattern so a crash
@@ -26,11 +33,20 @@ from typing import Any
 
 CONFIG_FILE = Path.home() / ".claude" / "orbit-dashboard-config.json"
 
+_DEFAULT_STATUSLINE: dict[str, Any] = {
+    "codex": True,
+    "subscription_usage": True,
+    "subscription_type": True,
+    "claude_status": True,
+    "claude_status_services": ["Code", "Claude API"],
+}
+
 DEFAULTS: dict[str, Any] = {
     "jira_urls": {},
     "author_emails": [],
     "repos": {},
     "dashboard_url": "http://localhost:8787",
+    "statusline": _DEFAULT_STATUSLINE,
 }
 
 
@@ -127,3 +143,24 @@ def get_dashboard_url() -> str:
     Precedence: ORBIT_DASHBOARD_URL env var, config file, hardcoded default.
     """
     return os.environ.get("ORBIT_DASHBOARD_URL") or _read()["dashboard_url"]
+
+
+def get_statusline_config() -> dict[str, Any]:
+    """Return the statusline visibility + status-services config.
+
+    Any keys missing from the on-disk config fall back to per-key defaults,
+    so partial configs written by older dashboards stay valid.
+    """
+    raw = _read().get("statusline")
+    if not isinstance(raw, dict):
+        return dict(_DEFAULT_STATUSLINE)
+    merged = dict(_DEFAULT_STATUSLINE)
+    for k in _DEFAULT_STATUSLINE:
+        if k in raw:
+            merged[k] = raw[k]
+    return merged
+
+
+def set_statusline_config(cfg: dict[str, Any]) -> None:
+    """Replace the statusline config and persist to disk."""
+    _update("statusline", dict(cfg))

@@ -99,6 +99,48 @@ class TestDashboardUrl:
         assert config.get_dashboard_url() == "http://from-env:1234"
 
 
+class TestStatuslineConfig:
+    def test_default(self, tmp_config):
+        cfg = config.get_statusline_config()
+        assert cfg["codex"] is True
+        assert cfg["subscription_usage"] is True
+        assert cfg["subscription_type"] is True
+        assert cfg["claude_status"] is True
+        assert cfg["claude_status_services"] == ["Code", "Claude API"]
+
+    def test_set_and_get(self, tmp_config):
+        config.set_statusline_config({
+            "codex": False,
+            "subscription_usage": True,
+            "subscription_type": False,
+            "claude_status": True,
+            "claude_status_services": ["Code"],
+        })
+        cfg = config.get_statusline_config()
+        assert cfg["codex"] is False
+        assert cfg["subscription_type"] is False
+        assert cfg["claude_status_services"] == ["Code"]
+
+    def test_partial_config_fills_defaults(self, tmp_config):
+        """An older dashboard may have written only a subset of keys."""
+        tmp_config.write_text(json.dumps({"statusline": {"codex": False}}))
+        cfg = config.get_statusline_config()
+        assert cfg["codex"] is False
+        assert cfg["subscription_usage"] is True  # filled from default
+        assert cfg["claude_status_services"] == ["Code", "Claude API"]
+
+    def test_non_dict_statusline_returns_all_defaults(self, tmp_config):
+        tmp_config.write_text(json.dumps({"statusline": "not-a-dict"}))
+        cfg = config.get_statusline_config()
+        assert cfg == {
+            "codex": True,
+            "subscription_usage": True,
+            "subscription_type": True,
+            "claude_status": True,
+            "claude_status_services": ["Code", "Claude API"],
+        }
+
+
 class TestAtomicWrite:
     def test_concurrent_updates_preserve_both(self, tmp_config):
         """Sequential set_X and set_Y should not clobber each other."""

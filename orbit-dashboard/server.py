@@ -2394,6 +2394,14 @@ class RepoOverridesPayload(BaseModel):
     repos: dict[str, dict[str, Any]]
 
 
+class StatuslinePayload(BaseModel):
+    codex: bool
+    subscription_usage: bool
+    subscription_type: bool
+    claude_status: bool
+    claude_status_services: list[str]
+
+
 @app.get("/api/settings")
 async def get_settings():
     """Return all Tier 1 settings in one payload.
@@ -2406,6 +2414,7 @@ async def get_settings():
         "author_emails": config.get_author_emails(),
         "repos": config.get_repo_overrides(),
         "dashboard_url": config.get_dashboard_url(),
+        "statusline": config.get_statusline_config(),
     }
 
 
@@ -2428,6 +2437,13 @@ async def update_repo_overrides(payload: RepoOverridesPayload):
     """Replace the per-repo display name and visibility overrides."""
     config.set_repo_overrides(payload.repos)
     return {"ok": True, "repos": config.get_repo_overrides()}
+
+
+@app.put("/api/settings/statusline")
+async def update_statusline_settings(payload: StatuslinePayload):
+    """Replace the statusline visibility toggles and status service filter."""
+    config.set_statusline_config(payload.model_dump())
+    return {"ok": True, "statusline": config.get_statusline_config()}
 
 
 # =============================================================================

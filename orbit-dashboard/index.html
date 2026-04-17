@@ -3751,6 +3751,30 @@
             border-radius: 3px;
         }
 
+        .settings-statusline-toggles,
+        .settings-statusline-services {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 20px;
+            margin-bottom: 14px;
+        }
+
+        .settings-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .settings-toggle input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
         .settings-rows {
             display: flex;
             flex-direction: column;
@@ -4789,6 +4813,24 @@
                                 <span id="repoSaveStatus" class="settings-save-status"></span>
                             </div>
                         </div>
+
+                        <!-- Statusline visibility -->
+                        <div class="settings-section">
+                            <h3>Statusline visibility</h3>
+                            <p class="settings-hint">Toggle which sections the statusline displays. Disabled sections also skip any background API calls they would otherwise make.</p>
+                            <div class="settings-statusline-toggles">
+                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleCodex"><span>Codex usage</span></label>
+                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubUsage"><span>Claude subscription usage</span></label>
+                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubType"><span>Claude subscription type</span></label>
+                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleStatus"><span>Claude status</span></label>
+                            </div>
+                            <p class="settings-hint" style="margin-top:12px">Claude status services to monitor (applies when Claude status is enabled):</p>
+                            <div class="settings-statusline-services" id="statuslineServicesCheckboxes"></div>
+                            <div class="settings-row-actions">
+                                <button class="settings-btn-primary" onclick="saveStatuslineSettings()">Save statusline settings</button>
+                                <span id="statuslineSaveStatus" class="settings-save-status"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div><!-- End Settings View -->
@@ -5385,9 +5427,54 @@
                 renderJiraRows(settings.jira_urls || {});
                 renderEmailRows(settings.author_emails || []);
                 renderRepoRows(reposData.repositories || [], settings.repos || {});
+                renderStatuslineSettings(settings.statusline || {});
             } catch (err) {
                 console.error('Failed to load settings:', err);
             }
+        }
+
+        // The full list of Claude status services the statusline can monitor.
+        // Kept client-side as a constant so we render checkboxes even before
+        // any config exists; the set of available services is stable and
+        // managed in statusline._ALL_HEALTH_COMPONENTS.
+        const STATUSLINE_SERVICES = ['Code', 'Claude API', 'claude.ai', 'platform.claude.com', 'Claude for Government', 'Claude Cowork'];
+
+        function renderStatuslineSettings(cfg) {
+            document.getElementById('statuslineToggleCodex').checked = cfg.codex !== false;
+            document.getElementById('statuslineToggleSubUsage').checked = cfg.subscription_usage !== false;
+            document.getElementById('statuslineToggleSubType').checked = cfg.subscription_type !== false;
+            document.getElementById('statuslineToggleStatus').checked = cfg.claude_status !== false;
+
+            const container = document.getElementById('statuslineServicesCheckboxes');
+            const selected = new Set(cfg.claude_status_services || ['Code', 'Claude API']);
+            container.replaceChildren();
+            for (const svc of STATUSLINE_SERVICES) {
+                const label = document.createElement('label');
+                label.className = 'settings-toggle';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = svc;
+                cb.checked = selected.has(svc);
+                cb.dataset.statuslineService = '1';
+                const span = document.createElement('span');
+                span.textContent = svc;
+                label.appendChild(cb);
+                label.appendChild(span);
+                container.appendChild(label);
+            }
+        }
+
+        async function saveStatuslineSettings() {
+            const services = Array.from(document.querySelectorAll('[data-statusline-service]'))
+                .filter(cb => cb.checked)
+                .map(cb => cb.value);
+            await saveSettingsSection('/api/settings/statusline', {
+                codex: document.getElementById('statuslineToggleCodex').checked,
+                subscription_usage: document.getElementById('statuslineToggleSubUsage').checked,
+                subscription_type: document.getElementById('statuslineToggleSubType').checked,
+                claude_status: document.getElementById('statuslineToggleStatus').checked,
+                claude_status_services: services,
+            }, 'statuslineSaveStatus');
         }
 
         async function ensureJiraUrlsLoaded() {
