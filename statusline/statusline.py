@@ -662,11 +662,9 @@ def get_version_info() -> tuple[str, str]:
             cache = json.loads(cache_file.read_text())
         except (json.JSONDecodeError, OSError):
             cache = {}
-    cache_dirty = False
 
     # Latest release lookup - time-bounded cache to avoid hitting GitHub on
-    # every prompt. Older per-version entries (keyed by version string) are
-    # kept for the installed-version age path below.
+    # every prompt.
     latest_version = ""
     latest_date: datetime | None = None
     latest_entry = cache.get("__latest__")
@@ -698,15 +696,12 @@ def get_version_info() -> tuple[str, str]:
                         "published_at": latest_date.isoformat(),
                         "checked_at": time.time(),
                     }
-                    cache_dirty = True
+                    try:
+                        cache_file.parent.mkdir(parents=True, exist_ok=True)
+                        cache_file.write_text(json.dumps(cache))
+                    except OSError:
+                        pass
         except Exception:
-            pass
-
-    if cache_dirty:
-        try:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            cache_file.write_text(json.dumps(cache))
-        except OSError:
             pass
 
     if latest_version and latest_version != installed:
