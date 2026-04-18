@@ -395,6 +395,7 @@ The plugin is the minimum viable install. Everything else is opt-in, and each co
 
 Deep dives for each component live in `docs/`:
 
+- [**Installation**](docs/installation.md) - all four install paths (setup.sh, marketplace, pip, manual), verification, uninstall, troubleshooting
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**Orbit Auto**](docs/orbit-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
