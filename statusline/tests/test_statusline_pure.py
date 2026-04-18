@@ -232,12 +232,8 @@ class TestParseInput:
     def test_tokens_under_1k(self):
         data = {
             "context_window": {
-                "current_usage": {
-                    "input_tokens": 500,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                    "output_tokens": 100,
-                }
+                "total_input_tokens": 500,
+                "total_output_tokens": 100,
             }
         }
         result = parse_input(json.dumps(data))
@@ -246,12 +242,8 @@ class TestParseInput:
     def test_tokens_k_threshold(self):
         data = {
             "context_window": {
-                "current_usage": {
-                    "input_tokens": 5000,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                    "output_tokens": 0,
-                }
+                "total_input_tokens": 5000,
+                "total_output_tokens": 0,
             }
         }
         result = parse_input(json.dumps(data))
@@ -260,12 +252,8 @@ class TestParseInput:
     def test_tokens_m_threshold(self):
         data = {
             "context_window": {
-                "current_usage": {
-                    "input_tokens": 1_500_000,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                    "output_tokens": 0,
-                }
+                "total_input_tokens": 1_500_000,
+                "total_output_tokens": 0,
             }
         }
         result = parse_input(json.dumps(data))

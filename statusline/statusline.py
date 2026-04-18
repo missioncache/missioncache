@@ -402,10 +402,8 @@ def parse_input(raw: str) -> dict:
         current_context = base + int(ctx_size * 0.19)
         ctx_percent = min(int((current_context / ctx_size) * 100) if ctx_size > 0 else 0, 100)
 
-    cur = ctx.get("current_usage") or {}
-    input_total = (cur.get("input_tokens", 0) + cur.get("cache_creation_input_tokens", 0)
-                   + cur.get("cache_read_input_tokens", 0))
-    output_total = cur.get("output_tokens", 0)
+    input_total = ctx.get("total_input_tokens", 0)
+    output_total = ctx.get("total_output_tokens", 0)
     tokens_str = f"\u2191{_fmt_token_count(input_total)}/\u2193{_fmt_token_count(output_total)}"
 
     cost_data = data.get("cost", {})
