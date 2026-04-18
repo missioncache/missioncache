@@ -492,6 +492,50 @@ else
     detail "Skipped rule installation"
 fi
 
+# ─── Step 8: User-Level Slash Commands ───────────────────────────────────────
+step 8 "User-Level Slash Commands"
+echo -e "  ${DIM}Orbit ships /whats-new - a slash command that scans the Claude Code${NC}"
+echo -e "  ${DIM}changelog since the version you last reviewed and marks that version${NC}"
+echo -e "  ${DIM}as seen so the statusline can render the version indicator in green.${NC}"
+echo ""
+
+if ask_yn "Install user-level slash commands into ~/.claude/commands/?" "Y"; then
+    CMDS_SRC="$ORBIT_REPO/user-commands"
+    CMDS_DST="$HOME/.claude/commands"
+    mkdir -p "$CMDS_DST"
+
+    if [[ -d "$CMDS_SRC" ]]; then
+        (
+            shopt -s nullglob
+            for src in "$CMDS_SRC"/*.md; do
+                fname=$(basename "$src")
+                link="$CMDS_DST/$fname"
+                if [[ -L "$link" ]]; then
+                    current_target=$(readlink "$link")
+                    if [[ "$current_target" == "$src" ]]; then
+                        detail "Already linked: $fname"
+                        continue
+                    fi
+                    rm "$link"
+                elif [[ -f "$link" ]]; then
+                    mv "$link" "$link.bak"
+                    detail "Backed up existing $fname -> $fname.bak"
+                elif [[ -e "$link" ]]; then
+                    warn "$link exists but is not a regular file - skipping $fname"
+                    continue
+                fi
+                ln -s "$src" "$link"
+                detail "Linked $fname -> $src"
+            done
+        )
+        success "User-level slash commands installed"
+    else
+        warn "user-commands directory not found at $CMDS_SRC - skipping"
+    fi
+else
+    detail "Skipped user-level slash command installation"
+fi
+
 # ─── Open Dashboard ──────────────────────────────────────────────────────────
 echo ""
 info "Opening Orbit Dashboard..."
