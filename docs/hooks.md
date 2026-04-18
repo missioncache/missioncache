@@ -219,19 +219,19 @@ Hooks write to a surprising number of places. Here is the complete map:
 
 ## The HTTP hook path
 
-Beyond the plugin-registered hooks in `hooks.json`, orbit also supports (but does not require) a second hook-wiring mechanism: Claude Code's native `"type": "http"` hook form in `~/.claude/settings.json`. This is a *user-level* registry - not part of the plugin - where power users can POST to dashboard endpoints on every hook event without going through Python at all.
+Beyond the plugin-registered hooks in `hooks.json`, orbit also uses a second hook-wiring mechanism: Claude Code's native `"type": "http"` hook form in `~/.claude/settings.json`. This is a *user-level* registry - not part of the plugin manifest - where Claude Code POSTs to HTTP endpoints on every hook event without going through Python at all.
 
-The orbit dashboard exposes three endpoints for this form:
+The orbit dashboard exposes these endpoints:
 
-| Endpoint | Hook | What it does |
-|----------|------|--------------|
-| `POST /api/hooks/heartbeat` | UserPromptSubmit | Records a heartbeat (alternative to the plugin's subprocess path) |
-| `POST /api/hooks/edit-count` | Stop | Updates `session_state.edit_count` in `hooks-state.db` for statusline display |
-| `POST /api/hooks/task-created` | (custom) | Notification-style hook for task creation |
+| Endpoint | Caller | What it does |
+|----------|--------|--------------|
+| `POST /api/hooks/edit-count` | `PostToolUse` HTTP hook wired by `setup.sh` (matcher `Edit\|Write\|NotebookEdit`) | Updates `session_state.edit_count` in `hooks-state.db` for the statusline edit counter |
+| `POST /api/hooks/task-created` | Orbit MCP server (`create_task`, `create_orbit_files`) | Triggers immediate SQLite → DuckDB sync so new projects show in the dashboard without the up-to-60s background-sync lag |
+| `POST /api/hooks/heartbeat` | Optional - power-user `UserPromptSubmit` HTTP hook wiring | Records a heartbeat. Plugin already records heartbeats via `activity_tracker.py`'s subprocess path, so wiring this on top just duplicates them |
 
-These endpoints live in `orbit-dashboard/server.py` and are documented in [`dashboard.md`](./dashboard.md). **The orbit plugin itself does not call them** - they exist purely for users who want to wire their own HTTP hooks in `settings.json`. If you grep the plugin codebase for "heartbeat" and only find the subprocess path in `activity_tracker.py`, that is correct. The HTTP endpoints are there because some power users (including the author's own dev setup) use both paths simultaneously - one heartbeat via the plugin subprocess, one via a `settings.json`-wired HTTP POST to the same dashboard endpoint.
+`edit-count` is wired automatically by `setup.sh` when the dashboard is installed, so full-install users get the statusline edit counter out of the box. `task-created` is called internally by the MCP server, not by a user-level HTTP hook. `heartbeat` is only of interest if you specifically want two parallel heartbeat paths.
 
-**If you are auditing "which endpoints are actually used by hooks", remember to grep `~/.claude/settings.json` in addition to `~/.claude/hooks/` and the plugin source.** Missing the settings.json half is how three actively-wired endpoints got reclassified as "dead" in an earlier dashboard cleanup pass before Daisy pushed back on the analysis.
+**If you are auditing "which endpoints are actually used by hooks", grep `~/.claude/settings.json` in addition to the plugin source.** Claude Code's `"type": "http"` hook form is wired in settings.json and isn't visible from `hooks.json` or the plugin tree.
 
 ## The `ORBIT_AUTO_MODE` signal
 

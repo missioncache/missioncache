@@ -11,7 +11,7 @@ from .app import mcp
 from .config import settings
 from .db import get_db
 from .errors import OrbitError, OrbitFileNotFoundError, TaskNotFoundError
-from .helpers import _validate_path
+from .helpers import _notify_dashboard_task_created, _validate_path
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ async def create_orbit_files(
             task = db.get_task_by_name(project_name)
         if task and task.repo_id != repo_id:
             db.update_task_repo(task.id, repo_id)
+
+        await _notify_dashboard_task_created()
 
         return {
             "success": True,

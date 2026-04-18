@@ -232,13 +232,19 @@ The orbit-auto endpoints read from the `auto_executions` and `auto_execution_log
 
 ### Hook receivers
 
-Orbit hooks can talk to the dashboard via `/api/hooks/*` endpoints. Two audiences use these: the orbit plugin's own commands (`/orbit:new`, `/orbit:go`, `/orbit:save`) call a handful of them to register active projects and resolve terminal-session IDs, and power users can wire HTTP hooks directly in `~/.claude/settings.json` using Claude Code's native `"type": "http"` hook form. That second path is how `heartbeat`, `edit-count`, and `task-created` get called - they have no caller in the orbit plugin itself, but they are exposed so that a user's own settings.json can POST to them from `UserPromptSubmit`, `PostToolUse`, and `TaskCreated` events.
+Orbit hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three callers use these:
+
+- The orbit plugin's own slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`) POST to `/api/hooks/project` to register active projects, and resolve terminal session IDs via `/api/hooks/term-session/...`.
+- The orbit MCP server fires `/api/hooks/task-created` internally whenever a task-creation tool runs, so the dashboard syncs immediately instead of waiting up to 60s.
+- `setup.sh` wires `/api/hooks/edit-count` into `~/.claude/settings.json` as a `PostToolUse` HTTP hook with matcher `Edit|Write|NotebookEdit`. That is what populates the statusline edit counter.
+
+`heartbeat` is exposed but not wired by the plugin - power users can optionally POST to it from their own `UserPromptSubmit` HTTP hook if they want a second redundant heartbeat path; the plugin already records heartbeats via its in-process subprocess hook, so this is a duplicate and most users should skip it.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/hooks/heartbeat` | Record an activity heartbeat. Intended for `UserPromptSubmit` HTTP hook wiring. |
-| POST | `/api/hooks/edit-count` | Increment per-session edit count. Intended for `PostToolUse` HTTP hook wiring with matcher `Edit\|Write\|NotebookEdit`. |
-| POST | `/api/hooks/task-created` | Triggers an immediate SQLite → DuckDB sync. Intended for `TaskCreated` HTTP hook wiring. |
+| POST | `/api/hooks/heartbeat` | Record an activity heartbeat. Optional - power-user `UserPromptSubmit` HTTP hook wiring only; the plugin already records heartbeats via its subprocess hook. |
+| POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `setup.sh` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`). Feeds the statusline edit counter. |
+| POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the orbit MCP server after `create_task` and `create_orbit_files`. |
 | POST | `/api/hooks/action` | Record current tool action for tab title display. |
 | POST | `/api/hooks/project` | Set the active project for a session. Called by `/orbit:new`, `/orbit:go`, `/orbit:save`. |
 | POST | `/api/hooks/qa-review` | Mark QA review as suggested for a session. |
@@ -268,7 +274,7 @@ Sync runs in four places:
 1. **On startup** - `lifespan()` at `orbit-dashboard/server.py:158` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
 2. **Every 60 seconds** - the `background_sync()` async task runs on a `SYNC_INTERVAL_SECONDS=60` loop. This is why the dashboard always lags heartbeats by at most a minute.
 3. **On demand via `POST /api/sync`** - useful for the "I just committed, show me the latest" case where you do not want to wait for the background loop.
-4. **On `task-created` hook** - `POST /api/hooks/task-created` triggers an immediate sync so that a newly created task shows up in the active table right away.
+4. **After task creation** - the orbit MCP server POSTs to `/api/hooks/task-created` after `create_task` and `create_orbit_files` so a newly created task shows up in the active table right away instead of waiting up to 60s for the next background sync.
 
 The `migrate_to_duckdb.py` script is a standalone version of the same logic; you run it manually after a DuckDB corruption or when you want to rebuild the analytics DB from scratch.
 

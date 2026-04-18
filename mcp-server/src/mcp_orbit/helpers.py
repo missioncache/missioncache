@@ -1,6 +1,8 @@
 """Shared helper functions used across tool modules."""
 
+import asyncio
 import logging
+import urllib.request
 from pathlib import Path
 
 from . import orbit
@@ -10,6 +12,31 @@ from .errors import TaskNotFoundError, ValidationError
 from .models import TaskDetail, TaskProgress, TaskSummary
 
 logger = logging.getLogger(__name__)
+
+
+async def _notify_dashboard_task_created() -> None:
+    """Fire-and-forget POST to the dashboard so it syncs immediately.
+
+    The dashboard polls SQLite every 60 seconds; this shaves that lag
+    off the user-visible "created a project, doesn't show up yet" case.
+    Silently swallows every failure - the dashboard is optional, may
+    not be running, and we never want to fail a tool call over it.
+    """
+    url = f"{settings.dashboard_url}/api/hooks/task-created"
+
+    def _post() -> None:
+        try:
+            req = urllib.request.Request(
+                url,
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=0.5)
+        except Exception:
+            pass
+
+    await asyncio.to_thread(_post)
 
 
 def _validate_path(

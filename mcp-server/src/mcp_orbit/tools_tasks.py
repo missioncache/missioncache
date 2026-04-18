@@ -11,7 +11,12 @@ from .app import mcp
 from .config import settings
 from .db import get_db
 from .errors import OrbitError, InvalidStateError, TaskNotFoundError
-from .helpers import _task_to_detail, _task_to_summary, _validate_path
+from .helpers import (
+    _notify_dashboard_task_created,
+    _task_to_detail,
+    _task_to_summary,
+    _validate_path,
+)
 from .models import (
     CompleteTaskResult,
     CreateTaskResult,
@@ -300,6 +305,8 @@ async def create_task(
             repo_id=repo_id,
             jira_key=jira_key,
         )
+
+        await _notify_dashboard_task_created()
 
         return CreateTaskResult(
             task_id=task.id,

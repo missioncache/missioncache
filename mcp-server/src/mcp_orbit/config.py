@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     active_dir_name: str = "active"
     completed_dir_name: str = "completed"
 
+    # Dashboard base URL for out-of-band sync notifications (task creation).
+    # Failures are silently ignored - dashboard is optional.
+    dashboard_url: str = "http://localhost:8787"
+
     class Config:
         env_prefix = "ORBIT_"
 

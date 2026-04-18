@@ -346,6 +346,36 @@ fi
 
 success "Orbit Dashboard installed (port 8787)"
 
+# Wire PostToolUse HTTP hook so the dashboard receives edit counts for the
+# statusline edit counter. Idempotent: no-op if already present.
+SETTINGS="$HOME/.claude/settings.json"
+if [[ ! -f "$SETTINGS" ]]; then
+    mkdir -p "$(dirname "$SETTINGS")"
+    echo "{}" > "$SETTINGS"
+fi
+"$PYTHON" - "$SETTINGS" << 'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    d = json.load(f)
+hooks = d.setdefault("hooks", {})
+post = hooks.setdefault("PostToolUse", [])
+url = "http://localhost:8787/api/hooks/edit-count"
+matcher = "Edit|Write|NotebookEdit"
+for entry in post:
+    if entry.get("matcher") == matcher:
+        for h in entry.get("hooks", []):
+            if h.get("type") == "http" and h.get("url") == url:
+                sys.exit(0)  # already wired
+        entry.setdefault("hooks", []).append({"type": "http", "url": url})
+        break
+else:
+    post.append({"matcher": matcher, "hooks": [{"type": "http", "url": url}]})
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+PY
+detail "Wired edit-count HTTP hook (statusline edit counter)"
+
 # ─── Step 4: Orbit Auto CLI ──────────────────────────────────────────────────
 step 4 "Orbit Auto CLI"
 info "Installing Orbit Auto for autonomous task execution..."
