@@ -494,9 +494,11 @@ fi
 
 # ─── Step 8: User-Level Slash Commands ───────────────────────────────────────
 step 8 "User-Level Slash Commands"
-echo -e "  ${DIM}Orbit ships /whats-new - a slash command that scans the Claude Code${NC}"
-echo -e "  ${DIM}changelog since the version you last reviewed and marks that version${NC}"
-echo -e "  ${DIM}as seen so the statusline can render the version indicator in green.${NC}"
+echo -e "  ${DIM}Orbit ships these user-level slash commands:${NC}"
+echo -e "  ${DIM}  /whats-new      - Scan Claude Code changelog since last review and${NC}"
+echo -e "  ${DIM}                    mark version as seen (unlocks green statusline).${NC}"
+echo -e "  ${DIM}  /optimize-prompt - Transform prompts into structured XML with agent${NC}"
+echo -e "  ${DIM}                    and skill suggestions (used by /orbit:prompts).${NC}"
 echo ""
 
 if ask_yn "Install user-level slash commands into ~/.claude/commands/?" "Y"; then
