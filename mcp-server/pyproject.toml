@@ -1,10 +1,28 @@
 [project]
 name = "mcp-orbit"
 version = "0.2.0"
-description = "MCP server for orbit project management with time tracking"
+description = "MCP server for the orbit Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Tomer Brami", email = "tomerbrami@gmail.com"}
+]
+keywords = ["claude-code", "orbit", "mcp", "model-context-protocol", "task-tracking"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
 dependencies = [
+    "orbit-db>=1.0.0",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
@@ -16,6 +34,11 @@ dev = [
     "pytest-asyncio>=0.21.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/tomerbr1/claude-orbit"
+Repository = "https://github.com/tomerbr1/claude-orbit"
+Issues = "https://github.com/tomerbr1/claude-orbit/issues"
+
 [project.scripts]
 mcp-orbit = "mcp_orbit.server:main"
 
@@ -25,4 +48,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_orbit"]
-# templates/ is now a proper subpackage with __init__.py, no force-include needed
