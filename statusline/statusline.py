@@ -627,15 +627,35 @@ def get_k8s_context() -> str:
 
 # ============ VERSION INFO ============
 
+def _parse_semver(version: str) -> tuple[int, ...]:
+    """Parse a semver-ish string into a comparable int tuple. Non-numeric
+    segments collapse to 0 so malformed input never crashes the comparison."""
+    parts = []
+    for part in version.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
 def is_version_reviewed(version: str) -> bool:
-    """Check if /whats-new has been run for this version."""
+    """Check if /whats-new has been run for this version or a later one.
+
+    /whats-new is cumulative - reviewing the changelog at version N implies
+    all prior versions' changelogs have been seen too. So we return True
+    whenever the recorded reviewed version is >= `version`.
+    """
     reviewed_file = Path.home() / ".claude" / "cache" / "whats-new-version"
     if not reviewed_file.exists():
         return False
     try:
-        return reviewed_file.read_text().strip() == version
+        reviewed = reviewed_file.read_text().strip()
     except OSError:
         return False
+    if not reviewed:
+        return False
+    return _parse_semver(reviewed) >= _parse_semver(version)
 
 
 _LATEST_RELEASE_TTL = 21600  # 6 hours
@@ -1257,7 +1277,7 @@ def main() -> None:
         if version_upgrade:
             # `version_upgrade` is pre-formatted as "v<tag> (Xd)" by get_version_info
             upgrade_link = f"\033]8;;{changelog_url}\033\\{version_upgrade}\033]8;;\033\\"
-            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}  {COLORS['upgrade']}\u2b06 {upgrade_link}{RESET}")
+            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET} {COLORS['upgrade']}\u2192 {upgrade_link}{RESET}")
         else:
             line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
     for inc in health:
