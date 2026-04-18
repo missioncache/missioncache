@@ -430,6 +430,7 @@ def parse_input(raw: str) -> dict:
         "cost_str": f"${session_cost:.2f}",
         "worktree": (data.get("workspace") or {}).get("git_worktree"),
         "rate_limits": data.get("rate_limits"),
+        "running_version": data.get("version", "") or "",
     }
 
 
@@ -640,19 +641,18 @@ def is_version_reviewed(version: str) -> bool:
 _LATEST_RELEASE_TTL = 21600  # 6 hours
 
 
-def get_version_info() -> tuple[str, str]:
-    """Return (installed, latest_if_newer_age).
+def get_version_info(running: str) -> tuple[str, str]:
+    """Return (running, latest_if_newer_age).
 
-    - installed: output of `claude --version`, e.g. "2.1.113".
+    - running: the running session's version, passed in from the stdin
+      `version` field. This is the version actually executing in the current
+      Claude Code process - distinct from `claude --version`, which reports
+      the on-disk binary (potentially already auto-updated to a newer tag).
     - latest_if_newer_age: "v2.1.114 (2d)"-style string when a newer release
       exists, otherwise empty. The caller uses its emptiness to decide whether
       to render the upgrade indicator at all.
     """
-    out = run_cmd(["claude", "--version"])
-    if not out:
-        return "", ""
-    installed = out.split()[0] if out else ""
-    if not installed:
+    if not running:
         return "", ""
 
     cache_file = STATE_DIR / "version-cache.json"
@@ -704,12 +704,12 @@ def get_version_info() -> tuple[str, str]:
         except Exception:
             pass
 
-    if latest_version and latest_version != installed:
+    if latest_version and latest_version != running:
         age = ""
         if latest_date:
             age = f" ({(date.today() - latest_date.astimezone().date()).days}d)"
-        return installed, f"v{latest_version}{age}"
-    return installed, ""
+        return running, f"v{latest_version}{age}"
+    return running, ""
 
 
 # ============ HEALTH STATUS ============
@@ -1136,7 +1136,7 @@ def main() -> None:
     f_project = pool.submit(get_project_info, session_id, info["duration_sec"])
     f_git = pool.submit(get_git_info)
     f_k8s = pool.submit(get_k8s_context)
-    f_version = pool.submit(get_version_info)
+    f_version = pool.submit(get_version_info, info["running_version"])
     f_health = pool.submit(get_health_status)
     f_usage = pool.submit(
         lambda: _parse_stdin_rate_limits(rate_limits) if rate_limits else get_usage_data()
