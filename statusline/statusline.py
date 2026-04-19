@@ -1214,9 +1214,6 @@ def main() -> None:
     dir_name = Path.cwd().name
     if dir_name == os.environ.get("USER", ""):
         dir_name = "~"
-    worktree = info.get("worktree")
-    if worktree and worktree.get("name"):
-        dir_name = f"{dir_name} (wt: {worktree['name']})"
 
     # --- Build items per line ---
 
