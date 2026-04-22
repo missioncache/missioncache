@@ -1,0 +1,68 @@
+[project]
+name = "orbit-install"
+version = "1.0.0"
+description = "Bootstrap installer for Orbit - the project manager for Claude Code"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Tomer Brami", email = "tomerbrami@gmail.com"},
+]
+license = "MIT"
+keywords = ["claude", "orbit", "installer", "bootstrap", "plugin"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Installation/Setup",
+]
+
+# Intentional: stdlib only. orbit-install must be runnable via `uvx orbit-install`
+# with zero bootstrap cost. Any new dependency here increases cold-start time and
+# risks cache misses on first run. Third-party deps belong in the component
+# packages (orbit-dashboard, orbit-auto, mcp-orbit, orbit-db), not here.
+dependencies = []
+
+[project.scripts]
+orbit-install = "orbit_install.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomerbr1/claude-orbit"
+Repository = "https://github.com/tomerbr1/claude-orbit"
+Issues = "https://github.com/tomerbr1/claude-orbit/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["orbit_install"]
+
+# Bundle the repo's rules/ and user-commands/ into the wheel so end users can
+# install them without cloning. Source of truth stays in the repo root; hatchling
+# pulls them in at build time. Maintainers using --local skip the bundle and
+# symlink from the clone directly.
+[tool.hatch.build.targets.wheel.force-include]
+"../rules" = "orbit_install/bundled/rules"
+"../user-commands" = "orbit_install/bundled/user_commands"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "tests/",
+    "__pycache__/",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
