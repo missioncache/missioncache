@@ -21,6 +21,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+dependencies = [
+    "orbit-db>=1.0.0",
+]
+
 [project.scripts]
 orbit-auto = "orbit_auto.cli:main"
 
