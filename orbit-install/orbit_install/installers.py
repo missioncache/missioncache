@@ -437,6 +437,32 @@ def uninstall_user_commands(ctx: InstallContext) -> None:
 
 
 # ---------------------------------------------------------------------------
+# orbit-db CLI
+# ---------------------------------------------------------------------------
+
+def install_orbit_db(ctx: InstallContext) -> None:
+    """Install the orbit-db CLI as a standalone tool for terminal task management."""
+    ui.step("7", "orbit-db CLI")
+    if ctx.mode == "local":
+        _pip_install_editable(_require_repo(ctx) / "orbit-db")
+    else:
+        _pipx_install("orbit-db")
+    if shutil.which("orbit-db"):
+        ui.detail(f"orbit-db available at {shutil.which('orbit-db')}")
+    else:
+        ui.warn("orbit-db not on PATH - restart your shell")
+    state.record_component("orbit_db", {"mode": ctx.mode})
+    ui.success("orbit-db installed")
+
+
+def uninstall_orbit_db(ctx: InstallContext) -> None:
+    if ctx.mode != "local":
+        _pipx_uninstall("orbit-db")
+    state.remove_component("orbit_db")
+    ui.detail("orbit-db uninstalled")
+
+
+# ---------------------------------------------------------------------------
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
@@ -583,6 +609,7 @@ ALL_COMPONENTS: tuple[str, ...] = (
     "statusline",
     "rules",
     "user_commands",
+    "orbit_db",
 )
 
 _INSTALLERS = {
@@ -592,6 +619,7 @@ _INSTALLERS = {
     "statusline": install_statusline,
     "rules": install_rules,
     "user_commands": install_user_commands,
+    "orbit_db": install_orbit_db,
 }
 
 _UNINSTALLERS = {
@@ -601,6 +629,7 @@ _UNINSTALLERS = {
     "statusline": uninstall_statusline,
     "rules": uninstall_rules,
     "user_commands": uninstall_user_commands,
+    "orbit_db": uninstall_orbit_db,
 }
 
 

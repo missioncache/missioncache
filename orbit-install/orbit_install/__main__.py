@@ -60,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("--statusline", "statusline"),
         ("--rules", "rules"),
         ("--user-commands", "user_commands"),
+        ("--orbit-db", "orbit_db"),
     ):
         opt_in.add_argument(flag, dest=dest, action="store_true")
 
@@ -74,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("--no-statusline", "no_statusline"),
         ("--no-rules", "no_rules"),
         ("--no-user-commands", "no_user_commands"),
+        ("--no-orbit-db", "no_orbit_db"),
     ):
         opt_out.add_argument(flag, dest=dest, action="store_true")
 

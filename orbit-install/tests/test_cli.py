@@ -90,6 +90,13 @@ def test_user_commands_flag_naming() -> None:
     assert _explicit_components(args) == ["user_commands"]
 
 
+def test_orbit_db_flag_naming() -> None:
+    """--orbit-db maps to the `orbit_db` component name."""
+    args = build_parser().parse_args(["--orbit-db"])
+    assert args.orbit_db is True
+    assert _explicit_components(args) == ["orbit_db"]
+
+
 def test_statusline_without_dashboard_auto_adds_dashboard(monkeypatch) -> None:
     """--statusline alone pulls dashboard in too, since orbit-statusline lives in that package."""
     captured: list[list[str]] = []

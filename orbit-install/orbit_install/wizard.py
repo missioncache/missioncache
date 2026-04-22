@@ -40,6 +40,11 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "User-level slash commands",
         "/whats-new and /optimize-prompt installed into ~/.claude/commands/.",
     ),
+    "orbit_db": (
+        "orbit-db CLI",
+        "Terminal CLI for task management (list-active, create-task, task-time, ...). "
+        "Complements the dashboard web UI for shell or script use.",
+    ),
 }
 
 
