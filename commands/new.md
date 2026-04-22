@@ -101,13 +101,12 @@ Report: failure modes and edge cases, known issues in related code, testing gaps
 
 Merge all 4 results into a single structured `research_findings` with sections: Stack, Features, Architecture, Pitfalls.
 
-### Step 3: Determine Repository Root
+### Step 3: Determine Project Location
 
-**IMPORTANT:** The `repo_path` must be the **git repository root**, not the current working directory.
+`repo_path` is a location marker used to group tasks in the dashboard. It does NOT need to be a git repo - orbit projects can be started anywhere. Prefer the git repo root when available so all tasks in the same repo group together; otherwise fall back to the current working directory.
 
-Run this command to get the repo root:
 ```bash
-git rev-parse --show-toplevel
+git rev-parse --show-toplevel 2>/dev/null || pwd
 ```
 
 Use the output as `repo_path`.
