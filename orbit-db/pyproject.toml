@@ -1,6 +1,6 @@
 [project]
 name = "orbit-db"
-version = "1.0.0"
+version = "1.0.1"
 description = "SQLite-based task and time tracking database for the orbit Claude Code plugin"
 readme = "README.md"
 requires-python = ">=3.11"

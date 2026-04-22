@@ -590,6 +590,18 @@ class TaskDB:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.execute("PRAGMA busy_timeout = 5000")
+            # Auto-init schema on first open. SCHEMA_SQL is fully idempotent
+            # (28 CREATE ... IF NOT EXISTS clauses), so this is safe for both
+            # fresh and existing DBs. Without this, the bare `orbit-db` CLI
+            # and any other first-time caller would crash on "no such table"
+            # errors because __init__ only ever created an empty DB file.
+            self._connection.executescript(SCHEMA_SQL)
+            for key, value in DEFAULT_CONFIG.items():
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)",
+                    (key, json.dumps(value)),
+                )
+            self._connection.commit()
         try:
             yield self._connection
         finally:

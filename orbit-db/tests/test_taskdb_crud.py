@@ -35,6 +35,23 @@ class TestInitialize:
         for expected in ("repositories", "tasks", "heartbeats", "sessions", "config", "task_updates"):
             assert expected in table_names, f"Missing table: {expected}"
 
+    def test_auto_init_without_explicit_initialize(self, tmp_path):
+        """A bare TaskDB() + query should work without calling initialize() first.
+
+        Regression: the `orbit-db list-active` CLI (and any other first-time
+        caller) used to crash with `sqlite3.OperationalError: no such table:
+        tasks` because __init__ only created an empty DB file. Fresh connection
+        opens now auto-run the idempotent schema DDL.
+        """
+        db_path = tmp_path / "fresh.db"
+        fresh_db = TaskDB(db_path=db_path)  # no .initialize() call
+        try:
+            # Any method that hits the tasks table used to crash here.
+            tasks = fresh_db.get_active_tasks()
+            assert tasks == []
+        finally:
+            fresh_db.close()
+
 
 # ── create_task ───────────────────────────────────────────────────────────
 
