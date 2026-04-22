@@ -4,7 +4,7 @@ This document covers the orbit dashboard: a FastAPI backend plus a single-file H
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (dual-DB pattern, heartbeats, sessions, `claude_session_cache`, `full_path`, orbit file layout). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* the dashboard, the short version is: run `python3.11 server.py` in `orbit-dashboard/` (or have launchd do it for you), open `http://localhost:8787`, and the two screens you will spend time on are **Projects** and **Activity**. The rest of this doc is for when you want to understand what you are looking at, hit the API directly, or extend the dashboard.
+If you are just trying to *use* the dashboard, the short version is: run `orbit-dashboard serve` (the pip-installed console entry point, or have launchd/systemd do it for you via `orbit-dashboard install-service`), open `http://localhost:8787`, and the two screens you will spend time on are **Projects** and **Activity**. The rest of this doc is for when you want to understand what you are looking at, hit the API directly, or extend the dashboard.
 
 ## What the dashboard shows
 
@@ -31,7 +31,7 @@ Clicking a row opens a modal with four tabs:
 
 The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the orbit files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
 
-The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.claude/orbit/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_orbit_progress()` at `orbit-dashboard/server.py:809`, which flags `orbit_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
+The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.claude/orbit/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_orbit_progress()` at `orbit-dashboard/orbit_dashboard/server.py:833`, which flags `orbit_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 ### Activity view
 
@@ -64,7 +64,7 @@ This is the one part of the dashboard that trips people up, so it is worth a pro
 
 ### Two sources, one number
 
-Every active task is reported with a `time_spent_seconds` field, computed in `/api/tasks/active` like this (see `orbit-dashboard/server.py:1128-1139`):
+Every active task is reported with a `time_spent_seconds` field, computed in `/api/tasks/active` like this (see `orbit-dashboard/orbit_dashboard/server.py:1131`):
 
 ```python
 task_ids = [t.id for t in tasks]
@@ -102,7 +102,7 @@ It is under-counting-prone when:
 
 JSONL time is the reconstruction from Claude Code's transcript files. Every message in a JSONL file has a timestamp; a session's "duration" is the sum of the gaps between consecutive messages, capped at 5 minutes per gap (longer gaps are treated as idle). This gives a realistic "time spent typing and waiting for Claude" figure rather than a wall-clock-span figure.
 
-The gap-capping logic lives in `SessionMetrics.active_seconds_for_date()` at `orbit-dashboard/lib/jsonl_parser.py:77`:
+The gap-capping logic lives in `SessionMetrics.active_seconds_for_date()` at `orbit-dashboard/orbit_dashboard/lib/jsonl_parser.py:77`:
 
 ```python
 max_gap_seconds = 5 * 60  # 5 minutes
@@ -118,7 +118,7 @@ JSONL sessions are parsed lazily and cached in the `claude_session_cache` table 
 
 ### Joining JSONL time to tasks
 
-The tricky bit is attributing cached JSONL sessions back to orbit tasks, because JSONL files are keyed by `cwd`, not by task. The join is at `_get_jsonl_task_times()` at `orbit-dashboard/server.py:1082`:
+The tricky bit is attributing cached JSONL sessions back to orbit tasks, because JSONL files are keyed by `cwd`, not by task. The join is at `_get_jsonl_task_times()` at `orbit-dashboard/orbit_dashboard/server.py:1099`:
 
 ```sql
 SELECT t.id, SUM(c.duration_seconds) as total
@@ -140,13 +140,13 @@ This does two things worth noting:
 
 ### Caps and overrides
 
-One more subtlety: the `/api/stats/today` and `/api/stats/day` endpoints cap the reported `claude_seconds` at wall-clock elapsed time for the day (see `orbit-dashboard/server.py:1550-1561`). This handles the case where multiple Claude sessions run in parallel and the naive sum of their per-session durations exceeds the actual elapsed time. For the current day, the cap is `(now - midnight).total_seconds()`; for past days, it is a hard 24 hours.
+One more subtlety: the `/api/stats/today` and `/api/stats/day` endpoints cap the reported `claude_seconds` at wall-clock elapsed time for the day (see `orbit-dashboard/orbit_dashboard/server.py:1569-1580`). This handles the case where multiple Claude sessions run in parallel and the naive sum of their per-session durations exceeds the actual elapsed time. For the current day, the cap is `(now - midnight).total_seconds()`; for past days, it is a hard 24 hours.
 
-The `/api/stats/history` endpoint does a similar merged-time override at `orbit-dashboard/server.py:1841-1843`: the `trends.time.current` field is bumped to `max(trends, merged_total)` so the history trend number never undercounts when JSONL time exceeds orbit-tracked time.
+The `/api/stats/history` endpoint does a similar merged-time override at `orbit-dashboard/orbit_dashboard/server.py:1862-1863`: the `trends.time.current` field is bumped to `max(trends, merged_total)` so the history trend number never undercounts when JSONL time exceeds orbit-tracked time.
 
 ## API reference
 
-Every dashboard endpoint lives in `orbit-dashboard/server.py`. Request bodies are JSON for all POST endpoints, and responses are JSON unless otherwise noted. There is no authentication - the server binds to `127.0.0.1:8787` only.
+Every dashboard endpoint lives in `orbit-dashboard/orbit_dashboard/server.py`. Request bodies are JSON for all POST endpoints, and responses are JSON unless otherwise noted. There is no authentication - the server binds to `127.0.0.1:8787` only.
 
 ### Projects and tasks
 
@@ -216,7 +216,7 @@ The `/api/tasks/active` response shape is the largest; the relevant fields are:
 - `merge_hourly_activity(task_hourly, claude_hourly)` - the two sources joined into one 24-element array.
 - `_merge_untracked_sessions(...)` - untracked Claude sessions (anti-joined against the `sessions` table) grouped by cwd and appended to the task list.
 
-`_merge_untracked_sessions` is what makes "Claude Code activity with no orbit project loaded" visible in the dashboard. The anti-join query lives in `ClaudeSessionCache.get_untracked_sessions(date)` at `orbit-dashboard/lib/analytics_db.py:3165` and returns JSONL sessions that do not appear in any orbit `sessions` row for the same `session_id`. Because the anti-join relies on both tables living in the same SQLite file, the invariant in `architecture.md` about not moving `claude_session_cache` to DuckDB matters here.
+`_merge_untracked_sessions` is what makes "Claude Code activity with no orbit project loaded" visible in the dashboard. The anti-join query lives in `ClaudeSessionCache.get_untracked_sessions(date)` at `orbit-dashboard/orbit_dashboard/lib/analytics_db.py:3164` and returns JSONL sessions that do not appear in any orbit `sessions` row for the same `session_id`. Because the anti-join relies on both tables living in the same SQLite file, the invariant in `architecture.md` about not moving `claude_session_cache` to DuckDB matters here.
 
 ### Orbit-auto execution tracking
 
@@ -236,14 +236,14 @@ Orbit hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three caller
 
 - The orbit plugin's own slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`) POST to `/api/hooks/project` to register active projects, and resolve terminal session IDs via `/api/hooks/term-session/...`.
 - The orbit MCP server fires `/api/hooks/task-created` internally whenever a task-creation tool runs, so the dashboard syncs immediately instead of waiting up to 60s.
-- `setup.sh` wires `/api/hooks/edit-count` into `~/.claude/settings.json` as a `PostToolUse` HTTP hook with matcher `Edit|Write|NotebookEdit`. That is what populates the statusline edit counter.
+- `orbit-install` wires `/api/hooks/edit-count` into `~/.claude/settings.json` as a `PostToolUse` HTTP hook with matcher `Edit|Write|NotebookEdit` whenever the dashboard component is installed. That is what populates the statusline edit counter.
 
 `heartbeat` is exposed but not wired by the plugin - power users can optionally POST to it from their own `UserPromptSubmit` HTTP hook if they want a second redundant heartbeat path; the plugin already records heartbeats via its in-process subprocess hook, so this is a duplicate and most users should skip it.
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/api/hooks/heartbeat` | Record an activity heartbeat. Optional - power-user `UserPromptSubmit` HTTP hook wiring only; the plugin already records heartbeats via its subprocess hook. |
-| POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `setup.sh` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`). Feeds the statusline edit counter. |
+| POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `orbit-install` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`) when the dashboard is installed. Feeds the statusline edit counter. |
 | POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the orbit MCP server after `create_task` and `create_orbit_files`. |
 | POST | `/api/hooks/action` | Record current tool action for tab title display. |
 | POST | `/api/hooks/project` | Set the active project for a session. Called by `/orbit:new`, `/orbit:go`, `/orbit:save`. |
@@ -271,7 +271,7 @@ The sync from SQLite to DuckDB is the mechanism that lets the dashboard read fas
 
 Sync runs in four places:
 
-1. **On startup** - `lifespan()` at `orbit-dashboard/server.py:158` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
+1. **On startup** - `lifespan()` at `orbit-dashboard/orbit_dashboard/server.py:158` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
 2. **Every 60 seconds** - the `background_sync()` async task runs on a `SYNC_INTERVAL_SECONDS=60` loop. This is why the dashboard always lags heartbeats by at most a minute.
 3. **On demand via `POST /api/sync`** - useful for the "I just committed, show me the latest" case where you do not want to wait for the background loop.
 4. **After task creation** - the orbit MCP server POSTs to `/api/hooks/task-created` after `create_task` and `create_orbit_files` so a newly created task shows up in the active table right away instead of waiting up to 60s for the next background sync.
@@ -299,11 +299,11 @@ The dashboard supports hash-based deep links so external tools (the statusline, 
 - `#auto` - Auto view.
 - `#projects?task=<name>&tab=<tab>` - Projects view with a specific task modal opened. `tab` can be `tasks` (default), `context`, `plan`, or `structure`.
 
-The routing is handled by `handleHashChange()` at `orbit-dashboard/index.html:4997`. Deep links resolve against both `/api/tasks/active` and `/api/tasks/completed?days=90`, so you can link to completed projects too. After opening the modal, the query string is stripped from the hash so that a page refresh does not re-open the modal unexpectedly.
+The routing is handled by `handleHashChange()` at `orbit-dashboard/orbit_dashboard/index.html:5292`. Deep links resolve against both `/api/tasks/active` and `/api/tasks/completed?days=90`, so you can link to completed projects too. After opening the modal, the query string is stripped from the hash so that a page refresh does not re-open the modal unexpectedly.
 
 The statusline uses this for its clickable project name and progress fraction. When orbit-statusline renders a line like `Project: orbit-public-release (19/39)`, the project name is wrapped in an OSC 8 hyperlink to `#{ORBIT_DASHBOARD_URL}/#projects` and the progress fraction is wrapped in a link to `#{ORBIT_DASHBOARD_URL}/#projects?task=orbit-public-release&tab=tasks`. Terminals that support OSC 8 (iTerm2, Ghostty, cmux, modern Windows Terminal) render these as clickable; terminals that do not, just see plain text with the same content.
 
-The `ORBIT_DASHBOARD_URL` environment variable is read at `statusline/statusline.py:951` and defaults to `http://localhost:8787`. If you move the dashboard to a different host or port, set this in your shell init so the statusline builds the right links.
+The `ORBIT_DASHBOARD_URL` environment variable is read at `orbit-dashboard/orbit_dashboard/statusline.py:1041` and defaults to `http://localhost:8787`. If you move the dashboard to a different host or port, set this in your shell init so the statusline builds the right links.
 
 ## Customization
 
@@ -311,21 +311,21 @@ The dashboard is deliberately minimal about configuration - there are very few k
 
 | What | Where | How to change |
 |------|-------|---------------|
-| Listen port | `server.py:2664` (`uvicorn.run`) | Change `port=8787` in the `if __name__ == "__main__":` block |
-| SQLite path | `orbit-dashboard/lib/analytics_db.py:29` (`SQLITE_PATH`) | Edit the constant |
-| DuckDB path | `orbit-dashboard/lib/analytics_db.py:28` (`DUCKDB_PATH`) | Edit the constant |
-| Sync interval | `server.py:124` (`SYNC_INTERVAL_SECONDS`) | Default 60s |
-| History cache TTL | `server.py:128` (`HISTORY_CACHE_TTL_SECONDS`) | Default 300s |
-| SSE refresh rate | `server.py:205` (`REFRESH_INTERVAL`) | Default 30s |
-| JIRA URL mapping | `server.py:208` (`JIRA_URLS`) | Add `"PREFIX-": "https://your-jira/browse/"` |
+| Listen port | `orbit_dashboard/server.py:2761` (`uvicorn.run`) | `orbit-dashboard serve --port <n>` or set `ORBIT_DASHBOARD_PORT` |
+| SQLite path | `orbit_dashboard/lib/analytics_db.py:29` (`SQLITE_PATH`) | Edit the constant |
+| DuckDB path | `orbit_dashboard/lib/analytics_db.py:28` (`DUCKDB_PATH`) | Edit the constant |
+| Sync interval | `orbit_dashboard/server.py:124` (`SYNC_INTERVAL_SECONDS`) | Default 60s |
+| History cache TTL | `orbit_dashboard/server.py:128` (`HISTORY_CACHE_TTL_SECONDS`) | Default 300s |
+| SSE refresh rate | `orbit_dashboard/server.py:205` (`REFRESH_INTERVAL`) | Default 30s |
+| JIRA URL mapping | `orbit_dashboard/server.py:224` (`get_jira_url()`) + runtime settings | Use the dashboard's Settings screen, or edit `~/.claude/orbit-dashboard-config.json` `jira_urls` map |
 | Statusline link base | `ORBIT_DASHBOARD_URL` env var | Set in shell init |
 | Dark/light theme | Frontend only | Toggle in the top-right of the UI (persisted in localStorage) |
 
-The JIRA URL mapping is empty by default. The dashboard turns any `jira_key` field into a clickable link only when the prefix matches an entry in `JIRA_URLS`, so until you populate it your task badges will show the JIRA key as plain text. Add an entry per prefix you use (e.g. `"PROJ-": "https://your-jira.example.com/browse/"`) to wire up your own JIRA. A user-facing settings screen for managing this mapping at runtime is planned (see the `dashboard-settings-screen` follow-up task).
+The JIRA URL mapping is empty by default. The dashboard turns any `jira_key` field into a clickable link only when the prefix matches a user-configured entry, so until you populate it your task badges will show the JIRA key as plain text. Open the dashboard's Settings screen (or edit `~/.claude/orbit-dashboard-config.json` directly) and add an entry per prefix you use, e.g. `"PROJ-": "https://your-jira.example.com/browse/"`.
 
 ### launchd deployment (macOS)
 
-The common way to run the dashboard in the background on macOS is via launchd. The plist lives at `~/Library/LaunchAgents/com.orbit.dashboard.plist` and `setup.sh` can generate one for you. The minimum you need is:
+The common way to run the dashboard in the background on macOS is via launchd. The plist lives at `~/Library/LaunchAgents/com.orbit.dashboard.plist` and `orbit-install` generates one for you (via `orbit-dashboard install-service`, which you can also run standalone). The minimum you need is:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -336,8 +336,8 @@ The common way to run the dashboard in the background on macOS is via launchd. T
     <string>com.orbit.dashboard</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3.11</string>
-        <string>/Users/YOU/work/personal/claude-orbit/orbit-dashboard/server.py</string>
+        <string>/opt/homebrew/bin/orbit-dashboard</string>
+        <string>serve</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -353,17 +353,17 @@ The common way to run the dashboard in the background on macOS is via launchd. T
 
 Load it with `launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist`; unload with the matching `unload` command. The `KeepAlive` key ensures the dashboard restarts automatically after a crash.
 
-**Python version matters.** DuckDB is distributed as a compiled wheel that is Python-version-specific. Orbit is known to work with Python 3.11; if your launchd plist uses `/usr/bin/python3` (system Python, usually 3.9 on macOS) you will get `ModuleNotFoundError: No module named 'duckdb'` even after installing DuckDB, because you installed it under a different interpreter. Use the exact path `/opt/homebrew/bin/python3.11` in the plist, and install dashboard dependencies with `/opt/homebrew/bin/python3.11 -m pip install -r orbit-dashboard/requirements.txt`.
+**Use the `orbit-dashboard` console script, not a raw `python3 server.py` command.** `orbit-install` writes the plist for you via `orbit-dashboard install-service` - use that rather than hand-rolling. If you do need to roll your own, point `ProgramArguments` at the absolute path from `which orbit-dashboard`. DuckDB is distributed as a compiled wheel that is Python-version-specific; installing `orbit-dashboard` into the wrong Python and then pointing launchd at a different one will give you `ModuleNotFoundError: No module named 'duckdb'` at startup. `pipx install orbit-dashboard` avoids this by pinning the package to its own venv.
 
 ### Running without launchd
 
-`python3.11 orbit-dashboard/server.py` works fine as a foreground process. You just lose auto-restart on crash, and you have to remember to start it again after rebooting. If you use tmux or a similar session manager, a dedicated pane for the dashboard is a reasonable middle ground.
+`orbit-dashboard serve` works fine as a foreground process. You just lose auto-restart on crash, and you have to remember to start it again after rebooting. If you use tmux or a similar session manager, a dedicated pane for the dashboard is a reasonable middle ground.
 
 ## Extending the dashboard
 
 ### Adding a new endpoint
 
-The rule is simple: **reads go to DuckDB via `analytics_db.py`, writes go to SQLite via `orbit-db`**. If you are adding a new aggregate query to the Activity view, you add a method to the `AnalyticsDB` class and call it from a new `@app.get()` handler. If you are adding a new mutation, you call into `OrbitTaskDB` (imported at `server.py:50`) and then trigger a sync.
+The rule is simple: **reads go to DuckDB via `analytics_db.py`, writes go to SQLite via `orbit-db`**. If you are adding a new aggregate query to the Activity view, you add a method to the `AnalyticsDB` class and call it from a new `@app.get()` handler. If you are adding a new mutation, you call into `OrbitTaskDB` (imported at `orbit_dashboard/server.py:50`) and then trigger a sync.
 
 The pattern for a new read endpoint:
 
@@ -396,9 +396,9 @@ Do not open either database directly from inside a route handler. The singletons
 
 The frontend is a single HTML file (`index.html`) with embedded CSS and JavaScript. There is no build tool, no framework, and no bundler. To add a view:
 
-1. Add a nav item in the `<nav>` block (around `orbit-dashboard/index.html:4194`).
+1. Add a nav item in the `<nav>` block (around `orbit-dashboard/orbit_dashboard/index.html:4410`).
 2. Add a `<div class="view" id="myNewView">...</div>` section below the existing views.
-3. Add a lazy loader function (`loadMyNewData`) and hook it into `switchView()` at around `orbit-dashboard/index.html:5064`.
+3. Add a lazy loader function (`loadMyNewData`) and hook it into `switchView()` at around `orbit-dashboard/orbit_dashboard/index.html:5359`.
 4. Write any render functions your view needs (convention: `renderMyNewThing(data)`).
 
 The CSS variable system at the top of `index.html` drives theming. Use `var(--bg)`, `var(--fg)`, `var(--accent)`, etc. and both the light and dark modes will Just Work.
@@ -407,7 +407,7 @@ For anything more complex than a table or a bar chart, you may want to pull in D
 
 ### Touching path resolution
 
-If you are changing how orbit files are located on disk, you need to update two places: `parse_orbit_progress()` in `orbit-dashboard/server.py:809` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
+If you are changing how orbit files are located on disk, you need to update two places: `parse_orbit_progress()` in `orbit-dashboard/orbit_dashboard/server.py:833` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
 
 ## Troubleshooting
 
@@ -449,7 +449,7 @@ This is almost always the heartbeat-vs-JSONL merge at work. See [Time accounting
 
 **Cause:** Most likely the `claude_session_cache` is missing or got moved to a different database file. The anti-join that identifies untracked sessions requires `claude_session_cache` and `sessions` to live in the same SQLite file.
 
-**Fix:** Check `sqlite3 ~/.claude/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` at `orbit-dashboard/lib/analytics_db.py:2947`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
+**Fix:** Check `sqlite3 ~/.claude/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` at `orbit-dashboard/orbit_dashboard/lib/analytics_db.py:2946`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
 
 ### "Dashboard shows stale data"
 
@@ -466,6 +466,6 @@ This is almost always the heartbeat-vs-JSONL merge at work. See [Time accounting
 ## Where to go from here
 
 - [`architecture.md`](./architecture.md) - if you need a refresher on the dual-DB pattern or the orbit-db invariants this doc assumes.
-- `orbit-dashboard/server.py` - the source. It is long but flat; grep for any endpoint path or helper name and you will find it.
-- `orbit-dashboard/lib/analytics_db.py` - if you are touching aggregate queries or adding a new one.
-- `orbit-dashboard/lib/jsonl_parser.py` - if you are debugging JSONL time estimation, especially the gap-capping logic.
+- `orbit-dashboard/orbit_dashboard/server.py` - the source. It is long but flat; grep for any endpoint path or helper name and you will find it.
+- `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` - if you are touching aggregate queries or adding a new one.
+- `orbit-dashboard/orbit_dashboard/lib/jsonl_parser.py` - if you are debugging JSONL time estimation, especially the gap-capping logic.

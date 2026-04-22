@@ -8,7 +8,7 @@
 - **Commands**: Slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`, `/orbit:done`, `/orbit:prompts`, `/orbit:mode`)
 - **Orbit Auto**: Autonomous execution CLI (`orbit-auto/`)
 - **Orbit Dashboard**: Web UI at localhost:8787 (`orbit-dashboard/`)
-- **Statusline**: Optional terminal status display (`statusline/`)
+- **Statusline**: Optional terminal status display (bundled in `orbit-dashboard/orbit_dashboard/statusline.py`, installed via the `orbit-statusline` pip entry point)
 - **Rules** (`rules/`): Claude behavioral guidance symlinked into `~/.claude/rules/` by the installer
 
 ## Key Files
@@ -29,7 +29,7 @@
 | `mcp-server/src/mcp_orbit/tools_planning.py` | Planning tools |
 | `orbit-db/orbit_db/__init__.py` | Core database layer (~3400 lines) |
 | `orbit-auto/orbit_auto/cli.py` | Orbit Auto CLI entry point |
-| `orbit-dashboard/server.py` | FastAPI dashboard backend |
+| `orbit-dashboard/orbit_dashboard/server.py` | FastAPI dashboard backend |
 | `hooks/hooks.json` | Hook definitions |
 | `hooks/session_start.py` | SessionStart hook |
 | `hooks/pre_compact.py` | PreCompact hook |
@@ -91,7 +91,7 @@ orbit-db provides `OrbitDB` class with these key tables:
 
 - **SQLite** (`~/.claude/tasks.db`): Source of truth for writes
 - **DuckDB** (`~/.claude/tasks.duckdb`): Analytics database for fast reads
-- `orbit-dashboard/lib/analytics_db.py` handles DuckDB operations
+- `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` handles DuckDB operations
 
 ## Testing
 
@@ -102,8 +102,8 @@ cd mcp-server && uvx --from . mcp-orbit
 # Test imports
 uvx --from . python -c "from mcp_orbit.server import mcp; print('OK')"
 
-# Run dashboard locally
-cd orbit-dashboard && python3 server.py
+# Run dashboard locally (via the pip-installed entry point)
+orbit-dashboard serve
 
 # Test orbit-auto
 orbit-auto --dry-run my-project
@@ -113,25 +113,29 @@ orbit-auto --dry-run my-project
 
 Two paths depending on context:
 
-**Public user install** (plugin core only, via GitHub marketplace):
-```
-/plugin marketplace add tomerbr1/claude-orbit
-/plugin install orbit@claude-orbit
-```
-
-**Maintainer/full install** (clone + all extras + local marketplace for fast iteration):
+**Public user install** (plugin core + dashboard + orbit-auto + statusline, via PyPI):
 ```bash
-./setup.sh
+uvx orbit-install
+# or
+pipx run orbit-install
 ```
 
-Or manually:
+**Maintainer install** (clone + editable pip installs + local marketplace for fast iteration):
+```bash
+git clone https://github.com/tomerbr1/claude-orbit.git
+cd claude-orbit
+uvx orbit-install --local
+```
+
+Or manually, without `orbit-install`:
 ```bash
 pip install -e ./orbit-db
 pip install -e ./orbit-auto
+pip install -e ./orbit-dashboard
 claude plugins install orbit@local
 ```
 
-The `@local` suffix refers to the local marketplace `setup.sh` creates under `~/.claude/plugins/local-marketplace/`. The `@claude-orbit` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist, but `setup.sh` will detect an existing GitHub marketplace install and skip the local-marketplace step to avoid duplicate plugin registrations.
+The `@local` suffix refers to the local marketplace that `orbit-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@claude-orbit` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.
 
 ## Dependencies
 

@@ -569,7 +569,7 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Cause:** You are on the quick (marketplace) install path, which does not include the `orbit-auto` CLI - it ships only the plugin core.
 
-**Fix:** Do the full install: clone the repo and run `./setup.sh`, which runs `pip install -e` on the `orbit-auto` package. Or, if you are already cloned, `pip install -e ./orbit-auto` by hand. The CLI binary lands in whatever Python environment you installed into.
+**Fix:** Do the full install: `uvx orbit-install` (or `uvx orbit-install --orbit-auto` if you only want this component). That pip-installs `orbit-auto` from PyPI and puts `orbit-auto` on your `PATH`. From a clone you can run `uvx orbit-install --local`, or `pip install -e ./orbit-auto` by hand if you would rather skip the installer. The CLI binary lands in whatever Python environment you installed into - if `which orbit-auto` is empty after install, check that that environment's `bin/` directory is on `PATH`.
 
 ## Where to go from here
 

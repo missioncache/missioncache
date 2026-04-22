@@ -26,7 +26,7 @@ The lines are rendered in a specific non-numeric order in the main() function - 
 
 Every line is laid out as two-column or three-column "cells" separated by a pipe character (` │ `). The first column has a dynamic width computed as `max(CELL_WIDTH=24, widest_first_column_item)`, the second column the same, and subsequent columns use the fixed `CELL_WIDTH`. This gives you vertical alignment on the first two cells of every line, which is the thing your eye tracks when scanning the status block.
 
-Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is in `statusline.py:198` if you need to change it.
+Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is in `orbit-dashboard/orbit_dashboard/statusline.py:227` if you need to change it.
 
 ## How it gets invoked
 
@@ -34,11 +34,11 @@ Claude Code runs the statusline via the `statusLine` key in `~/.claude/settings.
 
 ```json
 "statusLine": {
-  "command": "python3 ~/.claude/scripts/statusline.py"
+  "command": "orbit-statusline"
 }
 ```
 
-`~/.claude/scripts/statusline.py` is a symlink to `statusline/statusline.py` in the orbit repo - created by `setup.sh` during the full install. No reinstall is needed for statusline changes, since edits to the repo file are live instantly through the symlink. This is the one component in orbit that has no "reload" step.
+`orbit-statusline` is a pip entry point shipped by the `orbit-dashboard` package. `uvx orbit-install` wires it into `settings.json` automatically during the full install; if you cloned the repo and ran `uvx orbit-install --local`, the entry point resolves to `orbit_dashboard/statusline.py` in your checkout, so edits to that file are live instantly. No reinstall is needed for statusline-source changes in `--local` mode. For end users on the PyPI path, `uvx orbit-install --update` pulls in the newest published version.
 
 Claude Code spawns the script on every turn and sends session JSON on stdin:
 
@@ -91,7 +91,7 @@ On cache hit, the future returns instantly from a file read. On cache miss, the 
 
 ## Environment variables
 
-The statusline has a small but useful set of environment-variable knobs, documented in the module docstring at the top of `statusline.py`. Set them in your shell profile (`~/.zshrc`, `~/.bashrc`, fish config, etc.) to customize what is shown.
+The statusline has a small but useful set of environment-variable knobs, documented in the module docstring at the top of `orbit_dashboard/statusline.py`. Set them in your shell profile (`~/.zshrc`, `~/.bashrc`, fish config, etc.) to customize what is shown.
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
@@ -282,9 +282,9 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 ### "The statusline is missing entirely"
 
-**Cause:** Either `~/.claude/scripts/statusline.py` does not exist (the symlink was never created, or was pointing at the old `statusline-wrapper.sh` that got deleted), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup.
+**Cause:** Either the `orbit-statusline` entry point is not on `PATH` (the `orbit-dashboard` package was never pip-installed, or it was uninstalled), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup. A common legacy variant: `settings.json.statusLine.command` still points at `python3 ~/.claude/scripts/statusline.py` from a pre-M10 install, and that symlink now points at a deleted path.
 
-**Fix:** First check `ls -la ~/.claude/scripts/statusline.py` - it should be a symlink to `<orbit-repo>/statusline/statusline.py`. If not, re-run `setup.sh` or create the symlink manually. Then check `~/.claude/settings.json` for the `statusLine` block. Finally, run the script in isolation with a dummy payload: `echo '{}' | python3 ~/.claude/scripts/statusline.py`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
+**Fix:** First run `which orbit-statusline` - it should print a path. If not, re-run `uvx orbit-install --dashboard --statusline` (or `--update` if orbit is already installed) to reinstall the package and wire the entry point. Then check `~/.claude/settings.json` - the `statusLine.command` value should be the bare string `orbit-statusline`, not a `python3 ~/.claude/scripts/...` invocation. Rewrite it if needed. Finally, run the script in isolation with a dummy payload: `echo '{}' | orbit-statusline`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
 
 ### "The statusline renders but some lines are blank"
 
@@ -327,4 +327,4 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 - [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, the storage model, and where the statusline sits relative to the rest of orbit.
 - [`hooks.md`](./hooks.md) - for `session_start.py` and how it writes the state the statusline reads.
 - [`dashboard.md`](./dashboard.md) - for the `/api/hooks/project` endpoint used by `/orbit:go` and the OSC 8 link targets.
-- `statusline/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump.
+- `orbit-dashboard/orbit_dashboard/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump. The `orbit-statusline` entry point declared in `orbit-dashboard/pyproject.toml` resolves here.

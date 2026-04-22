@@ -15,7 +15,7 @@ This opens a private channel between you and the maintainer. You will get an ack
 Orbit is a Claude Code plugin built on top of the MCP protocol. In-scope reports include:
 
 - Issues in orbit's own code: plugin core, `orbit-db`, `orbit-auto`, the dashboard backend, hooks, statusline.
-- Issues in orbit's install or setup flow: `setup.sh`, rule-file installation, database initialization.
+- Issues in orbit's install or setup flow: the `orbit-install` package, rule-file installation, database initialization.
 - Issues in how orbit handles user data: tasks, heartbeats, orbit files, the SQLite and DuckDB stores under `~/.claude/`.
 
 Out of scope:
@@ -27,7 +27,7 @@ Out of scope:
 ## What to include
 
 - A clear description of the issue.
-- Steps to reproduce on a clean orbit install (use `./setup.sh` as the baseline).
+- Steps to reproduce on a clean orbit install (use `uvx orbit-install` as the baseline).
 - The affected component and version (commit hash from `git log`).
 - Any logs, stack traces, or proof-of-concept output that help confirm the issue.
 

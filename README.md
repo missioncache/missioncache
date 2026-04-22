@@ -63,27 +63,32 @@ Orbit ships in two flavors. Pick based on whether you want the full workbench ex
 
 ### Full install (recommended)
 
-Gets you everything: the plugin core (slash commands, MCP tools, hooks, rules), the local dashboard at `localhost:8787`, the `orbit-auto` CLI for autonomous execution, and the multi-line statusline. This is the experience Orbit was designed to deliver.
+One command, no clone needed:
 
 ```bash
-git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit
-./setup.sh
+uvx orbit-install
+# or
+pipx run orbit-install
 ```
 
-The interactive script will:
+The interactive wizard asks which components to install (default is all) and sets up:
 
-1. Register orbit in a local marketplace and install the plugin core
-2. `pip install -e` the `orbit-db` package so `orbit-auto` can log execution runs to the dashboard
-3. Install the Orbit Dashboard and wire it up as a background service (launchd on macOS, systemd on Linux)
-4. `pip install -e` the `orbit-auto` CLI
-5. Optionally install the statusline and configure health monitoring
+1. The orbit plugin itself (slash commands, MCP server, hooks, rules)
+2. The local dashboard at `localhost:8787` as a background service (launchd on macOS, systemd on Linux)
+3. The `orbit-auto` CLI for autonomous execution
+4. The `orbit-statusline` entry point, wired into `~/.claude/settings.json`
+5. Orbit rule files under `~/.claude/rules/`
+6. The `/whats-new` and `/optimize-prompt` user-level slash commands under `~/.claude/commands/`
 
-**Requirements:** Python 3.11+, Claude Code CLI, `pip`, and `uvx` on your `PATH` (needed by the plugin's MCP server). If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+For a fully non-interactive install, use `uvx orbit-install --all --yes`. To install everything except specific components, combine `--all` with opt-outs (e.g. `uvx orbit-install --all --yes --no-statusline`). Opt-out flags on their own drop you into the interactive wizard; they only take effect alongside `--all` or explicit opt-ins.
+
+**Requirements:** Python 3.11+, Claude Code CLI, and `uv` on your `PATH` (provides `uvx`). If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. `pipx` works in place of `uvx` if you prefer.
+
+**Windows note:** Windows service registration is not yet supported - the installer still registers the plugin, pip-installs `orbit-auto`, and prints manual instructions for running the dashboard.
 
 ### Plugin-only install
 
-If you only want the plugin core (slash commands, MCP tools, lifecycle hooks, orbit rules) and don't need the dashboard, `orbit-auto` CLI, or statusline, you can install Orbit as a pure Claude Code plugin via the marketplace.
+If you only want the plugin core (slash commands, MCP tools, lifecycle hooks, orbit rules) and don't need the dashboard, `orbit-auto` CLI, or statusline, install Orbit as a pure Claude Code plugin via the marketplace.
 
 In Claude Code:
 
@@ -102,45 +107,15 @@ Restart your Claude Code session.
 
 ### Full install
 
-The full install points every component at your git clone via symlinks and editable pip installs, so most of an upgrade is just `git pull`:
+Re-run the installer to refresh every component to the latest published version:
 
 ```bash
-cd claude-orbit
-git pull
+uvx orbit-install --update
 ```
 
-That alone refreshes `orbit-db`, `orbit-auto`, and the statusline immediately. Two components need an extra step:
+This pulls the latest `orbit-dashboard` and `orbit-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-orbit`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update orbit@claude-orbit` in Claude Code (or `claude plugins install orbit@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `orbit-db` is a transitive dependency of `orbit-dashboard` and `orbit-auto`, so it refreshes alongside them.
 
-**Plugin code** (commands, hooks, MCP server, templates, rules) - Claude Code caches plugin content, so you need to refresh the cache and restart your session:
-
-```bash
-claude plugins install orbit@local
-```
-
-Then restart Claude Code.
-
-**Dashboard** (server code or dependencies) - the background service is a running Python process and needs to be restarted to pick up new code. If the dashboard's `requirements.txt` changed, reinstall dependencies first.
-
-On macOS:
-```bash
-python3 -m pip install -r orbit-dashboard/requirements.txt   # if deps changed
-launchctl unload ~/Library/LaunchAgents/com.orbit.dashboard.plist
-launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist
-```
-
-On Linux:
-```bash
-python3 -m pip install -r orbit-dashboard/requirements.txt   # if deps changed
-systemctl --user restart orbit-dashboard
-```
-
-**One-command alternative:** re-running `./setup.sh` is idempotent - it detects existing installs, refreshes the plugin cache, and restarts the dashboard service for you. It's the same interactive flow as the initial install, just heavier than the manual steps above.
-
-```bash
-cd claude-orbit
-git pull
-./setup.sh
-```
+If the `uvx` cache is pinning you to an older `orbit-install` itself, clear it with `uvx cache prune` or `uvx --refresh orbit-install --update`.
 
 ### Plugin-only install
 
@@ -151,6 +126,10 @@ From Claude Code:
 ```
 
 Restart your Claude Code session.
+
+### Maintainer install (editable from a clone)
+
+If you are developing on orbit rather than consuming it, see [CONTRIBUTING.md](CONTRIBUTING.md) for the `uvx orbit-install --local` workflow. A `git pull` picks up changes in the editable Python packages; you still need `claude plugins install orbit@local` for plugin-cache refreshes and a service restart for dashboard server-code changes.
 
 ## Your First Project
 
@@ -201,7 +180,7 @@ You pick up without reconstructing anything.
 
 ### Run it autonomously
 
-*Requires the full install (`./setup.sh`). If you picked the quick install, skip to "Finish it".*
+*Requires the full install (`uvx orbit-install`). If you picked the plugin-only install, skip to "Finish it".*
 
 If your tasks are decomposed enough, hand the whole project to Orbit Auto:
 
@@ -365,7 +344,7 @@ Orbit ships as a Claude Code plugin with an MCP server, plus four standalone com
 | `orbit-db` | SQLite + DuckDB layer at `~/.claude/tasks.db` | `pip install orbit-db` |
 | `orbit-auto` | Autonomous execution CLI | `pip install orbit-auto` |
 | `orbit-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787` | Runs as a launchd/systemd service |
-| `statusline` | Optional multi-line terminal display | Symlinked into `~/.claude/scripts/` |
+| `orbit-statusline` | Optional multi-line terminal display | Bundled with `orbit-dashboard`, wired into `~/.claude/settings.json` |
 
 <!-- DIAGRAM: plugin + MCP server + db + auto + dashboard + statusline component graph -->
 
@@ -395,7 +374,7 @@ The plugin is the minimum viable install. Everything else is opt-in, and each co
 
 Deep dives for each component live in `docs/`:
 
-- [**Installation**](docs/installation.md) - all four install paths (setup.sh, marketplace, pip, manual), verification, uninstall, troubleshooting
+- [**Installation**](docs/installation.md) - all three install paths (`uvx orbit-install`, marketplace, manual), verification, uninstall, troubleshooting
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**Orbit Auto**](docs/orbit-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
@@ -405,7 +384,7 @@ Deep dives for each component live in `docs/`:
 
 ## Contributing
 
-Pull requests welcome. Development setup, testing conventions, and PR standards will live in `CONTRIBUTING.md` *(coming soon)*.
+Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup (`uvx orbit-install --local`), testing conventions, and PR standards.
 
 ## License
 

@@ -23,10 +23,10 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 | Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/orbit:<name>` |
 | orbit-auto | `orbit-auto/` | Standalone CLI that runs Claude in a loop over a task file, in either sequential or parallel-with-DAG mode | A long-running user-invoked process, one execution per `orbit-auto <project>` call |
 | Dashboard | `orbit-dashboard/` | FastAPI backend plus a single-file HTML frontend at `http://localhost:8787` for visualizing time, tasks, sessions, and orbit-auto runs | One persistent process, usually managed by launchd |
-| Statusline | `statusline/` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
-| Rules | `rules/` | Plain markdown files describing orbit conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. Legacy installs via `setup.sh` instead use a symlink; the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
+| Statusline | `orbit-dashboard/orbit_dashboard/statusline.py` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `orbit-dashboard` package and exposed via the `orbit-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
+| Rules | `rules/` | Plain markdown files describing orbit conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `orbit-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
 
-Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install via `/plugin marketplace add tomerbr1/claude-orbit` followed by `/plugin install orbit@claude-orbit`. Maintainers typically use `setup.sh`, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `orbit@local` for fast iteration without pushing to GitHub.
+Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx orbit-install`, or just the plugin core via `/plugin marketplace add tomerbr1/claude-orbit` followed by `/plugin install orbit@claude-orbit`. Maintainers run `uvx orbit-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `orbit@local` for fast iteration without pushing to GitHub.
 
 ## Talking to the database through orbit-db
 
@@ -132,7 +132,7 @@ Triggers keep `updated_at` fresh on every row update and set `completed_at`/`arc
 
 | Table | Purpose | Key columns |
 |-------|---------|-------------|
-| `claude_session_cache` | Cache of Claude Code's JSONL session transcripts, populated by `orbit-dashboard/lib/analytics_db.py`. Used to compute "untracked" sessions (Claude activity with no orbit project loaded) and to merge JSONL time with orbit heartbeat time | `session_id`, `file_path`, `date`, `hour`, `cwd`, `git_branch`, `project_path`, `message_count`, `tool_call_count`, `input_tokens`, `output_tokens`, `duration_seconds` |
+| `claude_session_cache` | Cache of Claude Code's JSONL session transcripts, populated by `orbit-dashboard/orbit_dashboard/lib/analytics_db.py`. Used to compute "untracked" sessions (Claude activity with no orbit project loaded) and to merge JSONL time with orbit heartbeat time | `session_id`, `file_path`, `date`, `hour`, `cwd`, `git_branch`, `project_path`, `message_count`, `tool_call_count`, `input_tokens`, `output_tokens`, `duration_seconds` |
 
 **Invariant:** `claude_session_cache` and `sessions` must be in the same SQLite file. The dashboard's "show me untracked Claude activity" query is a `LEFT JOIN ... WHERE s.session_id IS NULL` anti-join between the two tables. If you split them into separate databases, the anti-join silently returns empty and all untracked sessions disappear from the dashboard.
 
@@ -172,7 +172,7 @@ Projects have their own directory on disk under `~/.claude/orbit/`:
 
 The `full_path` column in the `tasks` table stores `"active/<name>"` or `"completed/<name>"`, which is how the DB stays in sync with the on-disk status. `/orbit:done` moves the directory and updates the row in one step.
 
-There is also a legacy layout under `<repo>/dev/{active,completed}/` that older projects still use. Dashboard and hooks fall back to it if the centralized path does not exist. If you are touching path resolution, check both `mcp-server/src/mcp_orbit/helpers.py` (for MCP writes) and `parse_orbit_progress()` in `orbit-dashboard/server.py` (for dashboard reads). They are independent implementations - keep them consistent.
+There is also a legacy layout under `<repo>/dev/{active,completed}/` that older projects still use. Dashboard and hooks fall back to it if the centralized path does not exist. If you are touching path resolution, check both `mcp-server/src/mcp_orbit/helpers.py` (for MCP writes) and `parse_orbit_progress()` in `orbit-dashboard/orbit_dashboard/server.py` (for dashboard reads). They are independent implementations - keep them consistent.
 
 ### Ephemeral hook state
 
@@ -252,7 +252,7 @@ The `@mcp.tool()` decorator registers your function against the shared `mcp` ins
 
 **Important:** MCP tool docstrings and parameter descriptions are the only thing Claude sees when picking tools. A vague docstring is a bug - the tool will never get called or will be called at the wrong time. Write the docstring like you are writing a commit title.
 
-After adding the tool, reinstall the plugin. If you are hacking on orbit locally from a clone, the fast path is the local marketplace that `setup.sh` set up:
+After adding the tool, reinstall the plugin. If you are hacking on orbit locally from a clone, the fast path is the local marketplace that `uvx orbit-install --local` set up:
 
 ```bash
 claude plugins install orbit@local
@@ -322,7 +322,7 @@ If you add a new mode (say, a "review mode" that spawns a code reviewer after ev
 
 ### 5. Customize the statusline
 
-`statusline/statusline.py` is a single ~1,350-line file because it is performance-sensitive - every import costs milliseconds at the bottom of every Claude message. The layout is:
+`orbit-dashboard/orbit_dashboard/statusline.py` is a single ~1,350-line file because it is performance-sensitive - every import costs milliseconds at the bottom of every Claude message. It ships inside the `orbit-dashboard` pip package and is exposed as the `orbit-statusline` console entry point. The layout is:
 
 - **Constants and colors** at the top.
 - **Data collection functions** that read from the DB, the projects state dir, git, and the file system.
@@ -339,8 +339,8 @@ Do not add dependencies. The statusline uses stdlib only because installing pack
 
 The dashboard reads from `~/.claude/tasks.db` and `~/.claude/tasks.duckdb` and listens on port 8787 by default. To change:
 
-- `DUCKDB_PATH` and `SQLITE_PATH` in `orbit-dashboard/lib/analytics_db.py` control the read paths.
-- The port is the argument to `uvicorn.run(...)` in `orbit-dashboard/server.py`.
+- `DUCKDB_PATH` and `SQLITE_PATH` in `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` control the read paths.
+- The port is the argument to `uvicorn.run(...)` in `orbit-dashboard/orbit_dashboard/server.py`.
 - `ORBIT_DASHBOARD_URL` is the env var the statusline uses to build OSC 8 hyperlinks to the dashboard. If you change the dashboard's host or port, set this in your shell init.
 
 launchd config lives at `~/Library/LaunchAgents/com.orbit.dashboard.plist`. It explicitly points at `/opt/homebrew/bin/python3.11` because orbit's DuckDB install is Python-version-specific. Do not switch it to system Python or `python3` without reinstalling DuckDB under that Python.

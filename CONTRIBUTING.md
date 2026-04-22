@@ -16,16 +16,19 @@ This document covers the mechanics. For the "why" behind orbit's architecture, r
 ```bash
 git clone https://github.com/tomerbr1/claude-orbit.git
 cd claude-orbit
-./setup.sh
+uvx orbit-install --local
 ```
 
-`setup.sh` installs everything: the plugin itself via a local marketplace, `orbit-db` and `orbit-auto` as editable Python packages, the dashboard launchd service, the statusline symlink, and the rule files under `~/.claude/rules/`. It is interactive and will ask before making changes you might not want.
+`orbit-install --local` is the maintainer workflow: it pip-installs `orbit-db`, `orbit-auto`, and `orbit-dashboard` in editable mode from the clone, wires the `orbit-statusline` entry point into `~/.claude/settings.json`, registers the plugin via a local marketplace, installs the dashboard service (launchd on macOS, systemd on Linux), and symlinks the rule files and user-level slash commands into `~/.claude/`. Edits to the clone are reflected live - no reinstall needed except for plugin-cache refreshes (see `CLAUDE.md`'s Quick Reference).
+
+The same tool in its default mode (`uvx orbit-install`) is what end users run - it pulls the packages from PyPI instead. Exercising both is how you validate a public-release change.
 
 Prerequisites:
 
 - Python 3.11 or newer (orbit uses modern syntax like `str | None` and the walrus operator).
+- `uv` on your `PATH` (provides `uvx`). `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. Alternatively `pipx run orbit-install --local` works if you prefer `pipx`.
 - `git filter-repo` if you plan to work on history-rewrite tooling (optional).
-- macOS is the primary test platform. Linux should work for the plugin core; the dashboard launchd integration is macOS-specific.
+- macOS is the primary test platform. Linux should work for the plugin core; on Linux the dashboard uses systemd user units instead of launchd. Windows service registration is not yet supported - the installer prints manual instructions.
 
 ## Running tests
 
@@ -36,7 +39,7 @@ make test        # full suite, verbose
 make test-fast   # stop at first failure, quiet
 ```
 
-This runs all six component test suites: `mcp-server`, `orbit-db`, `orbit-auto`, `orbit-dashboard`, `hooks`, `statusline`. Expect 284 passing tests on a clean checkout. `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
+This runs the component test suites under `mcp-server`, `orbit-db`, `orbit-auto`, `orbit-dashboard`, and `hooks` (statusline tests now live under `orbit-dashboard/tests/`). The `orbit-install` suite lives in `orbit-install/tests/` and is run separately (`cd orbit-install && python3.11 -m pytest`). `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
 
 ## Pull request standards
 
