@@ -171,7 +171,7 @@ def main() -> int:
         ui.banner()
         ui.info(f"Installing: {', '.join(c.replace('_', '-') for c in selected)}")
         installers.install_components(selected, ctx)
-        ui.success_banner()
+        ui.success_banner(selected)
         return 0
 
     # Default: interactive wizard.

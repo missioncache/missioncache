@@ -70,7 +70,7 @@ def run(ctx: installers.InstallContext) -> None:
     ui.info(f"Installing: {', '.join(c.replace('_', '-') for c in selected)}")
     installers.install_components(selected, ctx)
 
-    ui.success_banner()
+    ui.success_banner(selected)
     _print_next_steps(selected)
 
 

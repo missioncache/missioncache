@@ -21,11 +21,14 @@ classifiers = [
     "Topic :: System :: Installation/Setup",
 ]
 
-# Intentional: stdlib only. orbit-install must be runnable via `uvx orbit-install`
-# with zero bootstrap cost. Any new dependency here increases cold-start time and
-# risks cache misses on first run. Third-party deps belong in the component
-# packages (orbit-dashboard, orbit-auto, mcp-orbit, orbit-db), not here.
-dependencies = []
+# Runtime deps kept minimal to preserve `uvx orbit-install` cold-start UX.
+# rich is the only third-party dep - powers the install wizard's panels, tables,
+# prompts, and styled output. Its own deps (markdown-it-py, mdurl, pygments) are
+# all pure-Python and small; first-run cost is ~1-3s on a cold uvx cache.
+dependencies = [
+    "rich>=13.7.0",
+    "pyfiglet>=1.0.0",
+]
 
 [project.scripts]
 orbit-install = "orbit_install.__main__:main"
