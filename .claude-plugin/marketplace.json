@@ -9,10 +9,7 @@
   "plugins": [
     {
       "name": "orbit",
-      "source": {
-        "source": "github",
-        "repo": "tomerbr1/claude-orbit"
-      },
+      "source": "./",
       "description": "Project management with time tracking, autonomous execution, and context preservation",
       "category": "productivity",
       "keywords": ["orbit", "task", "time-tracking", "context", "orbit-auto"]
