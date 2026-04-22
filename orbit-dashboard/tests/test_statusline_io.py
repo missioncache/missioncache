@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-import statusline as mod
+import orbit_dashboard.statusline as mod
 
 
 # ── is_version_reviewed ──────────────────────────────────────────────────

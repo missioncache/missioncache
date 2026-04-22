@@ -1,6 +1,6 @@
 [project]
 name = "orbit-dashboard"
-version = "1.0.0"
+version = "1.0.1"
 description = "Orbit Dashboard - Task analytics and autonomous execution monitoring for Claude Code orbit projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,7 @@ dependencies = [
 
 [project.scripts]
 orbit-dashboard = "orbit_dashboard.cli:main"
+orbit-statusline = "orbit_dashboard.statusline:main"
 
 [project.optional-dependencies]
 rss = [

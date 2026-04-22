@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from statusline import (
+from orbit_dashboard.statusline import (
     COLORS,
     RESET,
     _detect_subscription,
@@ -384,7 +384,7 @@ class TestDetectSubscription:
 
 class TestLoadStatuslineConfig:
     def test_missing_file_returns_defaults(self, tmp_path, monkeypatch):
-        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', tmp_path / 'missing.json')
+        monkeypatch.setattr('orbit_dashboard.statusline._DASHBOARD_CONFIG_FILE', tmp_path / 'missing.json')
         cfg = _load_statusline_config()
         assert cfg == {
             "codex": True,
@@ -397,7 +397,7 @@ class TestLoadStatuslineConfig:
     def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
         f = tmp_path / 'config.json'
         f.write_text(json.dumps({"statusline": {"codex": False}}))
-        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        monkeypatch.setattr('orbit_dashboard.statusline._DASHBOARD_CONFIG_FILE', f)
         cfg = _load_statusline_config()
         assert cfg["codex"] is False
         assert cfg["subscription_usage"] is True
@@ -406,14 +406,14 @@ class TestLoadStatuslineConfig:
     def test_custom_services(self, tmp_path, monkeypatch):
         f = tmp_path / 'config.json'
         f.write_text(json.dumps({"statusline": {"claude_status_services": ["Code", "claude.ai"]}}))
-        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        monkeypatch.setattr('orbit_dashboard.statusline._DASHBOARD_CONFIG_FILE', f)
         cfg = _load_statusline_config()
         assert cfg["claude_status_services"] == ["Code", "claude.ai"]
 
     def test_bad_json_returns_defaults(self, tmp_path, monkeypatch):
         f = tmp_path / 'config.json'
         f.write_text("{not valid json")
-        monkeypatch.setattr('statusline._DASHBOARD_CONFIG_FILE', f)
+        monkeypatch.setattr('orbit_dashboard.statusline._DASHBOARD_CONFIG_FILE', f)
         cfg = _load_statusline_config()
         assert cfg["codex"] is True
 
