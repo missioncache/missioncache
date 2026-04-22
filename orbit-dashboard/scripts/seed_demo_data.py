@@ -1001,8 +1001,7 @@ def main() -> None:
     # dashboard's lifespan startup uses (AnalyticsDB.sync_from_sqlite), which
     # lazily creates the DuckDB file + schema on first connect.
     print("  syncing SQLite -> DuckDB...")
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from lib.analytics_db import AnalyticsDB  # type: ignore[import-not-found]
+    from orbit_dashboard.lib.analytics_db import AnalyticsDB  # type: ignore[import-not-found]
     sync_result = AnalyticsDB().sync_from_sqlite()
     print(f"  sync result: {sync_result}")
 

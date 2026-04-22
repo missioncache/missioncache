@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from lib.jsonl_parser import (
+from orbit_dashboard.lib.jsonl_parser import (
     SessionMetrics,
     decode_project_path,
     extract_tool_calls_from_content,

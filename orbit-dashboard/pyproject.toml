@@ -1,0 +1,64 @@
+[project]
+name = "orbit-dashboard"
+version = "1.0.0"
+description = "Orbit Dashboard - Task analytics and autonomous execution monitoring for Claude Code orbit projects"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    {name = "Tomer Brami", email = "tomerbrami@gmail.com"}
+]
+keywords = ["orbit", "dashboard", "claude", "analytics", "task-management"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+
+dependencies = [
+    "orbit-db>=1.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "duckdb>=1.1.0",
+    "httpx>=0.28.0",
+    "sse-starlette>=2.0.0",
+]
+
+[project.optional-dependencies]
+rss = [
+    "feedparser>=6.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "readability-lxml>=0.8.0",
+]
+learn = [
+    "anthropic>=0.40.0",
+    "python-slugify>=8.0.0",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomerbr1/claude-orbit"
+Repository = "https://github.com/tomerbr1/claude-orbit.git"
+Issues = "https://github.com/tomerbr1/claude-orbit/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["orbit_dashboard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"

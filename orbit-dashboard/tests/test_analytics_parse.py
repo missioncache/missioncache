@@ -1,11 +1,8 @@
 """Tests for parse_tasks_md and parse_dependency_graph from analytics_db."""
 
-import sys
-from pathlib import Path
-
 import pytest
 
-from lib.analytics_db import ParsedAgent, parse_dependency_graph, parse_tasks_md
+from orbit_dashboard.lib.analytics_db import ParsedAgent, parse_dependency_graph, parse_tasks_md
 
 
 # --- parse_tasks_md ---

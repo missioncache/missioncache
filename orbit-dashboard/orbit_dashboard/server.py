@@ -13,13 +13,13 @@ Port: 8787 (override with ORBIT_DASHBOARD_PORT env var)
 from __future__ import annotations
 
 import asyncio
+import importlib.resources
 import json
 import os
 import re
 
 import sqlite3
 import subprocess
-import sys
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -29,14 +29,12 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Add lib to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-from lib import config
-from lib.analytics_db import (
+from orbit_dashboard.lib import config
+from orbit_dashboard.lib.analytics_db import (
     AnalyticsDB,
     get_db,
     get_claude_hourly_activity,
@@ -2373,7 +2371,7 @@ async def api_auto_output_stream(
 # Static Assets
 # =============================================================================
 
-assets_dir = Path(__file__).parent.parent / "assets"
+assets_dir = Path(__file__).parent / "assets"
 if assets_dir.exists():
     app.mount("/static", StaticFiles(directory=str(assets_dir)), name="static")
 
@@ -2453,14 +2451,9 @@ async def update_statusline_settings(payload: StatuslinePayload):
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
-    """Serve the main dashboard HTML."""
-    html_path = Path(__file__).parent / "index.html"
-    if html_path.exists():
-        return FileResponse(html_path, media_type="text/html")
-    return HTMLResponse(
-        "<h1>Orbit Dashboard</h1><p>index.html not found. Dashboard UI coming soon.</p>",
-        status_code=200,
-    )
+    """Serve the main dashboard HTML from bundled package data."""
+    html = importlib.resources.files("orbit_dashboard").joinpath("index.html").read_text()
+    return HTMLResponse(html)
 
 
 

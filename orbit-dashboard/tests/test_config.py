@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from lib import config
+from orbit_dashboard.lib import config
 
 
 @pytest.fixture

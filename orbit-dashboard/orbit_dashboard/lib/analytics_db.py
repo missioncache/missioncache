@@ -3249,7 +3249,7 @@ def refresh_claude_session_cache(
     Returns:
         Dict mapping hour to activity metrics
     """
-    from lib.jsonl_parser import get_jsonl_files_for_date, parse_session_file
+    from orbit_dashboard.lib.jsonl_parser import get_jsonl_files_for_date, parse_session_file
 
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
