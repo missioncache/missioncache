@@ -42,8 +42,8 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
 
    | Subtask | Agents | Skills | Gap? |
    |---------|--------|--------|------|
-   | Create calculator.py | python-pro | pytest-patterns | No |
-   | Add API endpoint | api-designer | - | Missing: API validation skill |
+   | <subtask 1> | <agent-A> | <skill-X> | No |
+   | <subtask 2> | <agent-B> | - | Missing: <describe gap> |
 
    ### Recommended New Agents/Skills
 
@@ -78,11 +78,11 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
    ````markdown
    ## Generated Prompts (4 total)
 
-   ### Prompt 1: Create calculator.py with basic structure
+   ### Prompt 1: <subtask 1 title>
 
    **File:** `prompts/task-01-prompt.md`
-   **Agents:** python-pro
-   **Skills:** pytest-patterns
+   **Agents:** <agent-A>
+   **Skills:** <skill-X>
 
    <details>
    <summary>View full prompt</summary>
@@ -90,15 +90,15 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
    ```markdown
    ---
    task_id: "01"
-   task_title: "Create calculator.py with basic structure"
+   task_title: "<subtask 1 title>"
    agents:
-     - python-pro
+     - <agent-A>
    skills:
-     - pytest-patterns
+     - <skill-X>
    dependencies: []
    ---
 
-   # Task 01: Create calculator.py with basic structure
+   # Task 01: <subtask 1 title>
 
    <context>
    ...
@@ -115,11 +115,11 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
 
    ---
 
-   ### Prompt 2: Add addition function
+   ### Prompt 2: <subtask 2 title>
 
    **File:** `prompts/task-02-prompt.md`
-   **Agents:** python-pro
-   **Skills:** pytest-patterns
+   **Agents:** <agent-A>
+   **Skills:** <skill-X>
 
    <details>
    <summary>View full prompt</summary>
@@ -138,10 +138,10 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
 
    | # | Task | Agents | Skills |
    |---|------|--------|--------|
-   | 1 | Create calculator.py | python-pro | pytest-patterns |
-   | 2 | Add addition function | python-pro | pytest-patterns |
-   | 3 | Add subtraction function | python-pro | pytest-patterns |
-   | 4 | Add test coverage | python-pro, test-automator | pytest-patterns |
+   | 1 | <subtask 1 title> | <agent-A> | <skill-X> |
+   | 2 | <subtask 2 title> | <agent-A> | <skill-X> |
+   | 3 | <subtask 3 title> | <agent-A> | <skill-X> |
+   | 4 | <subtask 4 title> | <agent-A>, <agent-B> | <skill-X> |
 
    **Do you approve all these prompts?** (yes/edit prompt N/regenerate)
    ````
@@ -169,10 +169,10 @@ After all prompts are written:
 
    | # | Task | File | Agents | Skills |
    |---|------|------|--------|--------|
-   | 1 | Create calculator.py | task-01-prompt.md | python-pro | pytest-patterns |
-   | 2 | Add addition function | task-02-prompt.md | python-pro | pytest-patterns |
-   | 3 | Add subtraction function | task-03-prompt.md | python-pro | pytest-patterns |
-   | 4 | Add test coverage | task-04-prompt.md | python-pro, test-automator | pytest-patterns |
+   | 1 | <subtask 1 title> | task-01-prompt.md | <agent-A> | <skill-X> |
+   | 2 | <subtask 2 title> | task-02-prompt.md | <agent-A> | <skill-X> |
+   | 3 | <subtask 3 title> | task-03-prompt.md | <agent-A> | <skill-X> |
+   | 4 | <subtask 4 title> | task-04-prompt.md | <agent-A>, <agent-B> | <skill-X> |
 
    ## Execution
 
@@ -332,10 +332,10 @@ Claude: Let me analyze the subtasks and check agent/skill coverage...
 
 | Subtask | Agents | Skills | Complete? |
 |---------|--------|--------|-----------|
-| 1.1. Create user model | python-pro | - | Yes |
-| 1.2. Add login endpoint | api-designer | - | Yes |
-| 2.1. Create dashboard | python-pro | - | Yes |
-| 2.2. Add data fetching | python-pro | - | Yes |
+| 1.1. Create user model | <agent-A> | - | Yes |
+| 1.2. Add login endpoint | <agent-B> | - | Yes |
+| 2.1. Create dashboard | <agent-A> | - | Yes |
+| 2.2. Add data fetching | <agent-A> | - | Yes |
 
 ### No gaps identified
 
