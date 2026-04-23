@@ -54,9 +54,18 @@ def report(p: Prereqs) -> None:
             f"(have {p.python_version[0]}.{p.python_version[1]})"
         )
     _report_tool("claude CLI", p.claude_cli)
-    _report_tool("pipx", p.pipx)
     _report_tool("uvx", p.uvx)
     _report_tool("uv", p.uv)
+    # pipx is an optional fallback. uv's `uv tool install` covers the same job,
+    # so "pipx not found" is only a real problem when uv is also missing. Showing
+    # it as a yellow warning otherwise made uv-only users (the common case for
+    # anyone running `uvx orbit-install`) think something was broken.
+    if p.pipx:
+        ui.success(f"pipx ({p.pipx})")
+    elif p.uv:
+        ui.detail("pipx not installed - optional (uv handles PyPI installs)")
+    else:
+        ui.warn("pipx not found")
 
 
 def _report_tool(name: str, path: str | None) -> None:
