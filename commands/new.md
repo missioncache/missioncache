@@ -203,10 +203,40 @@ conn.execute(
 )
 conn.commit()
 ' 2>/dev/null
+
+  # Write per-session project pointer read by find_task_for_cwd (orbit-db/__init__.py:1270).
+  # Without this, /orbit:save cannot find the task when cwd is the repo root. Format matches
+  # session_start.py's write_session_project() so either writer is interchangeable.
+  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
+import os, json, datetime, pathlib
+projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
+projects_dir.mkdir(parents=True, exist_ok=True)
+(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps({
+    "projectName": os.environ["PROJECT_NAME"],
+    "updated": datetime.datetime.now().astimezone().isoformat(),
+    "sessionId": os.environ["SESSION_ID"],
+}))
+' 2>/dev/null
 fi
 ```
 
-### Step 7: Show Plan and Confirm
+### Step 7: Probe Dashboard (optional)
+
+Check whether the dashboard is reachable so the confirmation output can surface a deep link to the newly-created project. Skip silently when the dashboard is not installed or not running - dead links teach users to ignore the hint.
+
+Replace `<project-name>` with the kebab-case project name, then run:
+
+```bash
+PROJECT_NAME='<project-name>'
+DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
+if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
+  echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
+fi
+```
+
+If the probe emits a line, include it as a **Dashboard** entry in the confirmation below. If nothing is emitted, omit the entry.
+
+### Step 8: Show Plan and Confirm
 
 ```markdown
 ## Plan for: my-feature
@@ -224,6 +254,8 @@ fi
 - ~/.claude/orbit/active/my-feature/my-feature-plan.md
 - ~/.claude/orbit/active/my-feature/my-feature-context.md
 - ~/.claude/orbit/active/my-feature/my-feature-tasks.md
+
+**Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 7 emitted a line)*
 
 **Next step:** Run `/orbit:prompts my-feature` to create optimized prompts with agent/skill recommendations for each subtask.
 ```

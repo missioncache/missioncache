@@ -208,16 +208,29 @@ async def get_task(
 async def find_task_for_directory(
     directory: Annotated[str, Field(description="Directory path to find task for")],
     session_id: Annotated[
-        str | None, Field(description="Claude session ID (optional)")
+        str | None,
+        Field(
+            description=(
+                "Claude session ID. Strongly recommended: without it, matching "
+                "falls through to cwd-pattern only, which fails when cwd is the "
+                "repo root. Resolve via the filesystem (most-recently-modified "
+                "transcript in ~/.claude/projects/<sanitized-cwd>/); see "
+                "commands/save.md for the canonical pattern."
+            )
+        ),
     ] = None,
 ) -> dict:
     """
     Find the active task for a given directory.
 
-    Uses the same logic as heartbeat auto-detection:
-    1. Check pending-task.json
-    2. Check session task file
-    3. Check if in orbit/active/<task> directory
+    Lookup priority (see orbit_db.find_task_for_cwd):
+    1. pending-project.json (cwd match)
+    2. projects/<session_id>.json - requires session_id arg
+    3. cwd under ~/.claude/orbit/active/<task>/
+
+    Callers that invoke this from arbitrary cwds (e.g. the repo root) MUST
+    pass session_id for priority 2 to fire. The 4 orbit slash commands all
+    do this; copy their pattern rather than omitting the arg.
     """
     db = get_db()
 

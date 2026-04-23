@@ -105,12 +105,28 @@ Read the key files:
 
 ### Step 3: Display Resume Summary
 
+Before rendering the summary, probe the dashboard so the output can include a deep link to the project view when available. Skip the Dashboard line silently if the dashboard is not installed or not running.
+
+Replace `<project-name>` with the resumed project name, then run:
+
+```bash
+PROJECT_NAME='<project-name>'
+DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
+if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
+  echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
+fi
+```
+
+If the probe emits a line, include it as a **Dashboard** field in the summary. If nothing is emitted, omit the field.
+
 ```
 ## Project: <name> (active, <time>)
 
 **Where You Left Off:** <from context.md Next Steps>
 
 **Progress:** <X/Y tasks complete (Z%)>
+
+**Dashboard:** http://localhost:8787/#projects?task=<name> *(only if probe emitted a line)*
 
 **Key Decisions:**
 <from context.md Key Architectural Decisions>
@@ -169,6 +185,21 @@ conn.execute(
     (os.environ["SESSION_ID"], os.environ["PROJECT_NAME"]),
 )
 conn.commit()
+' 2>/dev/null
+
+  # Write per-session project pointer read by find_task_for_cwd (orbit-db/__init__.py:1270).
+  # Without this, /orbit:save cannot find the task when cwd is the repo root (only when
+  # cwd is under ~/.claude/orbit/active/<task>/). Format matches session_start.py's
+  # write_session_project() exactly so either writer is interchangeable.
+  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
+import os, json, datetime, pathlib
+projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
+projects_dir.mkdir(parents=True, exist_ok=True)
+(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps({
+    "projectName": os.environ["PROJECT_NAME"],
+    "updated": datetime.datetime.now().astimezone().isoformat(),
+    "sessionId": os.environ["SESSION_ID"],
+}))
 ' 2>/dev/null
 fi
 ```

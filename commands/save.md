@@ -47,9 +47,17 @@ Save progress on an active project using atomic MCP calls.
 
 ### Step 1: Find Current Project
 
-Call `mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>")` to detect the active project.
+First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/orbit:go` and `/orbit:new`. Without this, the lookup can only match when cwd is under `~/.claude/orbit/active/<task>/`, which fails from the repo root.
 
-**If project not found but orbit files exist:** Sometimes the session isn't registered (no `pending-task.json`) but the project exists. In this case:
+```bash
+CWD_KEY=$(pwd | sed 's|/|-|g')
+SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+echo "$SESSION_ID"
+```
+
+Call `mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
+
+**If project not found but orbit files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
 1. Try to detect the project from `~/.claude/orbit/active/<project-name>`
 2. Call `mcp__plugin_orbit_pm__get_orbit_files(task_name="<name>")` to confirm
