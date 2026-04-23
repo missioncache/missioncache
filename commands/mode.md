@@ -15,6 +15,48 @@ Assign workflow modes (autonomous or interactive) to specific tasks in an orbit 
 
 ## Workflow
 
+### Step 0: Handle No-Args Invocation
+
+If invoked bare (`/orbit:mode` with no arguments), switch to interactive mode before running Step 1.
+
+**Step 0a: Detect project.** Resolve the current Claude session and look up the active project, using the same SESSION_ID resolver pattern as `/orbit:save` (pointer-first, mtime fallback). If no project is found, print `Usage: /orbit:mode <project> <range:mode,...>` and stop.
+
+**Step 0b: Show tasks.** Call `mcp__plugin_orbit_pm__get_orbit_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
+
+```markdown
+## Tasks in: <project-name>
+
+| # | Task | Current Mode |
+|---|------|--------------|
+| 1 | <task 1 title> | (unset) |
+| 2 | <task 2 title> | auto |
+| 3 | <task 3 title> | inter |
+| 4 | <task 4 title> | (unset) |
+```
+
+**Step 0c: Ask how to assign.**
+
+```
+AskUserQuestion: "How do you want to assign modes?"
+- "Set all tasks to one mode"
+- "Change only specific tasks"
+- "Cancel"
+```
+
+**Step 0c-A (all tasks):** follow up with
+
+```
+AskUserQuestion: "Which mode for all tasks?"
+- "Autonomous (auto)"
+- "Interactive (inter)"
+```
+
+Build the range spec `all:<selected>` and proceed to Step 2.
+
+**Step 0c-B (specific tasks):** ask the user to type the range:mode spec via `AskUserQuestion`'s Other option. Include the expected format in the question: `e.g. 2,4:inter or 1-3:auto,5:inter`. Take the user's input as the range spec and proceed to Step 2. Tasks not listed in the spec keep their existing mode (or stay unset).
+
+**Step 0c-C (cancel):** stop, do nothing.
+
 ### Step 1: Parse Arguments
 
 Extract project name and mode assignments from the command arguments.
@@ -51,8 +93,6 @@ For each task line matching the range, append or replace the mode tag:
 - After:  `- [ ] 3. Design database schema \`[auto]\``
 
 If a task already has a mode tag, replace it.
-
-Use `mcp__plugin_orbit_pm__update_tasks_file` to write the changes back.
 
 ### Step 4: Display Results
 
@@ -144,4 +184,3 @@ This means task 7 can only run after tasks 3 and 5 are complete. Set dependencie
 | Tool | Purpose |
 |------|---------|
 | `mcp__plugin_orbit_pm__get_orbit_files` | Get paths to project's orbit files |
-| `mcp__plugin_orbit_pm__update_tasks_file` | Write updated tasks.md with mode tags |
