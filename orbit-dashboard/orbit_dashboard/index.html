@@ -256,6 +256,51 @@
             background: rgba(139, 92, 246, 0.1);
         }
 
+        /* Activity tab - History section needs light backgrounds in light mode.
+           The dark-mode values live in .trend-box / .heatmap-section / etc. and
+           are hardcoded rgba tuples (not CSS vars), so each needs an explicit
+           light override here. Keeps the fix additive - no changes to dark mode. */
+        [data-theme="light"] .trend-box {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 248, 252, 0.9) 100%);
+            border-color: rgba(0, 0, 0, 0.08);
+        }
+
+        [data-theme="light"] .trend-box:hover {
+            border-color: rgba(177, 140, 255, 0.4);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 0 24px rgba(177, 140, 255, 0.1);
+        }
+
+        [data-theme="light"] .trend-change {
+            background: rgba(0, 0, 0, 0.04);
+        }
+
+        [data-theme="light"] .heatmap-section,
+        [data-theme="light"] .breakdown-section {
+            background: rgba(255, 255, 255, 0.85);
+            border-color: rgba(0, 0, 0, 0.06);
+        }
+
+        [data-theme="light"] .daily-totals-toggle {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        [data-theme="light"] .heatmap-cell {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        [data-theme="light"] .repo-bar-track {
+            background: rgba(0, 0, 0, 0.06);
+        }
+
+        [data-theme="light"] .task-item {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 248, 252, 0.9) 100%);
+        }
+
+        [data-theme="light"] .task-item:hover {
+            background: linear-gradient(135deg, rgba(250, 250, 254, 0.98) 0%, rgba(242, 242, 248, 0.95) 100%);
+            border-color: rgba(177, 140, 255, 0.4);
+        }
+
         * {
             margin: 0;
             padding: 0;
