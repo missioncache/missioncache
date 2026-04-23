@@ -6,6 +6,8 @@ Outputs context to help Claude resume work on an active task.
 Also creates pending-task.json for the activity-tracker hook.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
