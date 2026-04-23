@@ -149,9 +149,16 @@ REPO_PATH='<repo-path>'
 # Activity tracking pointer (read by session_start hook on next session).
 echo "{\"projectName\": \"$PROJECT_NAME\", \"cwd\": \"$REPO_PATH\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > ~/.claude/hooks/state/pending-task.json
 
-# Primary: most-recently-modified transcript in ~/.claude/projects/<sanitized-cwd>/ = current session.
+# Primary: SessionStart hook writes the authoritative current-session pointer
+# at ~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Falls back to
+# transcript mtime for sessions that started before the pointer mechanism landed.
 CWD_KEY=$(pwd | sed 's|/|-|g')
-SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+SESSION_ID=""
+if [ -r "$POINTER_FILE" ]; then
+  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+fi
+[ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 
 # Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal only).
 if [ -z "$SESSION_ID" ]; then

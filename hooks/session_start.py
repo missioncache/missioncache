@@ -98,6 +98,41 @@ def write_term_session_mapping(session_id: str) -> None:
     mapping_file.write_text(session_id)
 
 
+def write_cwd_session_pointer(session_id: str) -> None:
+    """Record the current session as the owner of this cwd.
+
+    Writes `~/.claude/hooks/state/cwd-session/<cwd-sanitized>.json` so slash
+    commands (/orbit:save, /orbit:go, /orbit:new, /orbit:done) can resolve the
+    live session id from bash without relying on transcript-mtime heuristics.
+
+    Cwd sanitization matches Claude Code's own scheme for its transcript
+    directory (`~/.claude/projects/<sanitized-cwd>/`), so the key is a stable
+    shared identifier rather than a local convention.
+
+    Overwritten on every SessionStart fire. Concurrent sessions sharing the
+    same cwd will clobber each other's pointer - the last writer wins. This is
+    still strictly better than the mtime-on-transcripts heuristic because it
+    eliminates stale transcripts from long-finished sessions as a failure mode.
+    """
+    if not session_id:
+        return
+
+    cwd_key = str(Path.cwd()).replace("/", "-")
+    pointer_dir = Path.home() / ".claude" / "hooks" / "state" / "cwd-session"
+    pointer_dir.mkdir(parents=True, exist_ok=True)
+
+    pointer_file = pointer_dir / f"{cwd_key}.json"
+    pointer_file.write_text(
+        json.dumps(
+            {
+                "sessionId": session_id,
+                "cwd": str(Path.cwd()),
+                "updatedAt": datetime.now().astimezone().isoformat(),
+            }
+        )
+    )
+
+
 def write_session_project(task_name: str, session_id: str) -> None:
     """Write session-specific project file for statusline display.
 
@@ -146,6 +181,10 @@ def main():
     session_id = get_session_id()
     if session_id:
         write_term_session_mapping(session_id)
+        # Also record this session as the owner of the current cwd so slash
+        # commands can resolve the live session id authoritatively instead of
+        # guessing by transcript mtime.
+        write_cwd_session_pointer(session_id)
 
     # Always attempt to refresh rule files, even if orbit_db is unavailable.
     install_bundled_rules()

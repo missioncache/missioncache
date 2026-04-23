@@ -52,12 +52,23 @@ First resolve the current Claude session id so `find_task_for_directory` can use
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
 DIR="$HOME/.claude/projects/${CWD_KEY}"
-SESSION_ID=$(ls -t "$DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+
+# Primary: SessionStart hook writes the authoritative current-session pointer.
+SESSION_ID=""
+if [ -r "$POINTER_FILE" ]; then
+  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+fi
+# Fallback: transcript mtime (covers sessions that started before this pointer landed).
+[ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+
+# Safety check: count recently-active transcripts. If >1, concurrent sessions
+# share this cwd and even the pointer may be wrong (last-writer-wins race).
 RECENT=$(find "$DIR" -maxdepth 1 -name "*.jsonl" -mmin -10 2>/dev/null | wc -l | tr -d ' ')
 echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 ```
 
-**Ambiguity check:** If `RECENT > 1`, multiple Claude sessions have been active in this cwd within the last 10 minutes. The mtime heuristic is no longer reliable - the freshest transcript may not belong to the CURRENT session, which would silently bind `/orbit:save` to the wrong project. **Do NOT proceed with the mtime-picked SESSION_ID.** Instead:
+**Ambiguity check:** If `RECENT > 1`, multiple Claude sessions have been active in this cwd within the last 10 minutes. Under concurrency the pointer or mtime may not reflect the current invocation, and `/orbit:save` could silently bind to the wrong project. **Do NOT proceed with the resolved SESSION_ID directly.** Instead:
 
 1. Enumerate each recent `*.jsonl` in `$DIR` and look up its `~/.claude/hooks/state/projects/<sid>.json` (if it exists) to get the `projectName`.
 2. Deduplicate by project name.

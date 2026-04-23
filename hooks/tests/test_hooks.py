@@ -77,6 +77,43 @@ class TestSessionStart:
         assert data["cwd"] == "/some/path"
         assert "timestamp" in data
 
+    def test_writes_cwd_session_pointer(self, tmp_path, monkeypatch):
+        """write_cwd_session_pointer records {sessionId, cwd, updatedAt} keyed by cwd."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        fake_cwd = tmp_path / "some" / "repo"
+        fake_cwd.mkdir(parents=True)
+        monkeypatch.chdir(fake_cwd)
+
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        mod.write_cwd_session_pointer("abc-123")
+
+        cwd_key = str(fake_cwd).replace("/", "-")
+        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
+        assert pointer_file.exists()
+
+        data = json.loads(pointer_file.read_text())
+        assert data["sessionId"] == "abc-123"
+        assert data["cwd"] == str(fake_cwd)
+        assert "updatedAt" in data
+
+    def test_cwd_session_pointer_skipped_when_no_session_id(self, tmp_path, monkeypatch):
+        """Empty session_id is a no-op - no file created."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        mod.write_cwd_session_pointer("")
+
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        # Directory should not be created when session_id is empty.
+        assert not pointer_dir.exists()
+
     def test_outputs_context_message(self, tmp_path, monkeypatch, capsys):
         """session_start prints context including task name and status."""
         # Redirect Path.home() so state-file writes land in tmp_path, not

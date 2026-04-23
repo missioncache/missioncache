@@ -49,9 +49,16 @@ Call `mcp__plugin_orbit_pm__process_heartbeats()` to finalize time tracking.
 Remove the project pointer so the statusline stops showing the completed project name. Mirrors the resolver in `/orbit:new` / `/orbit:go` (filesystem primary, term-env fallback) and uses direct SQL because the dashboard has no DELETE endpoint for project_state. Silently no-ops on quick-install setups without `hooks-state.db`.
 
 ```bash
-# Primary: most-recently-modified transcript in ~/.claude/projects/<sanitized-cwd>/ = current session.
+# Primary: SessionStart hook writes the authoritative current-session pointer
+# at ~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Falls back to
+# transcript mtime for sessions that started before the pointer mechanism landed.
 CWD_KEY=$(pwd | sed 's|/|-|g')
-SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+SESSION_ID=""
+if [ -r "$POINTER_FILE" ]; then
+  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+fi
+[ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 
 # Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal only).
 if [ -z "$SESSION_ID" ]; then
