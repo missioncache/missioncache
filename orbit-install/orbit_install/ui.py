@@ -80,12 +80,19 @@ def banner() -> None:
     _console.print()
 
 
-def success_banner(components: list[str] | None = None) -> None:
+def success_banner(
+    components: list[str] | None = None,
+    dashboard_port: int = 8787,
+) -> None:
     """Print the end-of-install summary.
 
     If `components` is provided, renders a table of installed components with a
     check next to each. If None, falls back to a simple success panel (kept for
     back-compat with any caller that does not pass the list).
+
+    When "dashboard" is in `components`, also prints `http://localhost:<port>`
+    using the port actually registered by the installer (authoritative - matches
+    what ends up in launchd/systemd and state.json).
     """
     _console.print()
     if not components:
@@ -116,6 +123,14 @@ def success_banner(components: list[str] | None = None) -> None:
     _console.print(
         Panel(table, border_style="green", padding=(1, 2), expand=False)
     )
+    # Surface the dashboard URL only when the user actually installed it -
+    # printing it after a dashboard-less install would teach them the link
+    # does not work. Port comes from the installer context so `--port 9999`
+    # shows the correct URL rather than the default.
+    if "dashboard" in components:
+        _console.print(
+            f"  [dim]Dashboard:[/dim] [cyan]http://localhost:{dashboard_port}[/cyan]"
+        )
     _console.print()
 
 
