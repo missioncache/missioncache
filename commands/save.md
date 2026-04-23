@@ -51,11 +51,21 @@ First resolve the current Claude session id so `find_task_for_directory` can use
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
-SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-echo "$SESSION_ID"
+DIR="$HOME/.claude/projects/${CWD_KEY}"
+SESSION_ID=$(ls -t "$DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+RECENT=$(find "$DIR" -maxdepth 1 -name "*.jsonl" -mmin -10 2>/dev/null | wc -l | tr -d ' ')
+echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 ```
 
-Call `mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
+**Ambiguity check:** If `RECENT > 1`, multiple Claude sessions have been active in this cwd within the last 10 minutes. The mtime heuristic is no longer reliable - the freshest transcript may not belong to the CURRENT session, which would silently bind `/orbit:save` to the wrong project. **Do NOT proceed with the mtime-picked SESSION_ID.** Instead:
+
+1. Enumerate each recent `*.jsonl` in `$DIR` and look up its `~/.claude/hooks/state/projects/<sid>.json` (if it exists) to get the `projectName`.
+2. Deduplicate by project name.
+3. For each distinct project, call `mcp__plugin_orbit_pm__get_task(project_name=...)` to confirm it's still active.
+4. Use `AskUserQuestion` to ask the user which project they intend to save, showing project name + last-worked time as the option descriptions.
+5. Use the selected project name to drive the save directly via `mcp__plugin_orbit_pm__get_orbit_files(project_name=...)` - skip the session_id-based lookup entirely.
+
+If `RECENT <= 1`, proceed normally: call `mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
 
 **If project not found but orbit files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
