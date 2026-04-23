@@ -25,11 +25,9 @@ Regenerate or add optimized prompts for an existing orbit project. Use this when
 
 1. **List available agents:**
    - Read the agent descriptions from Task tool documentation
-   - Common agents: `python-pro`, `api-designer`, `kubernetes-specialist`, `code-reviewer`
 
 2. **List available skills:**
    - Check `/optimize-prompt` skill for the full list
-   - Common skills: `pytest-patterns`, `k8s-argo-workflows`, `python-config-management`
 
 3. **Analyze each subtask** and identify:
    - Which existing agents are relevant
@@ -245,14 +243,14 @@ Use the **Task tool** with the specified `subagent_type` when you need specializ
 
 | Agent | Invoke With | Use For |
 |-------|-------------|---------|
-| python-pro | `subagent_type="python-pro"` | Python best practices, type hints |
-| api-designer | `subagent_type="api-designer"` | API design, endpoint structure |
+| <agent-name> | `subagent_type="<agent-name>"` | <what this agent is good for> |
+| <agent-name-2> | `subagent_type="<agent-name-2>"` | <what this agent is good for> |
 
 Example invocation:
 ```
 Task tool with:
-  subagent_type: "python-pro"
-  prompt: "Review this function for Python best practices..."
+  subagent_type: "<agent-name>"
+  prompt: "<task-specific request>"
 ```
 </agents>
 
@@ -263,8 +261,8 @@ Invoke skills directly using `/skill-name` or by including trigger keywords:
 
 | Skill | Invoke | Auto-triggers on |
 |-------|--------|------------------|
-| pytest-patterns | `/pytest-patterns` | pytest, fixture, parametrize |
-| python-config-management | `/python-config-management` | environment variable, .env |
+| <skill-name> | `/<skill-name>` | <trigger keywords> |
+| <skill-name-2> | `/<skill-name-2>` | <trigger keywords> |
 
 Skills provide specialized guidance and patterns for specific domains.
 </skills>
