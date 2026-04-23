@@ -83,14 +83,14 @@ trailing dot convention and also query ClickHouse to verify the data exists.
 **After:**
 ```xml
 <context>
-Working in our framework E2E testing framework with ClickHouse integration.
+Working in a data-pipeline testing framework with ClickHouse integration.
 Domain data uses trailing dot convention (e.g., "example.com.").
 </context>
 
 <instructions>
 1. Write a validation function for domain data
 2. Handle trailing dot convention (add if missing, verify format)
-3. Query ClickHouse to verify domain exists in records table
+3. Query ClickHouse to verify domain exists in the records table
 4. Return validation result with clear error messages
 </instructions>
 
@@ -227,17 +227,8 @@ Skills can be invoked directly with `/skill-name` or auto-activate via keywords.
 | `/python-config-management` | `environment variable`, `.env`, `secret`, `kubernetes secret` |
 | `/k8s-argo-workflows` | `argo workflow`, `kubectl`, `port forward`, `workflow submission` |
 | `/data-pipeline-validation` | `validate data`, `delta table`, `prometheus metrics` |
-| `/jira-issue-management` | `jira issue`, `GC project`, `time tracking` |
+| `/jira-issue-management` | `jira issue`, `ticket creation`, `time tracking` |
 | `/message-polisher` | `slack message`, `polish message`, `make it casual/professional` |
-
-### our framework-Specific Skills
-
-| Skill | Keywords |
-|-------|----------|
-| `/clickhouse-validation` | `clickhouse query`, `records table`, `trailing dot` |
-| `/kafka-testing` | `kafka message`, `produce`, `consume`, `KafkaHelper` |
-| `/our framework-test-setup` | `before_all`, `after_all`, `conftest`, `module setup` |
-| `/external-feeds-testing` | `external feeds`, `mock server`, `feeds`, `mock-server` |
 
 ---
 
