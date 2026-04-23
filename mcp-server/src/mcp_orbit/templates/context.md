@@ -28,6 +28,6 @@
 
 1. TBD
 
-## Recent Changes ({{timestamp}})
+## Recent Changes
 
 - Created orbit files

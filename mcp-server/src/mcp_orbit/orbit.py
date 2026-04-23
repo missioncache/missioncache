@@ -265,18 +265,24 @@ def update_context_file(
         )
         content = _update_section(content, "Next Steps", next_steps_md)
 
-    # Update Recent Changes section
+    # Update Recent Changes section - consolidate into one `## Recent Changes`
+    # heading with dated `###` sub-sections prepended (newest first). Before,
+    # each save appended a new top-level `## Recent Changes (timestamp)` which
+    # fragmented the file with N unmerged sections.
     if recent_changes:
         changes_md = "\n".join(f"- {change}" for change in recent_changes)
-        # Try to update existing section or append
-        if "## Recent Changes" in content:
-            content = _update_section(
-                content, f"Recent Changes ({timestamp})", changes_md
+        new_subsection = f"### {timestamp}\n\n{changes_md}\n"
+        # Tolerates old-style `## Recent Changes (timestamp)` heading so
+        # pre-existing context files keep working without migration.
+        heading_pattern = r"(## Recent Changes[^\n]*\n)"
+        match = re.search(heading_pattern, content)
+        if match:
+            heading_end = match.end()
+            content = (
+                content[:heading_end] + f"\n{new_subsection}\n" + content[heading_end:]
             )
         else:
-            content = _update_section(
-                content, "Recent Changes", f"### {timestamp}\n\n{changes_md}"
-            )
+            content = content + f"\n## Recent Changes\n\n{new_subsection}"
 
     # Update Key Decisions section
     if key_decisions:
@@ -384,7 +390,7 @@ def update_tasks_file(
             f"**Remaining:** {remaining_summary}",
             content,
         )
-        updates_made.append(f"Updated remaining: {remaining_summary[:50]}...")
+        updates_made.append(f"Updated remaining: {remaining_summary}")
 
     # Add notes
     if notes:
@@ -448,13 +454,21 @@ def _update_section(content: str, section_name: str, new_content: str) -> str:
 
 
 def _append_to_section(content: str, section_name: str, new_content: str) -> str:
-    """Append content to an existing section."""
+    """Append content to an existing section.
+
+    Strips template placeholders (lines that are exactly `- TBD` or `1. TBD`)
+    so the first real write replaces the template rather than sitting alongside it.
+    """
     pattern = rf"(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
 
     match = re.search(pattern, content, re.DOTALL)
     if match:
-        existing = match.group(2).strip()
-        combined = f"{existing}\n{new_content}"
+        existing_lines = [
+            line for line in match.group(2).strip().splitlines()
+            if line.strip() not in ("- TBD", "1. TBD")
+        ]
+        existing = "\n".join(existing_lines)
+        combined = f"{existing}\n{new_content}" if existing else new_content
         return re.sub(pattern, rf"\1{combined}\n\n", content, flags=re.DOTALL)
     else:
         # Section doesn't exist, create it
