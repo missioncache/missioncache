@@ -1,6 +1,6 @@
 [project]
 name = "orbit-install"
-version = "1.0.2"
+version = "1.0.3"
 description = "Bootstrap installer for Orbit - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
