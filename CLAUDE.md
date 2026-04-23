@@ -34,6 +34,8 @@
 | `hooks/session_start.py` | SessionStart hook |
 | `hooks/pre_compact.py` | PreCompact hook |
 | `hooks/stop.py` | Stop hook |
+| `hooks/activity_tracker.py` | UserPromptSubmit hook (heartbeat recording) |
+| `hooks/task_tracker.py` | UserPromptSubmit hook (orbit task-tracking divergence reminder) |
 | `commands/*.md` | Slash command definitions |
 | `templates/` | File templates for orbit project files |
 | `rules/*.md` | Claude rule files installed to `~/.claude/rules/` (via symlink) |
