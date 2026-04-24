@@ -87,6 +87,7 @@ class ClaudeRunner:
         # This allows hooks to skip when running in orbit-auto mode
         env = os.environ.copy()
         env["ORBIT_AUTO_MODE"] = "1"
+        env["CLAUDE_CODE_HIDE_CWD"] = "1"
 
         # Run Claude
         process = subprocess.Popen(
