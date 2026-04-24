@@ -87,7 +87,27 @@ COLORS = {
     "extra_usage": f"{ESC}[38;2;220;170;80m",
     "fast_mode": f"{ESC}[38;2;255;120;20m",
     "upgrade": f"{ESC}[38;2;255;180;60m",
+    "effort_low": f"{ESC}[38;2;255;160;60m",
+    "effort_medium": f"{ESC}[38;2;100;200;120m",
+    "effort_high": f"{ESC}[38;2;170;180;235m",
+    "effort_xhigh": f"{ESC}[38;2;180;140;220m",
+    "thinking": f"{ESC}[38;2;180;140;220m",
 }
+
+# Rainbow palette for effort=max (cycled per character of the value).
+RAINBOW_COLORS = (
+    f"{ESC}[38;2;255;140;120m",
+    f"{ESC}[38;2;255;110;150m",
+    f"{ESC}[38;2;220;100;200m",
+)
+
+
+def _rainbow_text(text: str) -> str:
+    """Color each character with the next color in RAINBOW_COLORS."""
+    return "".join(
+        f"{RAINBOW_COLORS[i % len(RAINBOW_COLORS)]}{ch}"
+        for i, ch in enumerate(text)
+    )
 
 ICONS = {
     "dir": "\U0001f4c1",
@@ -107,6 +127,8 @@ ICONS = {
     "health_degraded": "\u26a0\ufe0f",
     "health_partial": "\U0001f7e1",
     "extra": "\U0001f4b3",
+    "effort": "\U0001f3af",
+    "thinking": "\U0001f9e0",
 }
 
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
@@ -417,6 +439,9 @@ def parse_input(raw: str) -> dict:
 
     session_cost = cost_data.get("total_cost_usd", 0)
 
+    effort_level = (data.get("effort") or {}).get("level")
+    thinking_enabled = bool((data.get("thinking") or {}).get("enabled"))
+
     return {
         "model_name": model_name,
         "tokens_str": tokens_str,
@@ -429,6 +454,8 @@ def parse_input(raw: str) -> dict:
         "worktree": (data.get("workspace") or {}).get("git_worktree"),
         "rate_limits": data.get("rate_limits"),
         "running_version": data.get("version", "") or "",
+        "effort_level": effort_level,
+        "thinking_enabled": thinking_enabled,
     }
 
 
@@ -1241,17 +1268,19 @@ def main() -> None:
     # Line 3: Metrics
     line3 = [
         _item(COLORS["model"], ICONS["model"], "Model", model_name),
-        _item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str),
     ]
-    ctx_pct = info["ctx_percent"]
-    if ctx_pct >= 80:
-        line3.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
-    elif ctx_pct >= 65:
-        line3.append(_item(COLORS["ctx_warn"], "\U0001f7e1", "Ctx", f"{ctx_pct}% (Compact recommended)"))
-    elif info["ctx_estimated"]:
-        line3.append(_item(COLORS["ctx_est"], ICONS["context"], "Ctx", f"{ctx_pct}% (Estimated)"))
-    else:
-        line3.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
+    effort_level = info.get("effort_level")
+    if effort_level:
+        if effort_level == "max":
+            rainbow_value = _rainbow_text("max")
+            line3.append(
+                f"{COLORS['effort_xhigh']}{ICONS['effort']} Effort: {RESET}{rainbow_value}{RESET}"
+            )
+        else:
+            effort_color = COLORS.get(f"effort_{effort_level}", COLORS["effort_medium"])
+            line3.append(_item(effort_color, ICONS["effort"], "Effort", effort_level))
+    if info.get("thinking_enabled"):
+        line3.append(_item(COLORS["thinking"], ICONS["thinking"], "Thinking", "on"))
     if _is_fast_mode():
         line3.append(f"{COLORS['fast_mode']}\u26a1 Fast mode activated{RESET}")
 
@@ -1261,10 +1290,23 @@ def main() -> None:
         _item(COLORS["edit"], ICONS["edit"], "Edits", str(edit_count)),
     ]
 
-    # Line K8s: K8s + Version + Health
+    # Line K8s: K8s + Tokens + Ctx
     line_k8s: list[str] = []
     if k8s_name:
         line_k8s.append(_item(COLORS["k8s"], ICONS["k8s"], "K8s", k8s_name))
+    line_k8s.append(_item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str))
+    ctx_pct = info["ctx_percent"]
+    if ctx_pct >= 80:
+        line_k8s.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
+    elif ctx_pct >= 65:
+        line_k8s.append(_item(COLORS["ctx_warn"], "\U0001f7e1", "Ctx", f"{ctx_pct}% (Compact recommended)"))
+    elif info["ctx_estimated"]:
+        line_k8s.append(_item(COLORS["ctx_est"], ICONS["context"], "Ctx", f"{ctx_pct}% (Estimated)"))
+    else:
+        line_k8s.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
+
+    # Line Health: Version + Claude Status (appears after Codex, or in place of it)
+    line_health: list[str] = []
     if version:
         ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
         changelog_url = "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
@@ -1272,19 +1314,19 @@ def main() -> None:
         if version_upgrade:
             # `version_upgrade` is pre-formatted as "v<tag> (Xd)" by get_version_info
             upgrade_link = f"\033]8;;{changelog_url}\033\\{version_upgrade}\033]8;;\033\\"
-            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET} {COLORS['upgrade']}\u2192 {upgrade_link}{RESET}")
+            line_health.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET} {COLORS['upgrade']}\u2192 {upgrade_link}{RESET}")
         else:
-            line_k8s.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
+            line_health.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
     for inc in health:
         if inc.get("service") == "OK":
-            line_k8s.append(f"{COLORS['health_ok']}{ICONS['health_ok']} {_health_link('Claude Status: OK')}{RESET}")
+            line_health.append(f"{COLORS['health_ok']}{ICONS['health_ok']} {_health_link('Claude Status: OK')}{RESET}")
         elif inc.get("resolved"):
             label = f"[{inc['service']}] {inc['name']} - {inc['status']}"
             if inc.get("body"):
                 label += f" - {inc['body']}"
             if inc.get("time_ago"):
                 label += f" ({inc['time_ago']})"
-            line_k8s.append(f"{COLORS['health_resolved']}{ICONS['health_ok']} {_health_link(label)}{RESET}")
+            line_health.append(f"{COLORS['health_resolved']}{ICONS['health_ok']} {_health_link(label)}{RESET}")
         else:
             st = inc.get("status", "")
             if st == "Investigating":
@@ -1298,7 +1340,7 @@ def main() -> None:
                 label += f" - {inc['body']}"
             if inc.get("time_ago"):
                 label += f" ({inc['time_ago']})"
-            line_k8s.append(f"{color}{icon} {_health_link(label)}{RESET}")
+            line_health.append(f"{color}{icon} {_health_link(label)}{RESET}")
 
     # Line Usage: Subscription + usage stats
     line_usage: list[str] = []
@@ -1324,25 +1366,25 @@ def main() -> None:
                 sr = usage.get("session_reset", "")
                 if sr and sr != "null":
                     line_usage.append(
-                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp}% "
+                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp:>3}% "
                         f"{COLORS['reset_time']}{ICONS['reset']} {sr}{RESET}")
                 else:
                     line_usage.append(
-                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp}%{RESET}")
+                        f"{COLORS['session_usage']}{ICONS['duration']} Session: {sp:>3}%{RESET}")
             wp = usage.get("weekly_pct")
             if wp and wp != "null":
                 wr = usage.get("weekly_reset", "")
                 if wr and wr != "null":
                     line_usage.append(
-                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp}% "
+                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp:>3}% "
                         f"{COLORS['reset_time']}{ICONS['reset']} {wr}{RESET}")
                 else:
                     line_usage.append(
-                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp}%{RESET}")
+                        f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp:>3}%{RESET}")
             op = usage.get("opus_pct")
             if op and op != "null" and op != "0":
                 line_usage.append(
-                    f"{COLORS['opus_usage']}{ICONS['model']} Opus: {op}%{RESET}")
+                    f"{COLORS['opus_usage']}{ICONS['model']} Opus: {op:>3}%{RESET}")
         # Extra usage (independent of rate-limit plan type)
         if not usage.get("is_foundry"):
             es = usage.get("extra_spent")
@@ -1367,29 +1409,31 @@ def main() -> None:
             sr = codex_usage.get("session_reset", "")
             if sr and sr != "null":
                 line_codex.append(
-                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp}% "
+                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp:>3}% "
                     f"{COLORS['reset_time']}{ICONS['reset']} {sr}{RESET}")
             else:
                 line_codex.append(
-                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp}%{RESET}")
+                    f"{COLORS['codex_session']}{ICONS['duration']} Session: {sp:>3}%{RESET}")
         wp = codex_usage.get("weekly_pct")
         if wp and wp != "null":
             wr = codex_usage.get("weekly_reset", "")
             if wr and wr != "null":
                 line_codex.append(
-                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp}% "
+                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp:>3}% "
                     f"{COLORS['reset_time']}{ICONS['reset']} {wr}{RESET}")
             else:
                 line_codex.append(
-                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp}%{RESET}")
+                    f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp:>3}%{RESET}")
 
     # --- Column alignment ---
-    all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex]
+    all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex, line_health]
     all_widths = [[display_width(item) for item in items] for items in all_lines]
 
+    # line_health is excluded from column-width aggregation so a long Claude
+    # Status message doesn't stretch columns on the lines above it.
     max_col1 = CELL_WIDTH
     max_col2 = CELL_WIDTH
-    for widths in all_widths:
+    for widths in all_widths[:-1]:
         if len(widths) > 0:
             max_col1 = max(max_col1, widths[0])
         if len(widths) > 1:
@@ -1400,13 +1444,14 @@ def main() -> None:
     line_widths = [display_width(j) for j in joined]
     max_width = max(line_widths) if line_widths else 0
 
-    j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage, j_line_codex = joined
-    w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage, w_line_codex = line_widths
+    j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage, j_line_codex, j_line_health = joined
+    w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage, w_line_codex, w_line_health = line_widths
 
     # --- Output ---
     # Output a fixed number of lines so Claude Code allocates
     # the full status area height from the very first render.
-    # 7 lines if Codex is installed, 6 otherwise.
+    # 8 lines if Codex is installed (health goes after codex),
+    # 7 otherwise (health takes the codex slot, no blank gap).
     has_codex = CODEX_ENABLED and CODEX_AUTH_FILE.exists()
     blank = " " * max_width if max_width > 0 else ""
     out = sys.stdout
@@ -1419,6 +1464,7 @@ def main() -> None:
     out.write(((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n"))
     if has_codex:
         out.write(((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n"))
+    out.write(((_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n"))
     out.write(RESET)
     out.flush()
 
@@ -1427,7 +1473,7 @@ def main() -> None:
 
 def _fallback_output() -> None:
     """Print minimal output so the statusline area stays allocated."""
-    lines = 7 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 6
+    lines = 8 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 7
     for _ in range(lines):
         sys.stdout.write(" \n")
     sys.stdout.flush()
