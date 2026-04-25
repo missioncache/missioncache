@@ -213,7 +213,17 @@ CODEX_USAGE_CACHE = SCRIPTS_DIR / "codex-usage-cache.json"
 CODEX_USAGE_TTL = 300
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
+CODEX_CONFIG_FILE = Path.home() / ".codex" / "config.toml"
 CODEX_ENABLED = STATUSLINE_CONFIG["codex"]
+
+
+def _get_codex_model() -> str | None:
+    """Return the model name configured in ~/.codex/config.toml, or None on any failure."""
+    try:
+        import tomllib
+        return tomllib.loads(CODEX_CONFIG_FILE.read_text()).get("model")
+    except Exception:
+        return None
 
 
 # ============ DISPLAY WIDTH ============
@@ -1407,7 +1417,9 @@ def main() -> None:
     line_codex: list[str] = []
     if codex_usage and codex_usage.get("codex_installed"):
         plan = codex_usage.get("plan_type", "")
-        label = f"Codex ({plan})" if plan else "Codex"
+        model = _get_codex_model()
+        parts = [p for p in (plan, model) if p]
+        label = f"Codex ({', '.join(parts)})" if parts else "Codex"
         line_codex.append(f"{COLORS['codex_label']}\U0001f9e0 {label}{RESET}")
         sp = codex_usage.get("session_pct")
         if sp and sp != "null":
