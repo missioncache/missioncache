@@ -31,12 +31,23 @@ async def create_orbit_files(
     plan: Annotated[
         dict | None, Field(description="Plan content: {summary, goals, approach, etc.}")
     ] = None,
+    force: Annotated[
+        bool,
+        Field(
+            description="Overwrite existing orbit files. Default False raises "
+            "ALREADY_EXISTS to prevent silent data loss."
+        ),
+    ] = False,
 ) -> dict:
     """
     Create orbit files for a new task.
 
     Creates files under ~/.claude/orbit/active/<task-name>/.
     The repo_path is used to register the repository in the DB.
+
+    Returns ALREADY_EXISTS error if any of plan/context/tasks already exist
+    for this name. Pass force=True to overwrite (destructive - the caller is
+    expected to have confirmed with the user).
 
     Returns paths to all created files.
     """
@@ -60,6 +71,7 @@ async def create_orbit_files(
             branch=branch,
             tasks=tasks,
             plan_content=plan,
+            force=force,
         )
 
         # Scan to register task in database
@@ -119,8 +131,14 @@ async def get_orbit_files(
             }
 
         name = task.name if task else project_name
-        # Pass full_path for subtasks (nested under parent directories)
-        full_path = task.full_path if task else None
+        # Pass full_path only for subtasks (nested under parent directories).
+        # For top-level tasks, full_path can be stale because complete_task
+        # moves the directory to completed/<name> without updating the column.
+        # Letting get_orbit_files do its standard active+completed search
+        # avoids returning null files for archived projects.
+        full_path = (
+            task.full_path if (task and task.parent_id is not None) else None
+        )
         files = orbit.get_orbit_files(name, full_path=full_path)
 
         return {

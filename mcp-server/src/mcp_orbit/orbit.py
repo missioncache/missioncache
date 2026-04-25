@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import settings
-from .errors import OrbitFileNotFoundError, ValidationError
+from .errors import ErrorCode, OrbitError, OrbitFileNotFoundError, ValidationError
 from .models import OrbitFiles, TaskProgress
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -82,32 +82,19 @@ def get_task_dir(task_name: str, active: bool = True) -> Path:
 def get_orbit_files(task_name: str, full_path: str | None = None) -> OrbitFiles:
     """Get paths to all orbit files for a task.
 
-    Args:
-        task_name: Task name (used for file naming conventions)
-        full_path: Optional path relative to orbit_root (e.g., 'active/parent/subtask').
-                   If provided, uses this instead of constructing from task_name.
-                   This is required for subtasks which are nested under parent tasks.
+    When ``full_path`` is given (e.g. ``active/parent/subtask`` for nested
+    subtasks), it is authoritative. Otherwise, search the active directory
+    first, then the completed directory. This lets ``/orbit:go`` and the
+    /orbit:save flow find archived projects without prompting the user to
+    "create files" - which would otherwise overwrite the archived content.
     """
     if full_path:
-        # Use the full path directly (supports subtasks)
-        task_dir = settings.orbit_root / full_path
+        candidate_dirs = [settings.orbit_root / full_path]
     else:
-        # Fall back to constructing from task_name (top-level tasks only)
-        task_dir = get_task_dir(task_name)
-
-    # Try both naming conventions
-    plan_candidates = [
-        task_dir / f"{task_name}-plan.md",
-        task_dir / "plan.md",
-    ]
-    context_candidates = [
-        task_dir / f"{task_name}-context.md",
-        task_dir / "context.md",
-    ]
-    tasks_candidates = [
-        task_dir / f"{task_name}-tasks.md",
-        task_dir / "tasks.md",
-    ]
+        candidate_dirs = [
+            get_task_dir(task_name, active=True),
+            get_task_dir(task_name, active=False),
+        ]
 
     def find_file(candidates: list[Path]) -> str | None:
         for c in candidates:
@@ -115,13 +102,26 @@ def get_orbit_files(task_name: str, full_path: str | None = None) -> OrbitFiles:
                 return str(c)
         return None
 
-    prompts_dir = task_dir / "prompts"
+    chosen_dir = candidate_dirs[0]
+    plan_file = context_file = tasks_file = None
+    for task_dir in candidate_dirs:
+        p = find_file([task_dir / f"{task_name}-plan.md", task_dir / "plan.md"])
+        c = find_file(
+            [task_dir / f"{task_name}-context.md", task_dir / "context.md"]
+        )
+        t = find_file([task_dir / f"{task_name}-tasks.md", task_dir / "tasks.md"])
+        if p or c or t:
+            chosen_dir = task_dir
+            plan_file, context_file, tasks_file = p, c, t
+            break
+
+    prompts_dir = chosen_dir / "prompts"
 
     return OrbitFiles(
-        task_dir=str(task_dir),
-        plan_file=find_file(plan_candidates),
-        context_file=find_file(context_candidates),
-        tasks_file=find_file(tasks_candidates),
+        task_dir=str(chosen_dir),
+        plan_file=plan_file,
+        context_file=context_file,
+        tasks_file=tasks_file,
         prompts_dir=str(prompts_dir) if prompts_dir.exists() else None,
     )
 
@@ -133,6 +133,7 @@ def create_orbit_files(
     branch: str | None = None,
     tasks: list[str] | None = None,
     plan_content: dict[str, str] | None = None,
+    force: bool = False,
 ) -> OrbitFiles:
     """Create orbit files for a task under ORBIT_ROOT.
 
@@ -143,12 +144,46 @@ def create_orbit_files(
         branch: Optional git branch
         tasks: List of task descriptions for tasks.md
         plan_content: Optional dict with plan sections (summary, goals, etc.)
+        force: If True, overwrite existing files. If False (default), raise
+            OrbitError(ALREADY_EXISTS) when any of plan/context/tasks already
+            exist on disk for this task. Prevents silent data loss when the
+            same name is reused.
 
     Returns:
         OrbitFiles with paths to created files
     """
     validate_task_name(task_name)
     task_dir = get_task_dir(task_name)
+
+    if not force:
+        # Include both prefixed AND legacy unprefixed filenames - get_orbit_files
+        # accepts both, so the guard must too. Otherwise creating a task whose
+        # dir already has only legacy files would write fresh prefixed files,
+        # and the legacy content would be hidden by the read-time precedence.
+        existing = [
+            p
+            for p in (
+                task_dir / f"{task_name}-plan.md",
+                task_dir / f"{task_name}-context.md",
+                task_dir / f"{task_name}-tasks.md",
+                task_dir / "plan.md",
+                task_dir / "context.md",
+                task_dir / "tasks.md",
+            )
+            if p.exists()
+        ]
+        if existing:
+            raise OrbitError(
+                ErrorCode.ALREADY_EXISTS,
+                f"Orbit files for '{task_name}' already exist. "
+                f"Pass force=True to overwrite, or pick a different name.",
+                {
+                    "task_name": task_name,
+                    "task_dir": str(task_dir),
+                    "existing_files": [str(p) for p in existing],
+                },
+            )
+
     task_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = get_timestamp()
