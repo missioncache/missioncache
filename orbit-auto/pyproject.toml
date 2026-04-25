@@ -1,6 +1,6 @@
 [project]
 name = "orbit-auto"
-version = "3.0.0"
+version = "3.0.1"
 description = "Orbit Auto - Autonomous AI Development Tool for Orbit Projects"
 readme = "README.md"
 requires-python = ">=3.11"
