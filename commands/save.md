@@ -16,7 +16,7 @@ Save progress on an active project using atomic MCP calls.
 
 1b. **If not found, try detecting from orbit files and register session:**
    ```
-   mcp__plugin_orbit_pm__get_orbit_files(task_name="<name>")
+   mcp__plugin_orbit_pm__get_orbit_files(project_name="<name>")
    # If found, create pending-task.json and record heartbeat
    ```
 
@@ -81,7 +81,7 @@ If `RECENT <= 1`, proceed normally: call `mcp__plugin_orbit_pm__find_task_for_di
 **If project not found but orbit files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
 1. Try to detect the project from `~/.claude/orbit/active/<project-name>`
-2. Call `mcp__plugin_orbit_pm__get_orbit_files(task_name="<name>")` to confirm
+2. Call `mcp__plugin_orbit_pm__get_orbit_files(project_name="<name>")` to confirm
 3. If found, **register the session** (see Step 1b)
 
 ### Step 1b: Register Session (if not registered)

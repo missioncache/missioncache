@@ -17,6 +17,15 @@ Ask the user for:
 - Optional JIRA ticket
 - Initial subtasks (or generate from discussion)
 
+**Duplicate check:** Once you have a name, call
+`mcp__plugin_orbit_pm__get_task(project_name="<name>")` before going further.
+
+- If the response indicates the task is not found, the name is free - proceed.
+- If a task is returned (status `active` or `completed`), use `AskUserQuestion`
+  to choose between: resume via `/orbit:go <name>`, pick a different name, or
+  recreate from scratch (destructive - confirm with the user, then in Step 4
+  pass `force=True`).
+
 ### Step 2: Research Phase
 
 Ask the user what level of research they want before creating the project:
@@ -113,7 +122,10 @@ Use the output as `repo_path`.
 
 ### Step 4: Create Orbit Files
 
-Pass `research_findings` from Step 2 via the `plan_content` dict.
+Pass `research_findings` from Step 2 via the `plan` dict. Pass `force=True`
+ONLY if Step 1's duplicate check confirmed the user wants to recreate
+destructively - the tool returns `ALREADY_EXISTS` by default to prevent
+silent overwrite.
 
 **Flat tasks (simple):**
 ```
@@ -123,7 +135,7 @@ mcp__plugin_orbit_pm__create_orbit_files(
   description="<short description>",
   jira_key="<optional JIRA ticket>",
   tasks=["subtask 1", "subtask 2", ...],
-  plan_content={"research_findings": "<research results from step 2>"}
+  plan={"research_findings": "<research results from step 2>"}
 )
 ```
 
@@ -137,7 +149,7 @@ mcp__plugin_orbit_pm__create_orbit_files(
     {"title": "Authentication", "subtasks": ["Create user model", "Add login endpoint"]},
     {"title": "Dashboard", "subtasks": ["Create component", "Add data fetching"]}
   ],
-  plan_content={"research_findings": "<research results from step 2>"}
+  plan={"research_findings": "<research results from step 2>"}
 )
 ```
 
@@ -151,13 +163,7 @@ This generates numbered tasks:
   - [ ] 2.2. Add data fetching
 ```
 
-### Step 5: Register Project
-
-```
-mcp__plugin_orbit_pm__scan_repos()
-```
-
-### Step 6: Register Project in Statusline
+### Step 5: Register Project in Statusline
 
 Register the project name against the current Claude session so the statusline picks it up. Uses the filesystem resolver (works on any terminal, including Ghostty and cmux) with a legacy term-session fallback. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
 
@@ -227,7 +233,7 @@ projects_dir.mkdir(parents=True, exist_ok=True)
 fi
 ```
 
-### Step 7: Probe Dashboard (optional)
+### Step 6: Probe Dashboard (optional)
 
 Check whether the dashboard is reachable so the confirmation output can surface a deep link to the newly-created project. Skip silently when the dashboard is not installed or not running - dead links teach users to ignore the hint.
 
@@ -243,7 +249,7 @@ fi
 
 If the probe emits a line, include it as a **Dashboard** entry in the confirmation below. If nothing is emitted, omit the entry.
 
-### Step 8: Show Plan and Confirm
+### Step 7: Show Plan and Confirm
 
 ```markdown
 ## Plan for: my-feature
@@ -262,7 +268,7 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 - ~/.claude/orbit/active/my-feature/my-feature-context.md
 - ~/.claude/orbit/active/my-feature/my-feature-tasks.md
 
-**Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 7 emitted a line)*
+**Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 6 emitted a line)*
 
 **Next step:** Run `/orbit:prompts my-feature` to create optimized prompts with agent/skill recommendations for each subtask.
 ```
@@ -295,7 +301,7 @@ Non-coding projects don't need prompts:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__create_orbit_files` | Create plan/context/tasks files |
+| `mcp__plugin_orbit_pm__create_orbit_files` | Create plan/context/tasks files (also registers task in DB) |
 | `mcp__plugin_orbit_pm__create_task` | Create project in database (non-coding) |
-| `mcp__plugin_orbit_pm__scan_repos` | Register project in database |
+| `mcp__plugin_orbit_pm__get_task` | Pre-flight duplicate check before creating |
 | `mcp__plugin_orbit_pm__add_repo` | Register repo if not already tracked |

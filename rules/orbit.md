@@ -24,8 +24,12 @@ After finishing a coding task and updating orbit files (`~/.claude/orbit/active/
 
 2. **Aggregate time tracking**:
    ```bash
-   python3 -m orbit_db process-heartbeats 2>/dev/null
+   orbit-db process-heartbeats 2>/dev/null
    ```
+
+   The `orbit-db` CLI is installed by `uvx orbit-install` and put on PATH. Do NOT
+   use `python3 -m orbit_db` here - the system `python3` rarely has the module
+   available, and `2>/dev/null` would silently swallow the import error.
 
 This ensures session time is properly recorded in the task database.
 
