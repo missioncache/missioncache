@@ -13,6 +13,7 @@ import pytest
 
 from orbit_dashboard.statusline import (
     COLORS,
+    ICONS,
     RESET,
     _detect_subscription,
     _format_reset_time,
@@ -27,6 +28,7 @@ from orbit_dashboard.statusline import (
     _parse_task_progress,
     _parse_usage_response,
     _relative_time,
+    _render_effort_field,
     display_width,
     parse_input,
 )
@@ -545,3 +547,115 @@ class TestParseTaskProgress:
     def test_uppercase_tbd_placeholder(self):
         assert _parse_task_progress("- [ ] tbd") == "[TBD]"
         assert _parse_task_progress("- [ ] TBD  ") == "[TBD]"
+
+
+# ============ _render_effort_field (Effort + Thinking merged field) ============
+
+
+class TestRenderEffortField:
+    def test_no_effort_returns_none(self):
+        assert _render_effort_field(None, False) is None
+
+    def test_thinking_on_without_effort_drops_signal(self):
+        # Edge case: Claude Code emits thinking but not effort. We deliberately
+        # drop the signal rather than rendering a half-merged field.
+        assert _render_effort_field(None, True) is None
+
+    def test_effort_with_thinking_off_uses_dart_icon(self):
+        result = _render_effort_field("medium", False)
+        assert result is not None
+        assert ICONS["effort"] in result
+        assert ICONS["thinking"] not in result
+        assert "Effort: medium" in result
+
+    def test_effort_with_thinking_on_uses_brain_icon(self):
+        result = _render_effort_field("high", True)
+        assert result is not None
+        assert ICONS["thinking"] in result
+        assert ICONS["effort"] not in result
+        assert "Effort: high" in result
+
+    def test_max_with_thinking_off_uses_dart(self):
+        result = _render_effort_field("max", False)
+        assert result is not None
+        assert ICONS["effort"] in result
+        assert ICONS["thinking"] not in result
+
+    def test_max_with_thinking_on_uses_brain(self):
+        result = _render_effort_field("max", True)
+        assert result is not None
+        assert ICONS["thinking"] in result
+        assert ICONS["effort"] not in result
+
+    @pytest.mark.parametrize("level,color_key", [
+        ("low", "effort_low"),
+        ("medium", "effort_medium"),
+        ("high", "effort_high"),
+        ("xhigh", "effort_xhigh"),
+    ])
+    def test_effort_color_per_level(self, level, color_key):
+        result = _render_effort_field(level, False)
+        assert result is not None
+        assert COLORS[color_key] in result
+
+    def test_unknown_effort_level_falls_back_to_medium_color(self):
+        result = _render_effort_field("garbage", False)
+        assert result is not None
+        assert COLORS["effort_medium"] in result
+        assert "Effort: garbage" in result
+
+
+# ============ parse_input - effort/thinking extraction across CC versions ============
+
+
+class TestParseInputEffortThinking:
+    def _stdin(self, **overrides) -> str:
+        # Minimal stdin shape that parse_input accepts. We only care about
+        # effort/thinking extraction here; the other fields just need to
+        # not crash the parser.
+        base = {
+            "model": {"display_name": "Sonnet 4.5"},
+            "context_window": {"size": 200000, "used_percentage": 5},
+            "cost": {"total_duration_ms": 1000, "total_cost_usd": 0.0},
+            "session_id": "test",
+            "version": "2.1.119",
+        }
+        base.update(overrides)
+        return json.dumps(base)
+
+    def test_full_v2_119_stdin_extracts_both_fields(self):
+        info = parse_input(self._stdin(
+            effort={"level": "high"},
+            thinking={"enabled": True},
+        ))
+        assert info["effort_level"] == "high"
+        assert info["thinking_enabled"] is True
+
+    def test_old_claude_code_stdin_yields_none_and_false(self):
+        # Pre-v2.1.119 Claude Code emits no effort or thinking fields.
+        # parse_input must not crash and must return safe defaults.
+        info = parse_input(self._stdin())
+        assert info["effort_level"] is None
+        assert info["thinking_enabled"] is False
+
+    def test_partial_only_effort(self):
+        info = parse_input(self._stdin(effort={"level": "low"}))
+        assert info["effort_level"] == "low"
+        assert info["thinking_enabled"] is False
+
+    def test_partial_only_thinking(self):
+        info = parse_input(self._stdin(thinking={"enabled": True}))
+        assert info["effort_level"] is None
+        assert info["thinking_enabled"] is True
+
+    def test_null_effort_field_handled_safely(self):
+        info = parse_input(self._stdin(effort=None))
+        assert info["effort_level"] is None
+
+    def test_null_thinking_field_handled_safely(self):
+        info = parse_input(self._stdin(thinking=None))
+        assert info["thinking_enabled"] is False
+
+    def test_thinking_disabled_explicit_false(self):
+        info = parse_input(self._stdin(thinking={"enabled": False}))
+        assert info["thinking_enabled"] is False

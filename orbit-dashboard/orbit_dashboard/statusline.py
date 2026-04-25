@@ -91,7 +91,6 @@ COLORS = {
     "effort_medium": f"{ESC}[38;2;100;200;120m",
     "effort_high": f"{ESC}[38;2;170;180;235m",
     "effort_xhigh": f"{ESC}[38;2;180;140;220m",
-    "thinking": f"{ESC}[38;2;180;140;220m",
 }
 
 # Rainbow palette for effort=max (cycled per character of the value).
@@ -1084,6 +1083,19 @@ def _item(color: str, icon: str, label: str, value: str) -> str:
     return f"{color}{icon} {label}: {value}{RESET}"
 
 
+def _render_effort_field(effort_level: str | None, thinking_enabled: bool) -> str | None:
+    # Icon doubles as thinking indicator: brain when thinking is on, dart otherwise.
+    # No effort = no field, even if thinking is on (drops signal by design).
+    if not effort_level:
+        return None
+    icon = ICONS["thinking"] if thinking_enabled else ICONS["effort"]
+    if effort_level == "max":
+        rainbow_value = _rainbow_text("max")
+        return f"{COLORS['effort_xhigh']}{icon} Effort: {RESET}{rainbow_value}{RESET}"
+    effort_color = COLORS.get(f"effort_{effort_level}", COLORS["effort_medium"])
+    return _item(effort_color, icon, "Effort", effort_level)
+
+
 def _join_items(items: list[str], widths: list[int], max_col1: int, max_col2: int) -> str:
     if not items:
         return ""
@@ -1269,18 +1281,11 @@ def main() -> None:
     line3 = [
         _item(COLORS["model"], ICONS["model"], "Model", model_name),
     ]
-    effort_level = info.get("effort_level")
-    if effort_level:
-        if effort_level == "max":
-            rainbow_value = _rainbow_text("max")
-            line3.append(
-                f"{COLORS['effort_xhigh']}{ICONS['effort']} Effort: {RESET}{rainbow_value}{RESET}"
-            )
-        else:
-            effort_color = COLORS.get(f"effort_{effort_level}", COLORS["effort_medium"])
-            line3.append(_item(effort_color, ICONS["effort"], "Effort", effort_level))
-    if info.get("thinking_enabled"):
-        line3.append(_item(COLORS["thinking"], ICONS["thinking"], "Thinking", "on"))
+    effort_field = _render_effort_field(
+        info.get("effort_level"), info.get("thinking_enabled", False)
+    )
+    if effort_field:
+        line3.append(effort_field)
     if _is_fast_mode():
         line3.append(f"{COLORS['fast_mode']}\u26a1 Fast mode activated{RESET}")
 
