@@ -1,6 +1,6 @@
 [project]
 name = "orbit-dashboard"
-version = "1.0.2"
+version = "1.0.3"
 description = "Orbit Dashboard - Task analytics and autonomous execution monitoring for Claude Code orbit projects"
 readme = "README.md"
 requires-python = ">=3.11"
