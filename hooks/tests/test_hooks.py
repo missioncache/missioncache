@@ -156,42 +156,216 @@ class TestSessionStart:
 
 
 class TestPreCompact:
-    def test_updates_context_timestamp(self, tmp_path, monkeypatch):
-        """pre_compact updates the Last Updated timestamp in context.md."""
-        # Set up task dir with a context file
+    """Tests for the redesigned PreCompact hook (MAJOR-13).
+
+    The hook now:
+    1. Reads JSONL transcript, captures last N user/assistant turns into
+       a Pre-Compact Snapshot subsection.
+    2. Wraps DB calls in retry-with-backoff for sqlite lock contention.
+    3. Writes a sticky error file on terminal failure for /orbit:go to
+       surface on next resume.
+    """
+
+    def _setup_task(self, tmp_path, ctx_seed=None):
+        """Build a task dir + mock task/repo. Returns (task_dir, ctx_file, mocks)."""
         task_dir = tmp_path / "orbit" / "active" / "compact-task"
         task_dir.mkdir(parents=True)
         ctx_file = task_dir / "compact-task-context.md"
         ctx_file.write_text(
-            "# Context\n\n**Last Updated:** 2025-01-01 00:00\n\n## Recent Changes\n\n- Old change\n"
+            ctx_seed
+            or "# Context\n\n**Last Updated:** 2025-01-01 00:00\n\n## Recent Changes\n\n### Old\n\n- prior change\n"
         )
 
         mock_task = SimpleNamespace(
-            id=1, name="compact-task", repo_id=1, full_path="active/compact-task"
+            id=1,
+            name="compact-task",
+            repo_id=1,
+            full_path="active/compact-task",
         )
         mock_repo = SimpleNamespace(path=str(tmp_path / "orbit"))
+        return task_dir, ctx_file, mock_task, mock_repo
+
+    def _run(self, monkeypatch, mock_db, transcript_path=None):
+        """Reload pre_compact with stdin payload and mock orbit_db."""
+        payload = {"transcript_path": str(transcript_path) if transcript_path else "", "cwd": "/fake/cwd"}
+        monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
+        with patch.dict(
+            "sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}
+        ):
+            import importlib
+            import hooks.pre_compact as mod
+
+            importlib.reload(mod)
+            mod.main()
+            return mod
+
+    def test_updates_context_timestamp_and_writes_snapshot(
+        self, tmp_path, monkeypatch
+    ):
+        """Hook stamps timestamp and prepends a Pre-Compact Snapshot subsection."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
         mock_db.get_repo.return_value = mock_repo
         mock_db.process_heartbeats.return_value = 0
 
-        monkeypatch.setattr("os.getcwd", lambda: str(task_dir))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-
-        with patch.dict("sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}):
-            import importlib
-            import hooks.pre_compact as mod
-
-            importlib.reload(mod)
-            mod.main()
+        self._run(monkeypatch, mock_db)
 
         content = ctx_file.read_text()
-        # Old timestamp should be replaced
         assert "2025-01-01 00:00" not in content
         assert "**Last Updated:**" in content
-        # Compaction note added
-        assert "Auto-saved before compaction" in content
+        # New snapshot marker (replaces the legacy "Auto-saved before compaction")
+        assert "Pre-Compact Snapshot" in content
+
+    def test_snapshot_includes_recent_user_and_assistant_turns(
+        self, tmp_path, monkeypatch
+    ):
+        """Snapshot body contains the recent user prompts and assistant text."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+
+        # Build a fixture JSONL transcript with 2 user prompts + 2 assistant
+        # responses, plus one isMeta system-injected user (should be skipped)
+        # and one assistant tool_use block (should be skipped).
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            "\n".join(
+                [
+                    json.dumps({
+                        "type": "user",
+                        "isMeta": True,
+                        "message": {"role": "user", "content": "<system-injected>"},
+                    }),
+                    json.dumps({
+                        "type": "user",
+                        "message": {"role": "user", "content": "fix the bug in foo.py"},
+                    }),
+                    json.dumps({
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "thinking",
+                                    "thinking": "THINKING-BLOCK-XYZZY",
+                                },
+                                {"type": "text", "text": "I will fix it now."},
+                            ],
+                        },
+                    }),
+                    json.dumps({
+                        "type": "user",
+                        "message": {"role": "user", "content": "also add tests"},
+                    }),
+                    json.dumps({
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "tool_use", "name": "Edit"},
+                                {"type": "text", "text": "Tests added in test_foo.py"},
+                            ],
+                        },
+                    }),
+                ]
+            )
+        )
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = mock_task
+        mock_db.get_repo.return_value = mock_repo
+
+        self._run(monkeypatch, mock_db, transcript_path=transcript)
+
+        content = ctx_file.read_text()
+        assert "fix the bug in foo.py" in content
+        assert "also add tests" in content
+        assert "I will fix it now." in content
+        assert "Tests added in test_foo.py" in content
+        # Filtered noise must NOT appear
+        assert "system-injected" not in content
+        assert "THINKING-BLOCK-XYZZY" not in content  # thinking block dropped
+
+    def test_db_lock_writes_sticky_error(self, tmp_path, monkeypatch):
+        """OperationalError('database is locked') after retry → sticky error file,
+        no context.md write."""
+        import sqlite3
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        # Speed up the test by zeroing out the retry delay
+        monkeypatch.setattr("time.sleep", lambda *_: None)
+
+        _task_dir, ctx_file, _, _ = self._setup_task(tmp_path)
+        original_content = ctx_file.read_text()
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.side_effect = sqlite3.OperationalError(
+            "database is locked"
+        )
+
+        mod = self._run(monkeypatch, mock_db)
+
+        assert mod.ERROR_FILE.exists(), "sticky error file should be written"
+        sticky = json.loads(mod.ERROR_FILE.read_text())
+        assert "database is locked" in sticky["reason"]
+        assert "find_task_for_cwd" in sticky["reason"]
+        # context.md should be untouched - DB lookup never succeeded
+        assert ctx_file.read_text() == original_content
+
+    def test_successful_run_clears_prior_sticky_error(
+        self, tmp_path, monkeypatch
+    ):
+        """A successful run removes any leftover sticky error file from a
+        previous failed compaction so /orbit:go does not surface stale warnings."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        _task_dir, _ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+
+        # Pre-seed a sticky error from a previous failed run. Build the path
+        # the same way the module will (so the assertion can use mod.ERROR_FILE
+        # for the same-target check as the other sticky-error tests).
+        error_dir = tmp_path / ".claude" / "hooks" / "state"
+        error_dir.mkdir(parents=True)
+        (error_dir / "last-precompact-error.json").write_text(
+            json.dumps({"timestamp": "old", "task_name": "compact-task", "reason": "old failure"})
+        )
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = mock_task
+        mock_db.get_repo.return_value = mock_repo
+
+        mod = self._run(monkeypatch, mock_db)
+
+        assert not mod.ERROR_FILE.exists(), (
+            "successful run must clear prior sticky error file"
+        )
+
+    def test_db_lock_recovers_on_retry(self, tmp_path, monkeypatch):
+        """Lock once, succeed on second attempt → no sticky error, snapshot lands."""
+        import sqlite3
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr("time.sleep", lambda *_: None)
+
+        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+        original = ctx_file.read_text()
+
+        mock_db = MagicMock()
+        # First call raises locked, second call returns the task
+        mock_db.find_task_for_cwd.side_effect = [
+            sqlite3.OperationalError("database is locked"),
+            mock_task,
+        ]
+        mock_db.get_repo.return_value = mock_repo
+
+        mod = self._run(monkeypatch, mock_db)
+
+        assert ctx_file.read_text() != original, "snapshot should have landed"
+        assert "Pre-Compact Snapshot" in ctx_file.read_text()
+        assert not mod.ERROR_FILE.exists(), (
+            "retry success must not leave a sticky error"
+        )
 
 
 # ── stop ──────────────────────────────────────────────────────────────────

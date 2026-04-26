@@ -105,7 +105,7 @@ Read the key files:
 
 ### Step 3: Display Resume Summary
 
-Before rendering the summary, probe the dashboard so the output can include a deep link to the project view when available. Skip the Dashboard line silently if the dashboard is not installed or not running.
+Before rendering the summary, probe the dashboard so the output can include a deep link, and check for a sticky PreCompact error from a previous session that needs surfacing. The PreCompact hook writes `~/.claude/hooks/state/last-precompact-error.json` when its snapshot run fails (e.g. SQLite lock contention); /orbit:go is the natural place to tell the user since they are about to act on stale context.
 
 Replace `<project-name>` with the resumed project name, then run:
 
@@ -115,12 +115,41 @@ DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
 if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
   echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
 fi
+
+# Sticky PreCompact error from previous session, if any. Surface in the
+# summary if it matches the resumed project, then clear it so we do not
+# re-warn on later resumes.
+ERROR_FILE="$HOME/.claude/hooks/state/last-precompact-error.json"
+if [ -f "$ERROR_FILE" ]; then
+  PROJECT_NAME="$PROJECT_NAME" python3 - <<'PY' 2>/dev/null
+import json, os, pathlib, sys
+project = os.environ["PROJECT_NAME"]
+err_path = pathlib.Path.home() / ".claude" / "hooks" / "state" / "last-precompact-error.json"
+try:
+    data = json.loads(err_path.read_text())
+except Exception:
+    sys.exit(0)
+task = data.get("task_name")
+# Surface only when the failure was on THIS project (or had no task at all).
+if task and task != project:
+    sys.exit(0)
+ts = data.get("timestamp", "unknown time")
+reason = data.get("reason", "unknown reason")
+print(f"PRECOMPACT_WARNING: {ts}: {reason}")
+try:
+    err_path.unlink()
+except Exception:
+    pass
+PY
+fi
 ```
 
-If the probe emits a line, include it as a **Dashboard** field in the summary. If nothing is emitted, omit the field.
+If the dashboard probe emits a line, include it as a **Dashboard** field. If `PRECOMPACT_WARNING:` is emitted, surface it as a `**PreCompact warning:**` line near the top of the resume summary so the user knows the previous session's auto-snapshot did not land. If neither is emitted, omit those fields.
 
 ```
 ## Project: <name> (active, <time>)
+
+**PreCompact warning:** <from PRECOMPACT_WARNING line> *(only if surfaced)*
 
 **Where You Left Off:** <from context.md Next Steps>
 
