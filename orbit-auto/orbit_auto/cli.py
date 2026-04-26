@@ -110,7 +110,7 @@ Exit Codes:
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the run command."""
-    parser.add_argument("task_name", help="Name of task in ~/.claude/orbit/active/")
+    parser.add_argument("task_name", help="Name of task in ~/.orbit/active/")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(

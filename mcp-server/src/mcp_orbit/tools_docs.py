@@ -42,7 +42,7 @@ async def create_orbit_files(
     """
     Create orbit files for a new task.
 
-    Creates files under ~/.claude/orbit/active/<task-name>/.
+    Creates files under ~/.orbit/active/<task-name>/.
     The repo_path is used to register the repository in the DB.
 
     Returns ALREADY_EXISTS error if any of plan/context/tasks already exist
@@ -109,7 +109,7 @@ async def get_orbit_files(
     Get paths to orbit files for a task.
 
     Returns existing file paths (plan.md, context.md, tasks.md, prompts/).
-    Files are resolved under ~/.claude/orbit/.
+    Files are resolved under ~/.orbit/.
     """
     db = get_db()
 

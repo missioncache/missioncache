@@ -5,13 +5,14 @@ Reads JSON from stdin (Claude Code session data) and outputs
 a multi-line ANSI-colored status display.
 
 Layout:
-  Line 1: Project    - [project name] (only if active orbit project)
+  Line 1: Project    - [project name + progress] [current task] (only if active orbit project)
   Line 2: Location   - [dir] [git branch+status]
-  Line 3: Metrics    - [model] [tokens] [ctx%]
-  Line 4: Session    - [elapsed] [edits]
-  Line 5: K8s/Ver    - [k8s context] [version] [health status]
+  Line 3: Session    - [elapsed] [edits]
+  Line 4: Metrics    - [model] [effort?]
+  Line 5: K8s/Ctx    - [k8s context] [tokens] [ctx%]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
+  Line 8: Vitals     - [last action] [version] [Claude status]
 
 Configuration:
   All visibility toggles (Codex line, Claude subscription usage/type, Claude
@@ -140,7 +141,7 @@ STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
 HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
 SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
-ORBIT_ACTIVE = Path.home() / ".claude" / "orbit" / "active"
+ORBIT_ACTIVE = Path.home() / ".orbit" / "active"
 
 
 def _get_hooks_db() -> sqlite3.Connection | None:
@@ -555,29 +556,56 @@ def _parse_task_progress(tasks_content: str) -> str:
     return f"[{completed}/{total}]"
 
 
-def _get_project_progress(project_dir: Path, project_name: str) -> str:
-    """Read the tasks file in project_dir and return the progress bracket.
+def _get_active_task(session_id: str) -> str:
+    """Return the in-progress task for this Claude Code session.
 
-    Returns a leading-space-prefixed bracket ready for concatenation, e.g.
-    " [3/22]" or " [TBD]". Returns "" if the tasks file is missing or
-    unreadable (statusline falls back to showing just the project name).
+    Reads ``~/.claude/tasks/<session-id>/*.json`` - the directory Claude Code
+    maintains as its session task list. Each file is one task with the
+    schema ``{id, subject, activeForm, status, blocks, blockedBy}``. We pick
+    the first task with ``status == "in_progress"`` and prefer ``activeForm``
+    ("Running tests") over ``subject`` ("Run tests") because the former reads
+    naturally as a status field. Returns "" when no in-progress task exists.
+
+    Reading Claude Code's internal directory layout is fragile - if upstream
+    renames or restructures it the field stops rendering until we adapt. The
+    hook+bridge alternative was strictly more code for the same fragility
+    surface (PostToolUse routing, tool-name matching).
     """
-    tasks_file = project_dir / f"{project_name}-tasks.md"
+    if not session_id:
+        return ""
+    tasks_dir = Path.home() / ".claude" / "tasks" / session_id
     try:
-        content = tasks_file.read_text()
+        files = sorted(tasks_dir.glob("*.json"))
     except OSError:
         return ""
-    return f" {_parse_task_progress(content)}"
+    for f in files:
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("status") == "in_progress":
+            return data.get("activeForm") or data.get("subject") or ""
+    return ""
+
+
+def _read_tasks_content(project_dir: Path, project_name: str) -> str:
+    """Return the contents of the project's tasks.md, or "" if unreadable."""
+    tasks_file = project_dir / f"{project_name}-tasks.md"
+    try:
+        return tasks_file.read_text()
+    except OSError:
+        return ""
 
 
 class ProjectInfo(NamedTuple):
     name: str = ""
     display: str = ""
     progress: str = ""
+    current_task: str = ""
 
 
 def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
-    """Return ProjectInfo(name, display, progress)."""
+    """Return ProjectInfo(name, display, progress, current_task)."""
     if not session_id:
         return ProjectInfo()
     name = ""
@@ -610,8 +638,18 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     display = f"{parent.name}/{name}"
                     project_dir = nested
                     break
-    progress = _get_project_progress(project_dir, name)
-    return ProjectInfo(name, display, progress)
+
+    # Active task comes from the active_task_tracker hook, NOT from a
+    # heuristic over tasks.md. Falling back to "first pending checklist
+    # item" misled users into thinking Claude was working on something it
+    # was not. Show only what we can verify; otherwise hide the field.
+    current_task = _get_active_task(session_id)
+
+    tasks_content = _read_tasks_content(project_dir, name)
+    if not tasks_content:
+        return ProjectInfo(name, display, "", current_task)
+    progress = f" {_parse_task_progress(tasks_content)}"
+    return ProjectInfo(name, display, progress, current_task)
 
 
 # ============ LAST ACTION TIME ============
@@ -1215,9 +1253,16 @@ def main() -> None:
 
     _FUTURE_TIMEOUT = 3
     try:
-        project_name, project_display, project_progress = f_project.result(timeout=_FUTURE_TIMEOUT)
+        project_name, project_display, project_progress, project_current_task = (
+            f_project.result(timeout=_FUTURE_TIMEOUT)
+        )
     except Exception:
-        project_name, project_display, project_progress = "", "", ""
+        project_name, project_display, project_progress, project_current_task = (
+            "",
+            "",
+            "",
+            "",
+        )
     try:
         last_action_time = f_last_time.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1274,7 +1319,8 @@ def main() -> None:
         branch_display = f"{branch} (worktree)" if worktree else branch
         line1.append(_item(c, ICONS["git"], "Git", branch_display))
 
-    # Line 2: Project + Last Action time
+    # Line 2: Project + Task (Last Action moved to the bottom row alongside
+    # Version + Claude Status)
     line2: list[str] = []
     if project_name:
         linked_name = _osc8_link(f"{_DASHBOARD_URL}/#projects", project_display)
@@ -1284,8 +1330,11 @@ def main() -> None:
         else:
             linked_value = linked_name
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
-    if last_action_time:
-        line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
+        if project_current_task:
+            task_text = project_current_task
+            if len(task_text) > 60:
+                task_text = task_text[:60] + "..."
+            line2.append(_item(COLORS["edit"], ICONS["edit"], "Task", task_text))
 
     # Line 3: Metrics
     line3 = [
@@ -1320,8 +1369,15 @@ def main() -> None:
     else:
         line_k8s.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
 
-    # Line Health: Version + Claude Status (appears after Codex, or in place of it)
+    # Line Health: Last Action + Version + Claude Status (appears after Codex,
+    # or in place of it). Last Action lives here rather than next to Project so
+    # the bottom row carries the "session vitals" together (when, which version,
+    # what status) and the top row stays focused on the project + current task.
     line_health: list[str] = []
+    if last_action_time:
+        line_health.append(
+            _item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time)
+        )
     if version:
         ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
         changelog_url = "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
@@ -1446,14 +1502,20 @@ def main() -> None:
     all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex, line_health]
     all_widths = [[display_width(item) for item in items] for items in all_lines]
 
-    # line_health is excluded from column-width aggregation so a long Claude
-    # Status message doesn't stretch columns on the lines above it.
+    # line2's Task field and line_health's Claude Status are excluded from
+    # column-width aggregation so their long text doesn't stretch columns
+    # on the rows below (Task) or above (Status). line2's Project still
+    # contributes to col1 so the project label aligns with Dir/Elapsed/etc.
     max_col1 = CELL_WIDTH
     max_col2 = CELL_WIDTH
-    for widths in all_widths[:-1]:
+    for i, widths in enumerate(all_widths):
+        is_line_health = i == len(all_widths) - 1
+        is_line2 = i == 1
+        if is_line_health:
+            continue
         if len(widths) > 0:
             max_col1 = max(max_col1, widths[0])
-        if len(widths) > 1:
+        if len(widths) > 1 and not is_line2:
             max_col2 = max(max_col2, widths[1])
 
     joined = [_join_items(items, widths, max_col1, max_col2)

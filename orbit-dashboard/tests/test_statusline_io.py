@@ -97,12 +97,12 @@ class TestGetHealthStatusCache:
         assert result == [{"service": "OK"}]
 
 
-# ── _get_project_progress ─────────────────────────────────────────────────
+# ── _read_tasks_content ───────────────────────────────────────────────────
 
 
-class TestGetProjectProgress:
+class TestReadTasksContent:
     def test_reads_real_tasks_file(self, tmp_path):
-        """Reads the tasks.md file and returns a space-prefixed fraction."""
+        """Reads the tasks.md file; parses to the expected fraction."""
         project_dir = tmp_path / "my-project"
         project_dir.mkdir()
         (project_dir / "my-project-tasks.md").write_text(
@@ -112,23 +112,25 @@ class TestGetProjectProgress:
             "- [ ] 4. todo\n"
             "- [ ] 5. todo\n"
         )
+        content = mod._read_tasks_content(project_dir, "my-project")
 
-        assert mod._get_project_progress(project_dir, "my-project") == " [2/5]"
+        assert mod._parse_task_progress(content) == "[2/5]"
 
     def test_template_placeholder_returns_tbd(self, tmp_path):
-        """A fresh project with only the template placeholder shows [TBD]."""
+        """A fresh project with only the template placeholder parses to [TBD]."""
         project_dir = tmp_path / "fresh-project"
         project_dir.mkdir()
         (project_dir / "fresh-project-tasks.md").write_text("- [ ] TBD\n")
+        content = mod._read_tasks_content(project_dir, "fresh-project")
 
-        assert mod._get_project_progress(project_dir, "fresh-project") == " [TBD]"
+        assert mod._parse_task_progress(content) == "[TBD]"
 
     def test_missing_file_returns_empty(self, tmp_path):
-        """Missing tasks file returns empty string (statusline falls back)."""
+        """Missing tasks file returns empty content (statusline falls back)."""
         project_dir = tmp_path / "nonexistent"
         # Do NOT create the directory or file.
 
-        assert mod._get_project_progress(project_dir, "nonexistent") == ""
+        assert mod._read_tasks_content(project_dir, "nonexistent") == ""
 
     def test_unreadable_path_returns_empty(self, tmp_path):
         """An OSError while reading returns empty (defensive fallback)."""
@@ -138,4 +140,116 @@ class TestGetProjectProgress:
         project_dir.mkdir()
         (project_dir / "weird-tasks.md").mkdir()  # collision
 
-        assert mod._get_project_progress(project_dir, "weird") == ""
+        assert mod._read_tasks_content(project_dir, "weird") == ""
+
+
+# ── _get_active_task (reads Claude Code's ~/.claude/tasks/<session>/) ────
+
+
+class TestGetActiveTask:
+    """Reads Claude Code's per-session task list from ~/.claude/tasks/.
+
+    Each task is a separate JSON file under the session directory. Statusline
+    picks the first task with status='in_progress' and prefers activeForm
+    over subject for natural-sounding spinner-style display.
+    """
+
+    def _write_task(
+        self,
+        tmp_path,
+        session_id,
+        task_id,
+        status,
+        subject="task subject",
+        active_form=None,
+    ):
+        task_dir = tmp_path / ".claude" / "tasks" / session_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "id": task_id,
+            "subject": subject,
+            "status": status,
+            "blocks": [],
+            "blockedBy": [],
+        }
+        if active_form is not None:
+            payload["activeForm"] = active_form
+        (task_dir / f"{task_id}.json").write_text(json.dumps(payload))
+
+    def test_returns_active_form_when_in_progress(self, tmp_path, monkeypatch):
+        """activeForm wins over subject when both are present."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_task(
+            tmp_path, "sess-1", "1", "in_progress",
+            subject="Fix the auth bug", active_form="Fixing the auth bug"
+        )
+
+        assert mod._get_active_task("sess-1") == "Fixing the auth bug"
+
+    def test_falls_back_to_subject_without_active_form(self, tmp_path, monkeypatch):
+        """When activeForm is absent, subject is returned."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_task(
+            tmp_path, "sess-2", "1", "in_progress",
+            subject="Fix the auth bug", active_form=None
+        )
+
+        assert mod._get_active_task("sess-2") == "Fix the auth bug"
+
+    def test_skips_pending_and_completed_tasks(self, tmp_path, monkeypatch):
+        """Only in_progress tasks count. Completed and pending are ignored."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_task(tmp_path, "sess-3", "1", "completed", subject="finished")
+        self._write_task(tmp_path, "sess-3", "2", "pending", subject="not started")
+        self._write_task(
+            tmp_path, "sess-3", "3", "in_progress", subject="active one"
+        )
+
+        assert mod._get_active_task("sess-3") == "active one"
+
+    def test_returns_empty_when_no_in_progress(self, tmp_path, monkeypatch):
+        """Tasks exist but none in_progress -> empty."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_task(tmp_path, "sess-4", "1", "completed")
+        self._write_task(tmp_path, "sess-4", "2", "pending")
+
+        assert mod._get_active_task("sess-4") == ""
+
+    def test_returns_empty_for_missing_session_id(self, tmp_path, monkeypatch):
+        """Empty session_id short-circuits to empty without touching disk."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        assert mod._get_active_task("") == ""
+
+    def test_returns_empty_when_session_dir_missing(self, tmp_path, monkeypatch):
+        """No session dir means no tasks."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        assert mod._get_active_task("never-recorded-session") == ""
+
+    def test_corrupt_json_in_one_file_does_not_break_others(
+        self, tmp_path, monkeypatch
+    ):
+        """A malformed task file is skipped; remaining tasks still scanned."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        task_dir = tmp_path / ".claude" / "tasks" / "sess-5"
+        task_dir.mkdir(parents=True)
+        (task_dir / "1.json").write_text("not valid json")
+        self._write_task(
+            tmp_path, "sess-5", "2", "in_progress", subject="real one"
+        )
+
+        assert mod._get_active_task("sess-5") == "real one"
+
+    def test_per_session_isolation(self, tmp_path, monkeypatch):
+        """Each session's read sees only its own directory."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_task(
+            tmp_path, "sess-A", "1", "in_progress", subject="A's work"
+        )
+        self._write_task(
+            tmp_path, "sess-B", "1", "in_progress", subject="B's work"
+        )
+
+        assert mod._get_active_task("sess-A") == "A's work"
+        assert mod._get_active_task("sess-B") == "B's work"

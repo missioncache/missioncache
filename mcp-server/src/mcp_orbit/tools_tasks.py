@@ -226,7 +226,7 @@ async def find_task_for_directory(
     Lookup priority (see orbit_db.find_task_for_cwd):
     1. pending-project.json (cwd match)
     2. projects/<session_id>.json - requires session_id arg
-    3. cwd under ~/.claude/orbit/active/<task>/
+    3. cwd under ~/.orbit/active/<task>/
 
     Callers that invoke this from arbitrary cwds (e.g. the repo root) MUST
     pass session_id for priority 2 to fire. The 4 orbit slash commands all

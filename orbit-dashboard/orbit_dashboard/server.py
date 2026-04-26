@@ -59,7 +59,7 @@ def get_sqlite_db() -> OrbitTaskDB:
 # Configuration
 # =============================================================================
 
-ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+ORBIT_ROOT = Path.home() / ".orbit"
 
 
 def _init_hooks_state_db() -> None:
@@ -517,7 +517,7 @@ def get_loc_for_date(date: str | None = None) -> dict:
                 by_task[task_id]["commit_count"] += loc["commit_count"]
 
     # 2. Get shadow commits from SQLite (non-git repos with shadow tracking)
-    sqlite_path = Path.home() / ".claude" / "tasks.db"
+    sqlite_path = Path.home() / ".orbit" / "tasks.db"
     if sqlite_path.exists():
         try:
             conn = sqlite3.connect(str(sqlite_path))
@@ -1104,7 +1104,7 @@ def _get_jsonl_task_times(task_ids: list[int]) -> dict[int, int]:
     """
     import sqlite3
 
-    db_path = Path.home() / ".claude" / "tasks.db"
+    db_path = Path.home() / ".orbit" / "tasks.db"
     if not db_path.exists() or not task_ids:
         return {}
 
@@ -1962,7 +1962,7 @@ def _parse_orbit_tasks(tasks_file: Path) -> list[dict]:
 async def api_auto_projects():
     """List active orbit projects with their task graphs.
 
-    Returns projects from ~/.claude/orbit/active/ with:
+    Returns projects from ~/.orbit/active/ with:
     - Task list with status (completed/pending/wait)
     - Dependencies parsed from prompts (if available)
     - Graph data for D3.js visualization

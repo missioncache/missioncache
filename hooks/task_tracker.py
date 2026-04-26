@@ -135,11 +135,11 @@ def main() -> None:
         if not task or not task.full_path or not task.name:
             return
 
-        # Orbit files live under ~/.claude/orbit/<full_path>/, not under the
+        # Orbit files live under ~/.orbit/<full_path>/, not under the
         # repo path. `task.full_path` already includes the "active/<name>"
         # segment. This matches settings.orbit_root in the MCP server
         # (mcp_orbit/config.py:15) and the helpers in mcp_orbit/helpers.py.
-        orbit_root = Path.home() / ".claude" / "orbit"
+        orbit_root = Path.home() / ".orbit"
         orbit_dir = orbit_root / task.full_path
 
         # Two supported filename layouts:

@@ -60,8 +60,9 @@ def main():
         if not task.full_path:
             return
 
-        orbit_root = Path.home() / ".claude" / "orbit"
-        task_dir = orbit_root / task.full_path
+        from orbit_db import ORBIT_ROOT
+
+        task_dir = ORBIT_ROOT / task.full_path
         has_orbit_files = task_dir.exists() and any(
             (task_dir / f).exists()
             for f in [

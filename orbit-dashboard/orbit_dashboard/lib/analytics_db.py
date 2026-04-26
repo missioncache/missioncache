@@ -25,8 +25,8 @@ import duckdb
 # Configuration
 # =============================================================================
 
-DUCKDB_PATH = Path.home() / ".claude" / "tasks.duckdb"
-SQLITE_PATH = Path.home() / ".claude" / "tasks.db"  # Fallback
+DUCKDB_PATH = Path.home() / ".orbit" / "tasks.duckdb"
+SQLITE_PATH = Path.home() / ".orbit" / "tasks.db"  # Fallback
 
 
 # =============================================================================

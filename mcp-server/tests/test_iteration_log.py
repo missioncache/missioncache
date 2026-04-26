@@ -113,5 +113,5 @@ class TestGetPromptsStatus:
 class TestGetIterationLogPath:
     def test_path_construction(self):
         """Builds correct log path from task_dir and task_name."""
-        result = get_iteration_log_path("/home/user/.claude/orbit/active/my-task", "my-task")
-        assert result == Path("/home/user/.claude/orbit/active/my-task/my-task-iteration-log.md")
+        result = get_iteration_log_path("/home/user/.orbit/active/my-task", "my-task")
+        assert result == Path("/home/user/.orbit/active/my-task/my-task-iteration-log.md")

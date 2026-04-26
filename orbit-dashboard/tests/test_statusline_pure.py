@@ -549,6 +549,8 @@ class TestParseTaskProgress:
         assert _parse_task_progress("- [ ] TBD  ") == "[TBD]"
 
 
+
+
 # ============ _render_effort_field (Effort + Thinking merged field) ============
 
 

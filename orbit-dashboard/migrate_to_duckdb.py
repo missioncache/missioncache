@@ -27,9 +27,11 @@ from typing import Optional
 import duckdb
 
 # Paths
-SQLITE_PATH = Path.home() / ".claude" / "tasks.db"
-DUCKDB_PATH = Path.home() / ".claude" / "tasks.duckdb"
-BACKUP_PATH = Path.home() / ".claude" / "tasks.db.backup"
+from orbit_db import DB_PATH, ORBIT_ROOT
+
+SQLITE_PATH = DB_PATH
+DUCKDB_PATH = ORBIT_ROOT / "tasks.duckdb"
+BACKUP_PATH = ORBIT_ROOT / "tasks.db.backup"
 
 
 def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:

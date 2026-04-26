@@ -19,10 +19,10 @@ def init_task(
     Initialize a new task with template files.
 
     Creates:
-    - ~/.claude/orbit/active/<task-name>/
-    - ~/.claude/orbit/active/<task-name>/<task-name>-tasks.md
-    - ~/.claude/orbit/active/<task-name>/<task-name>-context.md
-    - ~/.claude/orbit/active/<task-name>/<task-name>-plan.md
+    - ~/.orbit/active/<task-name>/
+    - ~/.orbit/active/<task-name>/<task-name>-tasks.md
+    - ~/.orbit/active/<task-name>/<task-name>-context.md
+    - ~/.orbit/active/<task-name>/<task-name>-plan.md
 
     Args:
         task_name: Name of the task (used as directory name)
@@ -36,7 +36,9 @@ def init_task(
         FileExistsError: If task directory already exists
     """
     # Create in centralized orbit root
-    orbit_active = Path.home() / ".claude" / "orbit" / "active"
+    from orbit_db import ORBIT_ROOT
+
+    orbit_active = ORBIT_ROOT / "active"
     orbit_active.mkdir(parents=True, exist_ok=True)
 
     # Create task directory

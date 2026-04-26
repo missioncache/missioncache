@@ -172,7 +172,9 @@ class TaskPaths:
     @classmethod
     def from_task_name(cls, task_name: str) -> "TaskPaths":
         """Create TaskPaths from task name. Uses centralized orbit root."""
-        task_dir = Path.home() / ".claude" / "orbit" / "active" / task_name
+        from orbit_db import ORBIT_ROOT
+
+        task_dir = ORBIT_ROOT / "active" / task_name
         return cls(
             task_dir=task_dir,
             tasks_file=task_dir / f"{task_name}-tasks.md",

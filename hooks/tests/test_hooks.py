@@ -449,12 +449,12 @@ class TestTaskTracker:
         """Create fake orbit project files under tmp_path's fake HOME.
 
         Points Path.home() at tmp_path so the hook's orbit_root resolution
-        (~/.claude/orbit) lands in our sandbox. Returns a fake task object
+        (~/.orbit) lands in our sandbox. Returns a fake task object
         ready to be plugged into `mock_db.find_task_for_cwd.return_value`.
         """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        orbit_dir = tmp_path / ".claude" / "orbit" / "active" / "fake-task"
+        orbit_dir = tmp_path / ".orbit" / "active" / "fake-task"
         orbit_dir.mkdir(parents=True)
 
         tasks_file = orbit_dir / "fake-task-tasks.md"
@@ -770,7 +770,7 @@ class TestTaskTracker:
 
         # Subtask dir: active/parent-task/sub-task with plain tasks.md/context.md
         subtask_dir = (
-            tmp_path / ".claude" / "orbit" / "active" / "parent-task" / "sub-task"
+            tmp_path / ".orbit" / "active" / "parent-task" / "sub-task"
         )
         subtask_dir.mkdir(parents=True)
         (subtask_dir / "tasks.md").write_text(

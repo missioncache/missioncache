@@ -265,7 +265,7 @@ async def scan_repos(
     """
     Scan repositories for orbit tasks and sync with database.
 
-    Discovers tasks from ~/.claude/orbit/ directories.
+    Discovers tasks from ~/.orbit/ directories.
     """
     db = get_db()
 

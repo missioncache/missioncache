@@ -35,7 +35,7 @@ Non-Coding Task Management:
     python orbit_db.py today-updates [task_id]                           # Get today's updates
 
 Migration:
-    python orbit_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.claude/orbit/
+    python orbit_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.orbit/
 
 Cleanup:
     python orbit_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
@@ -59,8 +59,38 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 # Configuration
 # =============================================================================
 
-DB_PATH = Path.home() / ".claude" / "tasks.db"
-ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+DB_PATH = Path.home() / ".orbit" / "tasks.db"
+ORBIT_ROOT = Path.home() / ".orbit"
+
+# Legacy paths for the pre-Phase-11 ~/.claude/ layout. Used by the migration
+# guard below.
+_LEGACY_DB = Path.home() / ".claude" / "tasks.db"
+_LEGACY_ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+
+
+class OrbitMigrationRequired(RuntimeError):
+    """Raised when orbit data is at legacy ~/.claude/ paths but the new
+    ~/.orbit/ DB doesn't exist. Caught by CLI entry points to print a
+    user-friendly migration message; subclasses RuntimeError so existing
+    `except Exception` handlers in hooks catch it cleanly (unlike SystemExit
+    which is BaseException and would escape `except Exception`)."""
+
+
+def _check_legacy_paths() -> None:
+    """Raise OrbitMigrationRequired if orbit data exists at legacy paths
+    but not at the new path. Reads module-level DB_PATH / _LEGACY_DB /
+    _LEGACY_ORBIT_ROOT at call time so tests can monkeypatch them."""
+    if not DB_PATH.exists() and (_LEGACY_DB.exists() or _LEGACY_ORBIT_ROOT.exists()):
+        raise OrbitMigrationRequired(
+            "Orbit data found at legacy ~/.claude/ paths but not at ~/.orbit/.\n"
+            "Migrate before starting orbit:\n"
+            "  mkdir -p ~/.orbit\n"
+            "  mv ~/.claude/orbit/active     ~/.orbit/active\n"
+            "  mv ~/.claude/orbit/completed  ~/.orbit/completed\n"
+            "  mv ~/.claude/tasks.db*        ~/.orbit/ 2>/dev/null\n"
+            "  mv ~/.claude/tasks.duckdb*    ~/.orbit/ 2>/dev/null\n"
+            "  rmdir ~/.claude/orbit"
+        )
 
 # Non-git folder to track with shadow repo (only this folder gets shadow commits)
 SHADOW_TRACKED_FOLDER = Path(os.environ.get("ORBIT_SHADOW_FOLDER", str(Path.home() / "work")))
@@ -577,6 +607,14 @@ class TaskDB:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or DB_PATH
         self._connection: Optional[sqlite3.Connection] = None
+        # Guard against using orbit while data still lives at legacy paths.
+        # Raises OrbitMigrationRequired (RuntimeError subclass) so callers
+        # using `except Exception` catch it normally; CLI entry points pretty-print.
+        # Note: the guard inspects module-level DB_PATH (the canonical path),
+        # not self.db_path. Callers passing a custom db_path still get the
+        # check against the user's primary install location - intentional, so
+        # alternate-path TaskDB usage doesn't bypass the migration prompt.
+        _check_legacy_paths()
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:

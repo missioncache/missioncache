@@ -7,7 +7,7 @@ Invocation patterns:
     uvx orbit-install --all --no-statusline
                                       # install everything except the statusline
     uvx orbit-install --update        # refresh whatever is in state.json
-    uvx orbit-install --uninstall     # remove everything (preserves ~/.claude/orbit/)
+    uvx orbit-install --uninstall     # remove everything (preserves ~/.orbit/)
     uvx orbit-install --local         # maintainer mode: editable installs from clone
 """
 

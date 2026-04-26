@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     """Server configuration from environment variables."""
 
     # Path to the task database
-    db_path: Path = Path.home() / ".claude" / "tasks.db"
+    db_path: Path = Path.home() / ".orbit" / "tasks.db"
 
     # Centralized orbit root directory
-    orbit_root: Path = Path.home() / ".claude" / "orbit"
+    orbit_root: Path = Path.home() / ".orbit"
 
     # Active and completed subdirectory names
     active_dir_name: str = "active"
