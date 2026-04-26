@@ -256,3 +256,114 @@ class TestUpdateTasksFile:
         assert progress["completion_pct"] == 60
         assert progress["completed_items"] == 3
         assert progress["total_items"] == 5
+
+
+# ── atomic write semantics (MAJOR-12) ────────────────────────────────────
+
+
+class TestAtomicWrites:
+    """Verify update_context_file and update_tasks_file serialize concurrent
+    writes via fcntl.flock + os.replace, so no caller's edits are silently lost.
+    """
+
+    def test_concurrent_recent_changes_all_preserved(
+        self, tmp_path, sample_context_md
+    ):
+        """N concurrent update_context_file calls must preserve every entry.
+
+        Without flock around the read-modify-write, writers race and
+        last-writer-wins overwrites earlier additions. With the lock, each
+        worker reads the latest content, appends its own change, replaces.
+        """
+        import threading
+
+        ctx_file = tmp_path / "context.md"
+        ctx_file.write_text(sample_context_md)
+
+        n = 8
+        barrier = threading.Barrier(n)
+
+        def worker(label):
+            barrier.wait()  # release all workers simultaneously
+            update_context_file(
+                str(ctx_file), recent_changes=[f"change-{label}"]
+            )
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        content = ctx_file.read_text()
+        for i in range(n):
+            assert f"change-{i}" in content, (
+                f"change-{i} lost - lock did not serialize writers"
+            )
+
+    def test_concurrent_completed_tasks_all_preserved(
+        self, tmp_path, sample_tasks_md_hierarchical
+    ):
+        """N concurrent update_tasks_file calls each marking a different
+        task complete must all land. Mirrors the orbit-auto parallel path
+        where multiple workers report progress on disjoint subtasks.
+        """
+        import threading
+
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md_hierarchical)
+
+        # Pull pending task descriptions out of the fixture
+        pending = re.findall(
+            r"^\s*[-*]\s*\[\s*\]\s*\d+(?:\.\d+)?\.\s*(.+)$",
+            sample_tasks_md_hierarchical,
+            re.MULTILINE,
+        )
+        assert len(pending) >= 3, "fixture should have pending tasks to race"
+        targets = pending[:3]
+        barrier = threading.Barrier(len(targets))
+
+        def worker(desc):
+            barrier.wait()
+            update_tasks_file(str(tasks_file), completed_tasks=[desc])
+
+        threads = [threading.Thread(target=worker, args=(d,)) for d in targets]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        content = tasks_file.read_text()
+        for desc in targets:
+            # Either the original `- [ ]` got flipped to `- [x]`, or another
+            # writer's completion landed on this exact line. Verify each
+            # target description is now in a checked checkbox row.
+            assert re.search(
+                rf"- \[x\][^\n]*{re.escape(desc)}", content, re.IGNORECASE
+            ), f"completion of '{desc}' lost - lock did not serialize writers"
+
+    def test_lockfile_persists_as_sidecar(self, tmp_path, sample_context_md):
+        """The .lock sidecar is created on first write and left in place.
+
+        We deliberately don't delete it - lockfile create/delete under
+        contention is racy. Future writers reuse the existing inode.
+        """
+        ctx_file = tmp_path / "context.md"
+        ctx_file.write_text(sample_context_md)
+
+        update_context_file(str(ctx_file), recent_changes=["one"])
+
+        lock_file = ctx_file.with_name(ctx_file.name + ".lock")
+        assert lock_file.exists(), "sidecar .lock should exist after update"
+
+    def test_no_tmp_file_leftover(self, tmp_path, sample_context_md):
+        """os.replace is atomic - the .tmp staging file is renamed away,
+        not left as a leftover for the next reader to trip over.
+        """
+        ctx_file = tmp_path / "context.md"
+        ctx_file.write_text(sample_context_md)
+
+        update_context_file(str(ctx_file), recent_changes=["one"])
+
+        tmp_file = ctx_file.with_name(ctx_file.name + ".tmp")
+        assert not tmp_file.exists(), ".tmp staging file should be gone"

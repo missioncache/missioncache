@@ -1,6 +1,10 @@
 """Orbit file operations."""
 
+import contextlib
+import fcntl
+import os
 import re
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
@@ -11,6 +15,47 @@ from .errors import ErrorCode, OrbitError, OrbitFileNotFoundError, ValidationErr
 from .models import OrbitFiles, TaskProgress
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+# NOTE: ``_file_lock`` and ``_atomic_update_text`` below are duplicated in
+# ``hooks/pre_compact.py`` to keep the PreCompact hook self-contained
+# (avoids dragging mcp_orbit's transitive imports into the hook hot path).
+# If you change locking semantics here, mirror the change in the hook.
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on a sidecar lockfile next to ``path``.
+
+    The lockfile (``<path>.lock``) is a long-lived sidecar; we never delete
+    it because creation/deletion under contention is racy.
+    """
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lockfd:
+        fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
+    """Atomically update a text file under exclusive lock.
+
+    Acquires a flock on a sidecar lockfile, reads current content, applies the
+    transform, writes the result to ``<path>.tmp``, and atomically replaces
+    the target via ``os.replace``. A crash mid-write leaves the original file
+    intact; concurrent callers serialize on the lockfile so their
+    read-modify-write cycles do not interleave.
+    """
+    with _file_lock(path):
+        content = path.read_text()
+        new_content = transform(content)
+        tmp_path = path.with_name(path.name + ".tmp")
+        tmp_path.write_text(new_content)
+        os.replace(tmp_path, path)
+        return new_content
 
 
 def validate_task_name(name: str) -> None:
@@ -283,63 +328,69 @@ def update_context_file(
     if not path.exists():
         raise OrbitFileNotFoundError(str(path))
 
-    content = path.read_text()
-    timestamp = get_timestamp()
+    def _transform(content: str) -> str:
+        # Stamp inside the lock so serialized writers each get a fresh
+        # timestamp instead of all sharing the function-entry value.
+        timestamp = get_timestamp()
 
-    # Update Last Updated timestamp
-    content = re.sub(
-        r"\*\*Last Updated:\*\* .+",
-        f"**Last Updated:** {timestamp}",
-        content,
-    )
-
-    # Update Next Steps section
-    if next_steps:
-        next_steps_md = "\n".join(
-            f"{i + 1}. {step}" for i, step in enumerate(next_steps)
+        # Update Last Updated timestamp
+        content = re.sub(
+            r"\*\*Last Updated:\*\* .+",
+            f"**Last Updated:** {timestamp}",
+            content,
         )
-        content = _update_section(content, "Next Steps", next_steps_md)
 
-    # Update Recent Changes section - consolidate into one `## Recent Changes`
-    # heading with dated `###` sub-sections prepended (newest first). Before,
-    # each save appended a new top-level `## Recent Changes (timestamp)` which
-    # fragmented the file with N unmerged sections.
-    if recent_changes:
-        changes_md = "\n".join(f"- {change}" for change in recent_changes)
-        new_subsection = f"### {timestamp}\n\n{changes_md}\n"
-        # Tolerates old-style `## Recent Changes (timestamp)` heading so
-        # pre-existing context files keep working without migration.
-        heading_pattern = r"(## Recent Changes[^\n]*\n)"
-        match = re.search(heading_pattern, content)
-        if match:
-            heading_end = match.end()
-            content = (
-                content[:heading_end] + f"\n{new_subsection}\n" + content[heading_end:]
+        # Update Next Steps section
+        if next_steps:
+            next_steps_md = "\n".join(
+                f"{i + 1}. {step}" for i, step in enumerate(next_steps)
             )
-        else:
-            content = content + f"\n## Recent Changes\n\n{new_subsection}"
+            content = _update_section(content, "Next Steps", next_steps_md)
 
-    # Update Key Decisions section
-    if key_decisions:
-        decisions_md = "\n".join(f"- {d}" for d in key_decisions)
-        content = _append_to_section(
-            content, "Key Architectural Decisions", decisions_md
-        )
+        # Update Recent Changes section - consolidate into one `## Recent Changes`
+        # heading with dated `###` sub-sections prepended (newest first). Before,
+        # each save appended a new top-level `## Recent Changes (timestamp)` which
+        # fragmented the file with N unmerged sections.
+        if recent_changes:
+            changes_md = "\n".join(f"- {change}" for change in recent_changes)
+            new_subsection = f"### {timestamp}\n\n{changes_md}\n"
+            # Tolerates old-style `## Recent Changes (timestamp)` heading so
+            # pre-existing context files keep working without migration.
+            heading_pattern = r"(## Recent Changes[^\n]*\n)"
+            match = re.search(heading_pattern, content)
+            if match:
+                heading_end = match.end()
+                content = (
+                    content[:heading_end]
+                    + f"\n{new_subsection}\n"
+                    + content[heading_end:]
+                )
+            else:
+                content = content + f"\n## Recent Changes\n\n{new_subsection}"
 
-    # Update Gotchas section
-    if gotchas:
-        gotchas_md = "\n".join(f"- {g}" for g in gotchas)
-        content = _append_to_section(content, "Gotchas", gotchas_md)
+        # Update Key Decisions section
+        if key_decisions:
+            decisions_md = "\n".join(f"- {d}" for d in key_decisions)
+            content = _append_to_section(
+                content, "Key Architectural Decisions", decisions_md
+            )
 
-    # Update Key Files section
-    if key_files:
-        files_md = "\n".join(
-            f"| `{path}` | {desc} |" for path, desc in key_files.items()
-        )
-        content = _append_to_section(content, "Key Files", files_md)
+        # Update Gotchas section
+        if gotchas:
+            gotchas_md = "\n".join(f"- {g}" for g in gotchas)
+            content = _append_to_section(content, "Gotchas", gotchas_md)
 
-    path.write_text(content)
-    return content
+        # Update Key Files section
+        if key_files:
+            files_md = "\n".join(
+                f"| `{filename}` | {desc} |"
+                for filename, desc in key_files.items()
+            )
+            content = _append_to_section(content, "Key Files", files_md)
+
+        return content
+
+    return _atomic_update_text(path, _transform)
 
 
 def update_tasks_file(
@@ -365,78 +416,85 @@ def update_tasks_file(
     if not path.exists():
         raise OrbitFileNotFoundError(str(path))
 
-    content = path.read_text()
-    timestamp = get_timestamp()
-    updates_made = []
+    updates_made: list[str] = []
 
-    # Update Last Updated timestamp
-    content = re.sub(
-        r"\*\*Last Updated:\*\* .+",
-        f"**Last Updated:** {timestamp}",
-        content,
-    )
+    def _transform(content: str) -> str:
+        # Stamp inside the lock so serialized writers each get a fresh
+        # timestamp instead of all sharing the function-entry value.
+        timestamp = get_timestamp()
 
-    # Mark tasks as completed
-    if completed_tasks:
-        for task_desc in completed_tasks:
-            # Escape regex special chars in task description
-            escaped = re.escape(task_desc)
-            # Match the checkbox pattern with the task description
-            pattern = rf"- \[\s*\]([^\n]*{escaped}[^\n]*)"
-            if re.search(pattern, content, re.IGNORECASE):
-                content = re.sub(pattern, r"- [x]\1", content, flags=re.IGNORECASE)
-                updates_made.append(f"Completed: {task_desc[:50]}...")
-
-    # Add new tasks (before Phase 2/Validation section)
-    if new_tasks:
-        # Find the highest existing task number to continue numbering
-        existing_numbers = re.findall(
-            r"^\s*[-*]\s*\[[x\s]\]\s*(\d+)\.", content, re.MULTILINE
-        )
-        next_num = max([int(n) for n in existing_numbers], default=0) + 1
-
-        new_tasks_lines = []
-        for i, task in enumerate(new_tasks):
-            new_tasks_lines.append(f"- [ ] {next_num + i}. {task}")
-        new_tasks_md = "\n".join(new_tasks_lines)
-
-        # Find a good insertion point (before Phase 2 or Validation)
-        insertion_patterns = [
-            r"(## Phase 2)",
-            r"(## Validation)",
-            r"(## Notes)",
-        ]
-        inserted = False
-        for pattern in insertion_patterns:
-            if re.search(pattern, content):
-                content = re.sub(pattern, f"{new_tasks_md}\n\n\\1", content)
-                inserted = True
-                break
-
-        if not inserted:
-            content += f"\n{new_tasks_md}\n"
-
-        updates_made.append(f"Added {len(new_tasks)} new tasks")
-
-    # Update Remaining summary
-    if remaining_summary:
+        # Update Last Updated timestamp
         content = re.sub(
-            r"\*\*Remaining:\*\* .+",
-            f"**Remaining:** {remaining_summary}",
+            r"\*\*Last Updated:\*\* .+",
+            f"**Last Updated:** {timestamp}",
             content,
         )
-        updates_made.append(f"Updated remaining: {remaining_summary}")
 
-    # Add notes
-    if notes:
-        notes_md = "\n".join(f"- {n}" for n in notes)
-        content = _append_to_section(content, "Notes", notes_md)
-        updates_made.append(f"Added {len(notes)} notes")
+        # Mark tasks as completed
+        if completed_tasks:
+            for task_desc in completed_tasks:
+                # Escape regex special chars in task description
+                escaped = re.escape(task_desc)
+                # Match the checkbox pattern with the task description
+                pattern = rf"- \[\s*\]([^\n]*{escaped}[^\n]*)"
+                if re.search(pattern, content, re.IGNORECASE):
+                    content = re.sub(
+                        pattern, r"- [x]\1", content, flags=re.IGNORECASE
+                    )
+                    updates_made.append(f"Completed: {task_desc[:50]}...")
 
-    path.write_text(content)
+        # Add new tasks (before Phase 2/Validation section)
+        if new_tasks:
+            # Find the highest existing task number to continue numbering
+            existing_numbers = re.findall(
+                r"^\s*[-*]\s*\[[x\s]\]\s*(\d+)\.", content, re.MULTILINE
+            )
+            next_num = max([int(n) for n in existing_numbers], default=0) + 1
 
-    # Calculate progress
-    progress = parse_task_progress(content)
+            new_tasks_lines = []
+            for i, task in enumerate(new_tasks):
+                new_tasks_lines.append(f"- [ ] {next_num + i}. {task}")
+            new_tasks_md = "\n".join(new_tasks_lines)
+
+            # Find a good insertion point (before Phase 2 or Validation)
+            insertion_patterns = [
+                r"(## Phase 2)",
+                r"(## Validation)",
+                r"(## Notes)",
+            ]
+            inserted = False
+            for pattern in insertion_patterns:
+                if re.search(pattern, content):
+                    content = re.sub(pattern, f"{new_tasks_md}\n\n\\1", content)
+                    inserted = True
+                    break
+
+            if not inserted:
+                content += f"\n{new_tasks_md}\n"
+
+            updates_made.append(f"Added {len(new_tasks)} new tasks")
+
+        # Update Remaining summary
+        if remaining_summary:
+            content = re.sub(
+                r"\*\*Remaining:\*\* .+",
+                f"**Remaining:** {remaining_summary}",
+                content,
+            )
+            updates_made.append(f"Updated remaining: {remaining_summary}")
+
+        # Add notes
+        if notes:
+            notes_md = "\n".join(f"- {n}" for n in notes)
+            content = _append_to_section(content, "Notes", notes_md)
+            updates_made.append(f"Added {len(notes)} notes")
+
+        return content
+
+    new_content = _atomic_update_text(path, _transform)
+
+    # Calculate progress from the just-written content
+    progress = parse_task_progress(new_content)
 
     return {
         "file": str(path),
