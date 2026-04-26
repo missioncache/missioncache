@@ -130,12 +130,10 @@ class Worker:
 
     def _init_db_logger(self) -> None:
         """Initialize the database logger for this worker."""
-        from pathlib import Path as P
-
         try:
-            from orbit_db import TaskDB
+            from orbit_db import DB_PATH, TaskDB
 
-            db_path = P.home() / ".claude" / "tasks.db"
+            db_path = DB_PATH
             if db_path.exists() and self.execution_id is not None:
                 # Create a lightweight logger that wraps TaskDB
                 self._db_logger = _WorkerDBLogger(
@@ -145,8 +143,16 @@ class Worker:
                 )
         except ImportError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            # Match db_logger.py: surface to stderr instead of silent disable.
+            # First line only - migration errors carry multi-line shell snippets.
+            import sys
+
+            first_line = str(e).splitlines()[0] if str(e) else ""
+            print(
+                f"orbit-auto worker {self.worker_id}: db logger disabled ({type(e).__name__}: {first_line})",
+                file=sys.stderr,
+            )
 
     def _log(self, message: str, level: str = "info", subtask_id: Optional[str] = None) -> None:
         """Log a message to the database if logging is enabled."""

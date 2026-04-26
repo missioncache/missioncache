@@ -59,18 +59,32 @@ class ExecutionLogger:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize database connection if orbit_db is available."""
-        try:
-            from orbit_db import TaskDB
+        """Initialize database connection if orbit_db is available.
 
-            db_path = Path.home() / ".claude" / "tasks.db"
-            if db_path.exists():
-                self._db = TaskDB(str(db_path))
+        Logging is optional: if orbit_db isn't installed (ImportError) we
+        run silently. Other failures (DB corruption, lock contention,
+        OrbitMigrationRequired) get surfaced to stderr so the user can
+        see WHY their run produced no dashboard logs - silent disabling
+        was a worse default.
+        """
+        import sys
+
+        try:
+            from orbit_db import DB_PATH, TaskDB
+
+            if DB_PATH.exists():
+                self._db = TaskDB(str(DB_PATH))
                 self._enabled = True
         except ImportError:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            # First line only - migration errors carry a multi-line shell snippet
+            # that would otherwise spam stderr on every worker init.
+            first_line = str(e).splitlines()[0] if str(e) else ""
+            print(
+                f"orbit-auto: dashboard logging disabled ({type(e).__name__}: {first_line})",
+                file=sys.stderr,
+            )
 
     @property
     def enabled(self) -> bool:
