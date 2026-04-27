@@ -1,6 +1,6 @@
 # orbit-install
 
-Bootstrap installer for [Orbit](https://github.com/tomerbr1/claude-orbit), the project manager for Claude Code.
+Bootstrap installer for [Orbit](https://github.com/tomerbr1/orbit-pm), the project manager for Claude Code.
 
 ## Install
 
@@ -32,11 +32,11 @@ uvx orbit-install --uninstall                # remove everything (preserves user
 
 ## Maintainer mode
 
-From a clone of `claude-orbit`:
+From a clone of `orbit-pm`:
 
 ```bash
-git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit
+git clone https://github.com/tomerbr1/orbit-pm.git
+cd orbit-pm
 uvx orbit-install --local
 ```
 

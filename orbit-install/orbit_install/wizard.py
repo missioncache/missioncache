@@ -163,7 +163,7 @@ def _print_next_steps(selected: list[str]) -> None:
     ui.detail("Resume work:       /orbit:go")
     if "dashboard" in selected:
         ui.detail("Dashboard:         http://localhost:8787")
-    ui.detail("Docs:              https://github.com/tomerbr1/claude-orbit")
+    ui.detail("Docs:              https://github.com/tomerbr1/orbit-pm")
     print()
     ui.detail("Update later:  uvx orbit-install --update")
     ui.detail("Uninstall:     uvx orbit-install --uninstall")

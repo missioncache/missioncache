@@ -1,7 +1,7 @@
 # orbit-dashboard
 
 Task analytics and autonomous execution monitoring for the
-[orbit](https://github.com/tomerbr1/claude-orbit) Claude Code plugin.
+[orbit](https://github.com/tomerbr1/orbit-pm) Claude Code plugin.
 
 A local FastAPI web dashboard at `http://localhost:8787` that surfaces:
 
@@ -42,7 +42,7 @@ Open `http://localhost:8787` in your browser.
 
 `orbit-dashboard install-service` registers the dashboard as a launchd
 (macOS) or systemd user unit (Linux) so it starts on login. See the
-[orbit project](https://github.com/tomerbr1/claude-orbit) for the full
+[orbit project](https://github.com/tomerbr1/orbit-pm) for the full
 install guide.
 
 ## License

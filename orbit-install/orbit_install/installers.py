@@ -25,8 +25,8 @@ from . import command_clients, mcp_clients, settings, state, subprocess_utils, u
 
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
-PLUGIN_GITHUB_SOURCE = "tomerbr1/claude-orbit"
-PLUGIN_ID_PYPI = "orbit@claude-orbit"
+PLUGIN_GITHUB_SOURCE = "tomerbr1/orbit-pm"
+PLUGIN_ID_PYPI = "orbit@orbit-pm"
 PLUGIN_ID_LOCAL = "orbit@local"
 USER_COMMAND_FILES = ("whats-new.md", "optimize-prompt.md")
 
@@ -58,7 +58,7 @@ class InstallContext:
 def install_plugin(ctx: InstallContext) -> None:
     """Register the orbit plugin with Claude Code.
 
-    PyPI mode: adds the upstream marketplace and installs orbit@claude-orbit.
+    PyPI mode: adds the upstream marketplace and installs orbit@orbit-pm.
     Local mode: creates ~/.claude/plugins/local-marketplace pointing at the
     clone, then installs orbit@local. Mirrors setup.sh:152-217.
     """
@@ -75,7 +75,7 @@ def install_plugin(ctx: InstallContext) -> None:
 
 
 def _install_plugin_pypi() -> None:
-    """Add the upstream marketplace and install orbit@claude-orbit."""
+    """Add the upstream marketplace and install orbit@orbit-pm."""
     if not shutil.which("claude"):
         ui.warn("Claude CLI not found - skipping plugin registration.")
         ui.detail("After installing Claude Code, run: orbit-install --update")

@@ -93,8 +93,8 @@ If you only want the plugin core (slash commands, MCP tools, lifecycle hooks, or
 In Claude Code:
 
 ```
-/plugin marketplace add tomerbr1/claude-orbit
-/plugin install orbit@claude-orbit
+/plugin marketplace add tomerbr1/orbit-pm
+/plugin install orbit@orbit-pm
 ```
 
 Restart your Claude Code session.
@@ -134,7 +134,7 @@ Re-run the installer to refresh every component to the latest published version:
 uvx orbit-install --update
 ```
 
-This pulls the latest `orbit-dashboard` and `orbit-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-orbit`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update orbit@claude-orbit` in Claude Code (or `claude plugins install orbit@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `orbit-db` is a transitive dependency of `orbit-dashboard` and `orbit-auto`, so it refreshes alongside them.
+This pulls the latest `orbit-dashboard` and `orbit-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-orbit`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update orbit@orbit-pm` in Claude Code (or `claude plugins install orbit@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `orbit-db` is a transitive dependency of `orbit-dashboard` and `orbit-auto`, so it refreshes alongside them.
 
 If the `uvx` cache is pinning you to an older `orbit-install` itself, clear it with `uvx cache prune` or `uvx --refresh orbit-install --update`.
 
@@ -143,7 +143,7 @@ If the `uvx` cache is pinning you to an older `orbit-install` itself, clear it w
 From Claude Code:
 
 ```
-/plugin update orbit@claude-orbit
+/plugin update orbit@orbit-pm
 ```
 
 Restart your Claude Code session.

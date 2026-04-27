@@ -48,7 +48,7 @@ body:
         sw_vers 2>/dev/null || uname -a
         python3 --version
         claude --version 2>/dev/null || echo "claude CLI not found"
-        cd ~/.claude/plugins/claude-orbit 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo "orbit not found at standard path"
+        cd ~/.claude/plugins/orbit-pm 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo "orbit not found at standard path"
         ```
       render: shell
     validations:

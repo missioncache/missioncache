@@ -14,8 +14,8 @@ This document covers the mechanics. For the "why" behind orbit's architecture, r
 ## Development setup
 
 ```bash
-git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit
+git clone https://github.com/tomerbr1/orbit-pm.git
+cd orbit-pm
 uvx orbit-install --local
 ```
 

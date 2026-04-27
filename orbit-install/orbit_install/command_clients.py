@@ -560,7 +560,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
         "version": CODEX_PLUGIN_VERSION,
         "description": "Orbit project management slash commands for Codex",
         "author": {"name": "Tomer Brami"},
-        "homepage": "https://github.com/tomerbr1/claude-orbit",
+        "homepage": "https://github.com/tomerbr1/orbit-pm",
         "license": "MIT",
         "keywords": ["orbit", "project-management", "task-tracking", "productivity"],
         "interface": {

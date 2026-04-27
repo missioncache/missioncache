@@ -603,7 +603,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 **Cause:** The plugin cache is stale. MCP tools are discovered at plugin load, and a new tool added after you installed the plugin won't show up until you reinstall.
 
-**Fix:** `claude plugins install orbit@local` (or `orbit@claude-orbit` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
+**Fix:** `claude plugins install orbit@local` (or `orbit@orbit-pm` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
 
 ### "I'm calling the tool but getting `error: true, message: <python exception>` with no code"
 

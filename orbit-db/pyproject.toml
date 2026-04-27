@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tomerbr1/claude-orbit"
-Repository = "https://github.com/tomerbr1/claude-orbit"
-Issues = "https://github.com/tomerbr1/claude-orbit/issues"
+Homepage = "https://github.com/tomerbr1/orbit-pm"
+Repository = "https://github.com/tomerbr1/orbit-pm"
+Issues = "https://github.com/tomerbr1/orbit-pm/issues"
 
 [project.scripts]
 orbit-db = "orbit_db:main"

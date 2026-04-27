@@ -26,7 +26,7 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 | Statusline | `orbit-dashboard/orbit_dashboard/statusline.py` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `orbit-dashboard` package and exposed via the `orbit-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
 | Rules | `rules/` | Plain markdown files describing orbit conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `orbit-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
 
-Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx orbit-install`, or just the plugin core via `/plugin marketplace add tomerbr1/claude-orbit` followed by `/plugin install orbit@claude-orbit`. Maintainers run `uvx orbit-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `orbit@local` for fast iteration without pushing to GitHub.
+Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx orbit-install`, or just the plugin core via `/plugin marketplace add tomerbr1/orbit-pm` followed by `/plugin install orbit@orbit-pm`. Maintainers run `uvx orbit-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `orbit@local` for fast iteration without pushing to GitHub.
 
 ## Talking to the database through orbit-db
 
@@ -258,7 +258,7 @@ After adding the tool, reinstall the plugin. If you are hacking on orbit locally
 claude plugins install orbit@local
 ```
 
-If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update orbit@claude-orbit`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
+If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update orbit@orbit-pm`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
 
 ### 2. Add a new hook
 

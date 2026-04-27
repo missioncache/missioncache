@@ -45,7 +45,7 @@ pipx run orbit-install
 
 The interactive wizard asks which components to install (default is all) and runs:
 
-1. **Plugin core** - installs the Claude Code plugin. In the default PyPI mode this registers `tomerbr1/claude-orbit` as a marketplace and installs `orbit@claude-orbit`. In `--local` mode (from a clone) it sets up a local marketplace at `~/.claude/plugins/local-marketplace/` and installs `orbit@local` instead.
+1. **Plugin core** - installs the Claude Code plugin. In the default PyPI mode this registers `tomerbr1/orbit-pm` as a marketplace and installs `orbit@orbit-pm`. In `--local` mode (from a clone) it sets up a local marketplace at `~/.claude/plugins/local-marketplace/` and installs `orbit@local` instead.
 2. **Dashboard** - pip-installs `orbit-dashboard` (which pulls in `orbit-db` as a dependency, giving your own tooling access to the task DB) and wires up a background service (launchd on macOS, systemd on Linux) via `orbit-dashboard install-service`
 3. **Orbit Auto CLI** - pip-installs `orbit-auto` (also pulls in `orbit-db` as a dependency)
 4. **Statusline** - wires `orbit-statusline` (a console entry point shipped in `orbit-dashboard`) into `~/.claude/settings.json`. Selecting statusline without dashboard auto-adds dashboard, since that is where the entry point ships from.
@@ -74,8 +74,8 @@ State is tracked at `~/.claude/orbit-install.state.json` so subsequent runs can 
 For developing on orbit from a clone, `--local` swaps the PyPI installs for editable ones and registers the plugin via the local marketplace:
 
 ```bash
-git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit
+git clone https://github.com/tomerbr1/orbit-pm.git
+cd orbit-pm
 uvx orbit-install --local
 ```
 
@@ -88,8 +88,8 @@ If you only need the plugin core (slash commands, MCP tools, hooks, rules) and d
 In Claude Code:
 
 ```
-/plugin marketplace add tomerbr1/claude-orbit
-/plugin install orbit@claude-orbit
+/plugin marketplace add tomerbr1/orbit-pm
+/plugin install orbit@orbit-pm
 ```
 
 Restart your Claude Code session. The MCP server and bundled `orbit-db` are built on demand via `uvx`; no manual `pip install` is needed.
@@ -98,7 +98,7 @@ Restart your Claude Code session. The MCP server and bundled `orbit-db` are buil
 
 **What you give up:** local dashboard at `localhost:8787`, `orbit-auto` CLI for parallel execution, rich statusline.
 
-You can always upgrade to the full install later by running `uvx orbit-install --dashboard --statusline --orbit-auto --yes`. In PyPI mode (the default when not running from a clone), the installer does not create a local marketplace, so your existing `orbit@claude-orbit` install stays untouched.
+You can always upgrade to the full install later by running `uvx orbit-install --dashboard --statusline --orbit-auto --yes`. In PyPI mode (the default when not running from a clone), the installer does not create a local marketplace, so your existing `orbit@orbit-pm` install stays untouched.
 
 ## Manual install (no installer)
 
@@ -111,8 +111,8 @@ For Docker, CI, air-gapped environments, if you want full control over every ste
 pip install orbit-db orbit-auto orbit-dashboard mcp-orbit
 
 # Claude Code plugin (do this inside Claude Code, not the shell)
-#   /plugin marketplace add tomerbr1/claude-orbit
-#   /plugin install orbit@claude-orbit
+#   /plugin marketplace add tomerbr1/orbit-pm
+#   /plugin install orbit@orbit-pm
 
 # Dashboard background service (after pip install orbit-dashboard)
 orbit-dashboard install-service    # launchd on macOS, systemd on Linux
@@ -135,8 +135,8 @@ orbit-dashboard install-service    # launchd on macOS, systemd on Linux
 ### From a clone (editable, without `orbit-install --local`)
 
 ```bash
-git clone https://github.com/tomerbr1/claude-orbit.git
-cd claude-orbit
+git clone https://github.com/tomerbr1/orbit-pm.git
+cd orbit-pm
 
 # Editable Python packages
 pip install -e ./orbit-db
@@ -277,15 +277,15 @@ Removes: plugin registration, pip packages, service units, settings.json entries
 In Claude Code:
 
 ```
-/plugin uninstall orbit@claude-orbit
-/plugin marketplace remove tomerbr1/claude-orbit
+/plugin uninstall orbit@orbit-pm
+/plugin marketplace remove tomerbr1/orbit-pm
 ```
 
 ### Manual uninstall
 
 ```bash
 # Plugin
-claude plugins uninstall orbit@local   # (or orbit@claude-orbit)
+claude plugins uninstall orbit@local   # (or orbit@orbit-pm)
 
 # Dashboard service
 orbit-dashboard uninstall-service      # or remove the plist/unit manually

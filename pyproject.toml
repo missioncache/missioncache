@@ -1,5 +1,5 @@
 [project]
-name = "claude-orbit-tests"
+name = "orbit-pm-tests"
 version = "0.0.0"
 requires-python = ">=3.11"
 

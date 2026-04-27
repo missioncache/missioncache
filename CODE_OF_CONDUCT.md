@@ -6,7 +6,7 @@ Orbit adopts **[Contributor Covenant v2.1](https://www.contributor-covenant.org/
 
 To report a code-of-conduct concern:
 
-- **Public / non-sensitive**: open a GitHub issue with the `conduct` label at https://github.com/tomerbr1/claude-orbit/issues
-- **Private / sensitive**: use GitHub's private reporting channel at https://github.com/tomerbr1/claude-orbit/security — this is the closest private contact channel orbit has until a dedicated one exists
+- **Public / non-sensitive**: open a GitHub issue with the `conduct` label at https://github.com/tomerbr1/orbit-pm/issues
+- **Private / sensitive**: use GitHub's private reporting channel at https://github.com/tomerbr1/orbit-pm/security — this is the closest private contact channel orbit has until a dedicated one exists
 
 Orbit is a single-maintainer project. Response times are best-effort, but every report is read personally.

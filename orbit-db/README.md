@@ -1,7 +1,7 @@
 # orbit-db
 
 SQLite-based task and time tracking database for the
-[orbit](https://github.com/tomerbr1/claude-orbit) Claude Code plugin.
+[orbit](https://github.com/tomerbr1/orbit-pm) Claude Code plugin.
 
 Provides cross-repo task tracking with WakaTime-style heartbeat time
 aggregation. Used as the storage layer for the orbit MCP server, hooks,

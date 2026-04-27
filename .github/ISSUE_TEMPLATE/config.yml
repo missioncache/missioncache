@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/tomerbr1/claude-orbit/security
+    url: https://github.com/tomerbr1/orbit-pm/security
     about: Report security issues privately via GitHub Security Advisories, not public issues. See SECURITY.md for details.
   - name: Documentation
-    url: https://github.com/tomerbr1/claude-orbit/tree/main/docs
+    url: https://github.com/tomerbr1/orbit-pm/tree/main/docs
     about: Architecture, dashboard, orbit-auto, MCP tools, hooks, and statusline reference docs.
   - name: Contributing
-    url: https://github.com/tomerbr1/claude-orbit/blob/main/CONTRIBUTING.md
+    url: https://github.com/tomerbr1/orbit-pm/blob/main/CONTRIBUTING.md
     about: Development setup, testing, and pull request standards.
