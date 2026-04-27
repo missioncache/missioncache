@@ -8,25 +8,26 @@
 
 <h1 align="center">Orbit</h1>
 
-<p align="center"><strong>One workbench for your Claude Code projects.</strong></p>
+<p align="center"><strong>One workbench for your AI coding projects.</strong></p>
 
 <p align="center"><em>Plan, execute, track, and resume - without losing state.</em></p>
 
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-blue.svg">
-  <img alt="Claude Code Plugin" src="https://img.shields.io/badge/Claude%20Code-Plugin-purple.svg">
+  <img alt="MCP-compatible" src="https://img.shields.io/badge/MCP-compatible-purple.svg">
 </p>
 
 ---
 
-Orbit is the project layer for [Claude Code](https://claude.ai/code). Every orbit project gets a durable home: a plan, a living context file, and a task checklist. That state persists across sessions, survives context compaction, and reloads when you come back. On top of that foundation, orbit adds time tracking, a local analytics dashboard, autonomous execution, and a rich statusline, so multi-session work has one place to live and one place to watch.
+Orbit is the project layer for AI coding tools. It works in [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), and VSCode Copilot Chat - any tool that speaks MCP. Every orbit project gets a durable home: a plan, a living context file, and a task checklist. That state persists across sessions, survives context compaction, and reloads when you come back. On the Claude Code side, orbit also adds time tracking, a local analytics dashboard, autonomous execution, and a rich statusline; the other three currently get the project state and the MCP tool suite.
 
 <!-- HERO GIF: dashboard + statusline + /orbit:new flow -->
 
 ## Contents
 
 - [Why Orbit](#why-orbit)
+- [Supported tools](#supported-tools)
 - [Install](#install)
 - [Upgrading](#upgrading)
 - [Your First Project](#your-first-project)
@@ -43,7 +44,7 @@ Orbit is the project layer for [Claude Code](https://claude.ai/code). Every orbi
 
 ### Your projects keep their memory
 
-Every orbit project lives under `~/.claude/orbit/active/<project-name>/` as three markdown files: `plan.md` (the agreed approach, locked after approval), `context.md` (your decisions, key files, gotchas, and next steps as a living document), and `tasks.md` (a hierarchical checklist with progress). Claude Code sessions end, context windows compact, but your project state stays put. Run `/orbit:go <project-name>` in any new session and orbit reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
+Every orbit project lives under `~/.orbit/active/<project-name>/` as three markdown files: `plan.md` (the agreed approach, locked after approval), `context.md` (your decisions, key files, gotchas, and next steps as a living document), and `tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/orbit:go <project-name>` in any new Claude Code session (or `/orbit-go` in Codex, OpenCode, or VSCode) and orbit reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
 
 ### Full visibility into your Claude time
 
@@ -56,6 +57,27 @@ Orbit Auto runs project tasks in parallel with dependency-aware DAG scheduling, 
 ---
 
 Orbit exists because no single existing tool integrates all three. See [How Orbit compares](#how-orbit-compares) for the honest breakdown against the current field.
+
+## Supported tools
+
+Orbit's MCP server and slash commands install into any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register Orbit. Each prompt installs both the MCP server and the slash commands together; the CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without slash commands.
+
+| Tool | MCP server | Slash commands | Invocation | Hooks / statusline / orbit-auto |
+|------|------------|----------------|------------|---------------------------------|
+| Claude Code | yes | yes | `/orbit:go`, `/orbit:save`, ... | yes (full) |
+| Codex CLI | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
+| OpenCode | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
+| VSCode (Copilot Chat) | yes | yes (macOS) | `/orbit-go`, `/orbit-save`, ... | n/a (editor-level) |
+
+Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash-command namespaces, so orbit's commands ship as `orbit-go.md` etc. and resolve to `/orbit-go`. The behavior is identical across tools - only the invocation token differs by one character.
+
+Per-tool registration details:
+
+- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.orbit/codex-marketplace`. The `[plugins."orbit@orbit"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
+- **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
+- **VSCode** - prompt files written to `~/.orbit/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
+
+Per-tool hooks, statuslines, and `orbit-auto` integration stay Claude-only for this release - tracked as a follow-up phase post-launch.
 
 ## Install
 
@@ -101,28 +123,11 @@ Restart your Claude Code session.
 
 **Requirements:** Claude Code with `uvx` available on `PATH`. If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
 
-**What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.claude/tasks.db`, and all 30+ MCP tools.
+**What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.orbit/tasks.db`, and all 30+ MCP tools.
 
-### Multi-tool support
+### Other tools (Codex, OpenCode, VSCode)
 
-Orbit's MCP server and slash commands are installable in any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register Orbit. Each prompt installs both the MCP server and the slash commands together; the CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without slash commands.
-
-| Tool | MCP server | Slash commands | Invocation | Hooks / statusline |
-|------|------------|----------------|------------|--------------------|
-| Claude Code | yes | yes | `/orbit:go`, `/orbit:save`, ... | yes (full) |
-| Codex CLI | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
-| OpenCode | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
-| VSCode (Copilot Chat) | yes | yes (macOS) | `/orbit-go`, `/orbit-save`, ... | n/a (editor-level) |
-
-Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash command namespaces, so orbit's commands ship as `orbit-go.md` etc. and resolve to `/orbit-go`. The behavior is identical across tools - only the invocation token differs by one character.
-
-Per-tool details:
-
-- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.orbit/codex-marketplace`. The `[plugins."orbit@orbit"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
-- **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
-- **VSCode** - prompt files written to `~/.orbit/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
-
-Codex/OpenCode/VSCode currently get MCP tools and slash commands. Per-tool hooks, statuslines, and `orbit-auto` integration stay Claude-only for this release; tracked as Phase 11.2 work post-launch.
+The full installer also registers orbit in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and slash commands are the same files orbit ships to Claude; only the invocation token (`/orbit:go` vs `/orbit-go`) differs.
 
 ## Upgrading
 
@@ -160,7 +165,7 @@ If you are developing on orbit rather than consuming it, see [CONTRIBUTING.md](C
 /orbit:new auth-refactor
 ```
 
-Orbit drops three files under `~/.claude/orbit/active/auth-refactor/`:
+Orbit drops three files under `~/.orbit/active/auth-refactor/`:
 
 ```
 auth-refactor-plan.md      # the agreed approach, locked after you approve
@@ -222,7 +227,7 @@ Auto runs each task in a separate Claude Code invocation, respects task dependen
 /orbit:done auth-refactor
 ```
 
-Orbit archives the project files to `~/.claude/orbit/completed/` and records the final time and progress stats.
+Orbit archives the project files to `~/.orbit/completed/` and records the final time and progress stats.
 
 That is the full lifecycle. Everything else is optional depth.
 
@@ -230,7 +235,7 @@ That is the full lifecycle. Everything else is optional depth.
 
 ### Structured project files
 
-Every project has three markdown files: `plan`, `context`, and `tasks`. They live under `~/.claude/orbit/active/<project-name>/` and are fully human-editable. Plan captures the agreed approach and locks after approval. Context is a living document for decisions, key files, gotchas, and next steps. Tasks is a hierarchical checklist with per-item progress tracking.
+Every project has three markdown files: `plan`, `context`, and `tasks`. They live under `~/.orbit/active/<project-name>/` and are fully human-editable. Plan captures the agreed approach and locks after approval. Context is a living document for decisions, key files, gotchas, and next steps. Tasks is a hierarchical checklist with per-item progress tracking.
 
 <!-- SCREENSHOT: example tasks.md with checkboxes and phases -->
 
@@ -283,7 +288,7 @@ For readers who know the Anthropic Productivity Plugin or [Taskmaster AI](https:
 | Local dashboard | yes (web, analytics) | yes (HTML Kanban) | no |
 | Autonomous execution | yes (orbit-auto) | no | no |
 | Build/test gates on task close | no | no | yes |
-| Multi-IDE support | Claude Code only | Cowork-first | 13 IDEs |
+| Multi-IDE support | Claude Code, Codex, OpenCode, VSCode (MCP) | Cowork-first | 13 IDEs |
 | License | MIT | Anthropic official | MIT + Commons Clause |
 
 **Honest takeaway:** Taskmaster is stronger at PRD decomposition and at working across multiple IDEs. The Productivity Plugin is the simplest official option, with a Kanban board and workplace memory, and it ships from Anthropic. Orbit is the only one of the three with per-project time tracking, a local analytics dashboard, and autonomous execution in the same tool.
@@ -357,28 +362,29 @@ Orbit is not the right answer for every workflow. Use one of these instead if:
 
 ## Architecture
 
-Orbit ships as a Claude Code plugin with an MCP server, plus four standalone components you can install or skip independently:
+Orbit's load-bearing piece is the `mcp-orbit` MCP server. Around it sit four standalone components you can install or skip independently:
 
 | Component | Purpose | Installs via |
 |---|---|---|
-| `orbit` plugin | Slash commands, MCP tools, lifecycle hooks | Claude Code plugin marketplace |
-| `orbit-db` | SQLite + DuckDB layer at `~/.claude/tasks.db` | `pip install orbit-db` |
-| `orbit-auto` | Autonomous execution CLI | `pip install orbit-auto` |
-| `orbit-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787` | Runs as a launchd/systemd service |
-| `orbit-statusline` | Optional multi-line terminal display | Bundled with `orbit-dashboard`, wired into `~/.claude/settings.json` |
+| `mcp-orbit` | MCP server (project state, file ops, time tracking, iteration logging) | Bundled with the Claude plugin; `pipx install mcp-orbit` for other tools |
+| `orbit` Claude plugin | Slash commands as `/orbit:*`, lifecycle hooks (SessionStart, PreCompact, Stop), rules | Claude Code plugin marketplace |
+| `orbit-db` | SQLite + DuckDB layer at `~/.orbit/tasks.db` | `pip install orbit-db` |
+| `orbit-auto` | Autonomous execution CLI (Claude Code only) | `pip install orbit-auto` |
+| `orbit-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787` (Claude Code only) | Runs as a launchd/systemd service |
+| `orbit-statusline` | Optional multi-line terminal display (Claude Code only) | Bundled with `orbit-dashboard`, wired into `~/.claude/settings.json` |
 
 <!-- DIAGRAM: plugin + MCP server + db + auto + dashboard + statusline component graph -->
 
-The plugin is the minimum viable install. Everything else is opt-in, and each component can be used on its own if you only need that piece. `orbit-db` and `orbit-auto` are pip-installable packages you can depend on from your own scripts.
+The MCP server plus `orbit-db` is the minimum viable install (and the only piece needed for Codex / OpenCode / VSCode). Everything else is opt-in, and each component can be used on its own if you only need that piece. `orbit-db` and `orbit-auto` are pip-installable packages you can depend on from your own scripts.
 
 ### Data storage
 
 | Path | Purpose |
 |---|---|
-| `~/.claude/orbit/active/` | Active project files (plan, context, tasks) |
-| `~/.claude/orbit/completed/` | Archived completed projects |
-| `~/.claude/tasks.db` | SQLite database (task tracking, time heartbeats, Claude session cache) |
-| `~/.claude/tasks.duckdb` | DuckDB analytics (synced from SQLite, dashboard reads) |
+| `~/.orbit/active/` | Active project files (plan, context, tasks) |
+| `~/.orbit/completed/` | Archived completed projects |
+| `~/.orbit/tasks.db` | SQLite database (task tracking, time heartbeats, Claude session cache) |
+| `~/.orbit/tasks.duckdb` | DuckDB analytics (synced from SQLite, dashboard reads) |
 
 ## Commands
 
