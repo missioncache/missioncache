@@ -5,7 +5,9 @@ argument-hint: "[project-name] [--jira TICKET]"
 
 # Create New Project
 
-Create development documentation for a new feature or project. This command creates the plan, context, and tasks files. Run `/orbit:prompts` afterwards to create optimized prompts for each subtask.
+Create development documentation for a new feature or project. This command creates the plan, context, and tasks files - everything you need to start working interactively.
+
+`/orbit:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `orbit-auto`. Most interactive workflows do not need it.
 
 ## Workflow
 
@@ -260,7 +262,9 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 
 **Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 6 emitted a line)*
 
-**Next step:** Run `/orbit:prompts my-feature` to create optimized prompts with agent/skill recommendations for each subtask.
+**Next step:** Start working on task 1. The plan, context, and tasks files have everything you need.
+
+**Optional - only for autonomous execution:** If you'll run this project via `orbit-auto` (parallel workers), run `/orbit:prompts my-feature` to generate per-subtask prompts with agent/skill recommendations. Skip this step for interactive work - it generates prompt files you won't read.
 ```
 
 ---

@@ -1,16 +1,16 @@
 ---
-description: "Regenerate optimized prompts for an existing project (after subtask changes)"
+description: "Generate per-subtask prompts for autonomous execution via orbit-auto (skip for interactive work)"
 argument-hint: "<project-name>"
 ---
 
 # Regenerate Optimized Prompts
 
-Regenerate or add optimized prompts for an existing orbit project. Use this when:
-- Subtasks have been added or modified after initial project creation
-- You want to regenerate all prompts
-- Prompts were skipped during initial `/orbit:new` and you want to add them now
+Generate per-subtask prompts for an orbit project, optimized for autonomous parallel execution via `orbit-auto`. Each prompt bundles task context, agent recommendations, and skill hints into a self-contained input for a fresh Claude Code worker.
 
-**Note:** For new projects, prompt generation is built into `/orbit:new` workflow.
+**This is an autonomous-workflow tool.** Most interactive workflows do not need it - the plan, context, and tasks files are sufficient when you're working directly with Claude. Run `/orbit:prompts` only when:
+- You plan to run the project via `orbit-auto`
+- Subtasks have changed and the existing per-task prompts need to be regenerated
+- Prompts were skipped initially and you now want to switch to autonomous execution
 
 ## Prerequisites
 
