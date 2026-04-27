@@ -22,12 +22,18 @@ classifiers = [
 ]
 
 # Runtime deps kept minimal to preserve `uvx orbit-install` cold-start UX.
-# rich is the only third-party dep - powers the install wizard's panels, tables,
-# prompts, and styled output. Its own deps (markdown-it-py, mdurl, pygments) are
-# all pure-Python and small; first-run cost is ~1-3s on a cold uvx cache.
+# rich powers the install wizard's panels, tables, prompts, and styled output;
+# its own deps (markdown-it-py, mdurl, pygments) are pure-Python and small.
+# pyfiglet provides the gradient ORBIT banner.
+# json5 is a pure-Python JSONC parser, lazy-imported only when strict json.loads
+# fails so the happy path stays on stdlib. Required because OpenCode and VSCode
+# both accept JSONC (comments + trailing commas) in their config files; without
+# it, MCP registration silently skips users with documented-format configs.
+# First-run cost on cold uvx cache: ~1-3s for rich + pyfiglet, ~0.1s for json5.
 dependencies = [
     "rich>=13.7.0",
     "pyfiglet>=1.0.0",
+    "json5>=0.9.0",
 ]
 
 [project.scripts]
@@ -51,13 +57,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["orbit_install"]
 
-# Bundle the repo's rules/ and user-commands/ into the wheel so end users can
-# install them without cloning. Source of truth stays in the repo root; hatchling
-# pulls them in at build time. Maintainers using --local skip the bundle and
-# symlink from the clone directly.
+# Bundle the repo's rules/, user-commands/, and commands/ into the wheel so end
+# users can install them without cloning. Source of truth stays in the repo root;
+# hatchling pulls them in at build time. Maintainers using --local skip the bundle
+# and read from the clone directly.
+#
+# `commands/` powers slash command parity in Codex/OpenCode/VSCode (via
+# command_clients.py - one source, three rendered destinations). Claude reads the
+# same files via its plugin manifest, not the bundle.
 [tool.hatch.build.targets.wheel.force-include]
 "../rules" = "orbit_install/bundled/rules"
 "../user-commands" = "orbit_install/bundled/user_commands"
+"../commands" = "orbit_install/bundled/commands"
 
 [tool.hatch.build.targets.sdist]
 exclude = [

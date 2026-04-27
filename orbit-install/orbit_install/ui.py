@@ -35,6 +35,12 @@ _COMPONENT_LABELS: dict[str, str] = {
     "rules": "Rules",
     "user_commands": "User commands",
     "orbit_db": "orbit-db CLI",
+    "codex": "Codex MCP",
+    "codex_commands": "Codex slash commands",
+    "opencode": "OpenCode MCP",
+    "opencode_commands": "OpenCode slash commands",
+    "vscode": "VSCode MCP",
+    "vscode_commands": "VSCode slash commands",
 }
 
 # Brand gradient, approximately matching the logo's purple→blue:

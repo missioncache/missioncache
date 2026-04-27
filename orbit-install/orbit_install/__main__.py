@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, installers, state, ui, wizard
+from .wizard import COMMAND_IMPLIES
 
 
 DEFAULT_PORT = 8787
@@ -61,12 +62,20 @@ def build_parser() -> argparse.ArgumentParser:
         ("--rules", "rules"),
         ("--user-commands", "user_commands"),
         ("--orbit-db", "orbit_db"),
+        ("--codex", "codex"),
+        ("--codex-commands", "codex_commands"),
+        ("--opencode", "opencode"),
+        ("--opencode-commands", "opencode_commands"),
+        ("--vscode", "vscode"),
+        ("--vscode-commands", "vscode_commands"),
     ):
         opt_in.add_argument(flag, dest=dest, action="store_true")
 
     opt_out = p.add_argument_group(
         "component opt-out",
-        "Exclude specific components from --all (e.g. `--all --no-statusline`).",
+        "Exclude specific components from --all (e.g. `--all --no-statusline`). "
+        "`--no-codex-commands` keeps the Codex MCP server but skips the slash "
+        "command plugin (same for opencode / vscode).",
     )
     for flag, dest in (
         ("--no-plugin", "no_plugin"),
@@ -76,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
         ("--no-rules", "no_rules"),
         ("--no-user-commands", "no_user_commands"),
         ("--no-orbit-db", "no_orbit_db"),
+        ("--no-codex", "no_codex"),
+        ("--no-codex-commands", "no_codex_commands"),
+        ("--no-opencode", "no_opencode"),
+        ("--no-opencode-commands", "no_opencode_commands"),
+        ("--no-vscode", "no_vscode"),
+        ("--no-vscode-commands", "no_vscode_commands"),
     ):
         opt_out.add_argument(flag, dest=dest, action="store_true")
 
@@ -108,11 +123,39 @@ def _explicit_components(args: argparse.Namespace) -> list[str]:
 
 
 def _excluded_components(args: argparse.Namespace) -> set[str]:
-    """Components explicitly opted out via --no-*."""
-    return {
+    """Components explicitly opted out via --no-*.
+
+    Also auto-excludes a slash command companion when its parent MCP component
+    is excluded - slash commands need the MCP server to function, so installing
+    `codex_commands` without `codex` is a foot-gun. Users who really want that
+    asymmetry can override by passing `--codex-commands` explicitly.
+    """
+    excluded = {
         c for c in installers.ALL_COMPONENTS
         if getattr(args, f"no_{c}", False)
     }
+    for parent, child in COMMAND_IMPLIES.items():
+        if parent in excluded and not getattr(args, child, False):
+            excluded.add(child)
+    return excluded
+
+
+def _expand_implies(selected: list[str], excluded: set[str]) -> list[str]:
+    """Auto-add slash command companions for selected MCP integration parents.
+
+    `--codex` (or any `--all` that includes codex) implicitly turns on
+    `codex_commands` so that opting in to the Codex integration delivers the
+    full parity experience by default. Use `--no-codex-commands` to install
+    MCP without slash commands. Same pattern for opencode and vscode.
+
+    No-op if the child is already in `selected` (e.g. user passed both
+    `--codex` and `--codex-commands`) or explicitly excluded.
+    """
+    out = list(selected)
+    for parent, child in COMMAND_IMPLIES.items():
+        if parent in out and child not in out and child not in excluded:
+            out.append(child)
+    return out
 
 
 def _resolve_mode_and_repo(args: argparse.Namespace) -> tuple[str, Path | None]:
@@ -159,6 +202,7 @@ def main() -> int:
     if args.all or explicit:
         base = list(installers.ALL_COMPONENTS) if args.all else explicit
         selected = [c for c in base if c not in excluded]
+        selected = _expand_implies(selected, excluded)
         # statusline needs the orbit-statusline entry point, which ships in the
         # orbit-dashboard package. Installing statusline without dashboard wires
         # settings.json to a command that won't resolve. Auto-add dashboard.

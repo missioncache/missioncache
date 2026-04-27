@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit_install import settings, state
+from orbit_install import command_clients, mcp_clients, settings, state
 
 
 @pytest.fixture
@@ -26,5 +26,43 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setattr(
         settings, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json"
+    )
+    # mcp_clients constants snapshot Path.home() at import time, so the
+    # monkeypatch above is not enough - rewrite them to point under tmp_path.
+    monkeypatch.setattr(
+        mcp_clients,
+        "OPENCODE_CONFIG_PATH",
+        tmp_path / ".config" / "opencode" / "opencode.json",
+    )
+    monkeypatch.setattr(
+        mcp_clients,
+        "VSCODE_USER_MCP_PATH",
+        tmp_path / "Library" / "Application Support" / "Code" / "User" / "mcp.json",
+    )
+    # command_clients constants - same snapshot-at-import-time problem.
+    monkeypatch.setattr(
+        command_clients,
+        "OPENCODE_COMMANDS_DIR",
+        tmp_path / ".config" / "opencode" / "commands",
+    )
+    monkeypatch.setattr(
+        command_clients,
+        "VSCODE_PROMPTS_DIR",
+        tmp_path / ".orbit" / "vscode" / "prompts",
+    )
+    monkeypatch.setattr(
+        command_clients,
+        "VSCODE_USER_SETTINGS_PATH",
+        tmp_path / "Library" / "Application Support" / "Code" / "User" / "settings.json",
+    )
+    monkeypatch.setattr(
+        command_clients,
+        "CODEX_MARKETPLACE_DIR",
+        tmp_path / ".orbit" / "codex-marketplace",
+    )
+    monkeypatch.setattr(
+        command_clients,
+        "CODEX_CONFIG_TOML",
+        tmp_path / ".codex" / "config.toml",
     )
     return tmp_path

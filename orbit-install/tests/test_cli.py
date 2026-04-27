@@ -6,6 +6,7 @@ import pytest
 
 from orbit_install.__main__ import (
     _excluded_components,
+    _expand_implies,
     _explicit_components,
     build_parser,
     main,
@@ -95,6 +96,162 @@ def test_orbit_db_flag_naming() -> None:
     args = build_parser().parse_args(["--orbit-db"])
     assert args.orbit_db is True
     assert _explicit_components(args) == ["orbit_db"]
+
+
+@pytest.mark.parametrize("flag, dest", [
+    ("--codex", "codex"),
+    ("--opencode", "opencode"),
+    ("--vscode", "vscode"),
+])
+def test_mcp_tool_opt_in_flags(flag: str, dest: str) -> None:
+    """--codex / --opencode / --vscode each select the matching component."""
+    args = build_parser().parse_args([flag])
+    assert getattr(args, dest) is True
+    assert _explicit_components(args) == [dest]
+
+
+@pytest.mark.parametrize("flag, dest", [
+    ("--no-codex", "no_codex"),
+    ("--no-opencode", "no_opencode"),
+    ("--no-vscode", "no_vscode"),
+])
+def test_mcp_tool_opt_out_flags(flag: str, dest: str) -> None:
+    """--no-codex etc. land in the exclusion set when combined with --all."""
+    args = build_parser().parse_args(["--all", flag])
+    assert getattr(args, dest) is True
+    component_name = dest.removeprefix("no_")
+    assert component_name in _excluded_components(args)
+
+
+@pytest.mark.parametrize("flag, dest", [
+    ("--codex-commands", "codex_commands"),
+    ("--opencode-commands", "opencode_commands"),
+    ("--vscode-commands", "vscode_commands"),
+])
+def test_slash_command_opt_in_flags(flag: str, dest: str) -> None:
+    """--codex-commands etc. select only the slash command companion (without MCP)."""
+    args = build_parser().parse_args([flag])
+    assert getattr(args, dest) is True
+    assert _explicit_components(args) == [dest]
+
+
+@pytest.mark.parametrize("flag, dest", [
+    ("--no-codex-commands", "no_codex_commands"),
+    ("--no-opencode-commands", "no_opencode_commands"),
+    ("--no-vscode-commands", "no_vscode_commands"),
+])
+def test_slash_command_opt_out_flags(flag: str, dest: str) -> None:
+    """--no-<tool>-commands keeps the MCP server but skips slash commands."""
+    args = build_parser().parse_args(["--all", flag])
+    assert getattr(args, dest) is True
+    component_name = dest.removeprefix("no_")
+    assert component_name in _excluded_components(args)
+
+
+def test_expand_implies_pulls_in_command_companion_when_parent_selected() -> None:
+    """Selecting --codex implicitly turns on codex_commands too."""
+    out = _expand_implies(["codex"], excluded=set())
+    assert "codex" in out
+    assert "codex_commands" in out
+
+
+def test_expand_implies_respects_explicit_no_commands_opt_out() -> None:
+    """--codex --no-codex-commands installs MCP only, not the slash commands."""
+    out = _expand_implies(["codex"], excluded={"codex_commands"})
+    assert out == ["codex"], "child must NOT be auto-added when explicitly excluded"
+
+
+def test_expand_implies_no_op_when_parent_absent() -> None:
+    """Without a parent in the selection, the child is not auto-pulled."""
+    out = _expand_implies(["plugin", "rules"], excluded=set())
+    assert "codex_commands" not in out
+    assert "opencode_commands" not in out
+    assert "vscode_commands" not in out
+
+
+def test_expand_implies_does_not_double_add_existing_child() -> None:
+    """If the child is already in selection, it isn't added a second time."""
+    out = _expand_implies(["codex", "codex_commands"], excluded=set())
+    assert out.count("codex_commands") == 1
+
+
+def test_no_codex_auto_excludes_codex_commands() -> None:
+    """--all --no-codex must exclude codex_commands too (slash commands need MCP)."""
+    args = build_parser().parse_args(["--all", "--no-codex"])
+    excluded = _excluded_components(args)
+    assert "codex" in excluded
+    assert "codex_commands" in excluded
+
+
+def test_no_codex_with_explicit_codex_commands_keeps_child() -> None:
+    """--no-codex --codex-commands honors the explicit override (user owns MCP elsewhere)."""
+    args = build_parser().parse_args(["--all", "--no-codex", "--codex-commands"])
+    excluded = _excluded_components(args)
+    assert "codex" in excluded
+    assert "codex_commands" not in excluded
+
+
+def test_all_no_codex_invocation_skips_codex_commands(monkeypatch) -> None:
+    """End-to-end: --all --no-codex skips both codex and codex_commands."""
+    captured: list[list[str]] = []
+
+    def fake_install(components, ctx):
+        captured.append(list(components))
+
+    monkeypatch.setattr("sys.argv", ["orbit-install", "--all", "--no-codex", "--yes"])
+    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+
+    rc = main()
+
+    assert rc == 0
+    assert captured
+    assert "codex" not in captured[0]
+    assert "codex_commands" not in captured[0]
+
+
+def test_codex_only_invocation_implies_codex_commands(monkeypatch) -> None:
+    """End-to-end: `orbit-install --codex` installs both codex MCP + slash commands."""
+    captured: list[list[str]] = []
+
+    def fake_install(components, ctx):
+        captured.append(list(components))
+
+    monkeypatch.setattr("sys.argv", ["orbit-install", "--codex", "--yes"])
+    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+
+    rc = main()
+
+    assert rc == 0
+    assert captured
+    assert "codex" in captured[0]
+    assert "codex_commands" in captured[0], (
+        "--codex must imply --codex-commands by default"
+    )
+
+
+def test_codex_with_no_codex_commands_installs_mcp_only(monkeypatch) -> None:
+    """`orbit-install --codex --no-codex-commands` installs MCP without slash commands."""
+    captured: list[list[str]] = []
+
+    def fake_install(components, ctx):
+        captured.append(list(components))
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["orbit-install", "--codex", "--no-codex-commands", "--yes"],
+    )
+    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+
+    rc = main()
+
+    assert rc == 0
+    assert captured
+    assert captured[0] == ["codex"], (
+        "Explicit --no-codex-commands must keep codex_commands out of the install"
+    )
 
 
 def test_statusline_without_dashboard_auto_adds_dashboard(monkeypatch) -> None:

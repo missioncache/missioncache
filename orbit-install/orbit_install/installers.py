@@ -16,12 +16,12 @@ from __future__ import annotations
 import json
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from typing import Literal
 
-from . import settings, state, subprocess_utils, ui
+from . import command_clients, mcp_clients, settings, state, subprocess_utils, ui
 
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
@@ -43,6 +43,12 @@ class InstallContext:
     skip_service: bool       # --no-service; dashboard installs without launchd/systemd
     port: int                # dashboard port (default 8787)
     assume_yes: bool         # --yes; skip per-file confirmations (still honors component selection)
+    # In-memory MCP-registration outcomes for THIS run only. Keys are tool
+    # names ("codex", "opencode", "vscode"); True means the parent MCP
+    # installer succeeded in this run, False means it ran and failed, missing
+    # key means it didn't run. Slash command installers gate on this (not on
+    # state.json) so a stale prior-run success can't mask a fresh failure.
+    mcp_success: dict[str, bool] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +616,12 @@ ALL_COMPONENTS: tuple[str, ...] = (
     "rules",
     "user_commands",
     "orbit_db",
+    "codex",
+    "codex_commands",
+    "opencode",
+    "opencode_commands",
+    "vscode",
+    "vscode_commands",
 )
 
 _INSTALLERS = {
@@ -620,6 +632,12 @@ _INSTALLERS = {
     "rules": install_rules,
     "user_commands": install_user_commands,
     "orbit_db": install_orbit_db,
+    "codex": mcp_clients.install_codex,
+    "codex_commands": command_clients.install_codex_commands,
+    "opencode": mcp_clients.install_opencode,
+    "opencode_commands": command_clients.install_opencode_commands,
+    "vscode": mcp_clients.install_vscode,
+    "vscode_commands": command_clients.install_vscode_commands,
 }
 
 _UNINSTALLERS = {
@@ -630,6 +648,12 @@ _UNINSTALLERS = {
     "rules": uninstall_rules,
     "user_commands": uninstall_user_commands,
     "orbit_db": uninstall_orbit_db,
+    "codex": mcp_clients.uninstall_codex,
+    "codex_commands": command_clients.uninstall_codex_commands,
+    "opencode": mcp_clients.uninstall_opencode,
+    "opencode_commands": command_clients.uninstall_opencode_commands,
+    "vscode": mcp_clients.uninstall_vscode,
+    "vscode_commands": command_clients.uninstall_vscode_commands,
 }
 
 
