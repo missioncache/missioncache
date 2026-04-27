@@ -46,31 +46,17 @@ Ask the user to pick a project by number or name.
 
 **CRITICAL:** After the user selects a project, compare the project's `repo_path` with the current working directory (use `git rev-parse --show-toplevel` to get the cwd's git root).
 
-If they differ, ask the user to choose how to proceed via `AskUserQuestion`:
+If they differ, ask the user how to handle the mismatch and wait for their reply. Present these three options:
 
-```
-AskUserQuestion(questions=[{
-    "question": "This project is recorded as belonging to <repo_name> (<repo_path>), but you're currently in <cwd_repo>. How should I handle this?",
-    "header": "Repo Mismatch",
-    "multiSelect": false,
-    "options": [
-        {
-            "label": "Continue here for this session only",
-            "description": "Resume the project without changing the recorded repo. The mismatch warning will fire again next time."
-        },
-        {
-            "label": "Update the project's repo to match my current location",
-            "description": "Rewrite the task's repo association in the database so future /orbit:go calls work cleanly. Use this when the project was created with the wrong repo (e.g. /orbit:new captured the wrong cwd) or when the project's source of truth has moved."
-        },
-        {
-            "label": "Cancel",
-            "description": "Abort /orbit:go without resuming."
-        }
-    ]
-}])
-```
+> This project is recorded as belonging to **<repo_name>** (`<repo_path>`), but you're currently in **<cwd_repo>**. How should I handle this?
+>
+> 1. **Continue here for this session only** - Resume the project without changing the recorded repo. The mismatch warning will fire again next time.
+> 2. **Update the project's repo to match my current location** - Rewrite the task's repo association in the database so future `/orbit:go` calls work cleanly. Use this when the project was created with the wrong repo (e.g. `/orbit:new` captured the wrong cwd) or when the project's source of truth has moved.
+> 3. **Cancel** - Abort `/orbit:go` without resuming.
 
-**If the user picks "Update the project's repo to match my current location":**
+If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it. Otherwise present the options as prose and wait for the user to reply with a number or label.
+
+**If the user picks option 2 ("Update the project's repo to match my current location"):**
 
 Call the `set_task_repo` MCP tool with the current repo path:
 ```
@@ -82,9 +68,9 @@ mcp__plugin_orbit_pm__set_task_repo(
 
 If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo first via `add_repo`, then retry. Otherwise proceed with the resume flow as if there was no mismatch.
 
-**If the user picks "Cancel":** stop and do nothing.
+**If the user picks option 3 ("Cancel"):** stop and do nothing.
 
-**If the user picks "Continue here for this session only":** proceed with the resume flow without touching the database.
+**If the user picks option 1 ("Continue here for this session only"):** proceed with the resume flow without touching the database.
 
 ## Workflow
 

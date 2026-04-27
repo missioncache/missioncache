@@ -34,28 +34,28 @@ If invoked bare (`/orbit:mode` with no arguments), switch to interactive mode be
 | 4 | <task 4 title> | (unset) |
 ```
 
-**Step 0c: Ask how to assign.**
+**Step 0c: Ask how to assign.** Ask the user and wait for their reply:
 
-```
-AskUserQuestion: "How do you want to assign modes?"
-- "Set all tasks to one mode"
-- "Change only specific tasks"
-- "Cancel"
-```
+> How do you want to assign modes?
+>
+> 1. **Set all tasks to one mode**
+> 2. **Change only specific tasks**
+> 3. **Cancel**
 
-**Step 0c-A (all tasks):** follow up with
+If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it; otherwise present the options as prose.
 
-```
-AskUserQuestion: "Which mode for all tasks?"
-- "Autonomous (auto)"
-- "Interactive (inter)"
-```
+**Step 0c-A (option 1, all tasks):** follow up with:
+
+> Which mode for all tasks?
+>
+> 1. **Autonomous (`auto`)**
+> 2. **Interactive (`inter`)**
 
 Build the range spec `all:<selected>` and proceed to Step 2.
 
-**Step 0c-B (specific tasks):** ask the user to type the range:mode spec via `AskUserQuestion`'s Other option. Include the expected format in the question: `e.g. 2,4:inter or 1-3:auto,5:inter`. Take the user's input as the range spec and proceed to Step 2. Tasks not listed in the spec keep their existing mode (or stay unset).
+**Step 0c-B (option 2, specific tasks):** ask the user to type the range:mode spec directly. Include the expected format in the question: `e.g. 2,4:inter or 1-3:auto,5:inter`. Take the user's input as the range spec and proceed to Step 2. Tasks not listed in the spec keep their existing mode (or stay unset).
 
-**Step 0c-C (cancel):** stop, do nothing.
+**Step 0c-C (option 3, cancel):** stop, do nothing.
 
 ### Step 1: Parse Arguments
 

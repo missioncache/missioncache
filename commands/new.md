@@ -21,36 +21,26 @@ Ask the user for:
 `mcp__plugin_orbit_pm__get_task(project_name="<name>")` before going further.
 
 - If the response indicates the task is not found, the name is free - proceed.
-- If a task is returned (status `active` or `completed`), use `AskUserQuestion`
-  to choose between: resume via `/orbit:go <name>`, pick a different name, or
-  recreate from scratch (destructive - confirm with the user, then in Step 4
-  pass `force=True`).
+- If a task is returned (status `active` or `completed`), ask the user how to
+  proceed and wait for their reply. Present three options:
+  1. **Resume the existing project** - run `/orbit:go <name>` instead of recreating.
+  2. **Use a different name** - pick a new project name and re-run the duplicate check.
+  3. **Recreate from scratch (destructive)** - confirms with the user that the existing
+     plan/context/tasks files will be overwritten, then in Step 4 pass `force=True`.
+  If your tool supports a structured option picker (Claude Code's `AskUserQuestion`),
+  use it; otherwise present the options as a numbered prose list.
 
 ### Step 2: Research Phase
 
-Ask the user what level of research they want before creating the project:
+Ask the user what level of research they want before creating the project and wait for their reply. Present these three options:
 
-```
-AskUserQuestion(questions=[{
-    "question": "How much codebase research should I do before creating the project plan?",
-    "header": "Research",
-    "multiSelect": false,
-    "options": [
-        {
-            "label": "Skip (Recommended)",
-            "description": "Proceed directly to project creation. Best when you already know what needs to be done."
-        },
-        {
-            "label": "Quick",
-            "description": "Fast codebase scan: existing patterns, similar implementations, affected dependencies. ~30 seconds."
-        },
-        {
-            "label": "Deep",
-            "description": "Thorough analysis with 4 parallel agents: stack, features, architecture, pitfalls. ~2 minutes."
-        }
-    ]
-}])
-```
+> How much codebase research should I do before creating the project plan?
+>
+> 1. **Skip (Recommended)** - Proceed directly to project creation. Best when you already know what needs to be done.
+> 2. **Quick** - Fast codebase scan: existing patterns, similar implementations, affected dependencies. ~30 seconds.
+> 3. **Deep** - Thorough analysis with 4 parallel agents: stack, features, architecture, pitfalls. ~2 minutes.
+
+If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it; otherwise present the options as prose and wait for the user to reply.
 
 **If Skip:** Set `research_findings = ""` and continue to Step 3.
 
