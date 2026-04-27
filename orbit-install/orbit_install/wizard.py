@@ -9,6 +9,10 @@ The non-Claude MCP integrations (Codex, OpenCode, VSCode) are gated by tool
 detection - if the tool's CLI / app bundle is not present, the wizard skips
 the prompt silently. Users can still force-install via explicit `--codex`
 etc. flags after installing the tool.
+
+Uninstall-side: `run_uninstall_wizard()` is the parallel flow for `--uninstall`
+without `--all`. It reads tracked components from `state.json` and asks for
+a comma-separated index list (or `all` to wipe everything tracked).
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from __future__ import annotations
 import shutil
 import sys
 
-from . import installers, mcp_clients, prereqs, ui
+from . import installers, mcp_clients, prereqs, state, ui
 
 
 # Human-facing descriptions shown next to each y/N prompt.
@@ -154,6 +158,104 @@ def _select_components() -> list[str]:
                 selected.append(child)
         print()
     return selected
+
+
+def run_uninstall_wizard() -> list[str] | None:
+    """Show installed components and ask user to pick which to uninstall.
+
+    Reads tracked components from `state.json`, sorted by `ALL_COMPONENTS`
+    order so two users with the same components see the same numbered menu
+    regardless of install order.
+
+    Returns:
+    - list[str] - components the user picked (in `ALL_COMPONENTS` order).
+    - None - user cancelled (blank input or EOFError from `input()`).
+
+    Exits via `ui.fail` (not return) when the wizard cannot proceed:
+    - Empty state (no prior orbit-install tracked).
+    - Non-TTY shell (interactive wizard requires a terminal).
+    - Invalid selection (non-numeric, out-of-range, or junk input).
+
+    The interactive selector accepts:
+    - Comma-separated 1-based indices (e.g. `1,3,5`) - uninstalls those.
+    - `all` - uninstalls everything tracked.
+    - blank - cancels.
+
+    Project data and DBs (`~/.orbit/`) are never touched by the underlying
+    uninstallers, regardless of selection.
+    """
+    tracked = state.installed_components()
+    # Drop unknown keys (schema-evolution defense) and warn about them.
+    valid = [c for c in tracked if c in installers.ALL_COMPONENTS]
+    unknown = [c for c in tracked if c not in installers.ALL_COMPONENTS]
+    if unknown:
+        ui.warn(
+            f"State file references unknown components: {', '.join(unknown)}.\n"
+            "  Skipping them (not in this orbit-install version's catalog)."
+        )
+    # Render in ALL_COMPONENTS order so selection numbers are reproducible.
+    installed = [c for c in installers.ALL_COMPONENTS if c in valid]
+
+    if not installed:
+        ui.fail(
+            f"No prior orbit-install tracked in {state.STATE_FILE}.\n"
+            "  If you installed orbit manually outside the installer, remove\n"
+            "  components by hand. Otherwise nothing to uninstall."
+        )
+        raise AssertionError("unreachable")  # ui.fail exits
+
+    if not sys.stdin.isatty():
+        ui.fail(
+            "Bare `--uninstall` requires an interactive terminal.\n"
+            "  Use `--uninstall --all` (remove everything tracked) or\n"
+            "  `--uninstall <comp1>,<comp2>` (positive list) instead.",
+        )
+        raise AssertionError("unreachable")  # ui.fail exits
+
+    ui.banner()
+    print()
+    ui.step("?", "Uninstall components")
+    ui.detail(f"Tracked in {state.STATE_FILE}")
+    print()
+    for i, comp in enumerate(installed, 1):
+        print(f"  {i}. {comp.replace('_', '-')}")
+    print()
+    print("  Pick components to uninstall:")
+    print("    Comma-separated numbers (e.g. 1,3,5): uninstall those")
+    print('    "all": uninstall everything tracked')
+    print("    blank: cancel")
+    try:
+        answer = input("  > ").strip().lower()
+    except EOFError:
+        # Could be intentional Ctrl-D OR unexpected stdin loss (parent
+        # process death, redirected stdin drained mid-prompt). We can't
+        # distinguish, so warn instead of info to make it visible in logs.
+        ui.warn("Input ended unexpectedly. Cancelled.")
+        return None
+
+    if not answer:
+        ui.info("Cancelled.")
+        return None
+    if answer == "all":
+        return installed
+
+    try:
+        indices = [int(x.strip()) - 1 for x in answer.split(",")]
+    except ValueError:
+        ui.fail(
+            f"Invalid selection {answer!r}. "
+            "Expected comma-separated numbers or 'all'.",
+        )
+        raise AssertionError("unreachable")  # ui.fail exits
+    if any(i < 0 or i >= len(installed) for i in indices):
+        ui.fail(
+            f"Selection out of range: {answer!r}. "
+            f"Valid indices are 1..{len(installed)}.",
+        )
+        raise AssertionError("unreachable")  # ui.fail exits
+    # Dedup while preserving first-occurrence order so `1,1,2` doesn't
+    # call uninstall_components([plugin, plugin, dashboard]).
+    return list(dict.fromkeys(installed[i] for i in indices))
 
 
 def _print_next_steps(selected: list[str]) -> None:

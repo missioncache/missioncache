@@ -3,6 +3,9 @@
 Focus: verify that the y/N prompt fires for each component the user can
 actually install, and is silently skipped for MCP-tool integrations whose
 target tool is not installed locally.
+
+Also covers `run_uninstall_wizard` - the parallel multi-select flow for
+`--uninstall` without `--all`.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import sys
 
 import pytest
 
-from orbit_install import installers, mcp_clients, wizard
+from orbit_install import installers, mcp_clients, state, wizard
 
 
 @pytest.fixture
@@ -179,3 +182,224 @@ def test_vscode_detector_runs_app_check_on_darwin(
 
     monkeypatch.setattr(mcp_clients, "_vscode_detected", lambda: False)
     assert wizard._TOOL_DETECTORS["vscode"]() is False
+
+
+# ---------------------------------------------------------------------------
+# run_uninstall_wizard
+# ---------------------------------------------------------------------------
+
+def _seed_state(installed: list[str]) -> None:
+    """Populate a fake state.json with the given component list."""
+    s = state.load()
+    s.setdefault("components", {})
+    for c in installed:
+        s["components"][c] = {"installed_at": "2026-04-27T00:00:00Z"}
+    state.save(s)
+
+
+def test_uninstall_wizard_fails_loudly_on_empty_state(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No tracked components -> ui.fail (loud failure), not silent no-op.
+
+    Pre-2026-04-27 behavior was warn+return-None which produced exit code 0
+    with no work done - the textbook silent-success-no-action failure mode.
+    """
+    failures: list[str] = []
+
+    def fake_fail(msg: str, exit_code: int = 1) -> None:
+        failures.append(msg)
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(wizard.ui, "fail", fake_fail)
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+
+    with pytest.raises(SystemExit):
+        wizard.run_uninstall_wizard()
+
+    assert failures, "Empty state must call ui.fail, not silently return None"
+    assert "No prior orbit-install" in failures[0], (
+        "Empty-state error must explain why nothing can be uninstalled"
+    )
+
+
+def test_uninstall_wizard_refuses_on_non_tty(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-TTY -> ui.fail with guidance toward --all or --uninstall <list>."""
+    _seed_state(["plugin", "dashboard"])
+    failures: list[str] = []
+
+    def fake_fail(msg: str, exit_code: int = 1) -> None:
+        failures.append(msg)
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(wizard.ui, "fail", fake_fail)
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit):
+        wizard.run_uninstall_wizard()
+
+    assert failures, "ui.fail should have been called"
+    msg = failures[0]
+    assert "--uninstall --all" in msg or "comp1" in msg, (
+        "Non-TTY error must guide users toward --all or --uninstall <list>"
+    )
+
+
+def test_uninstall_wizard_returns_all_on_all_keyword(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User typing 'all' returns every tracked component in state order."""
+    _seed_state(["plugin", "dashboard", "codex"])
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "all")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    result = wizard.run_uninstall_wizard()
+
+    assert result == ["plugin", "dashboard", "codex"]
+
+
+def test_uninstall_wizard_parses_index_list(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Comma-separated 1-based indices map to the right components.
+
+    Display order is `ALL_COMPONENTS` order (not state-insertion order),
+    so seeded order doesn't affect the indices the user sees.
+    """
+    # Seed in a non-canonical order to confirm display sorting is robust.
+    _seed_state(["vscode", "plugin", "codex", "dashboard"])
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "2,4")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    result = wizard.run_uninstall_wizard()
+
+    # Display order matches ALL_COMPONENTS: plugin, dashboard, ..., codex, ..., vscode.
+    # So index 2 = dashboard, index 4 = vscode.
+    assert result == ["dashboard", "vscode"], (
+        "Indices must resolve via ALL_COMPONENTS display order, not state.json "
+        "insertion order"
+    )
+
+
+def test_uninstall_wizard_preserves_user_index_order(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User's index order is preserved (e.g. `4,2` -> [4th, 2nd])."""
+    _seed_state(["plugin", "dashboard", "codex", "vscode"])
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "4,2")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    result = wizard.run_uninstall_wizard()
+
+    # User typed 4 first, 2 second. Display order: plugin, dashboard, codex, vscode.
+    # 4 = vscode, 2 = dashboard. Result must reflect user-given order, not sorted.
+    assert result == ["vscode", "dashboard"]
+
+
+def test_uninstall_wizard_dedupes_repeated_indices(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`1,1,1` becomes `[plugin]`, not `[plugin, plugin, plugin]`."""
+    _seed_state(["plugin", "dashboard"])
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "1,1,1")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    result = wizard.run_uninstall_wizard()
+
+    assert result == ["plugin"], "Repeated indices must dedupe to single entries"
+
+
+def test_uninstall_wizard_filters_unknown_state_keys(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """State.json with no-longer-recognized component names is filtered + warned.
+
+    Schema-evolution defense: a stale state.json from an older orbit-install
+    version may reference deleted component names. The wizard must warn
+    and skip them rather than offering them to the user (who would pick a
+    number that maps to a silent no-op uninstall).
+    """
+    _seed_state(["plugin", "_legacy_component_"])
+    warnings: list[str] = []
+    monkeypatch.setattr(wizard.ui, "warn", lambda msg: warnings.append(msg))
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "all")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    result = wizard.run_uninstall_wizard()
+
+    assert result == ["plugin"], (
+        "Wizard must drop the orphan and offer only ALL_COMPONENTS-valid entries"
+    )
+    assert any("_legacy_component_" in w for w in warnings), (
+        "User must be told about the orphaned state entry"
+    )
+
+
+def test_uninstall_wizard_returns_none_on_blank_input(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blank input cancels without raising."""
+    _seed_state(["plugin"])
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+    info_msgs: list[str] = []
+    monkeypatch.setattr(wizard.ui, "info", lambda msg: info_msgs.append(msg))
+
+    result = wizard.run_uninstall_wizard()
+
+    assert result is None
+    assert any("Cancelled" in m for m in info_msgs)
+
+
+def test_uninstall_wizard_rejects_out_of_range_index(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Index above the tracked-component count fails with a clear range message."""
+    _seed_state(["plugin", "dashboard"])
+    failures: list[str] = []
+
+    def fake_fail(msg: str, exit_code: int = 1) -> None:
+        failures.append(msg)
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(wizard.ui, "fail", fake_fail)
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "5")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    with pytest.raises(SystemExit):
+        wizard.run_uninstall_wizard()
+
+    assert any("range" in f.lower() for f in failures), (
+        "Out-of-range error must mention valid range to guide the user"
+    )
+
+
+def test_uninstall_wizard_rejects_non_numeric_input(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Garbage input that isn't 'all' or numeric fails with a clear message."""
+    _seed_state(["plugin"])
+    failures: list[str] = []
+
+    def fake_fail(msg: str, exit_code: int = 1) -> None:
+        failures.append(msg)
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(wizard.ui, "fail", fake_fail)
+    monkeypatch.setattr(wizard.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "everything")
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+    with pytest.raises(SystemExit):
+        wizard.run_uninstall_wizard()
+
+    assert any("invalid" in f.lower() for f in failures)
