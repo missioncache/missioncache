@@ -221,6 +221,145 @@ class TestUpdateContextFile:
         assert "Fixed tests" in updated
 
 
+# ── Recent Changes consolidation (regression guards for commit 4776f3f) ──
+
+
+class TestRecentChangesConsolidation:
+    """Verify update_context_file consolidates Recent Changes into a single h2.
+
+    Pre-2026-04-23 versions added a new top-level `## Recent Changes (timestamp)`
+    h2 on every save, fragmenting the file. The fix at commit 4776f3f inserts
+    new entries as `### timestamp` h3 subsections under the FIRST existing
+    `## Recent Changes` h2 (with or without timestamp suffix). This class
+    locks in that contract so the tool can't silently regress.
+    """
+
+    def _h2_count(self, content: str) -> int:
+        """Count standalone h2 lines for `## Recent Changes` (any suffix)."""
+        return len(
+            re.findall(r"^## Recent Changes(\s.*)?$", content, re.MULTILINE)
+        )
+
+    def _h3_count(self, content: str) -> int:
+        """Count `### YYYY-MM-DD ...` h3 lines (the per-save subsections)."""
+        return len(re.findall(r"^### \d{4}-\d{2}-\d{2}", content, re.MULTILINE))
+
+    def test_appends_under_existing_clean_h2(self, tmp_path):
+        """File with `## Recent Changes` (no timestamp) gets a new h3 child."""
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Recent Changes\n\n"
+            "### 2026-04-26 12:00\n\n- old entry\n"
+        )
+        update_context_file(str(ctx), recent_changes=["new entry"])
+        content = ctx.read_text()
+        assert self._h2_count(content) == 1
+        assert self._h3_count(content) == 2  # original + new
+        assert "old entry" in content
+        assert "new entry" in content
+
+    def test_appends_under_first_legacy_h2(self, tmp_path):
+        """File with `## Recent Changes (timestamp)` legacy form: new entry as h3 under it.
+
+        The tool does NOT migrate the legacy h2 (that's the migration script's job)
+        but MUST insert the new entry under it as a child h3, not as a sibling h2.
+        """
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Recent Changes (2026-04-23 11:33)\n\nlegacy body content\n"
+        )
+        update_context_file(str(ctx), recent_changes=["new entry"])
+        content = ctx.read_text()
+        # Legacy h2 stays put.
+        assert "## Recent Changes (2026-04-23 11:33)" in content
+        # No second h2 was created.
+        assert self._h2_count(content) == 1
+        # New entry is present as a h3 AFTER the legacy h2.
+        legacy_pos = content.find("## Recent Changes (2026-04-23 11:33)")
+        new_pos = content.find("new entry")
+        assert legacy_pos != -1
+        assert new_pos != -1
+        assert new_pos > legacy_pos
+
+    def test_creates_section_when_missing(self, tmp_path):
+        """File without any Recent Changes section: new h2 + h3 are created."""
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Description\n\nA project.\n"
+        )
+        update_context_file(str(ctx), recent_changes=["first entry"])
+        content = ctx.read_text()
+        assert self._h2_count(content) == 1
+        assert "first entry" in content
+
+    def test_inserts_under_first_when_multiple_legacy_h2s(self, tmp_path):
+        """File with multiple legacy h2s gets the new entry under the FIRST one only.
+
+        This represents the user's actual file shape pre-migration: residual
+        accumulation from pre-fix sessions. The tool itself doesn't clean
+        up the residue (the migration script does); it just must not make
+        things worse by adding yet another sibling h2.
+        """
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Recent Changes (2026-04-23)\n\n- A\n\n"
+            "## Recent Changes (2026-04-22)\n\n- B\n\n"
+            "## Recent Changes (2026-04-21)\n\n- C\n"
+        )
+        update_context_file(str(ctx), recent_changes=["new"])
+        content = ctx.read_text()
+        first_h2 = content.find("## Recent Changes (2026-04-23)")
+        new_entry = content.find("- new")
+        second_h2 = content.find("## Recent Changes (2026-04-22)")
+        # New entry lands between the first and second h2 - i.e. as a child of the first.
+        assert first_h2 < new_entry < second_h2
+        # The 3 legacy h2s are unchanged in count (tool doesn't migrate; migration
+        # script does that separately).
+        assert content.count("## Recent Changes (2026-04-2") == 3
+
+    def test_three_consecutive_saves_yield_one_h2_three_h3s(self, tmp_path):
+        """Regression guard: 3 saves on a fresh file produce 1 h2 with 3 h3 children.
+
+        This is the original bug shape - pre-fix this would produce 3 sibling
+        h2s. Post-fix: exactly 1 h2 with 3 dated h3 subsections.
+        """
+        import time
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Recent Changes\n\n"
+        )
+        for i in range(3):
+            time.sleep(1)  # ensure distinct timestamps
+            update_context_file(str(ctx), recent_changes=[f"entry-{i}"])
+        content = ctx.read_text()
+        assert self._h2_count(content) == 1
+        assert self._h3_count(content) == 3
+        for i in range(3):
+            assert f"entry-{i}" in content
+
+    def test_preserves_h2_with_trailing_context_suffix(self, tmp_path):
+        """Legacy h2 with text after the close paren keeps its full line on insert.
+
+        Some old files have `## Recent Changes (2026-04-19 18:31) - Codex Round 2`
+        style headings. The match should not strip the trailing context.
+        """
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Recent Changes (2026-04-19 18:31) - Codex Round 2\n\n"
+            "old content\n"
+        )
+        update_context_file(str(ctx), recent_changes=["new"])
+        content = ctx.read_text()
+        # Trailing context on the h2 is intact.
+        assert "## Recent Changes (2026-04-19 18:31) - Codex Round 2" in content
+
+
 # ── update_tasks_file ────────────────────────────────────────────────────
 
 
