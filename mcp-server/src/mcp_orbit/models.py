@@ -129,3 +129,11 @@ class ListTasksResult(BaseModel):
     total_count: int
     filter_applied: str | None = None
     other_tasks: list[TaskSummary] | None = None
+    display: str | None = Field(
+        default=None,
+        description=(
+            "Pre-rendered plain-text table of `tasks`. Render this string "
+            "verbatim when displaying to a user - it reads cleanly across "
+            "MCP clients, including TUIs that don't render markdown."
+        ),
+    )

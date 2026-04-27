@@ -39,6 +39,68 @@ def _build_summaries(tasks, db, include_time: bool):
     return [_task_to_summary(task, db) for task in tasks]
 
 
+def _format_tasks_table(tasks: list) -> str:
+    """Format a list of TaskSummary as a plain-text whitespace-aligned table.
+
+    Designed to render cleanly across all MCP clients, including TUIs that
+    don't render markdown (Codex). Falls back to a single-line message when
+    there are no tasks.
+    """
+    if not tasks:
+        return "(no active tasks)"
+
+    headers = ("ID", "Task", "Repo", "Time", "Last worked")
+    rows = [
+        (
+            str(t.id),
+            t.name,
+            t.repo_name or "-",
+            t.time_formatted or "-",
+            t.last_worked_ago or "-",
+        )
+        for t in tasks
+    ]
+    widths = [
+        max(len(headers[i]), *(len(row[i]) for row in rows))
+        for i in range(len(headers))
+    ]
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    sep = "  ".join("-" * w for w in widths)
+    return "\n".join(
+        [fmt.format(*headers).rstrip(), sep]
+        + [fmt.format(*row).rstrip() for row in rows]
+    )
+
+
+def _format_prioritized_display(
+    repo_summaries: list,
+    other_summaries: list,
+    repo_path: str,
+) -> str:
+    """Format the prioritize_by_repo two-list display.
+
+    Renders both `tasks` (cwd repo) and `other_tasks` (everything else) so the
+    output is useful even when the primary list is empty. Common case the
+    user's cwd repo has no tasks attached directly (cwd is a top-level work
+    dir; actual projects live in subdirs) - we still want to show the other
+    tasks instead of collapsing to "(no active tasks)".
+    """
+    if not repo_summaries and not other_summaries:
+        return "(no active tasks)"
+    sections: list[str] = []
+    if repo_summaries:
+        sections.append(f"Tasks in {repo_path}:")
+        sections.append(_format_tasks_table(repo_summaries))
+    else:
+        sections.append(f"(no active tasks in {repo_path})")
+    if other_summaries:
+        if repo_summaries:
+            sections.append("")
+        sections.append("Other active tasks:")
+        sections.append(_format_tasks_table(other_summaries))
+    return "\n".join(sections)
+
+
 # =============================================================================
 # TASK LISTING
 # =============================================================================
@@ -72,6 +134,12 @@ async def list_active_tasks(
     When prioritize_by_repo=True and repo_path is set, returns two lists:
     - tasks: projects belonging to the given repo (shown first)
     - other_tasks: all other active projects
+
+    Display: the response includes a `display` field with a pre-rendered
+    plain-text table of `tasks`. When showing this output to a user in a
+    chat UI, render the `display` string verbatim - it reads cleanly in
+    TUIs that don't render markdown (e.g., Codex). Use the structured
+    `tasks` array for follow-up logic (filtering, picking by id, etc.).
     """
     db = get_db()
 
@@ -100,6 +168,9 @@ async def list_active_tasks(
                 total_count=len(repo_summaries) + len(other_summaries),
                 filter_applied=f"prioritized repo={repo_path}",
                 other_tasks=other_summaries if other_summaries else None,
+                display=_format_prioritized_display(
+                    repo_summaries, other_summaries, repo_path or ""
+                ),
             ).model_dump()
         else:
             # Original behavior: filter by repo or return all
@@ -120,6 +191,7 @@ async def list_active_tasks(
                 tasks=summaries,
                 total_count=len(summaries),
                 filter_applied=", ".join(filter_desc) if filter_desc else None,
+                display=_format_tasks_table(summaries),
             ).model_dump()
 
     except Exception as e:

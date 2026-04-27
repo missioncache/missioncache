@@ -1,6 +1,6 @@
 [project]
 name = "mcp-orbit"
-version = "0.2.3"
+version = "0.2.5"
 description = "MCP server for the orbit Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
