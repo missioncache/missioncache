@@ -103,6 +103,27 @@ Restart your Claude Code session.
 
 **What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.claude/tasks.db`, and all 30+ MCP tools.
 
+### Multi-tool support
+
+Orbit's MCP server and slash commands are installable in any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register Orbit. Each prompt installs both the MCP server and the slash commands together; the CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without slash commands.
+
+| Tool | MCP server | Slash commands | Invocation | Hooks / statusline |
+|------|------------|----------------|------------|--------------------|
+| Claude Code | yes | yes | `/orbit:go`, `/orbit:save`, ... | yes (full) |
+| Codex CLI | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
+| OpenCode | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
+| VSCode (Copilot Chat) | yes | yes (macOS) | `/orbit-go`, `/orbit-save`, ... | n/a (editor-level) |
+
+Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash command namespaces, so orbit's commands ship as `orbit-go.md` etc. and resolve to `/orbit-go`. The behavior is identical across tools - only the invocation token differs by one character.
+
+Per-tool details:
+
+- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.orbit/codex-marketplace`. The `[plugins."orbit@orbit"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
+- **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
+- **VSCode** - prompt files written to `~/.orbit/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
+
+Codex/OpenCode/VSCode currently get MCP tools and slash commands. Per-tool hooks, statuslines, and `orbit-auto` integration stay Claude-only for this release; tracked as Phase 11.2 work post-launch.
+
 ## Upgrading
 
 ### Full install
