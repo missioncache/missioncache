@@ -13,6 +13,7 @@ from typing import Any
 from .config import settings
 from .errors import ErrorCode, OrbitError, OrbitFileNotFoundError, ValidationError
 from .models import OrbitFiles, TaskProgress
+from .tasks_parse import parse_tasks_md
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -410,18 +411,28 @@ def update_tasks_file(
         notes: Notes to add
 
     Returns:
-        Dict with update summary
+        Dict with update summary including ``completed_numbers``: the
+        checklist numbers (e.g. ``["54a", "56"]``) of items that were
+        unchecked before this call and are now checked. Used by callers
+        to drive cross-cutting cleanup like clearing active-task pointers.
     """
     path = Path(tasks_file)
     if not path.exists():
         raise OrbitFileNotFoundError(str(path))
 
     updates_made: list[str] = []
+    completed_numbers_seen: list[str] = []
 
     def _transform(content: str) -> str:
         # Stamp inside the lock so serialized writers each get a fresh
         # timestamp instead of all sharing the function-entry value.
         timestamp = get_timestamp()
+
+        # Snapshot pre-transform unchecked items so we can diff after
+        # marking completions and report the actual numbers transitioned.
+        pre_unchecked = {
+            item.number for item in parse_tasks_md(content) if not item.checked
+        }
 
         # Update Last Updated timestamp
         content = re.sub(
@@ -442,6 +453,15 @@ def update_tasks_file(
                         pattern, r"- [x]\1", content, flags=re.IGNORECASE
                     )
                     updates_made.append(f"Completed: {task_desc[:50]}...")
+
+        # Diff post-transform: any number that was [ ] before and is [x]
+        # now is a real transition. This catches edits regardless of how
+        # the caller phrased ``completed_tasks`` (description, fragment,
+        # etc.) and ignores items that were already checked beforehand.
+        post_checked = {
+            item.number for item in parse_tasks_md(content) if item.checked
+        }
+        completed_numbers_seen.extend(sorted(pre_unchecked & post_checked))
 
         # Add new tasks (before Phase 2/Validation section)
         if new_tasks:
@@ -500,6 +520,7 @@ def update_tasks_file(
         "file": str(path),
         "updates_made": updates_made,
         "progress": progress.model_dump() if progress else None,
+        "completed_numbers": completed_numbers_seen,
     }
 
 

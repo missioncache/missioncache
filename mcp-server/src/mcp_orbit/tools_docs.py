@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import orbit
+from . import active_task, orbit
 from .app import mcp
 from .config import settings
 from .db import get_db
@@ -243,9 +243,30 @@ async def update_tasks_file(
             notes=notes,
         )
 
+        # Auto-clear active-task pointers for any items just transitioned
+        # to [x]. Without this, the statusline keeps rendering Task: <foo>
+        # after the user (or Claude via update_tasks_file) finished it.
+        # Project name is the prefix of <name>-tasks.md; legacy unprefixed
+        # tasks.md files yield None and skip the sweep (the parent-dir-name
+        # fallback would be unsafe for renamed projects).
+        completed_numbers = result.get("completed_numbers") or []
+        tasks_path_name = Path(tasks_file).name
+        project_name = (
+            tasks_path_name[: -len("-tasks.md")]
+            if tasks_path_name.endswith("-tasks.md")
+            and tasks_path_name != "-tasks.md"
+            else None
+        )
+        cleared_sessions: list[str] = []
+        if project_name and completed_numbers:
+            cleared_sessions = active_task.remove_task_numbers_everywhere(
+                project_name, completed_numbers
+            )
+
         return {
             "success": True,
             **result,
+            "active_pointers_cleared_for_sessions": cleared_sessions,
         }
 
     except OrbitError as e:

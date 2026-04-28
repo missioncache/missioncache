@@ -556,36 +556,139 @@ def _parse_task_progress(tasks_content: str) -> str:
     return f"[{completed}/{total}]"
 
 
-def _get_active_task(session_id: str) -> str:
-    """Return the in-progress task for this Claude Code session.
+def _read_active_task_pointer(session_id: str) -> dict | None:
+    """Return the orbit active-task pointer for this session, or None.
 
-    Reads ``~/.claude/tasks/<session-id>/*.json`` - the directory Claude Code
-    maintains as its session task list. Each file is one task with the
-    schema ``{id, subject, activeForm, status, blocks, blockedBy}``. We pick
-    the first task with ``status == "in_progress"`` and prefer ``activeForm``
-    ("Running tests") over ``subject`` ("Run tests") because the former reads
-    naturally as a status field. Returns "" when no in-progress task exists.
+    The pointer is written by the ``set_active_orbit_tasks`` MCP tool when
+    a caller (Claude in interactive use, or any other MCP client) declares
+    which orbit checklist task numbers are currently in progress. Lives at
+    ``~/.claude/hooks/state/active-orbit-task/<session-id>.json``.
 
-    Reading Claude Code's internal directory layout is fragile - if upstream
-    renames or restructures it the field stops rendering until we adapt. The
-    hook+bridge alternative was strictly more code for the same fragility
-    surface (PostToolUse routing, tool-name matching).
+    Replaces the previous read of Claude Code's internal TodoList
+    (``~/.claude/tasks/<sid>/*.json``) which duplicated information Claude
+    already prints in chat - the statusline ``Task:`` field added zero
+    value above what was already on screen.
     """
     if not session_id:
-        return ""
-    tasks_dir = Path.home() / ".claude" / "tasks" / session_id
+        return None
+    path = (
+        Path.home()
+        / ".claude"
+        / "hooks"
+        / "state"
+        / "active-orbit-task"
+        / f"{session_id}.json"
+    )
     try:
-        files = sorted(tasks_dir.glob("*.json"))
-    except OSError:
-        return ""
-    for f in files:
-        try:
-            data = json.loads(f.read_text())
-        except (OSError, json.JSONDecodeError):
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+# Match a checklist line. Mirrors mcp_orbit.tasks_parse._CHECKLIST_RE but
+# duplicated here so the statusline stays free of any mcp_orbit dependency.
+# Captures (1) checked? marker, (2) number, (3) trailing text.
+_CHECKLIST_RE = re.compile(
+    r"^\s*[-*]\s*\[\s*([xX ])\s*\]\s*([0-9]+(?:[.][0-9]+)*[a-z]?)\s*\.\s*(.*?)\s*$"
+)
+
+
+def _items_from_tasks_content(tasks_content: str) -> dict[str, tuple[bool, str]]:
+    """Index a tasks.md body by checklist number.
+
+    Returns ``{number: (checked, text)}`` for every line matching the
+    checklist pattern. Used to look up the descriptive text that the
+    statusline renders next to each active task number.
+    """
+    out: dict[str, tuple[bool, str]] = {}
+    for line in tasks_content.splitlines():
+        m = _CHECKLIST_RE.match(line)
+        if not m:
             continue
-        if data.get("status") == "in_progress":
-            return data.get("activeForm") or data.get("subject") or ""
-    return ""
+        out[m.group(2)] = (m.group(1).lower() == "x", m.group(3))
+    return out
+
+
+def _common_parent(numbers: list[str]) -> str | None:
+    """Return the parent number all entries collapse to, else None.
+
+    ``["54a", "54b", "54c"]`` -> ``"54"``. ``["54a", "56"]`` -> None
+    (no common reduction). Single-element or empty inputs return None
+    because there's nothing to collapse.
+    """
+    if len(numbers) < 2:
+        return None
+    parents: set[str | None] = set()
+    for n in numbers:
+        if n and n[-1].isalpha() and n[-1].islower():
+            parents.add(n[:-1])
+        elif "." in n:
+            parents.add(n.rsplit(".", 1)[0])
+        else:
+            parents.add(None)
+    if len(parents) != 1:
+        return None
+    return next(iter(parents))
+
+
+def _format_active_task(
+    pointer: dict | None, tasks_content: str, current_project: str
+) -> str:
+    """Build the ``Task:`` field text from a pointer + tasks.md body.
+
+    Display rules (from the design discussion):
+      - 0 active or pointer missing -> ``""`` (caller hides the field)
+      - 1 active                    -> ``"54a. <text>"``
+      - 2-3 sharing parent          -> ``"<parent text> (N active)"``
+      - 2-3 not sharing parent      -> ``"54a, 56, 57"``
+      - 4+                          -> ``"54a, 56, 57 (+N)"``
+
+    Pointers are keyed by session id alone, so when a session switches
+    projects mid-flight ``pointer["project_name"]`` may name the prior
+    project. Suppress the field unless the pointer matches
+    ``current_project`` to avoid rendering the prior project's task
+    numbers against the new project's tasks.md.
+    """
+    if not pointer:
+        return ""
+    numbers = pointer.get("task_numbers") or []
+    if not numbers:
+        return ""
+    if pointer.get("project_name") != current_project:
+        return ""
+
+    items = _items_from_tasks_content(tasks_content)
+
+    if len(numbers) == 1:
+        n = numbers[0]
+        text = items.get(n, (False, ""))[1]
+        return f"{n}. {text}" if text else n
+
+    parent = _common_parent(numbers)
+    if parent is not None and parent in items:
+        parent_text = items[parent][1]
+        return f"{parent_text} ({len(numbers)} active)"
+
+    if len(numbers) <= 3:
+        return ", ".join(numbers)
+
+    head = ", ".join(numbers[:3])
+    return f"{head} (+{len(numbers) - 3})"
+
+
+def _get_active_task(
+    session_id: str, tasks_content: str, current_project: str
+) -> str:
+    """Return the orbit Task field text for the statusline, or "".
+
+    Composes ``_read_active_task_pointer`` and ``_format_active_task``;
+    kept as a single seam so callers (and tests) can mock either layer.
+    ``current_project`` scopes the pointer match - see the
+    ``_format_active_task`` docstring for the cross-project rationale.
+    """
+    return _format_active_task(
+        _read_active_task_pointer(session_id), tasks_content, current_project
+    )
 
 
 def _read_tasks_content(project_dir: Path, project_name: str) -> str:
@@ -639,13 +742,15 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     project_dir = nested
                     break
 
-    # Active task comes from the active_task_tracker hook, NOT from a
-    # heuristic over tasks.md. Falling back to "first pending checklist
-    # item" misled users into thinking Claude was working on something it
-    # was not. Show only what we can verify; otherwise hide the field.
-    current_task = _get_active_task(session_id)
-
+    # Active task is read from the orbit active-task pointer set by the
+    # set_active_orbit_tasks MCP tool. Falling back to "first pending
+    # checklist item" or to Claude Code's internal TodoList both proved
+    # misleading - the first lied, the second duplicated information
+    # Claude already prints in chat. Show only what we can verify;
+    # otherwise hide the field.
     tasks_content = _read_tasks_content(project_dir, name)
+    current_task = _get_active_task(session_id, tasks_content, current_project=name)
+
     if not tasks_content:
         return ProjectInfo(name, display, "", current_task)
     progress = f" {_parse_task_progress(tasks_content)}"

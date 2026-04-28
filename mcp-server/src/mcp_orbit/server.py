@@ -17,6 +17,7 @@ from . import tools_docs  # noqa: F401
 from . import tools_tracking  # noqa: F401
 from . import tools_iteration  # noqa: F401
 from . import tools_planning  # noqa: F401
+from . import tools_active  # noqa: F401
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

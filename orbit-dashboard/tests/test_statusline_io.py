@@ -143,113 +143,174 @@ class TestReadTasksContent:
         assert mod._read_tasks_content(project_dir, "weird") == ""
 
 
-# ── _get_active_task (reads Claude Code's ~/.claude/tasks/<session>/) ────
+# ── _get_active_task (reads orbit active-task pointer) ────
 
 
 class TestGetActiveTask:
-    """Reads Claude Code's per-session task list from ~/.claude/tasks/.
+    """Reads ``~/.claude/hooks/state/active-orbit-task/<session>.json``.
 
-    Each task is a separate JSON file under the session directory. Statusline
-    picks the first task with status='in_progress' and prefers activeForm
-    over subject for natural-sounding spinner-style display.
+    The pointer is written by the ``set_active_orbit_tasks`` MCP tool and
+    holds the orbit checklist task numbers currently in progress. The
+    statusline composes ``_read_active_task_pointer`` and
+    ``_format_active_task`` via ``_get_active_task``; tests cover both the
+    raw pointer read and the per-shape display formatting.
     """
 
-    def _write_task(
-        self,
-        tmp_path,
-        session_id,
-        task_id,
-        status,
-        subject="task subject",
-        active_form=None,
+    PROJECT = "orbit-public-release"
+    TASKS_MD = (
+        "- [ ] 8. Draft Show HN post\n"
+        "- [ ] 54. M11.2 - Per-tool hooks tracker\n"
+        "  - [ ] 54a. M11.2 - VSCode statusline extension\n"
+        "  - [ ] 54b. M11.2 - OpenCode TS plugin\n"
+        "  - [ ] 54c. M11.2 - Codex hooks\n"
+        "- [ ] 56. Verify data-preservation contract\n"
+        "- [ ] 57. macOS dashboard-as-app opt-in\n"
+    )
+
+    def _write_pointer(
+        self, tmp_path, session_id, project_name, task_numbers
     ):
-        task_dir = tmp_path / ".claude" / "tasks" / session_id
-        task_dir.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "id": task_id,
-            "subject": subject,
-            "status": status,
-            "blocks": [],
-            "blockedBy": [],
-        }
-        if active_form is not None:
-            payload["activeForm"] = active_form
-        (task_dir / f"{task_id}.json").write_text(json.dumps(payload))
-
-    def test_returns_active_form_when_in_progress(self, tmp_path, monkeypatch):
-        """activeForm wins over subject when both are present."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_task(
-            tmp_path, "sess-1", "1", "in_progress",
-            subject="Fix the auth bug", active_form="Fixing the auth bug"
+        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task"
+        pdir.mkdir(parents=True, exist_ok=True)
+        (pdir / f"{session_id}.json").write_text(
+            json.dumps(
+                {
+                    "project_name": project_name,
+                    "task_numbers": task_numbers,
+                    "updated": "2026-04-28T00:00:00+00:00",
+                }
+            )
         )
 
-        assert mod._get_active_task("sess-1") == "Fixing the auth bug"
-
-    def test_falls_back_to_subject_without_active_form(self, tmp_path, monkeypatch):
-        """When activeForm is absent, subject is returned."""
+    def test_single_task_renders_number_and_text(self, tmp_path, monkeypatch):
+        """One active task: ``<number>. <text>``."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_task(
-            tmp_path, "sess-2", "1", "in_progress",
-            subject="Fix the auth bug", active_form=None
+        self._write_pointer(tmp_path, "sess-1", self.PROJECT, ["54a"])
+
+        assert mod._get_active_task("sess-1", self.TASKS_MD, self.PROJECT) == (
+            "54a. M11.2 - VSCode statusline extension"
         )
 
-        assert mod._get_active_task("sess-2") == "Fix the auth bug"
+    def test_unknown_number_falls_back_to_just_number(self, tmp_path, monkeypatch):
+        """Pointer references a number not in tasks.md -> render bare number.
 
-    def test_skips_pending_and_completed_tasks(self, tmp_path, monkeypatch):
-        """Only in_progress tasks count. Completed and pending are ignored."""
+        Defensive: if tasks.md was edited and the pointer wasn't refreshed, we
+        still surface SOMETHING rather than hide the field. Caller can fix
+        the pointer via ``set_active_orbit_tasks`` or ``clear_active_orbit_tasks``.
+        """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_task(tmp_path, "sess-3", "1", "completed", subject="finished")
-        self._write_task(tmp_path, "sess-3", "2", "pending", subject="not started")
-        self._write_task(
-            tmp_path, "sess-3", "3", "in_progress", subject="active one"
+        self._write_pointer(tmp_path, "sess-2", self.PROJECT, ["999"])
+
+        assert mod._get_active_task("sess-2", self.TASKS_MD, self.PROJECT) == "999"
+
+    def test_three_siblings_collapse_to_parent_text(self, tmp_path, monkeypatch):
+        """``["54a","54b","54c"]`` collapses to parent 54's text + count."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(
+            tmp_path, "sess-3", self.PROJECT, ["54a", "54b", "54c"]
         )
 
-        assert mod._get_active_task("sess-3") == "active one"
-
-    def test_returns_empty_when_no_in_progress(self, tmp_path, monkeypatch):
-        """Tasks exist but none in_progress -> empty."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_task(tmp_path, "sess-4", "1", "completed")
-        self._write_task(tmp_path, "sess-4", "2", "pending")
-
-        assert mod._get_active_task("sess-4") == ""
-
-    def test_returns_empty_for_missing_session_id(self, tmp_path, monkeypatch):
-        """Empty session_id short-circuits to empty without touching disk."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        assert mod._get_active_task("") == ""
-
-    def test_returns_empty_when_session_dir_missing(self, tmp_path, monkeypatch):
-        """No session dir means no tasks."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        assert mod._get_active_task("never-recorded-session") == ""
-
-    def test_corrupt_json_in_one_file_does_not_break_others(
-        self, tmp_path, monkeypatch
-    ):
-        """A malformed task file is skipped; remaining tasks still scanned."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        task_dir = tmp_path / ".claude" / "tasks" / "sess-5"
-        task_dir.mkdir(parents=True)
-        (task_dir / "1.json").write_text("not valid json")
-        self._write_task(
-            tmp_path, "sess-5", "2", "in_progress", subject="real one"
+        assert mod._get_active_task("sess-3", self.TASKS_MD, self.PROJECT) == (
+            "M11.2 - Per-tool hooks tracker (3 active)"
         )
 
-        assert mod._get_active_task("sess-5") == "real one"
+    def test_two_siblings_collapse_to_parent_text(self, tmp_path, monkeypatch):
+        """Boundary case: 2 siblings sharing a parent collapse the same way as 3."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(tmp_path, "sess-3b", self.PROJECT, ["54a", "54b"])
+
+        assert mod._get_active_task("sess-3b", self.TASKS_MD, self.PROJECT) == (
+            "M11.2 - Per-tool hooks tracker (2 active)"
+        )
+
+    def test_two_unrelated_tasks_render_as_number_list(self, tmp_path, monkeypatch):
+        """No common parent -> comma-separated numbers."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(tmp_path, "sess-4", self.PROJECT, ["54a", "56"])
+
+        assert mod._get_active_task("sess-4", self.TASKS_MD, self.PROJECT) == (
+            "54a, 56"
+        )
+
+    def test_three_unrelated_tasks_render_as_number_list(self, tmp_path, monkeypatch):
+        """Three with no common parent -> all three as a comma list."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(tmp_path, "sess-5", self.PROJECT, ["54a", "56", "57"])
+
+        assert mod._get_active_task("sess-5", self.TASKS_MD, self.PROJECT) == (
+            "54a, 56, 57"
+        )
+
+    def test_four_plus_truncates_with_overflow_count(self, tmp_path, monkeypatch):
+        """4+ active -> first 3 + ``(+N)``."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(
+            tmp_path, "sess-6", self.PROJECT, ["54a", "56", "57", "8"]
+        )
+
+        assert mod._get_active_task("sess-6", self.TASKS_MD, self.PROJECT) == (
+            "54a, 56, 57 (+1)"
+        )
+
+    def test_empty_pointer_hides_field(self, tmp_path, monkeypatch):
+        """Pointer file with empty task_numbers -> ``""`` so caller hides field."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        self._write_pointer(tmp_path, "sess-7", self.PROJECT, [])
+
+        assert mod._get_active_task("sess-7", self.TASKS_MD, self.PROJECT) == ""
+
+    def test_missing_pointer_hides_field(self, tmp_path, monkeypatch):
+        """No pointer file -> ``""``."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        assert mod._get_active_task("never-set", self.TASKS_MD, self.PROJECT) == ""
+
+    def test_empty_session_id_short_circuits(self, tmp_path, monkeypatch):
+        """Empty session id never touches disk."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        assert mod._get_active_task("", self.TASKS_MD, self.PROJECT) == ""
+
+    def test_corrupt_pointer_json_hides_field(self, tmp_path, monkeypatch):
+        """Malformed pointer JSON is treated as missing, not crashed on."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task"
+        pdir.mkdir(parents=True)
+        (pdir / "sess-8.json").write_text("not valid json")
+
+        assert mod._get_active_task("sess-8", self.TASKS_MD, self.PROJECT) == ""
 
     def test_per_session_isolation(self, tmp_path, monkeypatch):
-        """Each session's read sees only its own directory."""
+        """Concurrent sessions don't see each other's pointer."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_task(
-            tmp_path, "sess-A", "1", "in_progress", subject="A's work"
+        self._write_pointer(tmp_path, "sess-A", self.PROJECT, ["54a"])
+        self._write_pointer(tmp_path, "sess-B", self.PROJECT, ["56"])
+
+        assert mod._get_active_task("sess-A", self.TASKS_MD, self.PROJECT) == (
+            "54a. M11.2 - VSCode statusline extension"
         )
-        self._write_task(
-            tmp_path, "sess-B", "1", "in_progress", subject="B's work"
+        assert mod._get_active_task("sess-B", self.TASKS_MD, self.PROJECT) == (
+            "56. Verify data-preservation contract"
         )
 
-        assert mod._get_active_task("sess-A") == "A's work"
-        assert mod._get_active_task("sess-B") == "B's work"
+    def test_pointer_from_other_project_is_suppressed(self, tmp_path, monkeypatch):
+        """Switching projects in the same session must not render the prior
+        project's task numbers against the new project's tasks.md.
+
+        Pointers are keyed by session_id alone. Without a project_name guard,
+        the prior project's task_numbers would be looked up in the new
+        project's tasks.md - showing the wrong line's text if the number
+        coincidentally exists, or a bare misleading number if it doesn't.
+        """
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        # Pointer says we're working on 54a in project-a.
+        self._write_pointer(tmp_path, "sess-X", "project-a", ["54a"])
+
+        # Now the session is rendering for project-b (same TASKS_MD body, but
+        # the project context differs). The Task field must hide.
+        assert mod._get_active_task("sess-X", self.TASKS_MD, "project-b") == ""
+
+        # Sanity check: passing the matching project_name still renders.
+        assert mod._get_active_task("sess-X", self.TASKS_MD, "project-a") == (
+            "54a. M11.2 - VSCode statusline extension"
+        )

@@ -231,6 +231,32 @@ Then record initial heartbeat:
 mcp__plugin_orbit_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ```
 
+### Step 5: Track the Active Checklist Task (when known)
+
+If the user signals which orbit checklist task they want to work on
+(either by number like "let's do 54a" or by description that matches a
+``[ ]`` line in tasks.md), call ``set_active_orbit_tasks`` so the
+statusline ``Task:`` field reflects the current focus.
+
+```
+mcp__plugin_orbit_pm__set_active_orbit_tasks(
+    project_name="<project-name>",
+    task_numbers=["54a"],          # or ["56", "57"] for parallel work
+    session_id="<SESSION_ID from Step 4>"
+)
+```
+
+Pass MULTIPLE numbers when the user is genuinely working on multiple
+items in parallel (e.g. ``["54a", "54b"]``). The statusline collapses
+sibling subtasks under their parent automatically. Pointer auto-clears
+on ``update_tasks_file`` when items get marked ``[x]``; call
+``clear_active_orbit_tasks`` explicitly when focus shifts off-task
+without completing anything.
+
+If the user resumes without naming a specific task, skip this step -
+the field hides cleanly. Do NOT guess or use the first ``[ ]`` line as
+a fallback; misleading data is worse than missing data.
+
 ## Example Output
 
 ### Selection Table
@@ -289,3 +315,5 @@ Ready to continue. What would you like to work on?
 | `mcp__plugin_orbit_pm__get_orbit_progress` | Get checklist progress |
 | `mcp__plugin_orbit_pm__record_heartbeat` | Start time tracking |
 | `mcp__plugin_orbit_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
+| `mcp__plugin_orbit_pm__set_active_orbit_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
+| `mcp__plugin_orbit_pm__clear_active_orbit_tasks` | Clear the Task field when focus shifts off-task without completing |

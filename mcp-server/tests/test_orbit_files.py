@@ -396,6 +396,52 @@ class TestUpdateTasksFile:
         assert progress["completed_items"] == 3
         assert progress["total_items"] == 5
 
+    def test_returns_completed_numbers_for_transitions(
+        self, tmp_path, sample_tasks_md
+    ):
+        """Newly-checked items are reported as their numbers in ``completed_numbers``."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(
+            str(tasks_file),
+            completed_tasks=["Implement core logic"],
+        )
+
+        # Item "3. Implement core logic" was [ ] before, [x] after -> reported.
+        assert result["completed_numbers"] == ["3"]
+
+    def test_completed_numbers_excludes_already_checked(
+        self, tmp_path, sample_tasks_md
+    ):
+        """Items already ``[x]`` before the call don't appear in completed_numbers.
+
+        The pre/post diff gates membership so callers only see real
+        transitions. Without this guarantee, the auto-clear hook would
+        spuriously remove pointers for tasks that were already done.
+        """
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        # "Set up project structure" is item 1, already [x] in the fixture.
+        result = update_tasks_file(
+            str(tasks_file),
+            completed_tasks=["Set up project structure"],
+        )
+        assert result["completed_numbers"] == []
+
+    def test_no_completed_tasks_arg_yields_empty_completed_numbers(
+        self, tmp_path, sample_tasks_md
+    ):
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(
+            str(tasks_file),
+            notes=["just a note"],
+        )
+        assert result["completed_numbers"] == []
+
 
 # ── atomic write semantics (MAJOR-12) ────────────────────────────────────
 
