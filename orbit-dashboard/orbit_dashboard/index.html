@@ -5513,13 +5513,24 @@
             const services = Array.from(document.querySelectorAll('[data-statusline-service]'))
                 .filter(cb => cb.checked)
                 .map(cb => cb.value);
-            await saveSettingsSection('/api/settings/statusline', {
-                codex: document.getElementById('statuslineToggleCodex').checked,
-                subscription_usage: document.getElementById('statuslineToggleSubUsage').checked,
-                subscription_type: document.getElementById('statuslineToggleSubType').checked,
-                claude_status: document.getElementById('statuslineToggleStatus').checked,
-                claude_status_services: services,
-            }, 'statuslineSaveStatus');
+            // The statusline runs as a fresh subprocess on each prompt render,
+            // so config changes apply on the next prompt rather than instantly.
+            // The other Settings sections (JIRA, emails, repos) are read live
+            // by the dashboard API and don't carry the same lag, which is why
+            // only this section gets the explanatory message.
+            await saveSettingsSection(
+                '/api/settings/statusline',
+                {
+                    codex: document.getElementById('statuslineToggleCodex').checked,
+                    subscription_usage: document.getElementById('statuslineToggleSubUsage').checked,
+                    subscription_type: document.getElementById('statuslineToggleSubType').checked,
+                    claude_status: document.getElementById('statuslineToggleStatus').checked,
+                    claude_status_services: services,
+                },
+                'statuslineSaveStatus',
+                'Saved - applies on your next prompt in Claude',
+                4500,
+            );
         }
 
         async function ensureJiraUrlsLoaded() {
@@ -5688,7 +5699,8 @@
             await saveSettingsSection('/api/settings/repos', { repos: overrides }, 'repoSaveStatus');
         }
 
-        async function saveSettingsSection(endpoint, body, statusElId) {
+        async function saveSettingsSection(endpoint, body, statusElId,
+                                           successMessage = 'Saved', clearMs = 2500) {
             const status = document.getElementById(statusElId);
             status.textContent = 'Saving...';
             status.className = 'settings-save-status';
@@ -5699,9 +5711,9 @@
                     body: JSON.stringify(body),
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                status.textContent = 'Saved';
+                status.textContent = successMessage;
                 status.className = 'settings-save-status success';
-                setTimeout(() => { status.textContent = ''; }, 2500);
+                setTimeout(() => { status.textContent = ''; }, clearMs);
             } catch (err) {
                 status.textContent = `Error: ${err.message}`;
                 status.className = 'settings-save-status error';
