@@ -22,22 +22,22 @@ class TestValidateTaskName:
 
     def test_uppercase_rejected(self):
         """Uppercase letters are rejected."""
-        with pytest.raises(ValidationError, match="lowercase alphanumeric"):
+        with pytest.raises(ValidationError, match="lowercase letters"):
             validate_task_name("My-Task")
 
     def test_spaces_rejected(self):
         """Spaces in name are rejected."""
-        with pytest.raises(ValidationError, match="lowercase alphanumeric"):
+        with pytest.raises(ValidationError, match="lowercase letters"):
             validate_task_name("my task")
 
     def test_empty_rejected(self):
         """Empty string is rejected."""
-        with pytest.raises(ValidationError, match="lowercase alphanumeric"):
+        with pytest.raises(ValidationError, match="cannot be empty"):
             validate_task_name("")
 
     def test_starts_with_hyphen_rejected(self):
         """Name starting with hyphen is rejected."""
-        with pytest.raises(ValidationError, match="lowercase alphanumeric"):
+        with pytest.raises(ValidationError, match="must start with a letter or digit"):
             validate_task_name("-my-task")
 
 

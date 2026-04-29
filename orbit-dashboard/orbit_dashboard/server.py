@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import importlib.resources
 import json
+import logging
 import os
 import re
 
@@ -47,7 +48,14 @@ from orbit_dashboard.lib.analytics_db import (
 )
 
 # Import SQLite OrbitDB for auto execution queries (these tables are only in SQLite)
-from orbit_db import TaskDB as OrbitTaskDB, AutoExecution, AutoExecutionLog
+from orbit_db import (
+    AutoExecution,
+    AutoExecutionLog,
+    AutoRunActiveError,
+    FilesystemCollisionError,
+    NameCollisionError,
+    TaskDB as OrbitTaskDB,
+)
 
 
 def get_sqlite_db() -> OrbitTaskDB:
@@ -183,6 +191,8 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Orbit Dashboard", version="2.0.0", lifespan=lifespan)
 
@@ -2689,6 +2699,80 @@ async def hook_task_created(body: dict):
     except Exception:
         pass
     return {}
+
+
+@app.post("/api/tasks/{task_id}/rename")
+async def rename_task_endpoint(task_id: int, body: dict):
+    """Rename a project / task.
+
+    Delegates to ``orbit_db.TaskDB.rename_task`` (the source-of-truth
+    primitive) and triggers a SQLite -> DuckDB sync so the dashboard's
+    read endpoints reflect the new name immediately on the next call.
+
+    Body: ``{"new_name": "..."}``. Server-side normalization (trim +
+    lowercase) and validation always run, regardless of any client-side
+    pre-check, so tampering with the frontend can't bypass the rule.
+    Errors return JSON ``{"error": True, "code": "...", "message": "..."}``
+    with an appropriate HTTP status code.
+    """
+    new_name = body.get("new_name") if isinstance(body, dict) else None
+    if not isinstance(new_name, str):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Missing 'new_name' string in request body.",
+            },
+        )
+
+    sqlite_db = get_sqlite_db()
+    task = sqlite_db.get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "TASK_NOT_FOUND",
+                "message": f"No project found with id {task_id}.",
+            },
+        )
+
+    try:
+        result = sqlite_db.rename_task(task_id, new_name)
+    except (NameCollisionError, FilesystemCollisionError) as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": True, "code": "ALREADY_EXISTS", "message": str(e)},
+        )
+    except AutoRunActiveError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": True, "code": "INVALID_STATE", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": True, "code": "VALIDATION_ERROR", "message": str(e)},
+        )
+
+    # Refresh the DuckDB-backed read path so /api/tasks/active reflects
+    # the new name without waiting for the periodic sync. Failures are
+    # logged AND surfaced as a warning in the response so the caller can
+    # tell the dashboard list will be stale until the next periodic sync.
+    warnings = list(result.get("warnings", []))
+    try:
+        get_db().sync_from_sqlite()
+    except Exception as e:
+        logger.warning("DuckDB sync after rename failed: %s", e)
+        warnings.append(
+            f"Dashboard list refresh failed ({type(e).__name__}); "
+            "the new name will appear on the next periodic sync."
+        )
+
+    response = {"success": True, "task_id": task_id, **result}
+    response["warnings"] = warnings
+    return response
 
 
 

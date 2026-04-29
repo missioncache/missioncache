@@ -10,12 +10,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from orbit_db import validate_task_name as _orbit_db_validate_task_name
+
 from .config import settings
 from .errors import ErrorCode, OrbitError, OrbitFileNotFoundError, ValidationError
 from .models import OrbitFiles, TaskProgress
 from .tasks_parse import parse_tasks_md
-
-_TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 # NOTE: ``_file_lock`` and ``_atomic_update_text`` below are duplicated in
@@ -62,13 +62,17 @@ def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
 def validate_task_name(name: str) -> None:
     """Validate task name is safe for filesystem and git branch use.
 
-    Raises ValidationError if name contains unsafe characters.
+    Delegates to ``orbit_db.validate_task_name`` (the single source of
+    truth for the regex and per-branch error messages) and re-raises
+    its ``ValueError`` as the structured ``ValidationError`` that mcp
+    callers and tests already expect. Keeping the wrap thin here means
+    a future tightening of the rule lands in one place (orbit-db) and
+    propagates to every surface.
     """
-    if not name or not _TASK_NAME_RE.match(name):
-        raise ValidationError(
-            "Task name must be lowercase alphanumeric with hyphens (e.g. 'my-task-1')",
-            field="task_name",
-        )
+    try:
+        _orbit_db_validate_task_name(name)
+    except ValueError as e:
+        raise ValidationError(str(e), field="task_name") from e
 
 
 def get_timestamp() -> str:

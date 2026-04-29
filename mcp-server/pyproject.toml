@@ -1,6 +1,6 @@
 [project]
 name = "mcp-orbit"
-version = "0.2.8"
+version = "0.2.9"
 description = "MCP server for the orbit Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "orbit-db>=1.0.0",
+    "orbit-db>=1.0.2",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

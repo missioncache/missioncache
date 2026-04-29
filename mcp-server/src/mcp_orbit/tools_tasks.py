@@ -6,11 +6,23 @@ from typing import Annotated
 
 from pydantic import Field
 
+from orbit_db import (
+    AutoRunActiveError,
+    FilesystemCollisionError,
+    NameCollisionError,
+)
+
 from . import orbit
 from .app import mcp
 from .config import settings
 from .db import get_db
-from .errors import OrbitError, InvalidStateError, TaskNotFoundError
+from .errors import (
+    ErrorCode,
+    InvalidStateError,
+    OrbitError,
+    TaskNotFoundError,
+    ValidationError,
+)
 from .helpers import (
     _notify_dashboard_task_created,
     _task_to_detail,
@@ -21,6 +33,7 @@ from .models import (
     CompleteTaskResult,
     CreateTaskResult,
     ListTasksResult,
+    RenameTaskResult,
     ReopenTaskResult,
 )
 
@@ -543,6 +556,92 @@ async def reopen_task(
         return e.to_dict()
     except Exception as e:
         logger.exception("Error reopening task")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def rename_task(
+    new_name: Annotated[
+        str, Field(description="New project name (kebab-case, e.g. 'my-project')")
+    ],
+    task_id: Annotated[int | None, Field(description="Task ID")] = None,
+    project_name: Annotated[
+        str | None, Field(description="Current project name (alternative to ID)")
+    ] = None,
+) -> dict:
+    """
+    Rename a project / task.
+
+    Updates the DB row, moves the orbit directory, renames files inside,
+    and rewrites template H1 titles. Time tracking, heartbeats, sessions,
+    and JIRA links survive because they're keyed by task_id (integer FK),
+    not by name.
+
+    Inputs are normalized (trim + lowercase) before validation. The
+    response always reports the canonical stored name in ``name`` -
+    callers should display that, not the user-typed input. The
+    ``normalized`` flag tells callers whether normalization changed the
+    input so they can prefix their confirmation accordingly.
+
+    Provide either task_id OR project_name to identify the project to
+    rename.
+
+    Refuses to rename when:
+    - Another project in the same repo has the target name (ALREADY_EXISTS)
+    - The target orbit directory already exists on disk (ALREADY_EXISTS)
+    - An orbit-auto run is in progress on the project (INVALID_STATE)
+    - The task is a subtask (VALIDATION_ERROR; rename the parent instead)
+    """
+    db = get_db()
+
+    try:
+        if task_id:
+            task = db.get_task(task_id)
+        elif project_name:
+            task = db.get_task_by_name(project_name)
+        else:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Provide task_id or project_name",
+            }
+
+        if not task:
+            raise TaskNotFoundError(task_id or project_name)
+
+        try:
+            result = db.rename_task(task.id, new_name)
+        except NameCollisionError as e:
+            raise OrbitError(ErrorCode.ALREADY_EXISTS, str(e))
+        except FilesystemCollisionError as e:
+            raise OrbitError(ErrorCode.ALREADY_EXISTS, str(e))
+        except AutoRunActiveError as e:
+            raise InvalidStateError(str(e), current_state="auto-running")
+        except ValueError as e:
+            # Validation, missing task, subtask refusal, unexpected
+            # full_path - all surface as VALIDATION_ERROR with the
+            # original message.
+            raise ValidationError(str(e), field="new_name")
+
+        return RenameTaskResult(
+            success=result["success"],
+            changed=result["changed"],
+            task_id=task.id,
+            name=result["name"],
+            old_name=result["old_name"],
+            normalized=result["normalized"],
+            full_path=result["full_path"],
+            files_renamed=result["files_renamed"],
+            h1_rewritten=result["h1_rewritten"],
+            h1_skipped=result["h1_skipped"],
+            sessions_updated=result["sessions_updated"],
+            warnings=result.get("warnings", []),
+        ).model_dump()
+
+    except OrbitError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error renaming task")
         return {"error": True, "message": str(e)}
 
 

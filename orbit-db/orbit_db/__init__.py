@@ -19,6 +19,7 @@ Usage:
     python orbit_db.py prune [days]              # Prune old completed tasks
     python orbit_db.py complete-task <task_id>   # Mark task as completed
     python orbit_db.py reopen-task <task_id>     # Reopen a completed task
+    python orbit_db.py rename-task <old-name> <new-name>  # Rename a project
     python orbit_db.py list-completed [days]     # List recently completed tasks
     python orbit_db.py get-task-by-name <name>   # Find task by name
 
@@ -42,6 +43,7 @@ Cleanup:
 """
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -53,6 +55,8 @@ from enum import Enum
 from glob import glob as glob_files
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -74,6 +78,50 @@ class OrbitMigrationRequired(RuntimeError):
     user-friendly migration message; subclasses RuntimeError so existing
     `except Exception` handlers in hooks catch it cleanly (unlike SystemExit
     which is BaseException and would escape `except Exception`)."""
+
+
+class RenameError(ValueError):
+    """Base class for rename_task failures other than basic ValidationError.
+
+    Subclasses are catchable by name in callers (CLI, MCP tool, dashboard
+    endpoint) to surface specific user-facing messages.
+    """
+
+
+class NameCollisionError(RenameError):
+    """Another task in the same repo already has the target name."""
+
+
+class FilesystemCollisionError(RenameError):
+    """The target orbit directory already exists on disk."""
+
+
+class AutoRunActiveError(RenameError):
+    """An orbit-auto run is currently in progress on this task."""
+
+
+_TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def validate_task_name(name: str) -> None:
+    """Validate a project / task name for filesystem and DB safety.
+
+    Mirrors ``mcp_orbit.orbit.validate_task_name`` exactly so the same
+    inputs are accepted/rejected on every surface (CLI, MCP, dashboard).
+    The check is split into three branches so each failure mode gets a
+    specific user-facing message.
+    """
+    if not name:
+        raise ValueError("Project name cannot be empty.")
+    if name.startswith("-"):
+        raise ValueError(
+            "Project name must start with a letter or digit, not a hyphen."
+        )
+    if not _TASK_NAME_RE.match(name):
+        raise ValueError(
+            "Project name must use lowercase letters, digits, and hyphens "
+            "only (e.g., 'my-project')."
+        )
 
 
 def _check_legacy_paths() -> None:
@@ -1256,6 +1304,362 @@ class TaskDB:
             conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (status, task_id))
             conn.commit()
         return self.get_task(task_id)
+
+    def rename_task(self, task_id: int, new_name: str) -> Dict[str, Any]:
+        """Rename a project: update DB row, move directory, rename files, rewrite H1s.
+
+        Inputs are normalized (trim + lowercase) before validation. The
+        response always reports the canonical stored name in ``name``;
+        callers should display that, not the user-typed input. The
+        ``normalized`` flag tells callers whether normalization changed
+        the input so they can prefix their confirmation message.
+
+        Atomicity: every filesystem mutation (outer dir rename, inner
+        file renames, H1 rewrites) is recorded as it happens. If the DB
+        UPDATE fails after FS work succeeded, every recorded mutation is
+        reversed in LIFO order before the original exception propagates.
+        Reversal failures are logged via the module logger and surfaced
+        in the response ``warnings`` list. The pre-flight auto-run guard
+        is re-checked inside the write transaction to tighten the TOCTOU
+        window between the user-facing check and the UPDATE.
+
+        Subtasks (``parent_id is not None``) are out of scope - rename
+        the parent instead.
+
+        Returns:
+            Dict with keys: success, changed, name, old_name, normalized,
+            full_path, files_renamed, h1_rewritten, h1_skipped,
+            sessions_updated, warnings.
+
+        Raises:
+            ValueError: invalid name (after normalization), missing task,
+                subtask, or unexpected full_path shape.
+            NameCollisionError: another task in the same repo has that name.
+            FilesystemCollisionError: target orbit directory already exists.
+            AutoRunActiveError: an orbit-auto run is currently running.
+        """
+        raw_input = new_name
+        new_name = new_name.strip().lower()
+        normalized = new_name != raw_input
+        validate_task_name(new_name)
+
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"No project found with id {task_id}.")
+        if task.parent_id is not None:
+            raise ValueError(
+                "Subtask rename is not supported. Rename the parent project instead."
+            )
+
+        old_name = task.name
+        # No-op short-circuit. Same-name rename returns success cleanly.
+        if new_name == old_name:
+            return {
+                "success": True,
+                "changed": False,
+                "name": new_name,
+                "old_name": old_name,
+                "normalized": normalized,
+                "full_path": task.full_path,
+                "files_renamed": [],
+                "h1_rewritten": [],
+                "h1_skipped": [],
+                "sessions_updated": 0,
+                "warnings": [],
+            }
+
+        # Compute new full_path - same prefix, new name. Splits on the LAST
+        # "/" so any "<prefix>/<name>" shape works (active/, manual/,
+        # global/, dev/active/<repo>/, etc.). Subtasks were already refused.
+        prefix_parts = task.full_path.rsplit("/", 1)
+        if len(prefix_parts) != 2:
+            raise ValueError(
+                f"Unexpected full_path shape: {task.full_path!r}. "
+                f"Expected '<prefix>/<name>'."
+            )
+        prefix = prefix_parts[0]
+        new_full_path = f"{prefix}/{new_name}"
+
+        # Pre-flight checks (DB collision + auto-run guard). Friendly
+        # fast-fail before we touch the filesystem. Re-checked inside
+        # the write transaction below to tighten the TOCTOU window.
+        with self.connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM tasks "
+                "WHERE COALESCE(repo_id, -1) = COALESCE(?, -1) "
+                "  AND full_path = ? AND id != ?",
+                (task.repo_id, new_full_path, task_id),
+            ).fetchone()
+            if existing:
+                raise NameCollisionError(
+                    f"A project named '{new_name}' already exists. "
+                    f"Pick a different name."
+                )
+
+            running = conn.execute(
+                "SELECT id FROM auto_executions "
+                "WHERE task_id = ? AND status = 'running' LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if running:
+                raise AutoRunActiveError(
+                    "Cannot rename while orbit-auto is running on this project. "
+                    "Stop the run and try again."
+                )
+
+        # Filesystem collision pre-check.
+        old_dir = ORBIT_ROOT / task.full_path
+        new_dir = ORBIT_ROOT / new_full_path
+        if new_dir.exists():
+            raise FilesystemCollisionError(
+                f"Directory '{new_dir}' already exists. Pick a different name."
+            )
+
+        files_renamed: List[str] = []
+        h1_rewritten: List[str] = []
+        h1_skipped: List[str] = []
+        # Rollback ledgers - every successful FS mutation is appended
+        # here so the DB-failure rollback can reverse it in LIFO order.
+        renamed_pairs: List[Tuple[Path, Path]] = []  # (current_path, original_path)
+        h1_originals: List[Tuple[Path, str]] = []  # (path, original_content)
+        fs_renamed = False
+
+        # Coding tasks have an on-disk directory; non-coding tasks
+        # (full_path = "global/<name>") do not. Skip FS work in the
+        # latter case - the DB update is enough.
+        if old_dir.exists():
+            # Pre-flight inner-file collision check BEFORE moving the outer
+            # dir. POSIX rename(2) silently overwrites an existing target
+            # file - if the source dir somehow already contains a file with
+            # the new prefix (e.g. user manually renamed one of the four
+            # without using this primitive), the inner loop would clobber
+            # it. Raising here keeps the FS untouched so no rollback is
+            # needed.
+            for suffix in ("plan", "context", "tasks", "iteration-log"):
+                proposed_target = old_dir / f"{new_name}-{suffix}.md"
+                if proposed_target.exists():
+                    raise FilesystemCollisionError(
+                        f"File '{proposed_target.name}' already exists in "
+                        f"'{old_dir}'. Resolve manually before renaming."
+                    )
+
+            old_dir.rename(new_dir)
+            fs_renamed = True
+
+            # File renames inside. Prompts subdir uses unprefixed names
+            # (task-NN-prompt.md) so it stays untouched.
+            for suffix in ("plan", "context", "tasks", "iteration-log"):
+                old_file = new_dir / f"{old_name}-{suffix}.md"
+                new_file = new_dir / f"{new_name}-{suffix}.md"
+                if old_file.exists():
+                    old_file.rename(new_file)
+                    renamed_pairs.append((new_file, old_file))
+                    files_renamed.append(new_file.name)
+
+            # H1 rewrite - only when the H1 still matches the exact
+            # template default. If the user has edited the H1 (different
+            # text, different shape), leave it alone and report skipped.
+            old_titlecase = old_name.replace("-", " ").title()
+            new_titlecase = new_name.replace("-", " ").title()
+            for suffix, label in (
+                ("plan", "Plan"),
+                ("context", "Context"),
+                ("tasks", "Tasks"),
+            ):
+                f = new_dir / f"{new_name}-{suffix}.md"
+                if not f.exists():
+                    continue
+                try:
+                    content = f.read_text()
+                except OSError:
+                    h1_skipped.append(f.name)
+                    continue
+                head, _, rest = content.partition("\n")
+                expected_h1 = f"# {old_titlecase} - {label}"
+                if head.rstrip() == expected_h1:
+                    new_h1 = f"# {new_titlecase} - {label}"
+                    try:
+                        f.write_text(new_h1 + "\n" + rest if rest else new_h1)
+                        h1_originals.append((f, content))
+                        h1_rewritten.append(f.name)
+                    except OSError:
+                        h1_skipped.append(f.name)
+                else:
+                    h1_skipped.append(f.name)
+
+        # DB update - re-check the auto-run guard inside the same
+        # connection used for the UPDATE so a concurrent orbit-auto INSERT
+        # between the pre-flight check and the UPDATE is caught. Narrow
+        # except sqlite3.Error so unrelated bugs (KeyError, attribute
+        # mistakes, OrbitMigrationRequired) don't silently trigger a
+        # misdirected FS rollback.
+        try:
+            with self.connection() as conn:
+                running = conn.execute(
+                    "SELECT id FROM auto_executions "
+                    "WHERE task_id = ? AND status = 'running' LIMIT 1",
+                    (task_id,),
+                ).fetchone()
+                if running:
+                    raise AutoRunActiveError(
+                        "Cannot rename while orbit-auto is running on this project. "
+                        "Stop the run and try again."
+                    )
+                conn.execute(
+                    "UPDATE tasks SET name = ?, full_path = ? WHERE id = ?",
+                    (new_name, new_full_path, task_id),
+                )
+                # Subtask rows embed the parent's full_path as a prefix
+                # (e.g. "active/parent/child"). The outer dir rename
+                # already moved their on-disk dirs as subdirectories, but
+                # their DB rows would otherwise keep the old prefix, so
+                # the next scan_repos would re-discover them at the new
+                # path and create duplicate rows. Rewrite the prefix in
+                # the same transaction.
+                old_prefix = task.full_path + "/"
+                new_prefix = new_full_path + "/"
+                children = conn.execute(
+                    "SELECT id, full_path FROM tasks WHERE parent_id = ?",
+                    (task_id,),
+                ).fetchall()
+                for child in children:
+                    if child["full_path"].startswith(old_prefix):
+                        new_child_path = (
+                            new_prefix + child["full_path"][len(old_prefix):]
+                        )
+                        conn.execute(
+                            "UPDATE tasks SET full_path = ? WHERE id = ?",
+                            (new_child_path, child["id"]),
+                        )
+                conn.commit()
+        except (sqlite3.Error, AutoRunActiveError):
+            # Reverse every recorded FS mutation in LIFO order: H1
+            # contents -> inner file renames -> outer directory rename.
+            # Each step is independently logged so partial-rollback
+            # state is observable.
+            for f, original in reversed(h1_originals):
+                try:
+                    f.write_text(original)
+                except OSError:
+                    logger.exception(
+                        "rename rollback: H1 restore failed for %s", f
+                    )
+            for current, original in reversed(renamed_pairs):
+                try:
+                    current.rename(original)
+                except OSError:
+                    logger.exception(
+                        "rename rollback: inner file restore failed for %s -> %s",
+                        current,
+                        original,
+                    )
+            if fs_renamed:
+                try:
+                    new_dir.rename(old_dir)
+                except OSError:
+                    logger.exception(
+                        "rename rollback: directory restore failed for %s -> %s",
+                        new_dir,
+                        old_dir,
+                    )
+            raise
+
+        sweep = self._sweep_session_pointers(old_name, new_name)
+
+        return {
+            "success": True,
+            "changed": True,
+            "name": new_name,
+            "old_name": old_name,
+            "normalized": normalized,
+            "full_path": new_full_path,
+            "files_renamed": files_renamed,
+            "h1_rewritten": h1_rewritten,
+            "h1_skipped": h1_skipped,
+            "sessions_updated": sweep["updated"],
+            "warnings": sweep["warnings"],
+        }
+
+    def _sweep_session_pointers(
+        self, old_name: str, new_name: str
+    ) -> Dict[str, Any]:
+        """Best-effort rewrite of per-session state files that reference
+        the renamed project by name.
+
+        Updates (does not delete) so session ownership is preserved. Each
+        sweep target is independently wrapped so a partial failure on one
+        pointer doesn't block the others - this is post-DB-commit cleanup,
+        not a transactional step. Failures are logged via the module
+        logger AND surfaced in the returned ``warnings`` list so callers
+        can show the user that some pointers may be stale.
+
+        Returns a dict with keys ``updated`` (int count of pointers
+        successfully rewritten) and ``warnings`` (list of human-readable
+        strings describing each failure).
+        """
+        state_dir = Path.home() / ".claude" / "hooks" / "state"
+        updated = 0
+        warnings: List[str] = []
+
+        pending_file = state_dir / "pending-task.json"
+        if pending_file.exists():
+            try:
+                data = json.loads(pending_file.read_text())
+                if data.get("projectName") == old_name:
+                    data["projectName"] = new_name
+                    pending_file.write_text(json.dumps(data))
+                    updated += 1
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(
+                    "session sweep: pending-task.json update failed: %s", e
+                )
+                warnings.append(
+                    f"pending-task.json update failed ({type(e).__name__}); "
+                    "statusline may show stale name on next session"
+                )
+
+        projects_dir = state_dir / "projects"
+        if projects_dir.is_dir():
+            for f in projects_dir.glob("*.json"):
+                try:
+                    data = json.loads(f.read_text())
+                    if data.get("projectName") == old_name:
+                        data["projectName"] = new_name
+                        f.write_text(json.dumps(data))
+                        updated += 1
+                except (OSError, json.JSONDecodeError) as e:
+                    logger.warning(
+                        "session sweep: %s update failed: %s", f.name, e
+                    )
+                    warnings.append(
+                        f"projects/{f.name} update failed ({type(e).__name__}); "
+                        "that session may show stale name"
+                    )
+
+        hooks_db = Path.home() / ".claude" / "hooks-state.db"
+        if hooks_db.exists():
+            try:
+                conn = sqlite3.connect(str(hooks_db))
+                cursor = conn.execute(
+                    "UPDATE project_state SET project_name = ?, "
+                    "updated_at = datetime('now', 'localtime') "
+                    "WHERE project_name = ?",
+                    (new_name, old_name),
+                )
+                if cursor.rowcount and cursor.rowcount > 0:
+                    updated += cursor.rowcount
+                conn.commit()
+                conn.close()
+            except sqlite3.Error as e:
+                logger.warning(
+                    "session sweep: hooks-state.db update failed: %s", e
+                )
+                warnings.append(
+                    f"hooks-state.db update failed ({type(e).__name__}); "
+                    "active sessions may show stale name"
+                )
+
+        return {"updated": updated, "warnings": warnings}
 
     def update_task_repo(self, task_id: int, repo_id: int) -> None:
         """Reassign a task to a different repository."""
@@ -3064,6 +3468,48 @@ def main():
                 "session_count": session_count,
             }
             print(json.dumps(output, indent=2))
+
+        elif command == "rename-task":
+            # Usage: orbit-db rename-task <old-name> <new-name>
+            if len(sys.argv) < 4:
+                print("Usage: orbit-db rename-task <old-name> <new-name>")
+                sys.exit(1)
+            old_name = sys.argv[2]
+            new_name_input = sys.argv[3]
+            task = db.get_task_by_name(old_name)
+            if not task:
+                print(
+                    json.dumps({"error": f"No project found with name '{old_name}'."})
+                )
+                sys.exit(1)
+            try:
+                result = db.rename_task(task.id, new_name_input)
+            except (
+                NameCollisionError,
+                FilesystemCollisionError,
+                AutoRunActiveError,
+                ValueError,
+            ) as e:
+                print(json.dumps({"error": str(e)}))
+                sys.exit(1)
+            # Successful path: print canonical name and let the user know
+            # if their input was normalized.
+            if result["normalized"]:
+                print(
+                    f"Renamed: {result['old_name']} -> {result['name']} "
+                    f"(normalized from '{new_name_input}')"
+                )
+            else:
+                print(f"Renamed: {result['old_name']} -> {result['name']}")
+            if result["h1_skipped"]:
+                print(
+                    "  Skipped H1 rewrite for (edited content): "
+                    + ", ".join(result["h1_skipped"])
+                )
+            if result["sessions_updated"]:
+                print(
+                    f"  Updated {result['sessions_updated']} session pointer(s)."
+                )
 
         elif command == "get-task-by-name":
             if len(sys.argv) < 3:

@@ -3244,6 +3244,50 @@
             background: var(--border);
         }
 
+        .task-modal-rename-btn {
+            margin-left: 12px;
+            padding: 4px 10px;
+            font-size: 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .task-modal-rename-btn:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .task-modal-rename-form {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+
+        .task-modal-rename-form input {
+            padding: 6px 10px;
+            font-size: 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            min-width: 220px;
+            font-family: inherit;
+        }
+
+        .task-modal-rename-form input.invalid {
+            border-color: var(--accent-red);
+        }
+
+        .task-modal-rename-form input:focus {
+            outline: none;
+            border-color: var(--accent-blue, #4da6ff);
+        }
+
         .task-modal-tabs {
             display: flex;
             gap: 4px;
@@ -4940,9 +4984,21 @@
     <div class="task-modal" id="taskModal">
         <div class="task-modal-content">
             <div class="task-modal-header">
-                <div class="task-modal-title">
+                <div class="task-modal-title" id="taskModalTitleView">
                     <span id="taskModalName">Task Name</span>
                     <span class="task-modal-repo" id="taskModalRepo">repo</span>
+                    <button class="task-modal-rename-btn"
+                            onclick="openRenameForm()"
+                            title="Rename project">Rename</button>
+                </div>
+                <div class="task-modal-rename-form" id="taskModalRenameForm" style="display: none;">
+                    <input type="text" id="taskRenameInput"
+                           placeholder="new-project-name"
+                           autocomplete="off"
+                           spellcheck="false">
+                    <button class="settings-btn-primary" onclick="submitRename()">Save</button>
+                    <button class="settings-btn-secondary" onclick="closeRenameForm()">Cancel</button>
+                    <span id="taskRenameStatus" class="settings-save-status"></span>
                 </div>
                 <button class="task-modal-close" onclick="closeTaskModal()">&times;</button>
             </div>
@@ -6775,8 +6831,135 @@
 
         function closeTaskModal() {
             document.getElementById('taskModal').classList.remove('open');
+            // Reset the rename form so a fresh open shows the title view.
+            closeRenameForm();
             currentTaskFiles = null;
             currentTaskId = null;
+        }
+
+        // =============================================================================
+        // Rename Project (modal inline form)
+        // =============================================================================
+        // The regex MUST stay in sync with orbit-db's _TASK_NAME_RE
+        // (orbit-db/orbit_db/__init__.py). Server-side validation runs again
+        // anyway - this is just for instant UX feedback.
+        const RENAME_TASK_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+        function openRenameForm() {
+            const titleView = document.getElementById('taskModalTitleView');
+            const form = document.getElementById('taskModalRenameForm');
+            const input = document.getElementById('taskRenameInput');
+            const status = document.getElementById('taskRenameStatus');
+            const currentName = document.getElementById('taskModalName').textContent;
+            input.value = currentName;
+            input.classList.remove('invalid');
+            status.textContent = '';
+            status.className = 'settings-save-status';
+            titleView.style.display = 'none';
+            form.style.display = 'flex';
+            input.focus();
+            input.select();
+        }
+
+        function closeRenameForm() {
+            const form = document.getElementById('taskModalRenameForm');
+            const titleView = document.getElementById('taskModalTitleView');
+            const status = document.getElementById('taskRenameStatus');
+            const input = document.getElementById('taskRenameInput');
+            if (!form || !titleView) return;
+            form.style.display = 'none';
+            titleView.style.display = '';
+            status.textContent = '';
+            input.classList.remove('invalid');
+        }
+
+        function _renameClientValidate(name) {
+            // Returns null on valid, or a friendly error message string.
+            // Mirrors orbit-db.validate_task_name's three branches.
+            if (!name) return 'Project name cannot be empty.';
+            if (name.startsWith('-')) {
+                return 'Project name must start with a letter or digit, not a hyphen.';
+            }
+            if (!RENAME_TASK_NAME_RE.test(name)) {
+                return "Project name must use lowercase letters, digits, and hyphens only (e.g., 'my-project').";
+            }
+            return null;
+        }
+
+        async function submitRename() {
+            if (!currentTaskId) return;
+            const input = document.getElementById('taskRenameInput');
+            const status = document.getElementById('taskRenameStatus');
+            const raw = input.value;
+            // Trim + lowercase mirrors orbit-db's server-side normalization.
+            const normalized = (raw || '').trim().toLowerCase();
+
+            const clientError = _renameClientValidate(normalized);
+            if (clientError) {
+                // Render via textContent so a hostile typed-string
+                // (e.g., "<script>") cannot inject into the DOM.
+                status.textContent = clientError;
+                status.className = 'settings-save-status error';
+                input.classList.add('invalid');
+                return;
+            }
+            input.classList.remove('invalid');
+
+            status.textContent = 'Renaming...';
+            status.className = 'settings-save-status';
+
+            try {
+                const res = await fetch(API_BASE + `/api/tasks/${currentTaskId}/rename`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    // Send raw input - server normalizes consistently with the client.
+                    body: JSON.stringify({ new_name: raw }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    // FastAPI HTTPException puts our payload under `.detail`.
+                    const detail = body.detail || body;
+                    const msg = (detail && detail.message) || `HTTP ${res.status}`;
+                    status.textContent = msg;
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+                if (body.error) {
+                    status.textContent = body.message || 'Rename failed.';
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+
+                // Use the canonical name from the server, NOT the user input.
+                const canonical = body.name;
+                const wasNormalized = body.normalized;
+                const prefix = wasNormalized
+                    ? `Normalized + renamed to '${canonical}'`
+                    : `Renamed to '${canonical}'`;
+                status.textContent = prefix;
+                status.className = 'settings-save-status success';
+
+                // Update modal title with the canonical name.
+                document.getElementById('taskModalName').textContent = canonical;
+
+                // Update the URL hash so deep-link state matches.
+                const newHash = `#projects?task=${encodeURIComponent(canonical)}`;
+                if (window.location.hash.startsWith('#projects')) {
+                    history.replaceState(null, '', newHash);
+                }
+
+                // Refresh the projects list so it shows the new name.
+                if (typeof loadProjectsData === 'function') {
+                    loadProjectsData();
+                }
+
+                // Brief dwell so the user reads the confirmation, then
+                // collapse back to the title view.
+                setTimeout(closeRenameForm, 2500);
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'settings-save-status error';
+            }
         }
 
         function switchTaskTab(tab) {

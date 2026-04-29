@@ -122,6 +122,29 @@ class ReopenTaskResult(BaseModel):
     new_status: str = "active"
 
 
+class RenameTaskResult(BaseModel):
+    """Result of renaming a project / task.
+
+    The ``name`` field is the canonical stored name (post-normalization);
+    callers should display this back to the user, not the typed input.
+    The ``normalized`` flag indicates whether trim/lowercase changed the
+    input so the UI can prefix its confirmation accordingly.
+    """
+
+    success: bool = True
+    changed: bool
+    task_id: int
+    name: str
+    old_name: str
+    normalized: bool
+    full_path: str
+    files_renamed: list[str] = []
+    h1_rewritten: list[str] = []
+    h1_skipped: list[str] = []
+    sessions_updated: int = 0
+    warnings: list[str] = []
+
+
 class ListTasksResult(BaseModel):
     """Result of listing tasks."""
 
