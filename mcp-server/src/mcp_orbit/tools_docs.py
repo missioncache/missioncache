@@ -11,7 +11,11 @@ from .app import mcp
 from .config import settings
 from .db import get_db
 from .errors import OrbitError, OrbitFileNotFoundError, TaskNotFoundError
-from .helpers import _notify_dashboard_task_created, _validate_path
+from .helpers import (
+    _notify_dashboard_task_created,
+    _resolve_to_git_root,
+    _validate_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +42,25 @@ async def create_orbit_files(
             "ALREADY_EXISTS to prevent silent data loss."
         ),
     ] = False,
+    resolve_git_root: Annotated[
+        bool,
+        Field(
+            description="Walk parents of repo_path to the containing git root "
+            "before registering. Default True so any cwd inside a repo lands "
+            "at the same registered path. Pass False when a sub-package within "
+            "a monorepo is the actual project boundary."
+        ),
+    ] = True,
 ) -> dict:
     """
     Create orbit files for a new task.
 
     Creates files under ~/.orbit/active/<task-name>/.
-    The repo_path is used to register the repository in the DB.
+    The repo_path is used to register the repository in the DB. By default,
+    repo_path is resolved to its containing git root before registration so
+    /orbit:new captures the same path regardless of which subdirectory the
+    user invoked it from. Pass resolve_git_root=False to opt out (e.g., when
+    each sub-package in a monorepo is its own orbit project).
 
     Returns ALREADY_EXISTS error if any of plan/context/tasks already exist
     for this name. Pass force=True to overwrite (destructive - the caller is
@@ -54,12 +71,19 @@ async def create_orbit_files(
     db = get_db()
 
     try:
+        # Validate the raw input first; otherwise an empty string passed
+        # with resolve_git_root=True would silently resolve to the MCP
+        # server's cwd via Path("").resolve() and bypass the empty-string
+        # / null-byte guards in _validate_path.
         _validate_path(repo_path, "repo_path")
+        registered_repo_path = (
+            _resolve_to_git_root(repo_path) if resolve_git_root else repo_path
+        )
 
         # Ensure repo is registered
-        repo = db.get_repo_by_path(repo_path)
+        repo = db.get_repo_by_path(registered_repo_path)
         if not repo:
-            repo_id = db.add_repo(repo_path)
+            repo_id = db.add_repo(registered_repo_path)
         else:
             repo_id = repo.id
 
@@ -91,6 +115,7 @@ async def create_orbit_files(
             "task_id": task.id if task else None,
             "task_name": project_name,
             "files": files.model_dump(),
+            "repo_path": registered_repo_path,
         }
 
     except OrbitError as e:

@@ -39,6 +39,43 @@ async def _notify_dashboard_task_created() -> None:
     await asyncio.to_thread(_post)
 
 
+def _resolve_to_git_root(path: str) -> str:
+    """Walk parents of ``path`` looking for ``.git``; return the git root.
+
+    Mirrors ``git rev-parse --show-toplevel`` semantics - the first
+    ancestor (closest to ``path``) that contains a ``.git`` entry
+    (directory or file, the latter for submodules) is the git root.
+    Falls back to the resolved input if no ancestor has ``.git``
+    before the filesystem root, so non-git project locations stay
+    supported.
+
+    Used at the MCP-tool boundary (``create_orbit_files``,
+    ``set_task_repo``) to enforce git-root resolution server-side
+    instead of trusting callers to do it. Slash command guidance
+    can be skipped silently by the model; tool-level enforcement
+    cannot. Callers that legitimately want a sub-package within a
+    monorepo to be the project boundary should pass
+    ``resolve_git_root=False`` to the tool rather than calling this
+    helper directly.
+
+    Symlinks are followed once via ``Path.resolve()`` before the walk
+    so a symlink to a subdir of a git repo lands on the real path.
+    ``OSError`` mid-walk (permission denied on ``.git`` probing) is
+    treated as "no git root found" and returns the resolved input.
+    """
+    current = Path(path).expanduser().resolve()
+
+    walker = current
+    while walker != walker.parent:
+        try:
+            if (walker / ".git").exists():
+                return str(walker)
+        except OSError:
+            return str(current)
+        walker = walker.parent
+    return str(current)
+
+
 def _validate_path(
     path: str, field_name: str = "path", must_be_under: Path | None = None
 ) -> Path:

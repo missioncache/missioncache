@@ -104,13 +104,24 @@ Merge all 4 results into a single structured `research_findings` with sections: 
 
 ### Step 3: Determine Project Location
 
-`repo_path` is a location marker used to group tasks in the dashboard. It does NOT need to be a git repo - orbit projects can be started anywhere. Prefer the git repo root when available so all tasks in the same repo group together; otherwise fall back to the current working directory.
+Pass the current working directory as `repo_path`. The MCP tool walks
+parents to the git root server-side, so any cwd inside a git repo
+resolves to the same registered path regardless of which subdirectory
+the user invoked `/orbit:new` from. Non-git directories pass through
+unchanged - orbit projects can be started anywhere.
 
 ```bash
-git rev-parse --show-toplevel 2>/dev/null || pwd
+pwd
 ```
 
-Use the output as `repo_path`.
+Use the output as `repo_path`. The tool's response includes the
+registered `repo_path` so you can report what was actually stored.
+
+**Monorepo opt-out:** if the user is starting an orbit project for a
+sub-package within a monorepo (e.g., `~/repo/packages/auth-service`)
+and the sub-package itself is the project boundary, pass
+`resolve_git_root=False` so the tool registers the subdir verbatim
+rather than rebasing to the monorepo root. Default is `True`.
 
 ### Step 4: Create Orbit Files
 

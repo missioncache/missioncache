@@ -8,7 +8,7 @@ from pydantic import Field
 from .app import mcp
 from .db import get_db, repo_to_dict
 from .errors import ErrorCode, OrbitError, TaskNotFoundError, ValidationError
-from .helpers import _validate_path
+from .helpers import _resolve_to_git_root, _validate_path
 from .models import HeartbeatResult, ProcessHeartbeatsResult
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,15 @@ async def set_task_repo(
     task_name: Annotated[
         str | None, Field(description="Task name (alternative to task_id)")
     ] = None,
+    resolve_git_root: Annotated[
+        bool,
+        Field(
+            description="Walk parents of repo_path to the containing git root "
+            "before rebinding. Default True mirrors create_orbit_files. Pass "
+            "False when a sub-package within a monorepo is the actual project "
+            "boundary."
+        ),
+    ] = True,
 ) -> dict:
     """
     Reassign a task to a different repository.
@@ -199,6 +208,10 @@ async def set_task_repo(
     /orbit:new captured the wrong working directory) or when the project's
     source of truth has moved. The repo at `repo_path` must already be
     registered - call add_repo first if it is not.
+
+    By default, repo_path is resolved to its containing git root before
+    looking up the registered repo, mirroring create_orbit_files. Pass
+    resolve_git_root=False to opt out.
 
     Provide either task_id OR task_name.
     """
@@ -217,17 +230,24 @@ async def set_task_repo(
         else:
             raise ValidationError("Provide task_id or task_name")
 
-        # Resolve repo by path
+        # Validate the raw input first; otherwise an empty string passed
+        # with resolve_git_root=True would silently resolve to the MCP
+        # server's cwd via Path("").resolve() and bypass the empty-string
+        # / null-byte guards in _validate_path.
         _validate_path(repo_path, "repo_path")
-        repo = db.get_repo_by_path(repo_path)
+        target_repo_path = (
+            _resolve_to_git_root(repo_path) if resolve_git_root else repo_path
+        )
+        repo = db.get_repo_by_path(target_repo_path)
         if not repo:
             raise OrbitError(
                 ErrorCode.REPO_NOT_FOUND,
-                f"Repository at {repo_path!r} is not registered. Call add_repo first.",
-                {"repo_path": repo_path},
+                f"Repository at {target_repo_path!r} is not registered. Call add_repo first.",
+                {"repo_path": target_repo_path},
             )
 
         previous_repo_id = task.repo_id
+
         if previous_repo_id == repo.id:
             return {
                 "task_id": task.id,
@@ -236,6 +256,7 @@ async def set_task_repo(
                 "repo_short_name": repo.short_name,
                 "changed": False,
                 "message": "Task is already assigned to that repo",
+                "repo_path": target_repo_path,
             }
 
         db.update_task_repo(task.id, repo.id)
@@ -247,6 +268,7 @@ async def set_task_repo(
             "repo_id": repo.id,
             "repo_short_name": repo.short_name,
             "changed": True,
+            "repo_path": target_repo_path,
         }
 
     except OrbitError as e:
