@@ -6,6 +6,7 @@ Tests mock orbit_db and use tmp_path for file I/O.
 import json
 import os
 import re
+import time
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
@@ -150,6 +151,364 @@ class TestSessionStart:
         assert "context-task" in output
         assert "PROJ-999" in output
         assert "1h 0m" in output
+
+
+class TestSessionStartResumePickup:
+    """Tests for ``_pickup_previous_session_binding`` and the resume-aware main flow.
+
+    Resume changes Claude Code's session_id; without these helpers the previous
+    session's project_state binding is orphaned and the statusline drops the
+    project field until /orbit:go is re-run. The pickup logic copies the
+    binding to the new sid before write_cwd_session_pointer overwrites the
+    breadcrumb that points back to the old sid.
+
+    Test fixtures use orbit_db's real ``init_hooks_state_db_schema`` rather
+    than hand-rolled DDL so a future column add in production is caught here
+    instead of silently passing because the test seeded its own minimal shape.
+    """
+
+    @staticmethod
+    def _redirect_state(monkeypatch, home: Path) -> Path:
+        """Redirect Path.home() and orbit_db.HOOKS_STATE_DB_PATH onto ``home``.
+
+        ``HOOKS_STATE_DB_PATH`` is captured at orbit_db import time using the
+        real ``Path.home()``, so monkeypatching ``pathlib.Path.home`` alone
+        leaves orbit_db reading the user's real DB. Patch both.
+
+        Returns the redirected hooks-state.db path for assertion convenience.
+        """
+        import orbit_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @classmethod
+    def _seed_project_state(cls, home: Path, rows: list[tuple[str, str]]) -> Path:
+        """Create the hooks-state.db schema (via the production init function)
+        and insert (sid, project) rows.
+
+        Importing the real schema function instead of hand-rolling the DDL
+        means tests catch column drift the moment production schema changes.
+        """
+        import sqlite3 as _sqlite3
+
+        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            init_hooks_state_db_schema(conn)
+            conn.executemany(
+                "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path
+
+    @staticmethod
+    def _seed_pointer(home: Path, cwd: Path, session_id: str) -> Path:
+        """Write a cwd-session pointer file as if a previous session owned this cwd."""
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        pointer_file = pointer_dir / f"{cwd_key}.json"
+        pointer_file.write_text(
+            json.dumps({"sessionId": session_id, "cwd": str(cwd), "updatedAt": "ignored"})
+        )
+        return pointer_file
+
+    def _reload_module(self):
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        return mod
+
+    def test_pickup_returns_project_when_pointer_and_state_match(self, tmp_path, monkeypatch):
+        """Happy path: prev sid in pointer + project_state row -> returns project name."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "carried-over-project")])
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "carried-over-project"
+
+    def test_pickup_returns_none_when_pointer_missing(self, tmp_path, monkeypatch):
+        """Fresh start at a cwd that never had a session - no-op."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "fresh"
+        cwd.mkdir()
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_pickup_returns_none_when_pointer_too_old(self, tmp_path, monkeypatch):
+        """Pointer mtime older than 24h is treated as fresh start."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "stale"
+        cwd.mkdir()
+        pointer_file = self._seed_pointer(tmp_path, cwd, "stale-sid")
+        self._seed_project_state(tmp_path, [("stale-sid", "abandoned-project")])
+
+        # Backdate mtime to 25h ago.
+        old_time = time.time() - (25 * 3600)
+        os.utime(pointer_file, (old_time, old_time))
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_pickup_returns_none_when_pointer_sid_matches_new_sid(self, tmp_path, monkeypatch):
+        """Defensive: same sid in pointer and incoming - never resurrect ourselves."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "self"
+        cwd.mkdir()
+        self._seed_pointer(tmp_path, cwd, "same-sid")
+        self._seed_project_state(tmp_path, [("same-sid", "my-project")])
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "same-sid") is None
+
+    def test_pickup_returns_none_when_no_project_bound_to_prev_sid(self, tmp_path, monkeypatch):
+        """Pointer present but project_state has no row - prev session never ran /orbit:go."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "unbound"
+        cwd.mkdir()
+        self._seed_pointer(tmp_path, cwd, "unbound-sid")
+        self._seed_project_state(tmp_path, [])
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_pickup_returns_none_when_pointer_missing_session_id_key(self, tmp_path, monkeypatch):
+        """Pointer JSON valid but lacks 'sessionId' key - the not-prev_session_id branch.
+
+        A future schema change or a manually edited pointer can produce this
+        shape. Without explicit coverage, dropping the ``not isinstance(...)``
+        guard would silently query the DB with None and the bug would slip.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "no-sid-key"
+        cwd.mkdir()
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(tmp_path, [])
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_pickup_returns_none_when_pointer_session_id_too_long(self, tmp_path, monkeypatch):
+        """A corrupt pointer with a multi-MB sessionId is rejected before the SQL bind.
+
+        Defends against the trickle of garbage data into the DB and bounds the
+        memory footprint of the pickup path.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "huge-sid"
+        cwd.mkdir()
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "x" * 10000, "cwd": str(cwd)})
+        )
+        self._seed_project_state(tmp_path, [])
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_pickup_corrupt_pointer_is_unlinked(self, tmp_path, monkeypatch, capsys):
+        """Malformed JSON returns None AND deletes the corrupt file so the next
+        resume gets a clean slate. Also surfaces a stderr breadcrumb so the
+        user knows their pointer was reset."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "corrupt"
+        cwd.mkdir()
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        pointer_file = pointer_dir / f"{cwd_key}.json"
+        pointer_file.write_text("not-valid-json{{{")
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+        assert not pointer_file.exists(), "corrupt pointer should be unlinked"
+        assert "corrupt cwd-session pointer" in capsys.readouterr().err
+
+    def test_pickup_returns_none_on_sqlite_error(self, tmp_path, monkeypatch):
+        """A sqlite3.Error during the project_state lookup must not propagate.
+
+        The docstring promises silent handling; without this test, a refactor
+        that drops the except clause would be undetectable.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "db-broken"
+        cwd.mkdir()
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        # No DB created at all - sqlite3.connect will succeed but the SELECT
+        # raises OperationalError ('no such table'). That hits the
+        # OperationalError branch which is silent (no stderr) and returns None.
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
+
+    def test_bind_works_on_fresh_install_without_table(self, tmp_path, monkeypatch):
+        """Fresh install (dashboard never ran) - bind must auto-create the schema.
+
+        Without ``init_hooks_state_db_schema``, the INSERT raises
+        ``OperationalError: no such table`` which the bare ``except sqlite3.Error``
+        swallows, and the resume binding silently no-ops. This is exactly the
+        Critical bug the review flagged.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        # No _seed_project_state call - DB and table do not exist yet.
+
+        mod = self._reload_module()
+        mod._bind_session_to_project("new-sid", "my-project")
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "my-project"
+
+    def test_bind_writes_project_state_and_per_session_pointer(self, tmp_path, monkeypatch):
+        """_bind_session_to_project upserts the DB row and writes projects/<sid>.json."""
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        self._seed_project_state(tmp_path, [])
+
+        mod = self._reload_module()
+        mod._bind_session_to_project("new-sid", "my-project")
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "my-project"
+
+        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
+        assert pointer_file.exists()
+        data = json.loads(pointer_file.read_text())
+        assert data["projectName"] == "my-project"
+        assert data["sessionId"] == "new-sid"
+
+    def test_bind_upserts_when_session_id_already_bound(self, tmp_path, monkeypatch):
+        """Calling bind twice replaces the project_name (ON CONFLICT DO UPDATE)."""
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        self._seed_project_state(tmp_path, [("dup-sid", "stale-project")])
+
+        mod = self._reload_module()
+        mod._bind_session_to_project("dup-sid", "fresh-project")
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("dup-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "fresh-project"
+
+    def test_bind_logs_to_stderr_on_db_failure_and_skips_pointer(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """When the DB write fails, log a breadcrumb AND skip the pointer write.
+
+        Silent failure here was the load-bearing review finding: without a
+        stderr trail, the user's statusline goes blank with no diagnostic.
+        Per-session pointer must NOT be written when DB fails - that's the
+        documented invariant (DB row is the source of truth).
+        """
+        import sqlite3 as _sqlite3
+
+        self._redirect_state(monkeypatch, tmp_path)
+
+        def _broken_connect(*args, **kwargs):
+            raise _sqlite3.OperationalError("simulated DB failure")
+
+        monkeypatch.setattr(_sqlite3, "connect", _broken_connect)
+
+        mod = self._reload_module()
+        mod._bind_session_to_project("new-sid", "my-project")
+
+        # Stderr breadcrumb surfaced.
+        err = capsys.readouterr().err
+        assert "bind_session failed" in err
+        assert "new-sid" in err
+
+        # Pointer file NOT written when DB failed.
+        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
+        assert not pointer_file.exists(), "pointer must not be written when DB write fails"
+
+    def test_main_carries_project_across_resume(self, tmp_path, monkeypatch):
+        """Full main() flow: new sid inherits the project bound to the previous sid."""
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "resume" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "new-sid")
+
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
+
+        mod = self._reload_module()
+        # Replace TaskDB on the real orbit_db module with a no-task mock so
+        # find_task_for_cwd returns None (we're testing the pickup path, not
+        # the existing task-detection path).
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        # New session inherited the project binding.
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "carried-over"
+
+        # Per-session pointer file written for the new sid.
+        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
+        assert pointer_file.exists()
+
+        # Existing behavior preserved: cwd-session pointer is overwritten with new sid.
+        cwd_key = str(cwd).replace("/", "-")
+        cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
+        assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
 
 
 # ── pre_compact ───────────────────────────────────────────────────────────
