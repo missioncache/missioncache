@@ -53,8 +53,10 @@ from orbit_db import (
     AutoExecutionLog,
     AutoRunActiveError,
     FilesystemCollisionError,
+    HOOKS_STATE_DB_PATH,
     NameCollisionError,
     TaskDB as OrbitTaskDB,
+    init_hooks_state_db_schema,
 )
 
 
@@ -71,39 +73,15 @@ ORBIT_ROOT = Path.home() / ".orbit"
 
 
 def _init_hooks_state_db() -> None:
-    """Create hooks-state.db with schema if it doesn't exist."""
+    """Initialize hooks-state.db with the shared schema and dashboard migrations.
+
+    Schema base lives in ``orbit_db.init_hooks_state_db_schema`` so that hooks
+    and the dashboard cannot drift on column shapes. Dashboard-specific
+    migrations (added columns) layer on top here.
+    """
     db = sqlite3.connect(str(HOOKS_STATE_DB))
     db.execute("PRAGMA journal_mode=WAL")
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS session_state (
-            session_id TEXT PRIMARY KEY,
-            context_percent INTEGER DEFAULT 0,
-            context_tokens TEXT DEFAULT '',
-            edit_count INTEGER DEFAULT 0,
-            qa_review_suggested INTEGER DEFAULT 0,
-            action TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS project_state (
-            session_id TEXT PRIMARY KEY,
-            project_name TEXT NOT NULL,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS term_sessions (
-            term_session_id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS guard_warned (
-            key TEXT PRIMARY KEY,
-            rule TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS validation_state (
-            session_id TEXT PRIMARY KEY,
-            validated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-    """)
+    init_hooks_state_db_schema(db)
     # Migrate: add last_prompt_at column
     for col in ("last_prompt_at",):
         try:
@@ -209,7 +187,7 @@ app.add_middleware(
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
 ORBIT_DB_SCRIPT = CLAUDE_DIR / "scripts" / "orbit_db.py"
-HOOKS_STATE_DB = CLAUDE_DIR / "hooks-state.db"
+HOOKS_STATE_DB = HOOKS_STATE_DB_PATH
 
 # Cache TTLs
 REFRESH_INTERVAL = 30  # seconds for SSE

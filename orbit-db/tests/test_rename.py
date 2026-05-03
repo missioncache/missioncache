@@ -40,6 +40,11 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(orbit_db, "ORBIT_ROOT", orbit_root)
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
+    # HOOKS_STATE_DB_PATH was captured with the real Path.home() at import time;
+    # redirect to the sandbox so the rename sweep writes there too.
+    monkeypatch.setattr(
+        orbit_db, "HOOKS_STATE_DB_PATH", fake_home / ".claude" / "hooks-state.db"
+    )
 
     db_path = tmp_path / "tasks.db"
     db = TaskDB(db_path=db_path)

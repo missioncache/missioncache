@@ -48,6 +48,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -66,10 +67,98 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path.home() / ".orbit" / "tasks.db"
 ORBIT_ROOT = Path.home() / ".orbit"
 
+# Shared session-state database used by the dashboard, statusline, and hooks.
+# Multiple writers exist (dashboard's HTTP API, hooks at SessionStart, orbit-db's
+# rename sweep). The dashboard authors the schema, but every writer should call
+# init_hooks_state_db_schema() to be tolerant of fresh installs where the
+# dashboard never ran.
+HOOKS_STATE_DB_PATH = Path.home() / ".claude" / "hooks-state.db"
+
 # Legacy paths for the pre-Phase-11 ~/.claude/ layout. Used by the migration
 # guard below.
 _LEGACY_DB = Path.home() / ".claude" / "tasks.db"
 _LEGACY_ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+
+
+def atomic_write_json(path: Path, payload: object) -> None:
+    """Write JSON to ``path`` via tmp+os.replace.
+
+    Used by hooks (cwd-session pointer, per-session project pointer) and by
+    statusline cache writes - any place where multiple processes can race on
+    the same file. ``write_text`` lets two writers observe a half-written
+    file; ``os.replace`` makes the live path atomically valid or untouched.
+
+    Tmp filename is suffixed with the writer's pid so concurrent writers do
+    not collide on the same tmp path. Pid is not stable across reboots or
+    PID-reuse, so this also sweeps any sibling ``<name>.tmp.*`` older than
+    one hour - that catches leftovers from prior crashes between
+    ``write_text`` and ``os.replace`` without needing an external janitor.
+
+    Failures are silent (return on OSError) so a full disk or read-only
+    mount cannot break the caller's hot path. Programming errors that pass
+    a non-JSON-serializable payload are still raised loudly via TypeError -
+    that surface deliberately is not swallowed; silent type errors corrupt
+    cache files in ways the next reader cannot detect.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Best-effort sweep of leftover tmp files from prior crashes.
+        cutoff = time.time() - 3600
+        for stale in path.parent.glob(f"{path.name}.tmp.*"):
+            try:
+                if stale.stat().st_mtime < cutoff:
+                    stale.unlink()
+            except OSError:
+                pass
+        tmp_path = path.parent / f"{path.name}.tmp.{os.getpid()}"
+        tmp_path.write_text(json.dumps(payload))
+        os.replace(tmp_path, path)
+    except OSError:
+        return
+
+
+def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
+    """Idempotently create every table needed in hooks-state.db.
+
+    Safe to call from any writer. Hooks rely on this when the dashboard has
+    never started (fresh install): without it, the first INSERT into
+    project_state raises ``OperationalError: no such table`` and the bind
+    silently no-ops. Schema must stay in sync with the dashboard's
+    ``_init_hooks_state_db`` (server.py); the dashboard delegates to this
+    function so they cannot drift.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS session_state (
+            session_id TEXT PRIMARY KEY,
+            context_percent INTEGER DEFAULT 0,
+            context_tokens TEXT DEFAULT '',
+            edit_count INTEGER DEFAULT 0,
+            qa_review_suggested INTEGER DEFAULT 0,
+            action TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS project_state (
+            session_id TEXT PRIMARY KEY,
+            project_name TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS term_sessions (
+            term_session_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS guard_warned (
+            key TEXT PRIMARY KEY,
+            rule TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS validation_state (
+            session_id TEXT PRIMARY KEY,
+            validated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        """
+    )
 
 
 class OrbitMigrationRequired(RuntimeError):
@@ -1636,10 +1725,9 @@ class TaskDB:
                         "that session may show stale name"
                     )
 
-        hooks_db = Path.home() / ".claude" / "hooks-state.db"
-        if hooks_db.exists():
+        if HOOKS_STATE_DB_PATH.exists():
             try:
-                conn = sqlite3.connect(str(hooks_db))
+                conn = sqlite3.connect(str(HOOKS_STATE_DB_PATH))
                 cursor = conn.execute(
                     "UPDATE project_state SET project_name = ?, "
                     "updated_at = datetime('now', 'localtime') "
