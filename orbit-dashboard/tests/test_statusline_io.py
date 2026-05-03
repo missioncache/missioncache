@@ -4,6 +4,7 @@ Tests use tmp_path and monkeypatch to isolate filesystem operations.
 """
 
 import json
+import os
 import pathlib
 import time
 
@@ -152,6 +153,137 @@ class TestGetHealthStatusCache:
         result = mod.get_health_status()
         # Should NOT contain the stale incident
         assert result == [{"service": "OK"}]
+
+
+# ── _atomic_write_json ────────────────────────────────────────────────────
+
+
+class TestAtomicWriteJson:
+    """Cache files are written via tmp+rename so concurrent statusline runs in
+    multiple Claude Code tabs cannot observe a half-written file. Each test
+    targets a distinct guarantee: durability, parent-dir creation, no tmp
+    leftover, OS-error tolerance, stale-tmp cleanup."""
+
+    def test_writes_payload_atomically(self, tmp_path):
+        """Happy path: file lands with valid JSON, no .tmp leftover."""
+        target = tmp_path / "cache.json"
+        mod._atomic_write_json(target, {"x": 1, "y": "z"})
+
+        assert target.exists()
+        assert json.loads(target.read_text()) == {"x": 1, "y": "z"}
+        # No tmp leftovers in the directory.
+        leftovers = [p for p in tmp_path.iterdir() if ".tmp." in p.name]
+        assert leftovers == []
+
+    def test_creates_missing_parent_dir(self, tmp_path):
+        """Parent dir is created on demand; new directory tree is materialized.
+
+        Also verifies no .tmp leftover in the (newly-created) parent dir,
+        catching the case where leftover-detection only inspects the original
+        ``tmp_path`` rather than the live destination directory.
+        """
+        target = tmp_path / "nested" / "subdir" / "cache.json"
+        mod._atomic_write_json(target, {"k": "v"})
+
+        assert target.exists()
+        assert json.loads(target.read_text()) == {"k": "v"}
+        leftovers = [p for p in target.parent.iterdir() if ".tmp." in p.name]
+        assert leftovers == []
+
+    def test_overwrites_existing_file(self, tmp_path):
+        """Subsequent writes replace the previous payload (not append)."""
+        target = tmp_path / "cache.json"
+        target.write_text(json.dumps({"old": True}))
+
+        mod._atomic_write_json(target, {"fresh": True})
+        assert json.loads(target.read_text()) == {"fresh": True}
+
+    def test_sweeps_stale_tmp_leftover_from_prior_crash(self, tmp_path, monkeypatch):
+        """A leftover ``cache.json.tmp.NNNN`` older than 1h is unlinked.
+
+        Pid-suffixed tmp files leak when the process is SIGKILL'd between
+        write_text and os.replace; pid is unstable across reboots so an
+        external janitor would otherwise be needed. Here we simulate the leak
+        by creating a stale tmp and asserting the next write sweeps it.
+        """
+        target = tmp_path / "cache.json"
+        stale_tmp = tmp_path / "cache.json.tmp.99999"
+        stale_tmp.write_text("garbage from a prior crash")
+        # Backdate 2h so it falls outside the 1h cleanup window.
+        old_time = time.time() - 7200
+        os.utime(stale_tmp, (old_time, old_time))
+
+        mod._atomic_write_json(target, {"fresh": True})
+
+        assert target.exists()
+        assert not stale_tmp.exists(), "stale tmp from prior crash should be swept"
+
+    def test_does_not_sweep_recent_concurrent_tmp(self, tmp_path):
+        """A tmp file under 1h old (likely a concurrent writer's in-flight
+        tmp) is left alone; the cleanup window only catches genuinely-stale
+        leftovers from crashed runs."""
+        target = tmp_path / "cache.json"
+        recent_tmp = tmp_path / "cache.json.tmp.99998"
+        recent_tmp.write_text("concurrent writer's in-flight payload")
+
+        mod._atomic_write_json(target, {"fresh": True})
+
+        assert target.exists()
+        assert recent_tmp.exists(), "fresh tmp must not be swept"
+
+    def test_silent_on_replace_oserror(self, tmp_path, monkeypatch):
+        """OSError during ``os.replace`` (e.g. read-only fs) must not raise.
+
+        Patching ``os.replace`` is narrower than patching all of
+        ``Path.write_text`` - only the rename leg fails, the tmp gets written
+        first, so we also catch any leak. The statusline fires on every
+        prompt; bubbling OSError would crash render path. The four cache
+        call sites pass json-safe shapes; TypeError is deliberately NOT
+        swallowed - silent type-corruption of caches is worse than crashing.
+        """
+        target = tmp_path / "cache.json"
+
+        def _boom(*args, **kwargs):
+            raise OSError("read-only fs simulated")
+
+        monkeypatch.setattr(os, "replace", _boom)
+
+        # Must NOT raise - statusline render path stays alive.
+        mod._atomic_write_json(target, {"k": "v"})
+        # File was never written (replace failed).
+        assert not target.exists()
+
+
+# ── TTL constants ─────────────────────────────────────────────────────────
+
+
+class TestStatuslineCacheTTLs:
+    """Cache TTLs must stay short enough that the 10s statusline refreshInterval
+    sees fresh data within the user's first re-render after work activity.
+
+    Tests assert UPPER bounds (``<=``), not exact values: a future tightening
+    to 30s should pass these tests rather than break them. Only a regression
+    to the pre-fix 180s/300s/21600s values is treated as a failure.
+
+    ``_LATEST_RELEASE_TTL`` is intentionally LONG (6h) because GitHub's
+    unauthenticated releases API is rate-limited at 60/h per IP - tighter
+    TTLs risk lockouts on shared NATs.
+    """
+
+    def test_usage_ttl_at_most_60s(self):
+        assert mod.USAGE_TTL <= 60, "regression: USAGE_TTL is too high for 10s refresh"
+
+    def test_codex_usage_ttl_at_most_60s(self):
+        assert mod.CODEX_USAGE_TTL <= 60, "regression: CODEX_USAGE_TTL is too high"
+
+    def test_health_ttl_at_most_60s(self):
+        assert mod.HEALTH_TTL <= 60, "regression: HEALTH_TTL is too high"
+
+    def test_latest_release_ttl_respects_github_rate_limit(self):
+        """Must stay >= 1h to keep the 60/h GitHub limit safe on shared NATs."""
+        assert mod._LATEST_RELEASE_TTL >= 3600, (
+            "_LATEST_RELEASE_TTL too aggressive; GitHub releases API is 60/h per IP"
+        )
 
 
 # ── _read_tasks_content ───────────────────────────────────────────────────

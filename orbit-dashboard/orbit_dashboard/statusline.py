@@ -102,6 +102,46 @@ RAINBOW_COLORS = (
 )
 
 
+def _atomic_write_json(path: Path, payload: object) -> None:
+    """Write JSON to ``path`` via tmp+rename so concurrent statusline runs cannot
+    observe a half-written cache file.
+
+    Multiple Claude Code tabs invoke the statusline on every prompt; a naive
+    ``path.write_text(json.dumps(...))`` lets two tabs race on the same cache
+    file and produce truncated output that the next reader cannot decode. The
+    tmp+``os.replace`` pattern bounds visibility to a complete file or no
+    write at all, with no new locking primitives.
+
+    The pid suffix on the tmp path keeps concurrent writers from collusion-
+    corrupting each other's tmp file; pid is not stable across reboots or
+    PID-reuse, so leftover ``<name>.tmp.*`` files from prior crashes (between
+    write_text and os.replace) are best-effort swept on every call. This
+    avoids a slow disk-fill in ``~/.claude/scripts/`` without an external
+    janitor process.
+
+    Failures are silent (return on OSError) so a full disk or read-only
+    mount cannot break the statusline render. TypeError on a non-JSON-safe
+    payload is NOT swallowed - the four current call sites pass dicts of
+    primitives, and silently stringifying corrupt data is worse than a loud
+    crash that the user can see in their terminal.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Best-effort cleanup of stale tmp files from prior crashes.
+        cutoff = time.time() - 3600
+        for stale in path.parent.glob(f"{path.name}.tmp.*"):
+            try:
+                if stale.stat().st_mtime < cutoff:
+                    stale.unlink()
+            except OSError:
+                pass
+        tmp_path = path.parent / f"{path.name}.tmp.{os.getpid()}"
+        tmp_path.write_text(json.dumps(payload))
+        os.replace(tmp_path, path)
+    except OSError:
+        pass
+
+
 def _rainbow_text(text: str) -> str:
     """Color each character with the next color in RAINBOW_COLORS."""
     return "".join(
@@ -156,7 +196,7 @@ def _get_hooks_db() -> sqlite3.Connection | None:
         return None
 
 HEALTH_CACHE = SCRIPTS_DIR / "health-cache.json"
-HEALTH_TTL = 180
+HEALTH_TTL = 60
 HEALTH_URL = "https://status.claude.com/api/v2/incidents.json"
 
 _ALL_HEALTH_COMPONENTS = {
@@ -207,11 +247,11 @@ HEALTH_COMPONENTS = {
 }
 
 USAGE_CACHE = SCRIPTS_DIR / "usage-cache.json"
-USAGE_TTL = 300
+USAGE_TTL = 60
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 CODEX_USAGE_CACHE = SCRIPTS_DIR / "codex-usage-cache.json"
-CODEX_USAGE_TTL = 300
+CODEX_USAGE_TTL = 60
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
 CODEX_CONFIG_FILE = Path.home() / ".codex" / "config.toml"
@@ -835,7 +875,11 @@ def is_version_reviewed(version: str) -> bool:
     return _parse_semver(reviewed) >= _parse_semver(version)
 
 
-_LATEST_RELEASE_TTL = 21600  # 6 hours
+_LATEST_RELEASE_TTL = 21600  # 6 hours - kept long because GitHub's
+# unauthenticated releases API is rate-limited at 60/h per IP, and a corporate
+# NAT with multiple users running this plugin can exhaust the quota fast at
+# tighter TTLs. Releases don't happen multiple times per hour anyway, so a
+# stale "latest" indicator is a non-issue.
 
 
 def get_version_info(running: str) -> tuple[str, str]:
@@ -893,11 +937,7 @@ def get_version_info(running: str) -> tuple[str, str]:
                         "published_at": latest_date.isoformat(),
                         "checked_at": time.time(),
                     }
-                    try:
-                        cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        cache_file.write_text(json.dumps(cache))
-                    except OSError:
-                        pass
+                    _atomic_write_json(cache_file, cache)
         except Exception:
             pass
 
@@ -1009,11 +1049,7 @@ def get_health_status() -> list[dict]:
         incidents = [{"service": "OK"}]
 
     # Cache
-    try:
-        HEALTH_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        HEALTH_CACHE.write_text(json.dumps({"timestamp": time.time(), "incidents": incidents}))
-    except OSError:
-        pass
+    _atomic_write_json(HEALTH_CACHE, {"timestamp": time.time(), "incidents": incidents})
     return incidents
 
 
@@ -1097,13 +1133,10 @@ def get_usage_data() -> dict | None:
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
-        try:
-            USAGE_CACHE.write_text(json.dumps({
-                "cached_at": datetime.now(timezone.utc).isoformat(),
-                "data": data,
-            }))
-        except OSError:
-            pass
+        _atomic_write_json(USAGE_CACHE, {
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "data": data,
+        })
         return _parse_usage_response(data)
     except Exception:
         # API failed (429, timeout, etc.) - fall back to stale cache if available
@@ -1167,13 +1200,10 @@ def get_codex_usage() -> dict | None:
             result["weekly_reset"] = _format_unix_reset(sw.get("reset_at"))
 
         # Cache
-        try:
-            CODEX_USAGE_CACHE.write_text(json.dumps({
-                "cached_at": datetime.now(timezone.utc).isoformat(),
-                "parsed": result,
-            }))
-        except OSError:
-            pass
+        _atomic_write_json(CODEX_USAGE_CACHE, {
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "parsed": result,
+        })
         return result
     except Exception:
         # API failed - try returning expired cache
