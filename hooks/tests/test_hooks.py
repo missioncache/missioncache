@@ -16,6 +16,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+# ── shared helpers ────────────────────────────────────────────────────────
+
+
+def _patch_stdin_payload(monkeypatch, payload: dict) -> None:
+    """Replace ``sys.stdin`` with a real OS pipe carrying ``payload`` as JSON.
+
+    ``session_start.get_session_context`` polls ``sys.stdin`` via
+    ``select.select`` to peek without blocking. ``select.select`` requires
+    a real file descriptor (``fileno()``), which ``io.StringIO`` does not
+    expose - hence the OS pipe instead of a StringIO. The write end is
+    closed immediately so ``json.load`` sees EOF after the payload.
+    """
+    import os as _os
+    import sys as _sys
+
+    r, w = _os.pipe()
+    _os.write(w, json.dumps(payload).encode())
+    _os.close(w)
+    monkeypatch.setattr(_sys, "stdin", _os.fdopen(r, "r"))
+
+
 # ── session_start ─────────────────────────────────────────────────────────
 
 
@@ -466,7 +487,13 @@ class TestSessionStartResumePickup:
         assert not pointer_file.exists(), "pointer must not be written when DB write fails"
 
     def test_main_carries_project_across_resume(self, tmp_path, monkeypatch):
-        """Full main() flow: new sid inherits the project bound to the previous sid."""
+        """Full main() flow: new sid inherits the project bound to the previous sid.
+
+        The hook input carries ``source="resume"`` here, which is the only
+        case (alongside ``"compact"``) that triggers inheritance under the
+        post-fix contract. Tests for the gated-out cases live in
+        :class:`TestSessionStartSourceGating` below.
+        """
         import sqlite3 as _sqlite3
 
         db_path = self._redirect_state(monkeypatch, tmp_path)
@@ -474,7 +501,12 @@ class TestSessionStartResumePickup:
         cwd.mkdir(parents=True)
         monkeypatch.chdir(cwd)
         monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.setenv("CLAUDE_SESSION_ID", "new-sid")
+        # Pipe the SessionStart payload through real stdin so
+        # ``get_session_context`` sees both ``session_id`` and ``source``.
+        # ``CLAUDE_SESSION_ID`` is intentionally NOT set so the stdin path
+        # is exercised end-to-end.
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
 
         self._seed_pointer(tmp_path, cwd, "prev-sid")
         self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
@@ -509,6 +541,432 @@ class TestSessionStartResumePickup:
         cwd_key = str(cwd).replace("/", "-")
         cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
         assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
+
+
+class TestSessionStartSourceGating:
+    """Inheritance must fire ONLY on resume/compact, never on startup/clear.
+
+    The umbrella-cwd false positive: a fresh ``startup`` session in a cwd
+    like ``~/work`` (which has many active orbit projects under it) used to
+    inherit whatever project the previous session in that cwd was working
+    on. Result: the new conversation got mis-tagged, statusline showed the
+    wrong project, and heartbeats were attributed to the wrong task.
+
+    The fix gates the inheritance on Claude Code's ``source`` field
+    (``startup`` / ``resume`` / ``clear`` / ``compact``). Only ``resume``
+    and ``compact`` count as a continuation of prior work; the other two
+    are new conversations that should start blank.
+    """
+
+    @staticmethod
+    def _redirect_state(monkeypatch, home: Path) -> Path:
+        """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
+        import orbit_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @staticmethod
+    def _seed_for_inheritance(home: Path, cwd: Path) -> None:
+        """Seed the cwd-pointer + project_state row that inheritance reads."""
+        import sqlite3 as _sqlite3
+        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            init_hooks_state_db_schema(conn)
+            conn.execute(
+                "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
+                ("prev-sid", "previous-project"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _wire_no_task(monkeypatch) -> None:
+        """Stub TaskDB so the existing find_task_for_cwd path is a no-op.
+
+        We are testing the gating of the pickup branch only; the task-detection
+        branch has its own coverage in :class:`TestSessionStart`.
+        """
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+
+    def _reload_module(self):
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        return mod
+
+    @pytest.mark.parametrize(
+        "source,should_inherit",
+        [
+            ("startup", False),
+            ("clear", False),
+            ("resume", True),
+            ("compact", True),
+        ],
+    )
+    def test_main_inherits_only_on_resume_or_compact(
+        self, source, should_inherit, tmp_path, monkeypatch
+    ):
+        """Resume/compact -> inheritance fires. Startup/clear -> no binding for new sid.
+
+        This is the load-bearing assertion: a fresh ``startup`` in an umbrella
+        cwd must not steal the previous session's project name. A regression
+        here re-introduces the original bug.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "umbrella" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": source})
+
+        self._seed_for_inheritance(tmp_path, cwd)
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if should_inherit:
+            assert row is not None and row[0] == "previous-project", (
+                f"source={source!r} should have inherited 'previous-project'"
+            )
+        else:
+            assert row is None, (
+                f"source={source!r} must NOT bind new-sid - umbrella-cwd false "
+                f"positive. Got binding {row[0]!r}."
+            )
+
+        # The cwd-session pointer is overwritten regardless of source. That
+        # is the live "who owns this cwd right now" signal; gating it on
+        # source would break /orbit:save in a fresh session.
+        cwd_key = str(cwd).replace("/", "-")
+        cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
+        assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
+
+    def test_main_does_not_inherit_when_source_field_missing(self, tmp_path, monkeypatch):
+        """Older Claude Code versions or direct invocations omit ``source``.
+
+        Default to no-inherit so we fail to "no project" instead of "wrong
+        project". A blank statusline is recoverable; mis-attributed task
+        history is not.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "no-source" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        # Payload omits ``source`` entirely.
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid"})
+
+        self._seed_for_inheritance(tmp_path, cwd)
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is None, "missing source must not trigger inheritance"
+
+    def test_main_emits_breadcrumb_on_inherit(self, tmp_path, monkeypatch, capsys):
+        """A successful inherit logs a stderr breadcrumb naming project + source.
+
+        The breadcrumb is the user's only signal that auto-binding fired. If
+        the statusline ever shows an unexpected project, this line in
+        ``~/.claude/logs/`` is the first place to look. Format-locking via
+        substring asserts (not a full-string match) so the wording can
+        evolve without test churn; the three invariants - the "inherited"
+        verb, the project name, and the source value - stay.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "breadcrumb" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        self._seed_for_inheritance(tmp_path, cwd)
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        err = capsys.readouterr().err
+        # Lock canonical phrase order so a refactor that splits the
+        # breadcrumb (e.g. printing project on a separate line from
+        # source) is caught. Substring asserts on individual tokens
+        # would false-pass on a poorly-ordered re-emit.
+        assert "orbit: inherited project=previous-project" in err
+        assert "source=resume" in err
+
+    def test_main_emits_no_breadcrumb_when_gated_out(self, tmp_path, monkeypatch, capsys):
+        """``startup`` short-circuits before the breadcrumb. Stderr stays quiet."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "gated" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "startup"})
+
+        self._seed_for_inheritance(tmp_path, cwd)
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        # The "inherited" verb is the load-bearing token to keep out of
+        # stderr on a gated-out session. The new diagnostic breadcrumbs
+        # ("no previous binding", "unknown source") use different verbs,
+        # so this assert specifically protects the success-path phrase
+        # from leaking into the gated-out path.
+        assert "inherited" not in capsys.readouterr().err
+
+    def test_main_logs_breadcrumb_when_resume_has_no_previous_binding(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Resume + nothing to inherit emits the "no previous binding" diagnostic.
+
+        This is the user-visible failure mode the original bug fix did
+        not address: source=resume but the cwd has no pointer or the
+        previous session never bound a project. Without this breadcrumb,
+        a user whose statusline goes blank on resume has zero log signal
+        to debug from. Failing closed is correct behavior; failing
+        invisibly is not.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "no-prev" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        # No _seed_for_inheritance: the cwd has no pointer file and the
+        # DB has no project_state row, so _pickup_previous_session_binding
+        # returns None.
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        err = capsys.readouterr().err
+        assert "no previous binding to inherit" in err
+        assert "source=resume" in err
+        # The success-path "inherited project=" phrase MUST NOT appear
+        # since nothing was inherited; this guards against a refactor
+        # that prints the success line unconditionally.
+        assert "inherited project=" not in err
+
+    def test_main_logs_breadcrumb_for_unknown_source(self, tmp_path, monkeypatch, capsys):
+        """An unrecognized source value (future Claude Code addition) is logged.
+
+        If Anthropic ships a new SessionStart source variant beyond the
+        current four (startup/resume/clear/compact), the gate fails
+        closed correctly but inheritance silently stops working. This
+        breadcrumb makes contract drift visible without users having to
+        grep the hook source. Replace ``"agent"`` with whatever the
+        actual new value turns out to be when the day comes; the test's
+        intent is "any non-allowlisted, non-known source is observable",
+        not the specific string.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "unknown-src" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "agent"})
+
+        # Seed a pointer so any accidental inherit would have data to
+        # find; if the gating is broken this test will see "inherited"
+        # in stderr instead of the unknown-source breadcrumb.
+        self._seed_for_inheritance(tmp_path, cwd)
+        self._wire_no_task(monkeypatch)
+
+        mod = self._reload_module()
+        mod.main()
+
+        err = capsys.readouterr().err
+        assert "unknown source" in err
+        assert "'agent'" in err  # the unknown value is in the breadcrumb (repr form)
+        assert "no inherit" in err
+        # Critical: must NOT have inherited despite the seeded pointer.
+        assert "inherited project=" not in err
+
+
+class TestGetSessionContextValidation:
+    """Direct unit tests for ``get_session_context`` validation + precedence.
+
+    The ``TestSessionStartSourceGating`` class tests ``main()`` end-to-end;
+    these tests exercise ``get_session_context`` in isolation to lock
+    invariants that drive the security and precedence properties of the
+    surrounding flow.
+    """
+
+    def _reload_module(self):
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        return mod
+
+    def test_rejects_path_traversal_session_id(self, monkeypatch):
+        """A stdin session_id with path separators is dropped to None.
+
+        Defense against CWE-22: ``session_id`` is interpolated into
+        ``projects/<sid>.json`` in ``write_session_project``. A payload
+        like ``"../../../tmp/pwn"`` would otherwise produce a write
+        outside ``~/.claude/hooks/state/projects/``. The validator
+        rejects on charset mismatch (``/`` and ``.`` are outside
+        ``[A-Za-z0-9_-]``).
+        """
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch,
+            {"session_id": "../../../tmp/pwn", "source": "resume"},
+        )
+
+        mod = self._reload_module()
+        sid, source = mod.get_session_context()
+        assert sid is None
+        # source still propagates - the source field is documented as a
+        # plain enum string and isn't a security boundary.
+        assert source == "resume"
+
+    def test_rejects_oversized_session_id(self, monkeypatch):
+        """A multi-megabyte session_id is dropped to None.
+
+        Bounds the value flowing into DB rows (project_state),
+        filesystem writes (projects/<sid>.json), and breadcrumb stderr
+        output. 257 chars (one over the limit) is sufficient to verify
+        the boundary.
+        """
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch,
+            {"session_id": "a" * 257, "source": "resume"},
+        )
+
+        mod = self._reload_module()
+        sid, _source = mod.get_session_context()
+        assert sid is None
+
+    def test_rejects_non_string_session_id(self, monkeypatch):
+        """A JSON integer session_id is dropped to None.
+
+        Claude Code emits string UUIDs, but the JSON contract doesn't
+        enforce type at the wire layer. A buggy or hostile producer
+        could send ``"session_id": 12345``. ``isinstance(value, str)``
+        guards downstream code that assumes string operations on the id.
+        """
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch,
+            {"session_id": 12345, "source": "resume"},
+        )
+
+        mod = self._reload_module()
+        sid, _source = mod.get_session_context()
+        assert sid is None
+
+    def test_accepts_uuid_shaped_session_id(self, monkeypatch):
+        """A standard UUID-shaped session_id passes validation.
+
+        Sanity check the validator isn't over-tight; the actual
+        Claude-Code-issued shape (8-4-4-4-12 lowercase hex with hyphens)
+        must still get through.
+        """
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch,
+            {
+                "session_id": "258e25fa-96ea-4b72-bc96-bb9070dd7ea0",
+                "source": "resume",
+            },
+        )
+
+        mod = self._reload_module()
+        sid, source = mod.get_session_context()
+        assert sid == "258e25fa-96ea-4b72-bc96-bb9070dd7ea0"
+        assert source == "resume"
+
+    def test_env_var_wins_for_session_id_when_both_set(self, monkeypatch):
+        """env CLAUDE_SESSION_ID wins for sid; source still comes from stdin.
+
+        This is the documented split-precedence rule: env carries only
+        session_id (no source field), so when both are set, the env
+        value is the session_id but source still has to come from
+        stdin. A regression that returns early on the env var path
+        (skipping the stdin read) would silently break inheritance for
+        users whose terminal sets ``CLAUDE_SESSION_ID``.
+        """
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-sid")
+        _patch_stdin_payload(
+            monkeypatch,
+            {"session_id": "stdin-sid", "source": "resume"},
+        )
+
+        mod = self._reload_module()
+        sid, source = mod.get_session_context()
+        assert sid == "env-sid"
+        assert source == "resume"
+
+    def test_invalid_env_var_session_id_is_dropped(self, monkeypatch):
+        """A path-traversal env var is also rejected (env isn't a trust shortcut).
+
+        Validation runs at the function exit boundary, so the env var
+        path goes through the same gate as the stdin path. A user who
+        manually exports ``CLAUDE_SESSION_ID="../etc/passwd"`` doesn't
+        get to bypass the filename-safety check.
+        """
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "../../../tmp/pwn")
+        # No stdin payload - exercise the env-var-only path.
+
+        mod = self._reload_module()
+        sid, _source = mod.get_session_context()
+        assert sid is None
 
 
 # ── pre_compact ───────────────────────────────────────────────────────────

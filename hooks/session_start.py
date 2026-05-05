@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -29,6 +30,30 @@ _PICKUP_MAX_AGE_SECONDS = 24 * 60 * 60
 # while preventing a corrupt pointer with a multi-megabyte string from
 # trickling into the DB and bloating it.
 _MAX_PREV_SESSION_ID_LEN = 256
+
+# Charset for session_ids accepted at the stdin boundary. Claude Code emits
+# UUIDs (alphanumeric + hyphens). Validating at get_session_context's exit
+# defends downstream filename interpolation in write_session_project against
+# path traversal (CWE-22) and bounds the value flowing into DB rows + JSON
+# pointer values. Underscore is permitted because some test/dev contexts use
+# it in synthetic ids.
+_SESSION_ID_CHARSET_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _is_valid_session_id(value: object) -> bool:
+    """True if ``value`` is a plausible session id (UUID-charset, bounded length).
+
+    Used to validate session_id inputs from BOTH stdin and the
+    ``CLAUDE_SESSION_ID`` env var before they flow into filenames, DB
+    rows, or JSON pointer values. Rejects None, non-strings, empty
+    strings, anything containing path separators, control characters,
+    or non-ASCII, and anything over ``_MAX_PREV_SESSION_ID_LEN``.
+    """
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= _MAX_PREV_SESSION_ID_LEN
+        and bool(_SESSION_ID_CHARSET_RE.match(value))
+    )
 
 # Bundled orbit-db path for marketplace installs (no system pip install).
 _BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
@@ -314,41 +339,89 @@ def write_session_project(task_name: str, session_id: str) -> None:
     )
 
 
-def get_session_id() -> str | None:
-    """Get session ID from env var or stdin JSON."""
-    session_id = os.environ.get("CLAUDE_SESSION_ID")
-    if session_id:
-        return session_id
+def get_session_context() -> tuple[str | None, str | None]:
+    """Get ``(session_id, source)`` from env var or stdin JSON.
 
-    # Fallback: try reading from stdin JSON (some hook types provide it there)
+    ``source``, when present, is expected to be one of ``"startup"``,
+    ``"resume"``, ``"clear"``, or ``"compact"`` per Claude Code's
+    SessionStart contract (https://code.claude.com/docs/en/hooks); the
+    value is returned as-is without validation, and ``main()`` whitelist-
+    gates it before acting. The env var path carries only the session_id,
+    so ``source`` always comes from stdin when present.
+
+    ``session_id`` IS validated before return via
+    ``_is_valid_session_id``: it must be UUID-charset and at most
+    ``_MAX_PREV_SESSION_ID_LEN`` chars. This defends downstream filename
+    interpolation (``projects/<sid>.json``) against path traversal and
+    bounds the value flowing into DB rows + pointer JSON. Invalid
+    session_ids are dropped (returned as None) so the hook fails closed
+    rather than propagating a hostile value.
+
+    The ``select.select`` poll is a non-blocking peek so this hook still
+    works under env-var-only invocation (manual testing, older bootstrap
+    scripts) without hanging on an empty interactive stdin.
+    """
+    session_id = os.environ.get("CLAUDE_SESSION_ID")
+    source: str | None = None
     try:
         import select
 
         if select.select([sys.stdin], [], [], 0)[0]:
             data = json.load(sys.stdin)
-            return data.get("session_id") or None
-    except Exception:
+            session_id = session_id or data.get("session_id")
+            source = data.get("source")
+    except (json.JSONDecodeError, OSError, ValueError):
+        # Malformed JSON, stdin OS error, or value error from select.
+        # Hook falls back to env-var-only mode below.
         pass
-
-    return None
+    if not _is_valid_session_id(session_id):
+        session_id = None
+    return session_id, source
 
 
 def main():
     """Check for active task and output context."""
     # Write term-session mapping BEFORE OrbitDB (independent of task detection)
-    session_id = get_session_id()
+    session_id, source = get_session_context()
     if session_id:
         write_term_session_mapping(session_id)
-        # On resume, the cwd-session pointer still carries the previous
-        # session's id. Read its project binding BEFORE overwriting the
-        # pointer so the statusline can render the project for the new sid
-        # without waiting for the user to re-run /orbit:go.
-        inherited = _pickup_previous_session_binding(Path.cwd(), session_id)
-        if inherited:
-            _bind_session_to_project(session_id, inherited)
-        # Also record this session as the owner of the current cwd so slash
-        # commands can resolve the live session id authoritatively instead of
-        # guessing by transcript mtime.
+        # Only inherit on genuine continuations. The umbrella-cwd false
+        # positive: a fresh "startup"/"clear" in a parent directory that
+        # contains many orbit projects (e.g. ~/work) would otherwise
+        # steal whichever project the previous unrelated session bound.
+        # Missing source defaults to no-inherit so we fail to "no project"
+        # instead of "wrong project".
+        if source in ("resume", "compact"):
+            inherited = _pickup_previous_session_binding(Path.cwd(), session_id)
+            if inherited:
+                print(
+                    f"<!-- orbit: inherited project={inherited} (source={source}) -->",
+                    file=sys.stderr,
+                )
+                _bind_session_to_project(session_id, inherited)
+            else:
+                # Resume/compact requested an inherit but no previous
+                # binding was available. This is the user-visible
+                # "statusline went blank on resume" failure mode; surface
+                # it so it's debuggable from ~/.claude/logs/.
+                print(
+                    f"<!-- orbit: no previous binding to inherit (source={source}) -->",
+                    file=sys.stderr,
+                )
+        elif source is not None and source not in ("startup", "clear"):
+            # Unknown source value - Claude Code added one we don't
+            # recognize. Failing closed is correct, but silent is bad;
+            # surface contract drift so it's visible without grepping
+            # the hook source.
+            print(
+                f"<!-- orbit: unknown source={source!r}, no inherit -->",
+                file=sys.stderr,
+            )
+        # Always record this session as the owner of the current cwd so
+        # slash commands can resolve the live session id authoritatively
+        # instead of guessing by transcript mtime. Independent of project
+        # binding - the cwd-session pointer answers "who owns this cwd
+        # right now", not "what project are they working on".
         write_cwd_session_pointer(session_id)
 
     # Always attempt to refresh rule files, even if orbit_db is unavailable.
