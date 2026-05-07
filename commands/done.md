@@ -49,29 +49,20 @@ Call `mcp__plugin_orbit_pm__process_heartbeats()` to finalize time tracking.
 Remove the project pointer so the statusline stops showing the completed project name. Mirrors the resolver in `/orbit:new` / `/orbit:go` (filesystem primary, term-env fallback) and uses direct SQL because the dashboard has no DELETE endpoint for project_state. Silently no-ops on quick-install setups without `hooks-state.db`.
 
 ```bash
-# Primary: SessionStart hook writes the authoritative current-session pointer
-# at ~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Falls back to
-# transcript mtime for sessions that started before the pointer mechanism landed.
-CWD_KEY=$(pwd | sed 's|/|-|g')
-POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-SESSION_ID=""
-if [ -r "$POINTER_FILE" ]; then
-  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
-fi
-[ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+# Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
+SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 
-# Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal only).
+# Fallback for older Claude Code versions. SessionStart hook writes the
+# authoritative current-session pointer at ~/.claude/hooks/state/cwd-session/
+# <sanitized-cwd>.json; transcript mtime walk catches sessions that started
+# before the pointer mechanism landed.
 if [ -z "$SESSION_ID" ]; then
-  TERM_KEY="${TERM_SESSION_ID:-$WT_SESSION}"
-  if [ -n "$TERM_KEY" ]; then
-    SESSION_ID=$(curl -s "http://localhost:8787/api/hooks/term-session/${TERM_KEY}" --connect-timeout 1 --max-time 2 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
-    [ -z "$SESSION_ID" ] && SESSION_ID=$(TERM_KEY="$TERM_KEY" python3 -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-row = conn.execute("SELECT session_id FROM term_sessions WHERE term_session_id = ?", (os.environ["TERM_KEY"],)).fetchone()
-print(row[0] if row else "")
-' 2>/dev/null)
+  CWD_KEY=$(pwd | sed 's|/|-|g')
+  POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+  if [ -r "$POINTER_FILE" ]; then
+    SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
   fi
+  [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
 
 # Delete project_state row. String concatenation, not f-strings, because

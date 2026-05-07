@@ -76,29 +76,21 @@ The statusline displays the active project name automatically when set correctly
 
 ### Setting Project in Statusline
 
-When creating, continuing, or resuming an orbit project, resolve the current Claude session ID and set the project. The primary resolver uses the filesystem (works on any terminal including Ghostty), with the legacy term-session lookup as fallback:
+When creating, continuing, or resuming an orbit project, resolve the current Claude session ID and set the project. Claude Code 2.1.132+ exposes the session ID directly via the `CLAUDE_CODE_SESSION_ID` env var; older versions fall back to a filesystem mtime walk that works on any terminal (including Ghostty and cmux):
 
 ```bash
 # Caller MUST set PROJECT_NAME (orbit project name, kebab-case recommended).
 PROJECT_NAME='<project-name>'
 
-# Primary: most-recently-modified transcript in ~/.claude/projects/<sanitized-cwd>/ = current session.
-# Session IDs are UUIDs so ls|head is safe here.
-CWD_KEY=$(pwd | sed 's|/|-|g')
-SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+# Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
+SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 
-# Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal).
+# Fallback for older Claude Code versions: most-recently-modified transcript
+# in ~/.claude/projects/<sanitized-cwd>/ = current session. Session IDs are
+# UUIDs so ls|head is safe here.
 if [ -z "$SESSION_ID" ]; then
-  TERM_KEY="${TERM_SESSION_ID:-$WT_SESSION}"
-  if [ -n "$TERM_KEY" ]; then
-    SESSION_ID=$(curl -s "http://localhost:8787/api/hooks/term-session/${TERM_KEY}" --connect-timeout 1 --max-time 2 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
-    [ -z "$SESSION_ID" ] && SESSION_ID=$(TERM_KEY="$TERM_KEY" python3 -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-row = conn.execute("SELECT session_id FROM term_sessions WHERE term_session_id = ?", (os.environ["TERM_KEY"],)).fetchone()
-print(row[0] if row else "")
-' 2>/dev/null)
-  fi
+  CWD_KEY=$(pwd | sed 's|/|-|g')
+  SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
 
 # Write project_state. Dashboard API first (handles escaping via JSON), direct SQL fallback
@@ -124,7 +116,7 @@ conn.commit()
 fi
 ```
 
-**How it works:** Session state is stored in `~/.claude/hooks-state.db` (SQLite). The statusline reads `project_state` keyed by session_id. Claude writes transcript files to `~/.claude/projects/<cwd-sanitized>/<session-id>.jsonl`, and the most-recently-modified one corresponds to the active session - that's our universal resolver. The legacy `term_sessions` lookup only works on terminals that set `TERM_SESSION_ID` (iTerm2) or `WT_SESSION` (Windows Terminal), NOT on Ghostty/cmux.
+**How it works:** Session state is stored in `~/.claude/hooks-state.db` (SQLite). The statusline reads `project_state` keyed by session_id. On Claude Code 2.1.132+, `$CLAUDE_CODE_SESSION_ID` is set in every Bash subprocess and is the cheapest, most reliable resolver. On older versions we fall back to walking `~/.claude/projects/<cwd-sanitized>/*.jsonl` for the most-recently-modified transcript - the filename is the session ID, and that path works on any terminal (Ghostty, cmux, iTerm2, Windows Terminal, etc.).
 
 The statusline will automatically display:
 ```
