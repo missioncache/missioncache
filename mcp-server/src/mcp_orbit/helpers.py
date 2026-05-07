@@ -2,8 +2,13 @@
 
 import asyncio
 import logging
+import re
+import sqlite3
 import urllib.request
+from datetime import datetime
 from pathlib import Path
+
+import orbit_db  # type: ignore[import-not-found]
 
 from . import orbit
 from .config import settings
@@ -12,6 +17,90 @@ from .errors import TaskNotFoundError, ValidationError
 from .models import TaskDetail, TaskProgress, TaskSummary
 
 logger = logging.getLogger(__name__)
+
+
+# Session-id charset for binding. Matches active_task._SESSION_ID_RE so any
+# session_id accepted there is also bindable here. Bounded length (128) is
+# conservative; Claude Code UUIDs are 36 chars, other tools may use slightly
+# longer ids. Defends downstream filename interpolation in the per-session
+# pointer write against path traversal.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
+    """Bind a Claude Code session to a project so the statusline picks it up.
+
+    Writes the ``project_state`` row in ``~/.claude/hooks-state.db`` (source
+    of truth the statusline reads) and the per-session
+    ``~/.claude/hooks/state/projects/<sid>.json`` pointer (read by
+    ``find_task_for_cwd``) atomically with task creation. This eliminates
+    the "Claude skipped the binding step" failure mode where the slash
+    command's client-side bash binding gets bypassed silently.
+
+    Mirrors ``hooks/session_start.py:_bind_session_to_project``. The two
+    helpers are deliberately not yet extracted to a shared library; if a
+    third caller appears, this is the right time to lift them into
+    ``orbit_db``.
+
+    Direct SQL only - the dashboard may not be running, and degrading
+    silently to HTTP would re-introduce the failure mode this binding is
+    designed to eliminate. Failures log a stderr breadcrumb but do not
+    raise; the binding is best-effort, task creation is the load-bearing
+    operation.
+
+    Returns ``True`` on success, ``False`` on validation or IO failure.
+    """
+    if not session_id or not project_name:
+        return False
+    if not _SESSION_ID_RE.match(session_id):
+        logger.warning("Skipping session binding: invalid session_id shape")
+        return False
+
+    # Resolve orbit_db symbols via attribute access (not module-level
+    # `from orbit_db import X`) so test fixtures that monkeypatch
+    # ``orbit_db.HOOKS_STATE_DB_PATH`` to a tmp path are honored.
+    db_path = orbit_db.HOOKS_STATE_DB_PATH
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            orbit_db.init_hooks_state_db_schema(conn)
+            conn.execute(
+                "INSERT INTO project_state (session_id, project_name, updated_at) "
+                "VALUES (?, ?, datetime('now', 'localtime')) "
+                "ON CONFLICT(session_id) DO UPDATE SET "
+                "project_name = excluded.project_name, "
+                "updated_at = datetime('now', 'localtime')",
+                (session_id, project_name),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning(
+            f"Failed to bind session to project={project_name!r}: {e}"
+        )
+        return False
+
+    pointer_file = (
+        Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
+    )
+    try:
+        orbit_db.atomic_write_json(
+            pointer_file,
+            {
+                "projectName": project_name,
+                "updated": datetime.now().astimezone().isoformat(),
+                "sessionId": session_id,
+            },
+        )
+    except OSError as e:
+        # DB row already written - the per-session pointer is a secondary
+        # concern (used by find_task_for_cwd, not by the statusline). Log
+        # but report partial success since the statusline binding landed.
+        logger.warning(f"Failed to write per-session pointer: {e}")
+        return False
+    return True
 
 
 async def _notify_dashboard_task_created() -> None:

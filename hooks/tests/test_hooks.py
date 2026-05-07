@@ -916,20 +916,22 @@ class TestGetSessionContextValidation:
 
         Sanity check the validator isn't over-tight; the actual
         Claude-Code-issued shape (8-4-4-4-12 lowercase hex with hyphens)
-        must still get through.
+        must still get through. Synthetic all-zeros UUID so it never
+        collides with a real developer session_id even if the test ever
+        loses its isolation.
         """
         monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
         _patch_stdin_payload(
             monkeypatch,
             {
-                "session_id": "258e25fa-96ea-4b72-bc96-bb9070dd7ea0",
+                "session_id": "00000000-0000-0000-0000-000000000000",
                 "source": "resume",
             },
         )
 
         mod = self._reload_module()
         sid, source = mod.get_session_context()
-        assert sid == "258e25fa-96ea-4b72-bc96-bb9070dd7ea0"
+        assert sid == "00000000-0000-0000-0000-000000000000"
         assert source == "resume"
 
     def test_env_var_wins_for_session_id_when_both_set(self, monkeypatch):

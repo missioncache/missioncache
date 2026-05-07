@@ -12,6 +12,7 @@ from .config import settings
 from .db import get_db
 from .errors import OrbitError, OrbitFileNotFoundError, TaskNotFoundError
 from .helpers import (
+    _bind_session_to_project,
     _notify_dashboard_task_created,
     _resolve_to_git_root,
     _validate_path,
@@ -51,6 +52,16 @@ async def create_orbit_files(
             "a monorepo is the actual project boundary."
         ),
     ] = True,
+    session_id: Annotated[
+        str | None,
+        Field(
+            description="Claude Code session ID (UUID). When provided, binds "
+            "this session to the new project so the statusline picks it up "
+            "immediately. Resolve client-side from "
+            "~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Omit or "
+            "pass None to skip binding (the user can recover via /orbit:go)."
+        ),
+    ] = None,
 ) -> dict:
     """
     Create orbit files for a new task.
@@ -62,11 +73,18 @@ async def create_orbit_files(
     user invoked it from. Pass resolve_git_root=False to opt out (e.g., when
     each sub-package in a monorepo is its own orbit project).
 
+    When ``session_id`` is provided, also writes the project_state row +
+    per-session pointer that the statusline reads, atomically with task
+    creation. Eliminates the prior failure mode where a separate
+    client-side bash binding step could be silently skipped, leaving the
+    statusline blank until /orbit:go was re-run.
+
     Returns ALREADY_EXISTS error if any of plan/context/tasks already exist
     for this name. Pass force=True to overwrite (destructive - the caller is
     expected to have confirmed with the user).
 
-    Returns paths to all created files.
+    Returns paths to all created files plus a ``session_bound`` flag
+    indicating whether the statusline binding was written.
     """
     db = get_db()
 
@@ -110,12 +128,19 @@ async def create_orbit_files(
 
         await _notify_dashboard_task_created()
 
+        # Bind the current session to the new project so the statusline
+        # picks it up immediately, atomically with task creation. None or
+        # an invalid session_id silently no-ops; the user can recover by
+        # running /orbit:go.
+        session_bound = _bind_session_to_project(session_id, project_name)
+
         return {
             "success": True,
             "task_id": task.id if task else None,
             "task_name": project_name,
             "files": files.model_dump(),
             "repo_path": registered_repo_path,
+            "session_bound": session_bound,
         }
 
     except OrbitError as e:

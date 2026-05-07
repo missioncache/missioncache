@@ -24,6 +24,7 @@ from .errors import (
     ValidationError,
 )
 from .helpers import (
+    _bind_session_to_project,
     _notify_dashboard_task_created,
     _task_to_detail,
     _task_to_summary,
@@ -353,12 +354,28 @@ async def create_task(
     jira_key: Annotated[
         str | None, Field(description="JIRA ticket ID (e.g., 'PROJ-12345')")
     ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            description="Claude Code session ID (UUID). When provided, binds "
+            "this session to the new task so the statusline picks it up "
+            "immediately. Resolve client-side from "
+            "~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Omit or "
+            "pass None to skip binding (the user can recover via /orbit:go)."
+        ),
+    ] = None,
 ) -> dict:
     """
     Create a new task in the database.
 
     For coding tasks, also creates the orbit/active/<name>/ directory.
     For non-coding tasks, no directory is created.
+
+    When ``session_id`` is provided, also writes the project_state row +
+    per-session pointer that the statusline reads, atomically with task
+    creation. Eliminates the prior failure mode where /orbit:new's
+    non-coding branch left the statusline blank because no binding step
+    existed for it.
     """
     db = get_db()
 
@@ -406,12 +423,20 @@ async def create_task(
 
         await _notify_dashboard_task_created()
 
-        return CreateTaskResult(
+        # Bind the current session to the new task so the statusline
+        # picks it up immediately, atomically with task creation. None
+        # or invalid session_id silently no-ops; the user can recover by
+        # running /orbit:go.
+        session_bound = _bind_session_to_project(session_id, name)
+
+        result = CreateTaskResult(
             task_id=task.id,
             task_name=task.name,
             task_type=task.task_type,
             orbit_path=orbit_path,
         ).model_dump()
+        result["session_bound"] = session_bound
+        return result
 
     except OrbitError as e:
         return e.to_dict()

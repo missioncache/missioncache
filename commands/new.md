@@ -125,10 +125,21 @@ rather than rebasing to the monorepo root. Default is `True`.
 
 ### Step 4: Create Orbit Files
 
-Pass `research_findings` from Step 2 via the `plan` dict. Pass `force=True`
-ONLY if Step 1's duplicate check confirmed the user wants to recreate
-destructively - the tool returns `ALREADY_EXISTS` by default to prevent
-silent overwrite.
+First resolve the current Claude session ID so the new project binds to this session for the statusline. Run:
+
+```bash
+CWD_KEY=$(pwd | sed 's|/|-|g')
+POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+SESSION_ID=""
+if [ -r "$POINTER_FILE" ]; then
+  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+fi
+echo "$SESSION_ID"
+```
+
+Capture the printed `SESSION_ID`. If the output is empty, the SessionStart hook has not fired yet (rare); call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/orbit:go` once the project exists.
+
+Now create the orbit files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
 **Flat tasks (simple):**
 ```
@@ -136,6 +147,7 @@ mcp__plugin_orbit_pm__create_orbit_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
+  session_id="<SESSION_ID from bash above; omit if empty>",
   jira_key="<optional JIRA ticket>",
   tasks=["subtask 1", "subtask 2", ...],
   plan={"research_findings": "<research results from step 2>"}
@@ -148,6 +160,7 @@ mcp__plugin_orbit_pm__create_orbit_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
+  session_id="<SESSION_ID from bash above; omit if empty>",
   tasks=[
     {"title": "Authentication", "subtasks": ["Create user model", "Add login endpoint"]},
     {"title": "Dashboard", "subtasks": ["Create component", "Add data fetching"]}
@@ -166,77 +179,9 @@ This generates numbered tasks:
   - [ ] 2.2. Add data fetching
 ```
 
-### Step 5: Register Project in Statusline
+The response includes `session_bound: true|false`. If `session_bound` is `false` and you DID pass a session_id, the binding helper rejected it (invalid shape or DB error); the user can recover via `/orbit:go`.
 
-Register the project name against the current Claude session so the statusline picks it up. Uses the filesystem resolver (works on any terminal, including Ghostty and cmux) with a legacy term-session fallback. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
-
-Replace `<project-name>` with the actual kebab-case project name, then run:
-
-```bash
-PROJECT_NAME='<project-name>'
-
-# Primary: SessionStart hook writes the authoritative current-session pointer
-# at ~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Falls back to
-# transcript mtime for sessions that started before the pointer mechanism landed.
-CWD_KEY=$(pwd | sed 's|/|-|g')
-POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-SESSION_ID=""
-if [ -r "$POINTER_FILE" ]; then
-  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
-fi
-[ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-
-# Fallback: legacy terminal-env-var lookup (iTerm2, Windows Terminal only).
-if [ -z "$SESSION_ID" ]; then
-  TERM_KEY="${TERM_SESSION_ID:-$WT_SESSION}"
-  if [ -n "$TERM_KEY" ]; then
-    SESSION_ID=$(curl -s "http://localhost:8787/api/hooks/term-session/${TERM_KEY}" --connect-timeout 1 --max-time 2 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
-    [ -z "$SESSION_ID" ] && SESSION_ID=$(TERM_KEY="$TERM_KEY" python3 -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-row = conn.execute("SELECT session_id FROM term_sessions WHERE term_session_id = ?", (os.environ["TERM_KEY"],)).fetchone()
-print(row[0] if row else "")
-' 2>/dev/null)
-  fi
-fi
-
-# Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
-if [ -n "$SESSION_ID" ]; then
-  PROJECT_JSON=$(python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
-  curl -s -X POST http://localhost:8787/api/hooks/project \
-    -H "Content-Type: application/json" \
-    -d "$PROJECT_JSON" \
-    --connect-timeout 1 --max-time 2 >/dev/null 2>&1 \
-  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-conn.execute(
-    "INSERT INTO project_state (session_id, project_name, updated_at) "
-    "VALUES (?, ?, datetime(\"now\", \"localtime\")) "
-    "ON CONFLICT(session_id) DO UPDATE SET project_name = excluded.project_name, "
-    "updated_at = datetime(\"now\", \"localtime\")",
-    (os.environ["SESSION_ID"], os.environ["PROJECT_NAME"]),
-)
-conn.commit()
-' 2>/dev/null
-
-  # Write per-session project pointer read by find_task_for_cwd (orbit-db/__init__.py:1270).
-  # Without this, /orbit:save cannot find the task when cwd is the repo root. Format matches
-  # session_start.py's write_session_project() so either writer is interchangeable.
-  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
-import os, json, datetime, pathlib
-projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
-projects_dir.mkdir(parents=True, exist_ok=True)
-(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps({
-    "projectName": os.environ["PROJECT_NAME"],
-    "updated": datetime.datetime.now().astimezone().isoformat(),
-    "sessionId": os.environ["SESSION_ID"],
-}))
-' 2>/dev/null
-fi
-```
-
-### Step 6: Probe Dashboard (optional)
+### Step 5: Probe Dashboard (optional)
 
 Check whether the dashboard is reachable so the confirmation output can surface a deep link to the newly-created project. Skip silently when the dashboard is not installed or not running - dead links teach users to ignore the hint.
 
@@ -252,7 +197,7 @@ fi
 
 If the probe emits a line, include it as a **Dashboard** entry in the confirmation below. If nothing is emitted, omit the entry.
 
-### Step 7: Show Plan and Confirm
+### Step 6: Show Plan and Confirm
 
 ```markdown
 ## Plan for: my-feature
@@ -267,11 +212,11 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 3. Third subtask
 
 **Files created:**
-- ~/.claude/orbit/active/my-feature/my-feature-plan.md
-- ~/.claude/orbit/active/my-feature/my-feature-context.md
-- ~/.claude/orbit/active/my-feature/my-feature-tasks.md
+- ~/.orbit/active/my-feature/my-feature-plan.md
+- ~/.orbit/active/my-feature/my-feature-context.md
+- ~/.orbit/active/my-feature/my-feature-tasks.md
 
-**Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 6 emitted a line)*
+**Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 5 emitted a line)*
 
 **Next step:** Start working on task 1. The plan, context, and tasks files have everything you need.
 
@@ -286,16 +231,28 @@ Non-coding projects don't need prompts:
 
 1. Ask for project name and optional JIRA ticket
 
-2. Create project:
+2. Resolve the current session ID (same bash as Step 4 above):
+   ```bash
+   CWD_KEY=$(pwd | sed 's|/|-|g')
+   POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+   SESSION_ID=""
+   if [ -r "$POINTER_FILE" ]; then
+     SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+   fi
+   echo "$SESSION_ID"
+   ```
+
+3. Create project, passing `session_id` so the statusline binds atomically:
    ```
    mcp__plugin_orbit_pm__create_task(
      name="<project-name>",
      task_type="non-coding",
+     session_id="<SESSION_ID from bash above; omit if empty>",
      jira_key="<optional>"
    )
    ```
 
-3. Explain how to track progress:
+4. Explain how to track progress:
    ```
    mcp__plugin_orbit_pm__add_task_update(task_id=<id>, note="...")
    ```
