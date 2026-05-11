@@ -152,7 +152,7 @@ def _is_cwd_compatible_with_inherited_project(
     so they always inherit on the cwd-pointer match alone.
     """
     try:
-        from orbit_db import ORBIT_ROOT, TaskDB  # type: ignore[import-not-found]
+        from orbit_db import TaskDB  # type: ignore[import-not-found]
     except ImportError:
         return True
 
@@ -177,29 +177,12 @@ def _is_cwd_compatible_with_inherited_project(
     if repo is None:
         return True
 
-    try:
-        cwd_resolved = cwd.resolve()
-        repo_resolved = Path(repo.path).resolve()
-    except OSError:
-        return True
-
     # cwd is the repo or a descendant of the repo (working inside the project)
     try:
-        cwd_resolved.relative_to(repo_resolved)
+        cwd.resolve().relative_to(Path(repo.path).resolve())
         return True
     except ValueError:
-        pass
-
-    # cwd is the orbit task dir or under it (e.g. ~/.orbit/active/<name>/...)
-    if task.full_path:
-        try:
-            task_dir = (ORBIT_ROOT / task.full_path).resolve()
-            cwd_resolved.relative_to(task_dir)
-            return True
-        except (ValueError, OSError):
-            pass
-
-    return False
+        return False
 
 
 def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | None:
