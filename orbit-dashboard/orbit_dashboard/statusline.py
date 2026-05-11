@@ -157,7 +157,7 @@ ICONS = {
     "model": "\U0001f916",
     "tokens": "\U0001f522",
     "context": "\U0001f4ca",
-    "duration": "\u23f1\ufe0f",
+    "duration": "\u231a",
     "edit": "\u270f\ufe0f",
     "datetime": "\U0001f550",
     "week": "\U0001f4c5",
