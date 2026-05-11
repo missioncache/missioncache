@@ -76,12 +76,29 @@ If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo
 
 ### Step 1: Get Project Details
 
-Call `mcp__plugin_orbit_pm__get_task(project_name="<name>")` which returns:
+First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_orbit_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
+
+```bash
+CWD_KEY=$(pwd | sed 's|/|-|g')
+POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+# Primary: env var set by Claude Code 2.1.132+ in every Bash subprocess.
+SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+# Fallback: cwd-session pointer written by the SessionStart hook.
+if [ -z "$SESSION_ID" ] && [ -r "$POINTER_FILE" ]; then
+  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+fi
+echo "SESSION_ID=$SESSION_ID"
+```
+
+Capture the printed `SESSION_ID`. Then call `mcp__plugin_orbit_pm__get_task(project_name="<name>", session_id="<SESSION_ID>")` which returns:
 - Project ID and status
 - Time invested (formatted)
 - Progress (completion %)
 - JIRA key (if any)
 - File paths
+- `session_bound: true | false | <omitted>` indicating whether the session-to-project binding succeeded server-side. If the response includes `session_bound: true`, the statusline will reflect this project immediately - the Step 4 bash binding is still run as defense-in-depth and to refresh the dashboard list view, but it is no longer load-bearing.
+
+If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg and rely entirely on the Step 4 bash binding.
 
 ### Step 2: Read Context Files
 

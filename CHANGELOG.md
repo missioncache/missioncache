@@ -4,6 +4,18 @@ All notable changes to orbit-pm are documented in this file. Dates are ISO 8601;
 
 ## Unreleased
 
+### Changed - `get_task` MCP tool accepts optional `session_id` for atomic binding (mcp-orbit 0.2.12)
+
+`mcp__plugin_orbit_pm__get_task` now accepts an optional `session_id` parameter. When provided, the tool atomically writes the `project_state` row in `~/.claude/hooks-state.db` and the per-session `~/.claude/hooks/state/projects/<sid>.json` pointer alongside the task lookup, mirroring the `create_orbit_files` binding pattern shipped in 0.2.11.
+
+**Motivation:** `/orbit:go`'s slash-command bash step (which used to be the sole binding writer for the resume path) can be silently skipped by Claude when it streams past Step 4 to the next instruction. The server-side binding makes it impossible to call `get_task` with a session_id without binding, eliminating the failure mode where the user runs `/orbit:go new-project` and the statusline keeps showing the previous project.
+
+**Response shape:**
+- When `session_id` is provided: response includes `session_bound: bool` (True on success, False on validation/IO failure).
+- When `session_id` is omitted: `session_bound` field is omitted entirely. Existing read-only callers (UI, list views, tests) are unaffected.
+
+**`/orbit:go` updates** to pass the resolved session_id to `get_task` via the same `$CLAUDE_CODE_SESSION_ID` env-var pattern adopted in `commands/save.md` / `commands/done.md` / `commands/new.md`. The Step 4 bash binding stays as defense-in-depth and to refresh the dashboard list view immediately, but the statusline binding is now driven server-side.
+
 ### Fixed - Statusline shows stale project after resume at umbrella cwd
 
 When a Claude Code session resumed at a parent directory holding multiple project repos (e.g. `~/work`), the SessionStart hook would unconditionally inherit whatever project the previous session at that cwd was bound to. The inherited binding then routed heartbeats to the wrong task, made the statusline display the wrong project name, and survived subsequent `/orbit:go <other-project>` invocations when the slash command's bash step did not fire correctly.
