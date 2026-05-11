@@ -371,7 +371,16 @@ class TestRenameNonCoding:
 
 
 class TestRenameSessionSweep:
-    def test_pending_task_json_updated(self, env):
+    def test_pending_task_json_no_longer_swept(self, env):
+        """The legacy ``pending-task.json`` file is no longer maintained
+        by rename_task as of orbit-db 1.0.4 / mcp-orbit 0.2.13. The file
+        is documented as vestigial state (see docs/hooks.md); the per-
+        session ``projects/<sid>.json`` pointer is the only live writer.
+
+        This test pins the new contract: a stale pending-task.json on
+        disk is left alone (no error, no mutation) and the rename's
+        sessions_updated count reflects only the live sweep targets.
+        """
         db, orbit_root, fake_home = env
         tid, _ = _seed_active_project(db, orbit_root, "old-pointer")
 
@@ -382,9 +391,14 @@ class TestRenameSessionSweep:
 
         result = db.rename_task(tid, "new-pointer")
 
-        assert result["sessions_updated"] >= 1
+        # rename succeeded
+        assert result["success"] is True
+        # Legacy pending-task.json was NOT rewritten - it is dead state.
         data = json.loads(pending.read_text())
-        assert data["projectName"] == "new-pointer"
+        assert data["projectName"] == "old-pointer"
+        # And the file was not removed either - we leave legacy artifacts
+        # alone for users to clean up on their own schedule.
+        assert pending.exists()
 
     def test_per_session_projects_json_updated(self, env):
         db, orbit_root, fake_home = env

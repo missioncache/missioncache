@@ -70,7 +70,6 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 1. **Write terminal-session mapping.** Looks up `TERM_SESSION_ID` (iTerm2) or `WT_SESSION` (Windows Terminal) from the environment and, if present, writes a row into `hooks-state.db:term_sessions` mapping the terminal tab to the Claude session ID. This is the bridge that lets the statusline find the current session when it runs, because the statusline only gets its session ID from Claude Code's statusline JSON and has no direct access to the SessionStart event.
 2. **Install bundled rules.** Runs `install_bundled_rules()`, which walks `${CLAUDE_PLUGIN_ROOT}/rules/*.md` and copies any file starting with `<!-- orbit-plugin:managed` into `~/.claude/rules/`. The ownership marker is critical: files that already exist in the destination are only overwritten if they *also* start with the marker. A user who deletes the marker takes ownership of that file and the hook stops touching it on subsequent SessionStarts. This is how marketplace installs get rule-file updates without clobbering user edits.
 3. **Detect the active task.** Tries `from orbit_db import TaskDB`, instantiates a DB, calls `db.find_task_for_cwd(cwd, session_id)`. If a task is found, it:
-   - Writes `pending-task.json` with the task name and repo path, for the activity tracker.
    - Writes `projects/<session-id>.json` with the project name, for the statusline.
    - Prints a markdown context block to stdout - this is the "Active Task Detected" banner Claude sees at the top of the session - with the task name, status, time invested, JIRA key, and the path to the orbit files.
    - Includes a `/orbit:go` tip and a task-tracking discipline reminder telling Claude to use `mcp__plugin_orbit_pm__update_tasks_file` instead of the built-in TaskCreate tool for orbit tasks.
@@ -78,12 +77,11 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 
 **State files written:**
 
-- `~/.claude/hooks/state/pending-task.json` - `{taskName, cwd, timestamp}`. Used to be read by `find_task_for_cwd` but is now vestigial (the actual per-session pointer is `projects/<session-id>.json`). Still written for backwards compatibility and because nothing breaks if it exists.
 - `~/.claude/hooks/state/term-sessions/<TERM_SESSION_ID>` - Plain-text file containing the Claude session ID. Used by the statusline for mid-session terminal→session resolution on terminals that set `TERM_SESSION_ID`.
 - `~/.claude/hooks-state.db:term_sessions` - Same mapping in the SQLite DB. Both formats exist because different readers use different stores.
 - `~/.claude/hooks/state/projects/<session-id>.json` - `{projectName, updated, sessionId}`. The authoritative per-session project pointer. The statusline reads this, and mid-session `/orbit:go` also writes it.
 
-**Why both `pending-task.json` and `projects/<session-id>.json`:** The per-session file is per-session (obviously), so two concurrent Claude Code windows can track different projects without interfering. `pending-task.json` is shared and prone to races when you open multiple sessions. The current resolution order in `find_task_for_cwd` checks the per-session file first, then falls back to cwd-based matching - `pending-task.json` is no longer in the resolution chain at all. It is dead state.
+**Removed in mcp-orbit 0.2.13:** the legacy `~/.claude/hooks/state/pending-task.json` file is no longer written by any hook or slash command. Old files left over from pre-0.2.13 installs are harmless and can be deleted by hand. `find_task_for_cwd` reads only `projects/<session-id>.json` and cwd-pattern matching now.
 
 ## UserPromptSubmit: `activity_tracker.py`
 
@@ -209,13 +207,12 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/tasks.db:sessions` | orbit_db `process_heartbeats` (called by pre_compact) | dashboard, orbit MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
-| `~/.claude/hooks-state.db:project_state` | `/orbit:go`, dashboard `/api/hooks/project` | statusline | SQLite row |
-| `~/.claude/hooks/state/pending-task.json` | session_start, `/orbit:go` | nothing (vestigial) | JSON file |
+| `~/.claude/hooks-state.db:project_state` | `/orbit:go`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
 | `~/.claude/hooks/state/term-sessions/<term-id>` | session_start | statusline fallback path | Plain text |
-| `~/.claude/hooks/state/projects/<session-id>.json` | session_start | statusline, `find_task_for_cwd` | JSON file |
+| `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/orbit:go`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
-**Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history and in older code, but `pending-task.json` is no longer read by anything and `pending-project.json` is *written* by nothing in the current codebase (it is read at priority 1 of `find_task_for_cwd`, but that branch is dead). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
+**Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history but are no longer written or read by any current code path (`pending-task.json` removed in mcp-orbit 0.2.13; `pending-project.json` writers were already removed earlier). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
 
 ## The HTTP hook path
 

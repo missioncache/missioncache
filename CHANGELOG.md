@@ -4,6 +4,23 @@ All notable changes to orbit-pm are documented in this file. Dates are ISO 8601;
 
 ## Unreleased
 
+### Removed - `pending-task.json` legacy state file (orbit-db 1.0.4, mcp-orbit 0.2.13)
+
+The shared `~/.claude/hooks/state/pending-task.json` file is no longer written or read by any code path. It had been documented as vestigial state since the per-session `projects/<session-id>.json` pointer landed; this release deletes the writers too.
+
+Removed:
+- `hooks/session_start.py:write_pending_task` and its call site in `main`.
+- The `pending-task.json` echo at the start of `commands/go.md` Step 4.
+- The `pending-task.json` echo at the start of `commands/save.md` Step 1b.
+- The `rm -f pending-task.json` cleanup in `commands/done.md` Step 5.
+- The `pending-task.json` sweep in `TaskDB.rename_task` (`orbit-db/__init__.py`).
+
+**Migration:** old `pending-task.json` files left over from pre-0.2.13 installs are harmless and can be deleted by hand. No active code reads them, and the rename-sweep no longer maintains them on task renames.
+
+Cosmetic cleanup in `commands/save.md` Step 1b: the previous one-liner ended with `&& echo "done" || echo "done"`, a no-op short-circuit pair. Rewritten as a single `echo "done"` after the curl call.
+
+orbit-db bumped 1.0.3 → 1.0.4 to invalidate uvx's wheel cache for the rename-sweep change; mcp-server bumped 0.2.12 → 0.2.13 to invalidate uvx's source-keyed venv cache (per `CLAUDE.local.md` - the orbit-db code is reachable from the MCP server, so both versions need to advance).
+
 ### Changed - `get_task` MCP tool accepts optional `session_id` for atomic binding (mcp-orbit 0.2.12)
 
 `mcp__plugin_orbit_pm__get_task` now accepts an optional `session_id` parameter. When provided, the tool atomically writes the `project_state` row in `~/.claude/hooks-state.db` and the per-session `~/.claude/hooks/state/projects/<sid>.json` pointer alongside the task lookup, mirroring the `create_orbit_files` binding pattern shipped in 0.2.11.

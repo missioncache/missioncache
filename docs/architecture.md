@@ -53,7 +53,7 @@ When Claude Code starts a new session in a repo, it fires the `SessionStart` hoo
 1. Resolves the session ID from `CLAUDE_SESSION_ID` or stdin JSON.
 2. Writes a `term-session` mapping file so that the statusline can later map terminal IDs back to session IDs.
 3. Calls `db.find_task_for_cwd(cwd, session_id)` to see if the current directory belongs to a tracked orbit project.
-4. If a task is found, writes `~/.claude/hooks/state/projects/<session-id>.json` - the per-session project pointer used both by the statusline (to render the active project name) and by `TaskDB.find_task_for_cwd` on subsequent prompts (to resolve which task a heartbeat belongs to). A legacy `pending-task.json` file is also written for historical reasons but is currently not consumed anywhere and is scheduled for removal.
+4. If a task is found, writes `~/.claude/hooks/state/projects/<session-id>.json` - the per-session project pointer used both by the statusline (to render the active project name) and by `TaskDB.find_task_for_cwd` on subsequent prompts (to resolve which task a heartbeat belongs to). (A legacy `pending-task.json` file used to be written here but was removed in mcp-orbit 0.2.13; see CHANGELOG.)
 
 The hook also prints a short "Active Task Detected" block to stdout, which Claude Code injects into the conversation context. This is how Claude learns which project it is working on without the user having to say so.
 
@@ -180,10 +180,10 @@ There is also a legacy layout under `<repo>/dev/{active,completed}/` that older 
 
 | File | Written by | Read by | Purpose |
 |------|------------|---------|---------|
-| `projects/<session-id>.json` | `session_start.py` only | `statusline.py`, `TaskDB.find_task_for_cwd` | Which project is active for a given session. Read on both the statusline rendering path (to show the project name) and the heartbeat path (to attribute time to the right task when `cwd` does not match a known task directory). Only written when `session_start.py` resolves a task at `SessionStart` time; mid-session project loads via slash commands do not write it |
+| `projects/<session-id>.json` | `session_start.py`, `/orbit:go`, `/orbit:new` (via `get_task` / `create_orbit_files` server-side binding), `/orbit:done` (removes) | `statusline.py`, `TaskDB.find_task_for_cwd` | Which project is active for a given session. Read on both the statusline rendering path (to show the project name) and the heartbeat path (to attribute time to the right task when `cwd` does not match a known task directory) |
 | `term-sessions/<term-id>` | `session_start.py` | `statusline.py` | Maps terminal-emulator session IDs back to Claude session IDs so mid-session lookups work from any tab |
-| `pending-task.json` | `session_start.py`, `/orbit:go`, `/orbit:save` | *(nothing)* | Legacy state file. Written for historical reasons but not consumed by any current code path. Safe to remove in a cleanup pass |
 | `pending-project.json` | *(nothing)* | `TaskDB.find_task_for_cwd` priority-1 branch | Inverse legacy: read but never written. The priority-1 branch in `find_task_for_cwd` is effectively dead code - task resolution always falls through to the `projects/<session-id>.json` branch |
+| ~~`pending-task.json`~~ | *(removed in mcp-orbit 0.2.13)* | *(never read)* | Removed. Old files left on disk from pre-0.2.13 installs are harmless; the rename-sweep also stopped maintaining them. Safe to delete by hand |
 
 These files are deliberately plain JSON and deliberately per-session. Early versions of orbit used a single shared project file that race-conditioned badly once multiple Claude sessions ran concurrently. If you add new state here, shard by session ID by default.
 

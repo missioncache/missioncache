@@ -83,9 +83,6 @@ print("Cleared project_state for session " + sid + " (rows: " + str(cur.rowcount
   # still find this task after completion.
   rm -f "$HOME/.claude/hooks/state/projects/${SESSION_ID}.json" 2>/dev/null
 fi
-
-# Clean up the vestigial activity-tracking pointer.
-rm -f ~/.claude/hooks/state/pending-task.json 2>/dev/null
 ```
 
 ### Step 6: Share Dashboard Link (if running)

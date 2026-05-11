@@ -1690,22 +1690,10 @@ class TaskDB:
         updated = 0
         warnings: List[str] = []
 
-        pending_file = state_dir / "pending-task.json"
-        if pending_file.exists():
-            try:
-                data = json.loads(pending_file.read_text())
-                if data.get("projectName") == old_name:
-                    data["projectName"] = new_name
-                    pending_file.write_text(json.dumps(data))
-                    updated += 1
-            except (OSError, json.JSONDecodeError) as e:
-                logger.warning(
-                    "session sweep: pending-task.json update failed: %s", e
-                )
-                warnings.append(
-                    f"pending-task.json update failed ({type(e).__name__}); "
-                    "statusline may show stale name on next session"
-                )
+        # ``pending-task.json`` used to be swept here; removed when the file
+        # itself stopped being written. The legacy file (if it still exists
+        # from a pre-0.2.13 install) is no longer maintained or read by any
+        # current code path. See docs/hooks.md.
 
         projects_dir = state_dir / "projects"
         if projects_dir.is_dir():
