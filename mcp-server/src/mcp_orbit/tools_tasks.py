@@ -254,12 +254,34 @@ async def get_task(
     include_updates: Annotated[
         bool, Field(description="Include recent updates for non-coding tasks")
     ] = True,
+    session_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional Claude Code session ID. When provided, atomically "
+                "binds the session to this project (writes project_state + "
+                "the per-session pointer) so the statusline picks it up "
+                "without relying on /orbit:go's slash-command bash step. "
+                "Mirrors the create_orbit_files binding pattern - lets "
+                "/orbit:go's binding be reliable even when Claude streams "
+                "past the bash block."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """
     Get full task details including progress, time, and prompt config.
 
     Provide either task_id OR project_name (not both).
     Returns all information needed for /continue-task in a single call.
+
+    When ``session_id`` is provided, also writes the project_state row +
+    the ``~/.claude/hooks/state/projects/<sid>.json`` pointer so the
+    statusline reflects this project immediately, without needing the
+    slash-command bash step to fire. Returns a ``session_bound`` field
+    in the response indicating whether the binding succeeded (True),
+    failed (False), or was not attempted (omitted when ``session_id``
+    is None).
     """
     db = get_db()
 
@@ -281,7 +303,17 @@ async def get_task(
             raise TaskNotFoundError(task_id or project_name)
 
         detail = _task_to_detail(task, include_subtasks, include_updates)
-        return detail.model_dump()
+        result = detail.model_dump()
+
+        # Atomic session binding when session_id is supplied. Best-effort
+        # like the create_orbit_files pattern: a DB-write failure or
+        # invalid session_id silently no-ops; the user can recover by
+        # re-running /orbit:go or invoking the binding explicitly.
+        if session_id:
+            session_bound = _bind_session_to_project(session_id, task.name)
+            result["session_bound"] = session_bound
+
+        return result
 
     except OrbitError as e:
         return e.to_dict()

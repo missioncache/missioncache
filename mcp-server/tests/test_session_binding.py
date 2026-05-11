@@ -284,6 +284,141 @@ class TestCreateTaskBinding:
         assert _read_project_state(hooks_db, "anything") is None
 
 
+# ── get_task binding (mirrors create_orbit_files / create_task) ───────────
+
+
+class TestGetTaskBinding:
+    """get_task accepts optional ``session_id`` for /orbit:go.
+
+    Background: ``/orbit:go`` calls ``get_task`` to load project context. The
+    binding (writing project_state + per-session pointer) used to live in a
+    bash block inside the slash command, which Claude can silently skip if
+    it streams past Step 4. Moving the binding into get_task makes it
+    impossible to call get_task with a session_id without binding - same
+    pattern as create_orbit_files (commit 9babe14).
+    """
+
+    def test_binds_session_when_session_id_provided(self, isolated_orbit):
+        """Happy path: get_task(project_name, session_id) writes both
+        project_state and per-session pointer atomically with the lookup."""
+        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+        sid = "11111111-1111-1111-1111-111111111111"
+
+        # Seed: a task exists already (perhaps from a previous session).
+        create_result = asyncio.run(
+            tools_tasks.create_task(
+                name="existing-project",
+                task_type="coding",
+                repo_path=str(repo_path),
+                # No session_id - simulates a task created outside /orbit:go.
+            )
+        )
+        assert create_result.get("error") is not True
+        assert _read_project_state(hooks_db, sid) is None
+
+        # /orbit:go path: load it with a session_id.
+        result = asyncio.run(
+            tools_tasks.get_task(
+                project_name="existing-project",
+                session_id=sid,
+            )
+        )
+
+        assert result.get("error") is not True
+        assert result.get("session_bound") is True, (
+            "get_task should bind the session when session_id is provided"
+        )
+        assert result.get("name") == "existing-project"
+        assert _read_project_state(hooks_db, sid) == "existing-project"
+        pointer = _read_per_session_pointer(fake_home, sid)
+        assert pointer is not None
+        assert pointer["projectName"] == "existing-project"
+        assert pointer["sessionId"] == sid
+
+    def test_no_binding_when_session_id_omitted(self, isolated_orbit):
+        """Backward-compat: get_task without session_id never binds.
+
+        Callers that just want to read task details (UI, list views, tests)
+        keep working unchanged. ``session_bound`` is omitted from the
+        response shape entirely, not set to False - so old clients that do
+        not know about the field do not break.
+        """
+        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+
+        asyncio.run(
+            tools_tasks.create_task(
+                name="read-only",
+                task_type="coding",
+                repo_path=str(repo_path),
+            )
+        )
+
+        result = asyncio.run(tools_tasks.get_task(project_name="read-only"))
+
+        assert result.get("error") is not True
+        assert "session_bound" not in result, (
+            "session_bound should be omitted when session_id is not provided"
+        )
+        assert _read_project_state(hooks_db, "anything") is None
+
+    def test_no_binding_when_task_not_found(self, isolated_orbit):
+        """Lookup failure surfaces as TaskNotFoundError - no binding fires.
+
+        Defends against a future refactor that accidentally binds before
+        verifying the task exists, which would tie a session to a phantom
+        project name and confuse downstream callers.
+        """
+        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        sid = "22222222-2222-2222-2222-222222222222"
+
+        result = asyncio.run(
+            tools_tasks.get_task(
+                project_name="does-not-exist",
+                session_id=sid,
+            )
+        )
+
+        assert result.get("error") is True
+        assert _read_project_state(hooks_db, sid) is None
+
+    def test_invalid_session_id_silently_skips_binding(self, isolated_orbit):
+        """Malformed session_id (path traversal, oversized) -> session_bound=False.
+
+        Mirrors the create_orbit_files contract: invalid session ids do not
+        fail the tool, they just skip the binding step and return
+        session_bound=False so the caller can recover via /orbit:go.
+        """
+        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+
+        asyncio.run(
+            tools_tasks.create_task(
+                name="reachable-project",
+                task_type="coding",
+                repo_path=str(repo_path),
+            )
+        )
+
+        result = asyncio.run(
+            tools_tasks.get_task(
+                project_name="reachable-project",
+                session_id="../escape",
+            )
+        )
+
+        assert result.get("error") is not True
+        assert result.get("session_bound") is False
+        # Confirm the task lookup still succeeded - the binding skip
+        # does not mask the read.
+        assert result.get("name") == "reachable-project"
+        assert _read_project_state(hooks_db, "../escape") is None
+
+
 # ── _bind_session_to_project unit tests ───────────────────────────────────
 
 
