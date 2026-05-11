@@ -139,6 +139,85 @@ def write_term_session_mapping(session_id: str) -> None:
     mapping_file.write_text(session_id)
 
 
+def _is_cwd_compatible_with_inherited_project(
+    cwd: Path, project_name: str
+) -> bool:
+    """Validate that the inherited project's repo is reachable from ``cwd``.
+
+    Defends against the umbrella-cwd false positive: a previous session at
+    ``~/work`` was bound to ``project-x`` (whose actual repo is
+    ``~/work/repo-x``). A new session resuming at the same umbrella cwd has
+    no business inheriting ``project-x`` - the user is sitting in the parent
+    and may be intending an entirely different project under it. Inheriting
+    blindly mis-tags the new session, routes its heartbeats to the wrong
+    task, and makes the statusline lie.
+
+    The gate: inherit only when ``cwd`` is the project's repo path OR a
+    descendant of it (i.e. the user is sitting *inside* the project). If
+    the repo lives *under* the cwd (umbrella case) or in an unrelated
+    location, skip the inherit and let the new session start clean - the
+    user can run ``/orbit:go`` to bind their actual intent.
+
+    Lookup-failure modes are treated conservatively: if orbit_db is
+    unavailable, the task lookup raises, the task was renamed/deleted, or
+    the repo row was deleted, this returns ``True`` (inherit proceeds) so a
+    transient infrastructure issue does not silently blank the statusline.
+    The gate only fires on affirmative evidence that the inherit is wrong.
+
+    Non-coding tasks (``repo_id is None``) have no repo to validate against,
+    so they always inherit on the cwd-pointer match alone.
+    """
+    try:
+        from orbit_db import ORBIT_ROOT, TaskDB  # type: ignore[import-not-found]
+    except ImportError:
+        return True
+
+    try:
+        db = TaskDB()
+        task = db.get_task_by_name(project_name)
+    except Exception:
+        return True
+
+    if task is None:
+        return True
+
+    if task.repo_id is None:
+        # Non-coding task - no repo path to spatially validate against.
+        return True
+
+    try:
+        repo = db.get_repo(task.repo_id)
+    except Exception:
+        return True
+
+    if repo is None:
+        return True
+
+    try:
+        cwd_resolved = cwd.resolve()
+        repo_resolved = Path(repo.path).resolve()
+    except OSError:
+        return True
+
+    # cwd is the repo or a descendant of the repo (working inside the project)
+    try:
+        cwd_resolved.relative_to(repo_resolved)
+        return True
+    except ValueError:
+        pass
+
+    # cwd is the orbit task dir or under it (e.g. ~/.orbit/active/<name>/...)
+    if task.full_path:
+        try:
+            task_dir = (ORBIT_ROOT / task.full_path).resolve()
+            cwd_resolved.relative_to(task_dir)
+            return True
+        except (ValueError, OSError):
+            pass
+
+    return False
+
+
 def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | None:
     """On resume, look up the project bound to the previous session at this cwd.
 
@@ -155,6 +234,8 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
       * Corrupt pointer JSON (also unlinks the corrupt file so the next resume
         does not keep tripping on it).
       * project_state has no row for that sid.
+      * The inherited project's repo lives outside ``cwd`` (umbrella-cwd
+        false-positive guard, see ``_is_cwd_compatible_with_inherited_project``).
       * sqlite3 lock contention is silent (recoverable, dashboard writes the
         same DB); other sqlite3 errors log to stderr for diagnosability.
     """
@@ -225,7 +306,22 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
 
     if not row:
         return None
-    return row[0]
+    project_name = row[0]
+
+    # Umbrella-cwd false-positive guard: if cwd has no spatial relationship
+    # to the inherited project's repo, the cwd-pointer match alone is not
+    # enough signal to inherit. Surface a stderr breadcrumb so the user can
+    # see in ~/.claude/logs/ why their statusline went blank instead of
+    # inheriting.
+    if not _is_cwd_compatible_with_inherited_project(cwd, project_name):
+        print(
+            f"<!-- orbit: skipping inherit of {project_name!r}: cwd {cwd} "
+            f"not under project's repo path -->",
+            file=sys.stderr,
+        )
+        return None
+
+    return project_name
 
 
 def _bind_session_to_project(session_id: str, project_name: str) -> None:

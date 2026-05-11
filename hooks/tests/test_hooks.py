@@ -519,6 +519,11 @@ class TestSessionStartResumePickup:
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
+        # Mock get_task_by_name to None so _is_cwd_compatible_with_inherited_project
+        # takes the conservative-inherit branch ("task not found in DB"). The
+        # test is about the resume-pickup path, not the cwd-validation gate -
+        # the gate has its own coverage in TestPickupCwdCompatibilityGate.
+        mock_db.get_task_by_name.return_value = None
         monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
         mod.main()
 
@@ -541,6 +546,262 @@ class TestSessionStartResumePickup:
         cwd_key = str(cwd).replace("/", "-")
         cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
         assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
+
+
+class TestPickupCwdCompatibilityGate:
+    """``_pickup_previous_session_binding`` must validate the inherited project
+    against the current cwd before binding.
+
+    Bug scenario: previous session at ``/Users/tbrami/work`` (umbrella dir
+    holding many repos) was bound to ``project-X`` whose actual repo path is
+    ``/Users/tbrami/work/some-repo``. When a new session resumes at the same
+    umbrella cwd, the prior logic blindly inherited ``project-X`` even though
+    the new session is sitting in a parent directory and might be intending a
+    completely different project. The inherited binding then routed the new
+    session's heartbeats to the wrong task and made the statusline lie.
+
+    The gate: only inherit when the inherited project's repo path is the
+    current cwd OR an ancestor of it (i.e. the cwd is inside the project's
+    repo). If the repo lives *under* the cwd (umbrella case) or in an
+    unrelated location, skip the inherit and let the new session start clean.
+
+    Non-coding tasks (no repo_id) and lookup failures (orbit_db unavailable,
+    task renamed/deleted, repo deleted) are treated conservatively: inherit
+    proceeds, preserving the prior behavior. The gate only fires when we have
+    affirmative evidence the inherit is wrong.
+    """
+
+    @staticmethod
+    def _redirect_state(monkeypatch, home: Path) -> Path:
+        import orbit_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @staticmethod
+    def _seed_pointer(home: Path, cwd: Path, session_id: str) -> Path:
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        pointer_file = pointer_dir / f"{cwd_key}.json"
+        pointer_file.write_text(
+            json.dumps({"sessionId": session_id, "cwd": str(cwd), "updatedAt": "x"})
+        )
+        return pointer_file
+
+    @staticmethod
+    def _seed_project_state(home: Path, rows: list[tuple[str, str]]) -> Path:
+        import sqlite3 as _sqlite3
+
+        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            init_hooks_state_db_schema(conn)
+            if rows:
+                conn.executemany(
+                    "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
+                    rows,
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path
+
+    @staticmethod
+    def _mock_taskdb(monkeypatch, *, task=None, repo=None) -> None:
+        """Replace ``orbit_db.TaskDB`` with a mock whose ``get_task_by_name``
+        returns ``task`` and ``get_repo`` returns ``repo``.
+
+        Pass ``task=None`` to simulate "task not found" (renamed/deleted).
+        Pass ``repo=None`` with a task to simulate "task exists but repo
+        orphaned" (deleted repo row).
+        """
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.get_task_by_name.return_value = task
+        mock_db.get_repo.return_value = repo
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+
+    def _reload_module(self):
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        return mod
+
+    def test_pickup_skips_when_repo_is_subdirectory_of_cwd_umbrella(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """REGRESSION: umbrella-cwd false positive.
+
+        Previous session at ``/work`` was on a project whose repo is
+        ``/work/repo-x``. New session at the SAME umbrella cwd ``/work``
+        must NOT inherit - the spatial signal says the user is in the
+        umbrella, not the project repo. Fails on master, passes on fix.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        umbrella = tmp_path / "work"
+        umbrella.mkdir()
+        repo_x = umbrella / "repo-x"
+        repo_x.mkdir()
+
+        self._seed_pointer(tmp_path, umbrella, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
+
+        task = SimpleNamespace(
+            id=1, name="project-x", repo_id=42, full_path="active/project-x"
+        )
+        repo = SimpleNamespace(id=42, path=str(repo_x))
+        self._mock_taskdb(monkeypatch, task=task, repo=repo)
+
+        mod = self._reload_module()
+        result = mod._pickup_previous_session_binding(umbrella, "new-sid")
+        assert result is None, (
+            "Umbrella cwd /work must not inherit project-x whose repo is at "
+            f"/work/repo-x. Got {result!r}."
+        )
+        # Surface a stderr breadcrumb so the user knows why their statusline
+        # went blank instead of inheriting.
+        assert "skipping inherit" in capsys.readouterr().err.lower()
+
+    def test_pickup_inherits_when_cwd_equals_repo_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Happy path: previous session was at the repo, new session is also
+        at the repo. Inherit proceeds - this is the canonical "resume the
+        project I was working on" case.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        repo_dir = tmp_path / "repo-x"
+        repo_dir.mkdir()
+
+        self._seed_pointer(tmp_path, repo_dir, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
+
+        task = SimpleNamespace(
+            id=1, name="project-x", repo_id=42, full_path="active/project-x"
+        )
+        repo = SimpleNamespace(id=42, path=str(repo_dir))
+        self._mock_taskdb(monkeypatch, task=task, repo=repo)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(repo_dir, "new-sid") == "project-x"
+
+    def test_pickup_inherits_when_cwd_is_descendant_of_repo(
+        self, tmp_path, monkeypatch
+    ):
+        """Working inside a subdir of the repo (e.g. ``repo-x/src``) - the
+        spatial signal still ties to the repo. Inherit proceeds.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        repo_dir = tmp_path / "repo-x"
+        subdir = repo_dir / "src" / "deep"
+        subdir.mkdir(parents=True)
+
+        self._seed_pointer(tmp_path, subdir, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
+
+        task = SimpleNamespace(
+            id=1, name="project-x", repo_id=42, full_path="active/project-x"
+        )
+        repo = SimpleNamespace(id=42, path=str(repo_dir))
+        self._mock_taskdb(monkeypatch, task=task, repo=repo)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(subdir, "new-sid") == "project-x"
+
+    def test_pickup_inherits_when_task_has_no_repo(self, tmp_path, monkeypatch):
+        """Non-coding task (repo_id is None) - no repo to validate against.
+        Inherit proceeds; the cwd-pointer match is the only signal we have.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "anywhere"
+        cwd.mkdir()
+
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "meeting-notes")])
+
+        task = SimpleNamespace(
+            id=1, name="meeting-notes", repo_id=None, full_path="global/meeting-notes"
+        )
+        self._mock_taskdb(monkeypatch, task=task, repo=None)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "meeting-notes"
+
+    def test_pickup_inherits_when_task_lookup_returns_none(
+        self, tmp_path, monkeypatch
+    ):
+        """Task was renamed or deleted - get_task_by_name returns None.
+        Conservative fallback: inherit proceeds with whatever project_state
+        says. (The user can re-run /orbit:go to correct if wrong.)
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "anywhere"
+        cwd.mkdir()
+
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "deleted-project")])
+
+        self._mock_taskdb(monkeypatch, task=None, repo=None)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "deleted-project"
+
+    def test_pickup_inherits_when_taskdb_raises(self, tmp_path, monkeypatch):
+        """TaskDB connection error - conservative fallback: inherit.
+
+        We don't want a transient DB issue to silently strip the inherit
+        and confuse the user with a blank statusline. The cwd-pointer match
+        is still a strong-enough signal on its own.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "anywhere"
+        cwd.mkdir()
+
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "some-project")])
+
+        import orbit_db  # type: ignore[import-not-found]
+
+        def _raising_taskdb():
+            raise RuntimeError("simulated DB connection failure")
+
+        monkeypatch.setattr(orbit_db, "TaskDB", _raising_taskdb)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "some-project"
+
+    def test_pickup_skips_when_repo_is_unrelated_to_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        """Previous project's repo is in a completely unrelated path (no
+        spatial relationship to cwd in either direction). Skip the inherit.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "work"
+        cwd.mkdir()
+        unrelated_repo = tmp_path / "elsewhere" / "repo"
+        unrelated_repo.mkdir(parents=True)
+
+        self._seed_pointer(tmp_path, cwd, "prev-sid")
+        self._seed_project_state(tmp_path, [("prev-sid", "off-topic")])
+
+        task = SimpleNamespace(
+            id=1, name="off-topic", repo_id=42, full_path="active/off-topic"
+        )
+        repo = SimpleNamespace(id=42, path=str(unrelated_repo))
+        self._mock_taskdb(monkeypatch, task=task, repo=repo)
+
+        mod = self._reload_module()
+        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
 
 
 class TestSessionStartSourceGating:
@@ -599,12 +860,16 @@ class TestSessionStartSourceGating:
         """Stub TaskDB so the existing find_task_for_cwd path is a no-op.
 
         We are testing the gating of the pickup branch only; the task-detection
-        branch has its own coverage in :class:`TestSessionStart`.
+        branch has its own coverage in :class:`TestSessionStart`. ``get_task_by_name``
+        also returns None so the cwd-compatibility gate (introduced for the
+        umbrella-cwd fix) takes the conservative-inherit branch and does not
+        spuriously skip valid pickups under test.
         """
         import orbit_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
         monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
 
     def _reload_module(self):
