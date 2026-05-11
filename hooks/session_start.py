@@ -3,7 +3,6 @@
 SessionStart hook - Auto-detect active task for the current directory.
 
 Outputs context to help Claude resume work on an active task.
-Also creates pending-task.json for the activity-tracker hook.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import re
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Maximum age for a cwd-session pointer to still be trusted as a "previous
@@ -103,21 +102,6 @@ def install_bundled_rules() -> None:
             dst.write_text(new_content)
     except OSError:
         pass
-
-
-def write_pending_task(task_name: str, cwd: str) -> None:
-    """Write pending-task.json for activity-tracker hook integration."""
-    state_dir = Path.home() / ".claude" / "hooks" / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-
-    pending_file = state_dir / "pending-task.json"
-    pending_data = {
-        "taskName": task_name,
-        "cwd": cwd,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-    pending_file.write_text(json.dumps(pending_data, indent=2))
 
 
 def write_term_session_mapping(session_id: str) -> None:
@@ -533,21 +517,17 @@ def main():
         task = db.find_task_for_cwd(cwd, session_id)
 
         if task:
-            # Get repo info (used for both pending-task and output)
-            repo_name = None
+            # Get repo info for the output context message.
             repo_path = None
             if task.repo_id:
                 repo = db.get_repo(task.repo_id)
                 if repo:
-                    repo_name = repo.short_name
                     repo_path = repo.path
 
-            # Write pending-task.json for activity-tracker integration
-            # This ensures heartbeats are recorded even when not in dev/active/<task>/ dir
-            write_pending_task(task.name, repo_path or cwd)
-
-            # Write session-specific project file for statusline display
-            # This avoids the shared pending-project.json race condition
+            # Write session-specific project file for statusline display.
+            # This is the per-session pointer that find_task_for_cwd reads
+            # for heartbeat routing; the old shared pending-task.json file
+            # was vestigial and removed in mcp-orbit 0.2.13.
             if session_id:
                 write_session_project(task.name, session_id)
 

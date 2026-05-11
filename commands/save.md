@@ -89,7 +89,7 @@ If `RECENT <= 1`, proceed normally: call `mcp__plugin_orbit_pm__find_task_for_di
 If `find_task_for_directory` returned `found: false` but `get_orbit_files` found the project:
 
 ```bash
-echo '{"projectName": "<project-name>", "cwd": "<repo-path>", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > ~/.claude/hooks/state/pending-task.json; SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1 && echo "done" || echo "done"
+SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1; echo "done"
 ```
 
 Then record initial heartbeat:

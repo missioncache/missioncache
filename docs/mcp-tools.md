@@ -119,7 +119,7 @@ The `progress` field is parsed live from `<project>-tasks.md` via `_parse_task_p
 
 **Returns:** `{"found": bool, "task": TaskDetail | None}`. When `found` is `False`, `task` is `None` and there is nothing to do. When `True`, `task` is a full `TaskDetail` with subtasks disabled.
 
-The resolution order is documented in the task_parser's `find_task_for_cwd`: per-session file first, then `pending-task.json`, then cwd directory match under `~/.claude/orbit/active/`. See `architecture.md` for the gotcha around `pending-project.json` being dead code and only the session file path actually mattering.
+The resolution order is documented in `find_task_for_cwd`: per-session file (`projects/<session-id>.json`) first, then cwd directory match under `~/.orbit/active/`. (The legacy `pending-project.json` priority-1 branch and the now-removed `pending-task.json` artifact are documented in `architecture.md`; neither is in the live path.)
 
 ### `create_task`
 

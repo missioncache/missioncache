@@ -79,26 +79,6 @@ class TestSessionStart:
         assert "my-task" in output
         assert "Active Task Detected" in output
 
-    def test_writes_pending_task_json(self, tmp_path, monkeypatch):
-        """write_pending_task creates a valid JSON file."""
-        state_dir = tmp_path / ".claude" / "hooks" / "state"
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        # Import after monkeypatch so Path.home() is patched
-        import importlib
-        import hooks.session_start as mod
-
-        importlib.reload(mod)
-        mod.write_pending_task("test-task", "/some/path")
-
-        pending_file = state_dir / "pending-task.json"
-        assert pending_file.exists()
-
-        data = json.loads(pending_file.read_text())
-        assert data["taskName"] == "test-task"
-        assert data["cwd"] == "/some/path"
-        assert "timestamp" in data
-
     def test_writes_cwd_session_pointer(self, tmp_path, monkeypatch):
         """write_cwd_session_pointer records {sessionId, cwd, updatedAt} keyed by cwd."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)

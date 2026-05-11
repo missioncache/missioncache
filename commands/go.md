@@ -170,16 +170,15 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 
 ### Step 4: Register Session for Time Tracking
 
-Write pending-task.json for activity tracking and register the project against the current Claude session so the statusline picks it up. Resolves the session ID from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), falling back to the orbit cwd-session pointer and then a filesystem mtime walk for older versions. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
+Register the project against the current Claude session so the statusline picks it up. Resolves the session ID from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), falling back to the orbit cwd-session pointer and then a filesystem mtime walk for older versions. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
+
+This step is defense-in-depth: Step 1's `get_task(session_id=...)` already performs the server-side binding via the MCP tool. The bash block additionally hits the dashboard API so the dashboard list view refreshes immediately (instead of waiting for the next periodic SQLite -> DuckDB sync) and writes the per-session pointer in case the MCP binding raced.
 
 Replace `<project-name>` with the actual project name and `<repo-path>` with the repo path from project details, then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
 REPO_PATH='<repo-path>'
-
-# Activity tracking pointer (read by session_start hook on next session).
-echo "{\"projectName\": \"$PROJECT_NAME\", \"cwd\": \"$REPO_PATH\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > ~/.claude/hooks/state/pending-task.json
 
 # Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
 SESSION_ID="$CLAUDE_CODE_SESSION_ID"
