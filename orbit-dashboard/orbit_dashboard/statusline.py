@@ -92,6 +92,11 @@ COLORS = {
     "effort_medium": f"{ESC}[38;2;100;200;120m",
     "effort_high": f"{ESC}[38;2;170;180;235m",
     "effort_xhigh": f"{ESC}[38;2;180;140;220m",
+    "pr_approved": f"{ESC}[38;2;80;200;120m",
+    "pr_pending": f"{ESC}[38;2;220;180;50m",
+    "pr_changes": f"{ESC}[38;2;255;109;0m",
+    "pr_draft": f"{ESC}[38;2;140;140;150m",
+    "pr": f"{ESC}[38;2;130;180;220m",
 }
 
 # Rainbow palette for effort=max (cycled per character of the value).
@@ -169,6 +174,11 @@ ICONS = {
     "extra": "\U0001f4b3",
     "effort": "\U0001f3af",
     "thinking": "\U0001f9e0",
+    "pr_approved": "\U0001f7e2",
+    "pr_pending": "\U0001f7e1",
+    "pr_changes": "\U0001f534",
+    "pr_draft": "⚪",
+    "pr": "\U0001f535",
 }
 
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
@@ -506,6 +516,7 @@ def parse_input(raw: str) -> dict:
         "running_version": data.get("version", "") or "",
         "effort_level": effort_level,
         "thinking_enabled": thinking_enabled,
+        "pr": data.get("pr"),
     }
 
 
@@ -1278,6 +1289,25 @@ def _item(color: str, icon: str, label: str, value: str) -> str:
     return f"{color}{icon} {label}: {value}{RESET}"
 
 
+def _render_pr_field(pr: dict | None) -> str | None:
+    # Open PR for the current branch (statusline `pr` object, Claude Code 2.1.90+).
+    # Icon/color encode review_state; review_state may be absent even when pr is.
+    if not pr or not pr.get("number"):
+        return None
+    state = pr.get("review_state")
+    state_map = {
+        "approved": "pr_approved",
+        "pending": "pr_pending",
+        "changes_requested": "pr_changes",
+        "draft": "pr_draft",
+    }
+    key = state_map.get(state, "pr") if isinstance(state, str) else "pr"
+    label = f"#{pr['number']}"
+    url = pr.get("url")
+    value = _osc8_link(url, label) if url else label
+    return _item(COLORS[key], ICONS[key], "PR", value)
+
+
 def _render_effort_field(effort_level: str | None, thinking_enabled: bool) -> str | None:
     # Icon doubles as thinking indicator: brain when thinking is on, dart otherwise.
     # No effort = no field, even if thinking is on (drops signal by design).
@@ -1465,6 +1495,9 @@ def main() -> None:
         worktree = info.get("worktree")
         branch_display = f"{branch} (worktree)" if worktree else branch
         line1.append(_item(c, ICONS["git"], "Git", branch_display))
+    pr_field = _render_pr_field(info.get("pr"))
+    if pr_field:
+        line1.append(pr_field)
 
     # Line 2: Project + Task (Last Action moved to the bottom row alongside
     # Version + Claude Status)
