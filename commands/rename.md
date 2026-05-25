@@ -40,8 +40,11 @@ CWD_KEY=$(pwd | sed 's|/|-|g')
 DIR="$HOME/.claude/projects/${CWD_KEY}"
 POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
 
-SESSION_ID=""
-if [ -r "$POINTER_FILE" ]; then
+# Primary: authoritative current-session id (Claude Code 2.1.132+). Fall back
+# to the SessionStart cwd-session pointer (last-writer-wins, can be stale),
+# then transcript mtime for older Claude Code.
+SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+if [ -z "$SESSION_ID" ] && [ -r "$POINTER_FILE" ]; then
   SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
 fi
 [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
