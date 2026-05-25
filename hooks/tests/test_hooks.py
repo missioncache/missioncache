@@ -1920,3 +1920,636 @@ class TestSessionStartTaskDiscipline:
         assert "Task tracking discipline" in output
         assert "update_tasks_file" in output
         assert "TaskCreate" in output
+
+
+class TestParallelSessionDetection:
+    """Tests for ``_read_cwd_pointer_sid``, ``_detect_parallel_sessions``,
+    ``_projects_for_sessions``, ``_format_collision_warning``, and the
+    main() integration that uses them to (a) skip ambiguous resume-pickup
+    and (b) surface a warning to Claude's context.
+
+    Failure mode being guarded against: when two Claude sessions are alive
+    in the same cwd, the cwd-session pointer is last-writer-wins. Resuming
+    either session inherits via that pointer and can bind the wrong project
+    silently. The fix detects parallel sessions via transcript jsonl mtime
+    in ``~/.claude/projects/<cwd-key>/`` and refuses to auto-pickup when
+    *another* session beyond the resumed-from one is recently active. The
+    resumed-from session itself is excluded from parallel detection - its
+    transcript is often still fresh from end-of-session writes but it is
+    the conversation being continued, not a parallel session.
+    """
+
+    @staticmethod
+    def _redirect_state(monkeypatch, home: Path) -> Path:
+        """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
+        import orbit_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @staticmethod
+    def _seed_transcript(
+        home: Path,
+        cwd: Path,
+        session_id: str,
+        mtime_offset_seconds: float = 0.0,
+    ) -> Path:
+        """Create a ``~/.claude/projects/<cwd-key>/<sid>.jsonl`` transcript
+        with mtime set to ``now + mtime_offset_seconds``.
+
+        Negative offsets backdate the transcript to simulate stale sessions.
+        """
+        cwd_key = str(cwd).replace("/", "-")
+        proj_dir = home / ".claude" / "projects" / cwd_key
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        jsonl = proj_dir / f"{session_id}.jsonl"
+        jsonl.write_text("{}\n")
+        if mtime_offset_seconds:
+            t = time.time() + mtime_offset_seconds
+            os.utime(jsonl, (t, t))
+        return jsonl
+
+    @classmethod
+    def _seed_project_state(cls, home: Path, rows: list[tuple[str, str]]) -> Path:
+        """Seed project_state with (sid, project) rows using the real schema."""
+        import sqlite3 as _sqlite3
+        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            init_hooks_state_db_schema(conn)
+            conn.executemany(
+                "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path
+
+    def _reload_module(self):
+        import importlib
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        return mod
+
+    # ── _detect_parallel_sessions ─────────────────────────────────────────
+
+    def test_detect_returns_empty_when_proj_dir_missing(self, tmp_path, monkeypatch):
+        """No transcripts dir at all (fresh cwd Claude has never written in)."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "fresh-cwd"
+        cwd.mkdir()
+        mod = self._reload_module()
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == []
+
+    def test_detect_excludes_own_session(self, tmp_path, monkeypatch):
+        """My own transcript must NOT appear in the parallel list."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        mod = self._reload_module()
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == []
+
+    def test_detect_returns_other_fresh_sessions(self, tmp_path, monkeypatch):
+        """A fresh transcript for another sid is detected."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+        mod = self._reload_module()
+        result = mod._detect_parallel_sessions(cwd, "my-sid")
+        assert result == ["other-sid"]
+
+    def test_detect_excludes_stale_transcripts(self, tmp_path, monkeypatch):
+        """Transcripts older than the threshold are not 'parallel'."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        # 30 minutes ago > 10 minute threshold.
+        self._seed_transcript(
+            tmp_path, cwd, "stale-sid", mtime_offset_seconds=-30 * 60
+        )
+        mod = self._reload_module()
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == []
+
+    # ── _projects_for_sessions ────────────────────────────────────────────
+
+    def test_projects_for_sessions_maps_bound_sids(self, tmp_path, monkeypatch):
+        self._redirect_state(monkeypatch, tmp_path)
+        self._seed_project_state(
+            tmp_path, [("sid-a", "alpha"), ("sid-b", "beta"), ("sid-c", "")]
+        )
+        mod = self._reload_module()
+        result = mod._projects_for_sessions(["sid-a", "sid-b", "sid-c", "sid-d"])
+        # sid-c has empty name (filtered), sid-d has no row.
+        assert result == {"sid-a": "alpha", "sid-b": "beta"}
+
+    def test_projects_for_sessions_empty_input(self, tmp_path, monkeypatch):
+        """Empty input must not issue a SQL query - guards against an
+        IN () syntax error that some SQLite versions reject."""
+        self._redirect_state(monkeypatch, tmp_path)
+        self._seed_project_state(tmp_path, [])
+        mod = self._reload_module()
+        assert mod._projects_for_sessions([]) == {}
+
+    # ── _format_collision_warning ─────────────────────────────────────────
+
+    def test_format_warning_mentions_my_project_when_bound(self, tmp_path, monkeypatch):
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        warning = mod._format_collision_warning(
+            "alpha", {"other-sid-abc": "beta"}
+        )
+        assert "alpha" in warning
+        assert "beta" in warning
+        assert "other-si" in warning  # truncated sid prefix
+        assert "/orbit:go" in warning
+
+    def test_format_warning_handles_unbound_self(self, tmp_path, monkeypatch):
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        warning = mod._format_collision_warning(None, {"sid-x-12345": "beta"})
+        assert "beta" in warning
+        assert "/orbit:go" in warning
+
+    # ── main() integration: skip pickup under ambiguity ───────────────────
+
+    def test_main_skips_resume_pickup_when_parallel_session_exists(
+        self, tmp_path, monkeypatch
+    ):
+        """The bug fix: when another session is alive in the same cwd, do NOT
+        auto-pickup the project from the cwd-pointer (it could name the
+        wrong previous session). project_state for new-sid must stay empty."""
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "resume" / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        # Seed pointer + project_state as if a previous session (prev-sid) was
+        # the last writer to this cwd. WITHOUT the parallel-session detection,
+        # main() would inherit "carried-over" onto new-sid.
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(
+            tmp_path, [("prev-sid", "carried-over"), ("other-sid", "concurrent-project")]
+        )
+        # Concurrent session "other-sid" has a fresh transcript - this triggers
+        # the parallel detection that gates the pickup.
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        # new-sid did NOT inherit "carried-over" because parallel sessions
+        # made the inheritance ambiguous.
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is None, "new-sid must NOT inherit when parallel sessions exist"
+
+    def test_main_inherits_when_no_parallel_sessions(self, tmp_path, monkeypatch):
+        """Negative case for the gate: with a stale lone other transcript
+        OLDER than the threshold, pickup still works (preserves existing
+        single-session resume behavior).
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "lone-resume"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
+        # An old transcript exists but is well past the threshold - must not
+        # trigger the parallel-session gate.
+        self._seed_transcript(
+            tmp_path, cwd, "stale-sid", mtime_offset_seconds=-30 * 60
+        )
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "carried-over"
+
+    # ── main() integration: warning emission ──────────────────────────────
+
+    def test_main_emits_warning_when_parallel_session_has_different_project(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The warning fires on stdout (Claude's context) when another active
+        session is bound to a different project than this one."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "collision-repo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "my-sid", "source": "startup"}
+        )
+
+        # My session is bound to "alpha"; another active session has "beta".
+        self._seed_project_state(
+            tmp_path, [("my-sid", "alpha"), ("other-sid", "beta")]
+        )
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Parallel Orbit Session Warning" in out
+        # Structural assertions: "alpha" must appear as the bound-self
+        # project (in the intro line), "beta" as the bullet for the other
+        # session. Bare token checks would also pass if alpha/beta swapped
+        # roles, which is the exact contract we want this test to enforce.
+        assert "bound to orbit project `alpha`" in out
+        assert "- `beta`" in out
+
+    def test_main_no_warning_when_parallel_session_has_same_project(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Two sessions on the same project is still a parallel-work risk
+        but not a *name collision* - the user explicitly asked for the
+        warning to fire only on different project names. Keeping it scoped
+        avoids noise on the harmless same-project case.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "same-project-repo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "my-sid", "source": "startup"}
+        )
+
+        self._seed_project_state(
+            tmp_path, [("my-sid", "alpha"), ("other-sid", "alpha")]
+        )
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Parallel Orbit Session Warning" not in out
+
+    def test_main_no_warning_when_no_parallel_sessions(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Sanity check: solo session, no warning."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "solo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "my-sid", "source": "startup"}
+        )
+
+        self._seed_project_state(tmp_path, [("my-sid", "alpha")])
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Parallel Orbit Session Warning" not in out
+
+    # ── Codex P1: exclude resumed-from session from parallel detection ────
+
+    def test_main_inherits_on_resume_when_only_prev_sids_transcript_is_fresh(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex P1 fix. On a normal solo-session resume, the previous
+        session's transcript is often still fresh (closed seconds ago,
+        end-of-session writes touched it). Without the cwd-pointer-based
+        exclusion in main(), ``_detect_parallel_sessions`` returns the
+        prev-sid, main() treats that as a parallel session, skips pickup,
+        and the statusline goes blank on every normal resume. This test
+        proves the fix: pickup MUST run when the only "parallel" detected
+        is the resumed-from session itself.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "normal-resume"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
+        # Prev session's transcript is FRESH (just touched). Without the
+        # fix this would make main() see prev-sid as a parallel session
+        # and skip pickup.
+        self._seed_transcript(tmp_path, cwd, "prev-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == "carried-over"
+
+    def test_main_skips_pickup_when_third_session_parallel_to_resumed_pair(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex P1 fix: only the resumed-from session is excluded, not
+        all fresh sessions. When a THIRD session is also alive in the same
+        cwd, the ambiguous-resume path still fires and pickup is skipped.
+        Without this guard the fix would over-relax the gate and
+        reintroduce the wrong-project-on-resume bug.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "three-way"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(
+            tmp_path,
+            [("prev-sid", "carried-over"), ("third-sid", "concurrent-project")],
+        )
+        # prev-sid is the resumed-from session (excluded by the fix).
+        self._seed_transcript(tmp_path, cwd, "prev-sid")
+        # third-sid is a different live session - the gate MUST still fire.
+        self._seed_transcript(tmp_path, cwd, "third-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is None, "third-sid is genuinely parallel; pickup must be skipped"
+
+    # ── Compact source coverage ───────────────────────────────────────────
+
+    def test_main_skips_compact_pickup_when_parallel_session_exists(
+        self, tmp_path, monkeypatch
+    ):
+        """``source="compact"`` shares the gated-pickup path with
+        ``"resume"``. The original review flagged that compact was
+        documented as gated but never tested. This is the compact-path
+        analog of test_main_skips_resume_pickup_when_parallel_session_exists.
+        """
+        import sqlite3 as _sqlite3
+
+        db_path = self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "compact-collide"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "compact"})
+
+        cwd_key = str(cwd).replace("/", "-")
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        (pointer_dir / f"{cwd_key}.json").write_text(
+            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
+        )
+        self._seed_project_state(
+            tmp_path,
+            [("prev-sid", "carried-over"), ("other-sid", "concurrent-project")],
+        )
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+
+        mod = self._reload_module()
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_task_by_name.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        conn = _sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                ("new-sid",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is None, "compact path must gate pickup the same as resume"
+
+    # ── _detect_parallel_sessions boundary at the freshness threshold ─────
+
+    @pytest.mark.parametrize(
+        "offset_seconds,expected_in_parallel",
+        [
+            (-599, True),   # 1s inside the window
+            (-600, True),   # exactly at the boundary (>= comparison)
+            (-601, False),  # 1s outside the window
+        ],
+        ids=["inside_by_1s", "exactly_at_threshold", "outside_by_1s"],
+    )
+    def test_detect_threshold_boundary(
+        self, tmp_path, monkeypatch, offset_seconds, expected_in_parallel
+    ):
+        """Lock in the ``>=`` semantics of the freshness threshold so a
+        future edit changing it to ``>`` (or shifting the constant) is
+        caught. Pin ``time.time`` to a fixed value so the seed's mtime and
+        the production code's threshold agree (without this, wall-clock
+        advance between the two calls makes the exactly-at-threshold case
+        flaky).
+        """
+        import time as _time
+
+        frozen_now = 1_700_000_000.0
+        monkeypatch.setattr(_time, "time", lambda: frozen_now)
+
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "boundary"
+        cwd.mkdir()
+        self._seed_transcript(
+            tmp_path, cwd, "other-sid", mtime_offset_seconds=offset_seconds
+        )
+
+        mod = self._reload_module()
+        result = mod._detect_parallel_sessions(cwd, "my-sid")
+        if expected_in_parallel:
+            assert result == ["other-sid"]
+        else:
+            assert result == []
+
+    # ── _projects_for_sessions DB error paths ─────────────────────────────
+
+    def test_projects_for_sessions_returns_empty_on_connect_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """``sqlite3.Error`` (non-OperationalError) raised by connect()
+        must NOT propagate. A breadcrumb fires so silent degradation is
+        visible in ``~/.claude/logs/``.
+        """
+        import sqlite3 as _sqlite3
+
+        self._redirect_state(monkeypatch, tmp_path)
+
+        def _broken_connect(*args, **kwargs):
+            raise _sqlite3.DatabaseError("simulated DB corruption")
+
+        monkeypatch.setattr(_sqlite3, "connect", _broken_connect)
+
+        mod = self._reload_module()
+        assert mod._projects_for_sessions(["sid-a"]) == {}
+        err = capsys.readouterr().err
+        assert "project_state connect failed" in err
+
+    def test_projects_for_sessions_returns_empty_on_query_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """If the DB connects but the query raises a non-OperationalError
+        (schema drift, programming error), return ``{}`` with a stderr
+        breadcrumb. sqlite3.Connection is immutable in 3.11+, so use a
+        fake connection returned by a patched connect().
+        """
+        import sqlite3 as _sqlite3
+
+        self._redirect_state(monkeypatch, tmp_path)
+
+        class _FakeConn:
+            def execute(self, *args, **kwargs):
+                raise _sqlite3.DatabaseError("simulated schema drift")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(_sqlite3, "connect", lambda *a, **kw: _FakeConn())
+
+        mod = self._reload_module()
+        assert mod._projects_for_sessions(["sid-a"]) == {}
+        err = capsys.readouterr().err
+        assert "project_state batch lookup failed" in err
+
+    def test_projects_for_sessions_silent_on_operational_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """OperationalError (lock contention, missing-table-on-fresh-install)
+        is the expected-recoverable case and must stay silent - it self-heals
+        on the next SessionStart fire. Locks in the OperationalError /
+        broader-Error split documented in the docstring.
+        """
+        import sqlite3 as _sqlite3
+
+        self._redirect_state(monkeypatch, tmp_path)
+
+        def _locked_connect(*args, **kwargs):
+            raise _sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(_sqlite3, "connect", _locked_connect)
+
+        mod = self._reload_module()
+        assert mod._projects_for_sessions(["sid-a"]) == {}
+        err = capsys.readouterr().err
+        assert "project_state" not in err
