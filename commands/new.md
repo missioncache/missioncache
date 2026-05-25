@@ -129,15 +129,24 @@ First resolve the current Claude session ID so the new project binds to this ses
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
-POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-SESSION_ID=""
-if [ -r "$POINTER_FILE" ]; then
-  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+# Authoritative current-session id (Claude Code 2.1.132+). Fall back to the
+# cwd-session pointer, then a transcript-mtime walk for older versions. Env
+# var FIRST is critical: the cwd-pointer is last-writer-wins and goes stale
+# when a session is resumed or two sessions share a cwd. Binding off a stale
+# pointer writes project_state under the wrong session_id, so the statusline
+# (which keys on the real session id) never shows the new project.
+SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+if [ -z "$SESSION_ID" ]; then
+  POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+  if [ -r "$POINTER_FILE" ]; then
+    SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+  fi
+  [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
 echo "$SESSION_ID"
 ```
 
-Capture the printed `SESSION_ID`. If the output is empty, the SessionStart hook has not fired yet (rare); call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/orbit:go` once the project exists.
+Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/orbit:go` once the project exists.
 
 Now create the orbit files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
@@ -234,10 +243,13 @@ Non-coding projects don't need prompts:
 2. Resolve the current session ID (same bash as Step 4 above):
    ```bash
    CWD_KEY=$(pwd | sed 's|/|-|g')
-   POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-   SESSION_ID=""
-   if [ -r "$POINTER_FILE" ]; then
-     SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+   SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+   if [ -z "$SESSION_ID" ]; then
+     POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
+     if [ -r "$POINTER_FILE" ]; then
+       SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+     fi
+     [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
    fi
    echo "$SESSION_ID"
    ```

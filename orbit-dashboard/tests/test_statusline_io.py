@@ -503,3 +503,109 @@ class TestGetActiveTask:
         assert mod._get_active_task("sess-X", self.TASKS_MD, "project-a") == (
             "54a. M11.2 - VSCode statusline extension"
         )
+
+
+# ── get_project_info (project_state binding -> name + progress) ────────────
+
+
+class TestGetProjectInfo:
+    """End-to-end statusline resolution: a project_state binding plus a
+    tasks.md file must yield BOTH the project name and the subtask count.
+
+    This is the behavior that ``/orbit:new`` depends on: after the command
+    binds the current session to the freshly-created project, the next
+    statusline render must show ``<name> [0/N]`` automatically. The bug it
+    guards against is a binding written under the wrong session_id (stale
+    cwd-pointer), which makes ``get_project_info`` find nothing and return
+    an empty ``ProjectInfo`` - no name, and therefore no count either.
+    """
+
+    @staticmethod
+    def _seed_binding(tmp_path, monkeypatch, session_id, project_name):
+        """Point HOOKS_STATE_DB + ORBIT_ACTIVE at tmp_path and write a fresh
+        project_state row for (session_id, project_name)."""
+        import sqlite3
+        from datetime import datetime
+
+        db_path = tmp_path / "hooks-state.db"
+        monkeypatch.setattr(mod, "HOOKS_STATE_DB", db_path)
+        orbit_active = tmp_path / ".orbit" / "active"
+        monkeypatch.setattr(mod, "ORBIT_ACTIVE", orbit_active)
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "CREATE TABLE project_state ("
+                "session_id TEXT PRIMARY KEY, project_name TEXT, updated_at TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO project_state (session_id, project_name, updated_at) "
+                "VALUES (?, ?, ?)",
+                (
+                    session_id,
+                    project_name,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return orbit_active
+
+    def test_binding_plus_tasks_file_yields_name_and_progress(
+        self, tmp_path, monkeypatch
+    ):
+        """The /orbit:new success path: bound session + tasks file -> the
+        statusline shows the project name and the [0/N] subtask count."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-new", "my-feature"
+        )
+        proj_dir = orbit_active / "my-feature"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "my-feature-tasks.md").write_text(
+            "- [ ] 1. First subtask\n"
+            "- [ ] 2. Second subtask\n"
+            "- [ ] 3. Third subtask\n"
+        )
+
+        info = mod.get_project_info("sess-new", duration_sec=120)
+
+        assert info.name == "my-feature"
+        assert info.progress.strip() == "[0/3]"
+
+    def test_fresh_project_with_tbd_placeholder_shows_tbd_count(
+        self, tmp_path, monkeypatch
+    ):
+        """A project created without subtasks (TBD placeholder) still shows
+        the name and a [TBD] count, not a blank statusline."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-tbd", "empty-feature"
+        )
+        proj_dir = orbit_active / "empty-feature"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "empty-feature-tasks.md").write_text("- [ ] TBD\n")
+
+        info = mod.get_project_info("sess-tbd", duration_sec=120)
+
+        assert info.name == "empty-feature"
+        assert info.progress.strip() == "[TBD]"
+
+    def test_wrong_session_id_yields_empty_projectinfo(
+        self, tmp_path, monkeypatch
+    ):
+        """The bug being fixed: when the binding is written under a different
+        session_id than the statusline's, get_project_info finds nothing -
+        no name AND no count. This is what a stale-cwd-pointer binding in
+        /orbit:new produced before the env-var-first resolver fix."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "bound-under-wrong-sid", "my-feature"
+        )
+        proj_dir = orbit_active / "my-feature"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "my-feature-tasks.md").write_text("- [ ] 1. task\n")
+
+        # Statusline renders for the REAL session, which has no row.
+        info = mod.get_project_info("real-session-sid", duration_sec=120)
+
+        assert info.name == ""
+        assert info.progress == ""
