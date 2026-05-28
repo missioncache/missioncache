@@ -1404,6 +1404,17 @@ def main() -> None:
     model_name = info["model_name"]
     tokens_str = info["tokens_str"]
 
+    # Claude Code 2.1.153+ sets COLUMNS in the statusline subprocess env.
+    # Older versions don't, in which case term_cols stays None and the
+    # statusline keeps its prior (no width-aware) behavior.
+    term_cols: int | None = None
+    try:
+        cols_raw = int(os.environ.get("COLUMNS", "0"))
+        if cols_raw > 0:
+            term_cols = cols_raw
+    except ValueError:
+        pass
+
     # Default empty model/tokens (startup or incomplete data)
     model_name = model_name or "Claude"
     tokens_str = tokens_str or "0"
@@ -1512,8 +1523,14 @@ def main() -> None:
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
         if project_current_task:
             task_text = project_current_task
-            if len(task_text) > 60:
-                task_text = task_text[:60] + "..."
+            # Truncate to 60 chars by default; shrink further on narrow
+            # terminals so the Task field doesn't push the row past the
+            # terminal edge. Floor at 20 so the text stays useful.
+            task_max = 60
+            if term_cols is not None:
+                task_max = min(60, max(20, term_cols - 30))
+            if len(task_text) > task_max:
+                task_text = task_text[:task_max] + "..."
             line2.append(_item(COLORS["edit"], ICONS["edit"], "Task", task_text))
 
     # Line 3: Metrics
@@ -1702,6 +1719,8 @@ def main() -> None:
               for items, widths in zip(all_lines, all_widths)]
     line_widths = [display_width(j) for j in joined]
     max_width = max(line_widths) if line_widths else 0
+    if term_cols is not None:
+        max_width = min(max_width, term_cols)
 
     j_line1, j_line2, j_line3, j_line4, j_line_k8s, j_line_usage, j_line_codex, j_line_health = joined
     w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage, w_line_codex, w_line_health = line_widths
