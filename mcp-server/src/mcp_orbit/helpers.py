@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import sqlite3
 import urllib.request
@@ -25,6 +26,35 @@ logger = logging.getLogger(__name__)
 # longer ids. Defends downstream filename interpolation in the per-session
 # pointer write against path traversal.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def _resolve_session_id(session_id: str | None) -> str | None:
+    """Resolve the effective Claude session id for a binding tool.
+
+    Precedence: a non-empty explicit ``session_id`` wins. An empty string
+    or ``None`` is treated as "no id provided" and falls back to
+    ``CLAUDE_CODE_SESSION_ID``, which Claude Code 2.1.154+ injects into
+    every stdio MCP subprocess's environment. (Empty and absent are
+    deliberately equivalent here: a caller that fumbles client-side
+    resolution and passes "" still binds to the right session instead of
+    failing.) The env value is stripped, so a stray trailing newline or
+    whitespace-only value normalizes to ``None`` rather than leaking into a
+    filename or DB row. The env var is per subprocess and a stdio server is 1:1 with
+    the Claude Code session that spawned it, so the fallback always names
+    the calling session - safe even for concurrent sessions (each has its
+    own subprocess + env).
+
+    Returns ``None`` when neither is available: pre-2.1.154 Claude Code, or
+    a non-Claude client (Codex/OpenCode) that doesn't set the var. Callers
+    treat ``None`` exactly as a missing session id (skip binding, or raise),
+    so behavior for those clients is unchanged. The returned value is NOT
+    validated here - downstream ``_bind_session_to_project`` /
+    ``active_task.write_pointer`` enforce the session-id charset before it
+    reaches a filename or DB row.
+    """
+    if session_id:
+        return session_id
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip() or None
 
 
 def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:

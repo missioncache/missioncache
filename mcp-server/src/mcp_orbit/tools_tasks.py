@@ -26,6 +26,7 @@ from .errors import (
 from .helpers import (
     _bind_session_to_project,
     _notify_dashboard_task_created,
+    _resolve_session_id,
     _task_to_detail,
     _task_to_summary,
     _validate_path,
@@ -258,13 +259,14 @@ async def get_task(
         str | None,
         Field(
             description=(
-                "Optional Claude Code session ID. When provided, atomically "
-                "binds the session to this project (writes project_state + "
-                "the per-session pointer) so the statusline picks it up "
-                "without relying on /orbit:go's slash-command bash step. "
-                "Mirrors the create_orbit_files binding pattern - lets "
-                "/orbit:go's binding be reliable even when Claude streams "
-                "past the bash block."
+                "Claude Code session ID. Binds the session to this project "
+                "(writes project_state + the per-session pointer) so the "
+                "statusline picks it up without relying on /orbit:go's "
+                "slash-command bash step. On Claude Code 2.1.154+ this is "
+                "resolved automatically from the CLAUDE_CODE_SESSION_ID this "
+                "MCP subprocess was spawned with, so you can omit it. Pass "
+                "explicitly for older Claude Code or non-Claude clients; if "
+                "it cannot be resolved, binding is skipped."
             )
         ),
     ] = None,
@@ -275,13 +277,14 @@ async def get_task(
     Provide either task_id OR project_name (not both).
     Returns all information needed for /continue-task in a single call.
 
-    When ``session_id`` is provided, also writes the project_state row +
-    the ``~/.claude/hooks/state/projects/<sid>.json`` pointer so the
-    statusline reflects this project immediately, without needing the
-    slash-command bash step to fire. Returns a ``session_bound`` field
-    in the response indicating whether the binding succeeded (True),
-    failed (False), or was not attempted (omitted when ``session_id``
-    is None).
+    When a session id is available - passed explicitly, or resolved from
+    the CLAUDE_CODE_SESSION_ID env var on Claude Code 2.1.154+ - also writes
+    the project_state row + the ``~/.claude/hooks/state/projects/<sid>.json``
+    pointer so the statusline reflects this project immediately, without
+    needing the slash-command bash step to fire. Returns a ``session_bound``
+    field indicating whether the binding succeeded (True) or failed (False);
+    the field is omitted entirely when no session id could be resolved (no
+    argument and no env var).
     """
     db = get_db()
 
@@ -308,7 +311,10 @@ async def get_task(
         # Atomic session binding when session_id is supplied. Best-effort
         # like the create_orbit_files pattern: a DB-write failure or
         # invalid session_id silently no-ops; the user can recover by
-        # re-running /orbit:go or invoking the binding explicitly.
+        # re-running /orbit:go or invoking the binding explicitly. Falls
+        # back to the CLAUDE_CODE_SESSION_ID env var so /orbit:go binds
+        # without the caller resolving the id client-side.
+        session_id = _resolve_session_id(session_id)
         if session_id:
             session_bound = _bind_session_to_project(session_id, task.name)
             result["session_bound"] = session_bound
@@ -389,11 +395,13 @@ async def create_task(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code session ID (UUID). When provided, binds "
-            "this session to the new task so the statusline picks it up "
-            "immediately. Resolve client-side from "
-            "~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Omit or "
-            "pass None to skip binding (the user can recover via /orbit:go)."
+            description="Claude Code session ID (UUID). Binds this session to "
+            "the new task so the statusline picks it up immediately. On Claude "
+            "Code 2.1.154+ this is resolved automatically from the "
+            "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
+            "you can omit it. Pass explicitly for older Claude Code or "
+            "non-Claude clients; if it cannot be resolved, binding is skipped "
+            "(the user can recover via /orbit:go)."
         ),
     ] = None,
 ) -> dict:
@@ -458,7 +466,9 @@ async def create_task(
         # Bind the current session to the new task so the statusline
         # picks it up immediately, atomically with task creation. None
         # or invalid session_id silently no-ops; the user can recover by
-        # running /orbit:go.
+        # running /orbit:go. Falls back to the CLAUDE_CODE_SESSION_ID env
+        # var so the binding works without the caller resolving the id.
+        session_id = _resolve_session_id(session_id)
         session_bound = _bind_session_to_project(session_id, name)
 
         result = CreateTaskResult(

@@ -222,6 +222,75 @@ class TestClearActiveOrbitTasks:
         assert result["code"] == "VALIDATION_ERROR"
 
 
+# ── session_id env fallback (Claude Code 2.1.154+) ───────────────────────
+
+
+class TestSessionIdEnvFallback:
+    """When session_id is omitted, the tools resolve CLAUDE_CODE_SESSION_ID
+    from the MCP subprocess environment. The _no_ambient_session autouse
+    fixture guarantees the var is unset unless a test sets it here."""
+
+    def test_set_active_resolves_session_from_env(self, project_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-1")
+        result = asyncio.run(
+            tools_active.set_active_orbit_tasks(
+                project_name="demo-project",
+                task_numbers=["54a"],
+            )
+        )
+        assert result["success"] is True
+        assert active_task.read_pointer("env-sess-1")["task_numbers"] == ["54a"]
+
+    def test_set_active_explicit_wins_over_env(self, project_dir, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-1")
+        asyncio.run(
+            tools_active.set_active_orbit_tasks(
+                project_name="demo-project",
+                task_numbers=["54a"],
+                session_id="explicit-sess",
+            )
+        )
+        assert active_task.read_pointer("explicit-sess")["task_numbers"] == ["54a"]
+        # The ambient env session must NOT have received the pointer.
+        assert active_task.read_pointer("env-sess-1") is None
+
+    def test_set_active_no_param_no_env_rejected(self, project_dir):
+        """Omitted param with no env var still errors (unchanged for older
+        Claude Code / non-Claude clients)."""
+        result = asyncio.run(
+            tools_active.set_active_orbit_tasks(
+                project_name="demo-project",
+                task_numbers=["54a"],
+            )
+        )
+        assert result["error"] is True
+        assert result["code"] == "VALIDATION_ERROR"
+
+    def test_clear_active_resolves_session_from_env(self, project_dir, monkeypatch):
+        active_task.write_pointer("env-sess-2", "demo-project", ["54a"])
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-2")
+        result = asyncio.run(tools_active.clear_active_orbit_tasks())
+        assert result["success"] is True
+        assert result["cleared"] is True
+        assert active_task.read_pointer("env-sess-2") is None
+
+    def test_empty_string_session_id_resolves_from_env(self, project_dir, monkeypatch):
+        """Explicit "" is treated as missing, not as a value that wins over the
+        env. Pairs with test_missing_session_id_rejected ("" + no env -> error):
+        with the env var set, "" falls back to it and binds rather than failing.
+        """
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-3")
+        result = asyncio.run(
+            tools_active.set_active_orbit_tasks(
+                project_name="demo-project",
+                task_numbers=["54a"],
+                session_id="",
+            )
+        )
+        assert result["success"] is True
+        assert active_task.read_pointer("env-sess-3")["task_numbers"] == ["54a"]
+
+
 # ── update_tasks_file -> active-task auto-clear hook ─────────────────────
 
 

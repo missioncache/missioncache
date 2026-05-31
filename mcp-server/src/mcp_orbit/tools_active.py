@@ -22,6 +22,7 @@ from pydantic import Field
 from . import active_task, orbit
 from .app import mcp
 from .errors import ErrorCode, OrbitError, ValidationError
+from .helpers import _resolve_session_id
 from .tasks_parse import find_item, parse_tasks_md
 
 logger = logging.getLogger(__name__)
@@ -41,13 +42,16 @@ async def set_active_orbit_tasks(
         ),
     ],
     session_id: Annotated[
-        str,
+        str | None,
         Field(
             description="Claude Code (or other tool) session ID. Pointer is "
             "scoped per session so concurrent sessions don't clobber each "
-            "other's display."
+            "other's display. Optional on Claude Code 2.1.154+: when omitted "
+            "it is resolved from the CLAUDE_CODE_SESSION_ID this MCP "
+            "subprocess was spawned with. Pass explicitly for older Claude "
+            "Code or non-Claude clients that don't inject the env var."
         ),
-    ],
+    ] = None,
 ) -> dict:
     """Set the active checklist tasks for this session.
 
@@ -65,8 +69,13 @@ async def set_active_orbit_tasks(
     list (this same tool returns success with no pointer written).
     """
     try:
+        session_id = _resolve_session_id(session_id)
         if not session_id:
-            raise ValidationError("session_id is required", field="session_id")
+            raise ValidationError(
+                "session_id is required (none provided and "
+                "CLAUDE_CODE_SESSION_ID not set in the MCP server environment)",
+                field="session_id",
+            )
         if not project_name:
             raise ValidationError("project_name is required", field="project_name")
         # Reject path-traversal-shaped names early. The kebab-case promise in
@@ -144,9 +153,13 @@ async def set_active_orbit_tasks(
 @mcp.tool()
 async def clear_active_orbit_tasks(
     session_id: Annotated[
-        str,
-        Field(description="Claude Code (or other tool) session ID."),
-    ],
+        str | None,
+        Field(
+            description="Claude Code (or other tool) session ID. Optional on "
+            "Claude Code 2.1.154+: resolved from the CLAUDE_CODE_SESSION_ID "
+            "this MCP subprocess was spawned with when omitted."
+        ),
+    ] = None,
 ) -> dict:
     """Clear the active orbit-task pointer for this session.
 
@@ -154,8 +167,13 @@ async def clear_active_orbit_tasks(
     is called again.
     """
     try:
+        session_id = _resolve_session_id(session_id)
         if not session_id:
-            raise ValidationError("session_id is required", field="session_id")
+            raise ValidationError(
+                "session_id is required (none provided and "
+                "CLAUDE_CODE_SESSION_ID not set in the MCP server environment)",
+                field="session_id",
+            )
         removed = active_task.clear_pointer(session_id)
         return {"success": True, "session_id": session_id, "cleared": removed}
     except OrbitError as e:
