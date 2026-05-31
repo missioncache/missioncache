@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from mcp_orbit.errors import ValidationError
-from mcp_orbit.helpers import _resolve_to_git_root, _validate_path
+from mcp_orbit.helpers import (
+    _resolve_session_id,
+    _resolve_to_git_root,
+    _validate_path,
+)
 
 
 class TestValidatePath:
@@ -36,6 +40,48 @@ class TestValidatePath:
         outside = Path("/tmp/outside_dir/file.txt")
         with pytest.raises(ValidationError, match="must be within"):
             _validate_path(str(outside), must_be_under=tmp_path)
+
+
+class TestResolveSessionId:
+    """Precedence for the session-id env fallback: a non-empty explicit arg
+    wins; empty/whitespace/None falls back to CLAUDE_CODE_SESSION_ID; None
+    when neither yields a value. The autouse ``_no_ambient_session`` fixture
+    (conftest.py) guarantees the env var is unset unless a test sets it, so
+    these assertions are deterministic even when pytest runs inside a Claude
+    Code session."""
+
+    def test_explicit_non_empty_returned(self):
+        assert _resolve_session_id("sess-1") == "sess-1"
+
+    def test_explicit_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sid")
+        assert _resolve_session_id("explicit-sid") == "explicit-sid"
+
+    def test_empty_explicit_falls_back_to_env(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sid")
+        assert _resolve_session_id("") == "env-sid"
+
+    def test_empty_explicit_no_env_returns_none(self):
+        assert _resolve_session_id("") is None
+
+    def test_none_falls_back_to_env(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sid")
+        assert _resolve_session_id(None) == "env-sid"
+
+    def test_none_no_env_returns_none(self):
+        assert _resolve_session_id(None) is None
+
+    def test_whitespace_only_env_returns_none(self, monkeypatch):
+        """A whitespace-only / stray-newline env value normalizes to None
+        rather than flowing into a filename or DB row."""
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "  \n")
+        assert _resolve_session_id(None) is None
+
+    def test_env_value_is_stripped(self, monkeypatch):
+        """Surrounding whitespace on a real id is trimmed (re.match's $
+        otherwise accepts a trailing newline downstream)."""
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", " abc-123 \n")
+        assert _resolve_session_id(None) == "abc-123"
 
 
 class TestResolveToGitRoot:

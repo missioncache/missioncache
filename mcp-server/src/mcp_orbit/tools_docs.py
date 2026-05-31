@@ -14,6 +14,7 @@ from .errors import OrbitError, OrbitFileNotFoundError, TaskNotFoundError
 from .helpers import (
     _bind_session_to_project,
     _notify_dashboard_task_created,
+    _resolve_session_id,
     _resolve_to_git_root,
     _validate_path,
 )
@@ -55,11 +56,13 @@ async def create_orbit_files(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code session ID (UUID). When provided, binds "
-            "this session to the new project so the statusline picks it up "
-            "immediately. Resolve client-side from "
-            "~/.claude/hooks/state/cwd-session/<sanitized-cwd>.json. Omit or "
-            "pass None to skip binding (the user can recover via /orbit:go)."
+            description="Claude Code session ID (UUID). Binds this session to "
+            "the new project so the statusline picks it up immediately. On "
+            "Claude Code 2.1.154+ this is resolved automatically from the "
+            "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
+            "you can omit it. Pass explicitly for older Claude Code or "
+            "non-Claude clients; if it cannot be resolved, binding is skipped "
+            "(the user can recover via /orbit:go)."
         ),
     ] = None,
 ) -> dict:
@@ -131,7 +134,9 @@ async def create_orbit_files(
         # Bind the current session to the new project so the statusline
         # picks it up immediately, atomically with task creation. None or
         # an invalid session_id silently no-ops; the user can recover by
-        # running /orbit:go.
+        # running /orbit:go. Falls back to the CLAUDE_CODE_SESSION_ID env
+        # var so the binding works without the caller resolving the id.
+        session_id = _resolve_session_id(session_id)
         session_bound = _bind_session_to_project(session_id, project_name)
 
         return {

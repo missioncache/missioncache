@@ -210,6 +210,54 @@ class TestCreateOrbitFilesBinding:
         )
         assert _read_project_state(hooks_db, sid) == "second-project"
 
+    def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
+        """Claude Code 2.1.154+ injects CLAUDE_CODE_SESSION_ID into the stdio
+        MCP subprocess. With session_id omitted, the tool resolves it from the
+        env, so the binding lands without the caller threading the id through.
+        """
+        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+        env_sid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
+
+        result = asyncio.run(
+            tools_docs.create_orbit_files(
+                repo_path=str(repo_path),
+                project_name="env-bound",
+                resolve_git_root=False,
+            )
+        )
+
+        assert result.get("success") is True
+        assert result.get("session_bound") is True
+        assert _read_project_state(hooks_db, env_sid) == "env-bound"
+
+    def test_explicit_session_id_wins_over_env(self, isolated_orbit, monkeypatch):
+        """Precedence: an explicit session_id overrides the env fallback, so a
+        caller targeting a specific session is never silently redirected to the
+        ambient one."""
+        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+        explicit = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        env_sid = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
+
+        result = asyncio.run(
+            tools_docs.create_orbit_files(
+                repo_path=str(repo_path),
+                project_name="explicit-wins",
+                session_id=explicit,
+                resolve_git_root=False,
+            )
+        )
+
+        assert result.get("session_bound") is True
+        assert _read_project_state(hooks_db, explicit) == "explicit-wins"
+        # The ambient env session must NOT have been bound.
+        assert _read_project_state(hooks_db, env_sid) is None
+
 
 # ── create_task binding (non-coding branch) ───────────────────────────────
 
@@ -282,6 +330,21 @@ class TestCreateTaskBinding:
         assert result.get("error") is not True
         assert result.get("session_bound") is False
         assert _read_project_state(hooks_db, "anything") is None
+
+    def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
+        """create_task resolves CLAUDE_CODE_SESSION_ID when session_id omitted,
+        so /orbit:new's non-coding branch binds without a client-side id."""
+        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        env_sid = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
+
+        result = asyncio.run(
+            tools_tasks.create_task(name="env-task", task_type="non-coding")
+        )
+
+        assert result.get("error") is not True
+        assert result.get("session_bound") is True
+        assert _read_project_state(hooks_db, env_sid) == "env-task"
 
 
 # ── get_task binding (mirrors create_orbit_files / create_task) ───────────
@@ -417,6 +480,33 @@ class TestGetTaskBinding:
         # does not mask the read.
         assert result.get("name") == "reachable-project"
         assert _read_project_state(hooks_db, "../escape") is None
+
+    def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
+        """/orbit:go can omit session_id - get_task resolves it from the env
+        var, so the resume binding lands without the slash-command bash step."""
+        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+        env_sid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+        # Seed a task created outside any session (env unset at this point).
+        asyncio.run(
+            tools_tasks.create_task(
+                name="env-go-project",
+                task_type="coding",
+                repo_path=str(repo_path),
+            )
+        )
+        assert _read_project_state(hooks_db, env_sid) is None
+
+        # /orbit:go path: load it with no explicit session_id; the env wins.
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
+        result = asyncio.run(tools_tasks.get_task(project_name="env-go-project"))
+
+        assert result.get("error") is not True
+        assert result.get("session_bound") is True
+        assert result.get("name") == "env-go-project"
+        assert _read_project_state(hooks_db, env_sid) == "env-go-project"
 
 
 # ── _bind_session_to_project unit tests ───────────────────────────────────

@@ -3,6 +3,21 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_session(monkeypatch):
+    """Strip CLAUDE_CODE_SESSION_ID from the test environment.
+
+    The binding tools fall back to this env var when no session_id is
+    passed (Claude Code 2.1.154+ injects it into stdio MCP subprocesses).
+    Running pytest from inside a Claude Code session would otherwise leak
+    a real session id into "session_id omitted" tests, flipping their
+    binding assertions. Deleting it makes "omitted" mean truly absent -
+    matching CI, where the var is never set. Tests that exercise the
+    fallback set it explicitly via monkeypatch.setenv.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+
 @pytest.fixture
 def sample_tasks_md():
     """Sample tasks.md content with mixed completion states."""
