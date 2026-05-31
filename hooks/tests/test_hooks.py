@@ -6,6 +6,8 @@ Tests mock orbit_db and use tmp_path for file I/O.
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime
 from io import StringIO
@@ -2041,6 +2043,152 @@ class TestParallelSessionDetection:
         mod = self._reload_module()
         assert mod._detect_parallel_sessions(cwd, "my-sid") == []
 
+    # ── PID liveness: _session_is_alive + _detect filtering ───────────────
+
+    @staticmethod
+    def _seed_pid_record(
+        home: Path, session_id: str, pid: int, start_time: str | None = None
+    ) -> Path:
+        """Write a ``~/.claude/hooks/state/session-pids/<sid>.json`` record
+        mirroring what ``write_session_pid`` produces."""
+        rec_dir = home / ".claude" / "hooks" / "state" / "session-pids"
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        rec = rec_dir / f"{session_id}.json"
+        rec.write_text(
+            json.dumps(
+                {
+                    "sessionId": session_id,
+                    "pid": pid,
+                    "startTime": start_time,
+                    "updatedAt": datetime.now().astimezone().isoformat(),
+                }
+            )
+        )
+        return rec
+
+    @staticmethod
+    def _dead_pid() -> int:
+        """Return a pid that is guaranteed dead: spawn a trivial process and
+        reap it, so the kernel has released it before we hand it back."""
+        proc = subprocess.Popen([sys.executable, "-c", ""])
+        proc.wait()
+        return proc.pid
+
+    def test_session_is_alive_none_when_no_record(self, tmp_path, monkeypatch):
+        """No pid record -> None (unknown), so the caller falls back to mtime."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        assert mod._session_is_alive("never-recorded") is None
+
+    def test_session_is_alive_true_for_live_pid(self, tmp_path, monkeypatch):
+        """A recorded pid that is still running -> True."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        # This test process is unquestionably alive; no start time, so the
+        # reuse guard is skipped and liveness rests on os.kill alone.
+        self._seed_pid_record(tmp_path, "live-sid", os.getpid(), start_time=None)
+        assert mod._session_is_alive("live-sid") is True
+
+    def test_session_is_alive_true_when_start_time_matches(self, tmp_path, monkeypatch):
+        """Live pid AND a matching recorded start time -> True (not a reuse)."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        start = mod._ps_field(os.getpid(), "lstart")
+        self._seed_pid_record(tmp_path, "live-sid", os.getpid(), start_time=start)
+        assert mod._session_is_alive("live-sid") is True
+
+    def test_session_is_alive_false_for_dead_pid(self, tmp_path, monkeypatch):
+        """A recorded pid whose process has exited -> False (the fix's core)."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        self._seed_pid_record(tmp_path, "dead-sid", self._dead_pid(), start_time=None)
+        assert mod._session_is_alive("dead-sid") is False
+
+    def test_session_is_alive_false_on_pid_reuse(self, tmp_path, monkeypatch):
+        """Live pid but a start time that no longer matches -> False: the pid
+        was recycled by an unrelated process after the session exited."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        self._seed_pid_record(
+            tmp_path, "reused-sid", os.getpid(), start_time="Thu Jan  1 00:00:00 1970"
+        )
+        assert mod._session_is_alive("reused-sid") is False
+
+    def test_detect_drops_dead_candidate(self, tmp_path, monkeypatch):
+        """A fresh transcript whose session is proven dead is NOT parallel.
+
+        This is the regression the fix targets: /clear-then-relaunch (or
+        quit-and-reopen) leaves the just-closed session's transcript fresh,
+        but its pid is gone, so it must not trip the warning.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        self._seed_transcript(tmp_path, cwd, "dead-sid")  # fresh mtime
+        mod = self._reload_module()
+        self._seed_pid_record(tmp_path, "dead-sid", self._dead_pid(), start_time=None)
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == []
+
+    def test_detect_keeps_live_candidate(self, tmp_path, monkeypatch):
+        """A fresh transcript whose session is provably alive stays parallel."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        self._seed_transcript(tmp_path, cwd, "live-sid")
+        mod = self._reload_module()
+        self._seed_pid_record(tmp_path, "live-sid", os.getpid(), start_time=None)
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == ["live-sid"]
+
+    def test_detect_keeps_candidate_without_pid_record(self, tmp_path, monkeypatch):
+        """Migration safety: a fresh transcript with no pid record (session
+        predating the feature) is kept, preserving the mtime-only behavior."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        self._seed_transcript(tmp_path, cwd, "my-sid")
+        self._seed_transcript(tmp_path, cwd, "legacy-sid")  # no pid record
+        mod = self._reload_module()
+        assert mod._detect_parallel_sessions(cwd, "my-sid") == ["legacy-sid"]
+
+    # ── PID record path-traversal guard (CWE-22) ──────────────────────────
+
+    def test_write_session_pid_rejects_path_like_id(self, tmp_path, monkeypatch):
+        """A path-like session id is rejected before a filename is built, so
+        no pid record is written - the session id never escapes the state dir.
+        Pid resolution is forced to succeed so id validation is the only gate.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        monkeypatch.setattr(mod, "_resolve_session_pid", lambda: os.getpid())
+        mod.write_session_pid("../escape")
+        state_dir = tmp_path / ".claude" / "hooks" / "state"
+        pid_dir = state_dir / "session-pids"
+        assert not (state_dir / "escape.json").exists()
+        assert not pid_dir.exists() or list(pid_dir.glob("*.json")) == []
+
+    def test_write_session_pid_writes_for_valid_id(self, tmp_path, monkeypatch):
+        """Positive control so the rejection test isn't vacuous: a valid id
+        does produce a record inside the state dir."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        monkeypatch.setattr(mod, "_resolve_session_pid", lambda: os.getpid())
+        mod.write_session_pid("valid-sid-123")
+        rec = (
+            tmp_path / ".claude" / "hooks" / "state" / "session-pids"
+            / "valid-sid-123.json"
+        )
+        assert rec.exists()
+
+    def test_session_is_alive_rejects_path_like_id(self, tmp_path, monkeypatch):
+        """A path-like candidate id returns None (unknown -> mtime fallback)
+        rather than reading a file outside the state dir."""
+        self._redirect_state(monkeypatch, tmp_path)
+        mod = self._reload_module()
+        assert mod._session_is_alive("../escape") is None
+        assert mod._session_is_alive("a/b") is None
+
     # ── _projects_for_sessions ────────────────────────────────────────────
 
     def test_projects_for_sessions_maps_bound_sids(self, tmp_path, monkeypatch):
@@ -2283,6 +2431,87 @@ class TestParallelSessionDetection:
 
         out = capsys.readouterr().out
         assert "Parallel Orbit Session Warning" not in out
+
+    # ── PID liveness: no warning on a serial handoff (the reported bug) ────
+
+    @pytest.mark.parametrize("source", ["clear", "startup"])
+    def test_main_no_warning_when_prior_session_is_dead(
+        self, tmp_path, monkeypatch, capsys, source
+    ):
+        """The reported recurrence: save -> /clear -> new session, and
+        quit -> relaunch. The prior session's transcript is seconds-fresh but
+        its process is gone. Same setup as the different-project warning test,
+        except the other session is proven dead, so NO warning must fire.
+
+        Parametrized over the two `source` values that exercise this path
+        (`clear` and a fresh `startup`); neither gets the resume-only
+        exclusion, so liveness is the only thing that suppresses the warning.
+        """
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "handoff-repo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "my-sid", "source": source})
+
+        # Different project on the other session: would warn if it were alive.
+        self._seed_project_state(
+            tmp_path, [("my-sid", "alpha"), ("prev-sid", "beta")]
+        )
+        self._seed_transcript(tmp_path, cwd, "prev-sid")  # fresh mtime
+
+        mod = self._reload_module()
+        # Don't depend on the live process tree for our own pid write.
+        monkeypatch.setattr(mod, "_resolve_session_pid", lambda: None)
+        # The prior session's recorded pid is dead -> proven not parallel.
+        self._seed_pid_record(tmp_path, "prev-sid", self._dead_pid(), start_time=None)
+
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Parallel Orbit Session Warning" not in out
+
+    def test_main_still_warns_when_prior_session_alive(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Guard against over-suppression: a genuinely concurrent session
+        (live pid, different project) must STILL warn."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "concurrent-repo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "my-sid", "source": "startup"}
+        )
+
+        self._seed_project_state(
+            tmp_path, [("my-sid", "alpha"), ("other-sid", "beta")]
+        )
+        self._seed_transcript(tmp_path, cwd, "other-sid")
+
+        mod = self._reload_module()
+        monkeypatch.setattr(mod, "_resolve_session_pid", lambda: None)
+        # Other session's recorded pid is this (alive) test process.
+        self._seed_pid_record(tmp_path, "other-sid", os.getpid(), start_time=None)
+
+        import orbit_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Parallel Orbit Session Warning" in out
+        assert "- `beta`" in out
 
     # ── Codex P1: exclude resumed-from session from parallel detection ────
 
