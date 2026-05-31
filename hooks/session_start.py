@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -46,6 +47,22 @@ _SESSION_ID_CHARSET_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # session (user stepped away mid-task) without misfiring on sessions that
 # finished hours ago.
 _PARALLEL_THRESHOLD_SECONDS = 10 * 60
+
+# Per-session process records, keyed by session id, used to tell a sibling
+# session that is still running apart from one that was just closed. Transcript
+# mtime alone cannot make that distinction: a session closed seconds ago (e.g.
+# /clear then relaunch, or quit-and-reopen in the same cwd) leaves a transcript
+# whose mtime is just as fresh as a session that is genuinely still alive. The
+# recorded process pid resolves the ambiguity - a dead pid proves the session
+# is gone.
+_SESSION_PID_DIR = Path.home() / ".claude" / "hooks" / "state" / "session-pids"
+
+# How far up the process tree to climb when resolving the Claude Code session
+# process. The hook runs as a short-lived ``python3`` descendant, usually under
+# a transient ``sh -c`` / ``zsh -c`` wrapper, under ``claude``; a handful of
+# levels covers every observed launch shape. Bounded so a pathological tree can
+# never spin.
+_SESSION_PID_WALK_MAX_DEPTH = 12
 
 
 def _is_valid_session_id(value: object) -> bool:
@@ -231,15 +248,158 @@ def _read_cwd_pointer_sid(cwd: Path) -> str | None:
     return sid
 
 
+def _ps_field(pid: int, fmt: str) -> str | None:
+    """Return a single ``ps -o <fmt>=`` field for ``pid``, or None.
+
+    Best-effort and portable across macOS and Linux (no ``/proc`` dependency,
+    which macOS lacks). Returns None when the process is gone, ps is missing,
+    or the call errors/times out.
+    """
+    try:
+        out = subprocess.run(
+            ["ps", "-o", f"{fmt}=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    val = out.stdout.strip()
+    return val or None
+
+
+def _resolve_session_pid() -> int | None:
+    """Climb from this hook to the Claude Code session process and return its pid.
+
+    The hook is spawned as ``python3 session_start.py``, itself a child of
+    Claude Code - sometimes directly, sometimes under a transient ``sh -c`` /
+    ``zsh -c`` wrapper - so ``os.getppid()`` is not reliably the session
+    process. We walk the ancestry until we find a process whose executable
+    name (argv0 basename, via ``ps -o comm=``) is ``claude``, which is the
+    CLI's process name (verified empirically: a claude-spawned subprocess sees
+    ``... -> claude -> login shell`` above it).
+
+    Returns None when no ``claude`` ancestor is found within
+    ``_SESSION_PID_WALK_MAX_DEPTH`` levels - e.g. the Claude Desktop app, whose
+    process shape differs - in which case callers fall back to the mtime-only
+    heuristic.
+    """
+    pid = os.getpid()
+    for _ in range(_SESSION_PID_WALK_MAX_DEPTH):
+        ppid_s = _ps_field(pid, "ppid")
+        if not ppid_s:
+            return None
+        try:
+            ppid = int(ppid_s)
+        except ValueError:
+            return None
+        if ppid <= 1:
+            return None
+        comm = _ps_field(ppid, "comm") or ""
+        if os.path.basename(comm) == "claude":
+            return ppid
+        pid = ppid
+    return None
+
+
+def write_session_pid(session_id: str) -> None:
+    """Record the Claude Code session process pid for ``session_id``.
+
+    Lets a later SessionStart tell a sibling session that is still running
+    (pid alive) from one that was just closed (pid gone) - the signal
+    transcript mtime alone cannot give, which is why closing a session and
+    immediately starting another in the same cwd used to misfire the
+    parallel-session warning.
+
+    Best-effort: when the session process can't be resolved (e.g. Claude
+    Desktop's process shape), nothing is written and ``_session_is_alive``
+    later returns None for this sid, falling back to the mtime heuristic. The
+    start time is recorded alongside the pid so a recycled pid (reused by an
+    unrelated process after the session exits) is detected on read.
+
+    The session id is validated before it becomes a filename component, the
+    same path-traversal guard (CWE-22) ``_is_valid_session_id`` enforces for
+    the other ``<sid>.json`` pointers - so a malformed or path-like id can
+    never write outside ``_SESSION_PID_DIR``.
+    """
+    if not _is_valid_session_id(session_id):
+        return
+    pid = _resolve_session_pid()
+    if pid is None:
+        return
+
+    from orbit_db import atomic_write_json  # type: ignore[import-not-found]
+
+    atomic_write_json(
+        _SESSION_PID_DIR / f"{session_id}.json",
+        {
+            "sessionId": session_id,
+            "pid": pid,
+            "startTime": _ps_field(pid, "lstart"),
+            "updatedAt": datetime.now().astimezone().isoformat(),
+        },
+    )
+
+
+def _session_is_alive(session_id: str) -> bool | None:
+    """Liveness of ``session_id`` from its recorded process pid.
+
+    Returns:
+      * ``True``  - pid recorded and the process is still running (and, when a
+        start time was recorded, still the same process).
+      * ``False`` - pid recorded but the process is gone, or the pid was reused
+        by an unrelated process (recorded start time no longer matches).
+      * ``None``  - no usable pid record (a session predating this feature,
+        Claude Desktop, or a resolution failure), OR an invalid session id.
+        Caller should fall back to the mtime heuristic and treat the session
+        as possibly-alive.
+
+    The id is validated before it becomes a filename component so a candidate
+    sid sourced from a transcript stem cannot read outside ``_SESSION_PID_DIR``
+    (CWE-22); an invalid id returns None, the safe possibly-alive fallback.
+    """
+    if not _is_valid_session_id(session_id):
+        return None
+    rec_file = _SESSION_PID_DIR / f"{session_id}.json"
+    try:
+        data = json.loads(rec_file.read_text())
+    except (OSError, ValueError):
+        return None
+    pid = data.get("pid")
+    if not isinstance(pid, int) or pid <= 1:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return None
+    recorded_start = data.get("startTime")
+    if recorded_start:
+        current_start = _ps_field(pid, "lstart")
+        if current_start is not None and current_start != recorded_start:
+            return False  # pid was recycled by a different process
+    return True
+
+
 def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
     """Return session_ids whose transcripts in ``cwd`` were modified recently.
 
     Reads ``~/.claude/projects/<cwd-key>/*.jsonl`` (Claude Code's transcript
     directory) and returns sids whose mtime is within
-    ``_PARALLEL_THRESHOLD_SECONDS``, excluding ``my_session_id``. A fresh
-    transcript mtime is the most reliable "session is alive right now"
-    signal we have at hook time - heartbeats lag, and project_state has no
-    end-of-session cleanup.
+    ``_PARALLEL_THRESHOLD_SECONDS``, excluding ``my_session_id``.
+
+    A fresh transcript mtime says "active recently" but NOT "alive right now":
+    a session closed seconds ago (the common /clear-then-relaunch or
+    quit-and-reopen handoff) leaves a transcript just as fresh as a session
+    still running, which used to misfire the warning on every serial handoff.
+    So each mtime-fresh candidate is confirmed against its recorded process
+    pid via ``_session_is_alive``: a candidate is dropped only when proven
+    dead. Sessions with no pid record (predating this feature, Claude Desktop,
+    or a resolution failure) return ``None`` and are kept, preserving the
+    mtime-only behavior rather than risking a false negative.
 
     Used for two purposes in ``main()``:
       * Decide whether to skip resume-pickup (which would last-writer-wins
@@ -278,7 +438,11 @@ def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
             continue
         try:
             if jsonl.stat().st_mtime >= threshold:
-                others.append(sid)
+                # mtime is fresh, but confirm the session is actually still
+                # running. Drop it only when its recorded pid proves it is
+                # gone; keep it when alive (True) or unknown (None).
+                if _session_is_alive(sid) is not False:
+                    others.append(sid)
         except OSError:
             # Race: transcript deleted between glob and stat. Silent skip
             # is correct - directory-level FS failures surface via the
@@ -639,6 +803,11 @@ def main():
     session_id, source = get_session_context()
     if session_id:
         write_term_session_mapping(session_id)
+        # Record THIS session's process pid so a later SessionStart can tell
+        # whether we are still alive or were just closed - the liveness signal
+        # _detect_parallel_sessions uses to avoid warning on a serial handoff
+        # (e.g. /clear then relaunch in the same cwd).
+        write_session_pid(session_id)
         # Detect other sessions whose transcripts in this cwd were touched
         # in the last few minutes. On resume/compact, exclude the resumed-
         # from session (its transcript is often still fresh from recent
