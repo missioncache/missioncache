@@ -272,7 +272,15 @@ async def update_context_file(
 async def update_tasks_file(
     tasks_file: Annotated[str, Field(description="Path to tasks.md file")],
     completed_tasks: Annotated[
-        list[str] | None, Field(description="Task descriptions to mark as [x]")
+        list[str] | None,
+        Field(
+            description=(
+                "Tasks to mark as [x]. Lead each entry with the checklist "
+                "number for a reliable match (e.g. '7' or '7. Implement X'); "
+                "trailing prose is ignored. Entries matching no item come "
+                "back in the 'unmatched' field."
+            )
+        ),
     ] = None,
     new_tasks: Annotated[
         list[str] | None, Field(description="New tasks to add")
