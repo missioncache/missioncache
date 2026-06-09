@@ -442,6 +442,65 @@ class TestUpdateTasksFile:
         )
         assert result["completed_numbers"] == []
 
+    def test_marks_by_number_ignoring_trailing_prose(
+        self, tmp_path, sample_tasks_md
+    ):
+        """An entry leading with the checklist number is matched by number,
+        so trailing annotations don't break the match (the bug that left
+        boxes unticked when callers appended '- DONE: ...')."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(
+            str(tasks_file),
+            completed_tasks=["3. Implement core logic - DONE: shipped in PR #312"],
+        )
+
+        content = tasks_file.read_text()
+        assert re.search(r"- \[x\] 3\. Implement core logic", content)
+        assert result["completed_numbers"] == ["3"]
+        assert result["unmatched"] == []
+
+    def test_bare_number_marks_task(self, tmp_path, sample_tasks_md):
+        """A bare checklist number marks that item complete."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(str(tasks_file), completed_tasks=["4"])
+
+        assert result["completed_numbers"] == ["4"]
+        assert result["unmatched"] == []
+
+    def test_unmatched_entries_reported(self, tmp_path, sample_tasks_md):
+        """Entries that resolve to no checklist item come back in
+        ``unmatched`` instead of being silently dropped."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(
+            str(tasks_file),
+            completed_tasks=["999. nonexistent task", "totally unrelated text"],
+        )
+
+        assert result["completed_numbers"] == []
+        assert result["unmatched"] == [
+            "999. nonexistent task",
+            "totally unrelated text",
+        ]
+
+    def test_text_fallback_still_matches(self, tmp_path, sample_tasks_md):
+        """An entry with no leading number falls back to a substring match."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(sample_tasks_md)
+
+        result = update_tasks_file(
+            str(tasks_file),
+            completed_tasks=["Write tests"],
+        )
+
+        assert result["completed_numbers"] == ["4"]
+        assert result["unmatched"] == []
+
 
 # ── atomic write semantics (MAJOR-12) ────────────────────────────────────
 

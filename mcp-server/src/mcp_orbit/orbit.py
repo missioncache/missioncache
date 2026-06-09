@@ -398,6 +398,35 @@ def update_context_file(
     return _atomic_update_text(path, _transform)
 
 
+# Pull a checklist number ("7", "54a", "0.1") off the front of a
+# completed-task entry, tolerating a leading list marker / checkbox. The
+# number must be terminated by a "." or end-of-string so a description that
+# merely starts with a digit ("3 tests added") is not mistaken for a number.
+_LEADING_NUM_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\[[ xX]?\]\s*)?([0-9]+(?:\.[0-9]+)*[a-z]?)\s*(?:\.|$)"
+)
+
+
+def _leading_task_number(entry: str) -> str | None:
+    """Return the checklist number at the front of ``entry``, or None."""
+    m = _LEADING_NUM_RE.match(entry)
+    return m.group(1) if m else None
+
+
+def _mark_task_checked_by_number(content: str, number: str) -> str:
+    """Flip the unchecked checklist line for ``number`` to ``[x]``.
+
+    Idempotent: an already-checked ``[x]`` line is left untouched, so
+    re-completing a done item is a safe no-op (and stays out of the
+    pre/post transition diff).
+    """
+    pattern = re.compile(
+        rf"^(\s*[-*]\s*)\[\s*\](\s*{re.escape(number)}\.)",
+        re.MULTILINE,
+    )
+    return pattern.sub(r"\1[x]\2", content)
+
+
 def update_tasks_file(
     tasks_file: str | Path,
     completed_tasks: list[str] | None = None,
@@ -409,7 +438,10 @@ def update_tasks_file(
 
     Args:
         tasks_file: Path to tasks.md
-        completed_tasks: List of task descriptions to mark as [x]
+        completed_tasks: Task identifiers to mark as [x]. Each entry may
+            lead with the checklist number ("7", "54a", "0.1", optionally
+            with trailing prose) which is matched by number; otherwise it
+            falls back to a literal substring match against a task line.
         new_tasks: List of new tasks to add
         remaining_summary: New summary for Remaining field
         notes: Notes to add
@@ -419,6 +451,9 @@ def update_tasks_file(
         checklist numbers (e.g. ``["54a", "56"]``) of items that were
         unchecked before this call and are now checked. Used by callers
         to drive cross-cutting cleanup like clearing active-task pointers.
+        Also includes ``unmatched``: ``completed_tasks`` entries that
+        resolved to no checklist item, so callers can surface a dropped
+        completion instead of leaving a box silently unticked.
     """
     path = Path(tasks_file)
     if not path.exists():
@@ -426,6 +461,7 @@ def update_tasks_file(
 
     updates_made: list[str] = []
     completed_numbers_seen: list[str] = []
+    unmatched: list[str] = []
 
     def _transform(content: str) -> str:
         # Stamp inside the lock so serialized writers each get a fresh
@@ -445,18 +481,31 @@ def update_tasks_file(
             content,
         )
 
-        # Mark tasks as completed
+        # Mark tasks as completed. Prefer the stable checklist NUMBER
+        # ("7", "54a", "0.1") parsed from the front of each entry, so a
+        # completion lands even when the caller's string carries extra
+        # prose ("7. Foo - DONE: shipped in PR #312"). Fall back to a
+        # literal substring match only when no leading number resolves to
+        # a real item. Entries that match nothing go to ``unmatched`` and
+        # are returned, so a dropped completion is never silent.
         if completed_tasks:
+            present_numbers = {item.number for item in parse_tasks_md(content)}
             for task_desc in completed_tasks:
-                # Escape regex special chars in task description
+                number = _leading_task_number(task_desc)
+                if number and number in present_numbers:
+                    content = _mark_task_checked_by_number(content, number)
+                    updates_made.append(f"Completed: {task_desc[:50]}...")
+                    continue
+                # Fallback: literal substring of an unchecked line.
                 escaped = re.escape(task_desc)
-                # Match the checkbox pattern with the task description
                 pattern = rf"- \[\s*\]([^\n]*{escaped}[^\n]*)"
                 if re.search(pattern, content, re.IGNORECASE):
                     content = re.sub(
                         pattern, r"- [x]\1", content, flags=re.IGNORECASE
                     )
                     updates_made.append(f"Completed: {task_desc[:50]}...")
+                else:
+                    unmatched.append(task_desc)
 
         # Diff post-transform: any number that was [ ] before and is [x]
         # now is a real transition. This catches edits regardless of how
@@ -525,6 +574,7 @@ def update_tasks_file(
         "updates_made": updates_made,
         "progress": progress.model_dump() if progress else None,
         "completed_numbers": completed_numbers_seen,
+        "unmatched": unmatched,
     }
 
 
