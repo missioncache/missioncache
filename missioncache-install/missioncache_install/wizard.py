@@ -34,8 +34,8 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Local web UI at http://localhost:8787 with task tracking and analytics. "
         "Runs as a background service.",
     ),
-    "orbit_auto": (
-        "orbit-auto CLI",
+    "missioncache_auto": (
+        "missioncache-auto CLI",
         "Autonomous task execution across multiple workers.",
     ),
     "statusline": (
@@ -52,8 +52,8 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "User-level slash commands",
         "/whats-new and /optimize-prompt installed into ~/.claude/commands/.",
     ),
-    "orbit_db": (
-        "orbit-db CLI",
+    "missioncache_db": (
+        "missioncache-db CLI",
         "Terminal CLI for task management (list-active, create-task, task-time, ...). "
         "Complements the dashboard web UI for shell or script use.",
     ),
@@ -172,7 +172,7 @@ def run_uninstall_wizard() -> list[str] | None:
     - None - user cancelled (blank input or EOFError from `input()`).
 
     Exits via `ui.fail` (not return) when the wizard cannot proceed:
-    - Empty state (no prior orbit-install tracked).
+    - Empty state (no prior missioncache-install tracked).
     - Non-TTY shell (interactive wizard requires a terminal).
     - Invalid selection (non-numeric, out-of-range, or junk input).
 
@@ -191,14 +191,14 @@ def run_uninstall_wizard() -> list[str] | None:
     if unknown:
         ui.warn(
             f"State file references unknown components: {', '.join(unknown)}.\n"
-            "  Skipping them (not in this orbit-install version's catalog)."
+            "  Skipping them (not in this missioncache-install version's catalog)."
         )
     # Render in ALL_COMPONENTS order so selection numbers are reproducible.
     installed = [c for c in installers.ALL_COMPONENTS if c in valid]
 
     if not installed:
         ui.fail(
-            f"No prior orbit-install tracked in {state.STATE_FILE}.\n"
+            f"No prior missioncache-install tracked in {state.STATE_FILE}.\n"
             "  If you installed orbit manually outside the installer, remove\n"
             "  components by hand. Otherwise nothing to uninstall."
         )
@@ -267,5 +267,5 @@ def _print_next_steps(selected: list[str]) -> None:
         ui.detail("Dashboard:         http://localhost:8787")
     ui.detail("Docs:              https://github.com/tomerbr1/orbit-pm")
     print()
-    ui.detail("Update later:  uvx orbit-install --update")
-    ui.detail("Uninstall:     uvx orbit-install --uninstall")
+    ui.detail("Update later:  uvx missioncache-install --update")
+    ui.detail("Uninstall:     uvx missioncache-install --uninstall")

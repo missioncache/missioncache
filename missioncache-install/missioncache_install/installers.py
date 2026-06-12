@@ -78,7 +78,7 @@ def _install_plugin_pypi() -> None:
     """Add the upstream marketplace and install orbit@orbit-pm."""
     if not shutil.which("claude"):
         ui.warn("Claude CLI not found - skipping plugin registration.")
-        ui.detail("After installing Claude Code, run: orbit-install --update")
+        ui.detail("After installing Claude Code, run: missioncache-install --update")
         return
 
     ui.detail(f"Adding marketplace {PLUGIN_GITHUB_SOURCE}")
@@ -194,15 +194,15 @@ def uninstall_plugin(ctx: InstallContext) -> None:
 # ---------------------------------------------------------------------------
 
 def install_dashboard(ctx: InstallContext) -> None:
-    """Install orbit-dashboard and register it as a background service.
+    """Install missioncache-dashboard and register it as a background service.
 
     Also wires the PostToolUse edit-count HTTP hook that the statusline needs.
     """
     ui.step("2", "Dashboard")
     if ctx.mode == "local":
-        _pip_install_editable(_require_repo(ctx) / "orbit-dashboard")
+        _pip_install_editable(_require_repo(ctx) / "missioncache-dashboard")
     else:
-        _pipx_install("orbit-dashboard")
+        _pipx_install("missioncache-dashboard")
     if ctx.skip_service:
         ui.detail("Skipping service registration (--no-service)")
     else:
@@ -221,12 +221,12 @@ def install_dashboard(ctx: InstallContext) -> None:
 
 
 def _register_dashboard_service(port: int) -> None:
-    """Delegate to `orbit-dashboard install-service` (ships with the dashboard pkg)."""
-    binary = shutil.which("orbit-dashboard")
+    """Delegate to `missioncache-dashboard install-service` (ships with the dashboard pkg)."""
+    binary = shutil.which("missioncache-dashboard")
     if not binary:
         ui.warn(
-            "orbit-dashboard not on PATH - restart your shell and run: "
-            "orbit-dashboard install-service"
+            "missioncache-dashboard not on PATH - restart your shell and run: "
+            "missioncache-dashboard install-service"
         )
         return
     cmd = [binary, "install-service"]
@@ -241,42 +241,42 @@ def _register_dashboard_service(port: int) -> None:
 
 def uninstall_dashboard(ctx: InstallContext) -> None:
     """Uninstall service, pipx package (unless editable), and edit-count hook."""
-    if shutil.which("orbit-dashboard"):
+    if shutil.which("missioncache-dashboard"):
         try:
-            subprocess_utils.run_streaming(["orbit-dashboard", "uninstall-service"])
+            subprocess_utils.run_streaming(["missioncache-dashboard", "uninstall-service"])
         except subprocess_utils.CommandFailed:
-            ui.warn("orbit-dashboard uninstall-service failed (non-fatal)")
+            ui.warn("missioncache-dashboard uninstall-service failed (non-fatal)")
     if ctx.mode != "local":
-        _pipx_uninstall("orbit-dashboard")
+        _pipx_uninstall("missioncache-dashboard")
     settings.remove_edit_count_hook()
     state.remove_component("dashboard")
     ui.detail("Dashboard uninstalled")
 
 
 # ---------------------------------------------------------------------------
-# orbit-auto CLI
+# missioncache-auto CLI
 # ---------------------------------------------------------------------------
 
-def install_orbit_auto(ctx: InstallContext) -> None:
-    """Install the orbit-auto CLI via pipx (or editable in local mode)."""
-    ui.step("3", "orbit-auto CLI")
+def install_missioncache_auto(ctx: InstallContext) -> None:
+    """Install the missioncache-auto CLI via pipx (or editable in local mode)."""
+    ui.step("3", "missioncache-auto CLI")
     if ctx.mode == "local":
-        _pip_install_editable(_require_repo(ctx) / "orbit-auto")
+        _pip_install_editable(_require_repo(ctx) / "missioncache-auto")
     else:
-        _pipx_install("orbit-auto")
-    if shutil.which("orbit-auto"):
-        ui.detail(f"orbit-auto available at {shutil.which('orbit-auto')}")
+        _pipx_install("missioncache-auto")
+    if shutil.which("missioncache-auto"):
+        ui.detail(f"missioncache-auto available at {shutil.which('missioncache-auto')}")
     else:
-        ui.warn("orbit-auto not on PATH - restart your shell")
-    state.record_component("orbit_auto", {"mode": ctx.mode})
-    ui.success("orbit-auto installed")
+        ui.warn("missioncache-auto not on PATH - restart your shell")
+    state.record_component("missioncache_auto", {"mode": ctx.mode})
+    ui.success("missioncache-auto installed")
 
 
-def uninstall_orbit_auto(ctx: InstallContext) -> None:
+def uninstall_missioncache_auto(ctx: InstallContext) -> None:
     if ctx.mode != "local":
-        _pipx_uninstall("orbit-auto")
-    state.remove_component("orbit_auto")
-    ui.detail("orbit-auto uninstalled")
+        _pipx_uninstall("missioncache-auto")
+    state.remove_component("missioncache_auto")
+    ui.detail("missioncache-auto uninstalled")
 
 
 # ---------------------------------------------------------------------------
@@ -284,10 +284,10 @@ def uninstall_orbit_auto(ctx: InstallContext) -> None:
 # ---------------------------------------------------------------------------
 
 def install_statusline(ctx: InstallContext) -> bool:
-    """Wire settings.json statusLine -> `orbit-statusline`.
+    """Wire settings.json statusLine -> `missioncache-statusline`.
 
-    The entry point itself is installed by install_dashboard (orbit-statusline
-    ships in the orbit-dashboard PyPI package).
+    The entry point itself is installed by install_dashboard (missioncache-statusline
+    ships in the missioncache-dashboard PyPI package).
 
     Respects user consent: if an existing statusLine points at something
     non-orbit, shows the current command and asks before overwriting. Returns
@@ -296,7 +296,7 @@ def install_statusline(ctx: InstallContext) -> bool:
     ui.step("4", "Statusline")
 
     # Legacy: old setup.sh installed a symlink at ~/.claude/scripts/statusline.py.
-    # The pip entry point orbit-statusline supersedes it. Back up or remove cleanly.
+    # The pip entry point missioncache-statusline supersedes it. Back up or remove cleanly.
     legacy = Path.home() / ".claude" / "scripts" / "statusline.py"
     if legacy.is_symlink():
         legacy.unlink()
@@ -311,22 +311,22 @@ def install_statusline(ctx: InstallContext) -> bool:
     if isinstance(existing, dict):
         current_cmd = existing.get("command")
 
-    if current_cmd and current_cmd != "orbit-statusline":
+    if current_cmd and current_cmd != "missioncache-statusline":
         ui.warn(f"An existing statusLine is wired in ~/.claude/settings.json:")
         ui.detail(f"  command: {current_cmd}")
         ui.detail("Overwriting will back up the current value to settings.json.bak")
-        if not (ctx.assume_yes or ui.ask_yn("Replace it with orbit-statusline?", default=False)):
+        if not (ctx.assume_yes or ui.ask_yn("Replace it with missioncache-statusline?", default=False)):
             ui.info("Keeping your existing statusline. Skipping.")
             return False
 
-    bak = settings.set_statusline("orbit-statusline")
+    bak = settings.set_statusline("missioncache-statusline")
     if bak:
         ui.detail(f"Backed up previous statusLine to {bak}")
     state.record_component(
         "statusline",
-        {"command": "orbit-statusline", "backup": str(bak) if bak else None},
+        {"command": "missioncache-statusline", "backup": str(bak) if bak else None},
     )
-    ui.success("Statusline wired (orbit-statusline)")
+    ui.success("Statusline wired (missioncache-statusline)")
     return True
 
 
@@ -336,7 +336,7 @@ def uninstall_statusline(ctx: InstallContext) -> None:
     bak_path = info.get("backup")
     if bak_path:
         ui.detail(f"Your previous statusline is preserved at {bak_path}")
-        ui.detail("Restore it manually or re-run orbit-install to wire a new one.")
+        ui.detail("Restore it manually or re-run missioncache-install to wire a new one.")
     settings.unset_statusline()
     state.remove_component("statusline")
 
@@ -348,7 +348,7 @@ def uninstall_statusline(ctx: InstallContext) -> None:
 def install_rules(ctx: InstallContext) -> None:
     """Install rule files to ~/.claude/rules/.
 
-    PyPI: copy bundled files out of orbit_install.bundled.rules.
+    PyPI: copy bundled files out of missioncache_install.bundled.rules.
     Local: symlink from <repo>/rules/ so maintainer edits are live.
 
     Existing files with different content are backed up to .bak; existing
@@ -361,7 +361,7 @@ def install_rules(ctx: InstallContext) -> None:
     if ctx.mode == "local":
         _symlink_md_dir(_require_repo(ctx) / "rules", dst)
     else:
-        _copy_bundled_dir("orbit_install.bundled.rules", dst)
+        _copy_bundled_dir("missioncache_install.bundled.rules", dst)
     state.record_component(
         "rules",
         {"mode": "symlink" if ctx.mode == "local" else "copy"},
@@ -387,7 +387,7 @@ def uninstall_rules(ctx: InstallContext) -> None:
                 target = f.resolve(strict=False)
             except OSError:
                 continue
-            if "orbit_install/bundled" in str(target) or target.parent.name == "rules":
+            if "missioncache_install/bundled" in str(target) or target.parent.name == "rules":
                 f.unlink()
                 removed += 1
             continue
@@ -414,7 +414,7 @@ def install_user_commands(ctx: InstallContext) -> None:
     if ctx.mode == "local":
         _symlink_md_dir(_require_repo(ctx) / "user-commands", dst)
     else:
-        _copy_bundled_dir("orbit_install.bundled.user_commands", dst)
+        _copy_bundled_dir("missioncache_install.bundled.user_commands", dst)
     state.record_component(
         "user_commands",
         {"mode": "symlink" if ctx.mode == "local" else "copy"},
@@ -425,7 +425,7 @@ def install_user_commands(ctx: InstallContext) -> None:
 def uninstall_user_commands(ctx: InstallContext) -> None:
     """Remove /whats-new and /optimize-prompt from ~/.claude/commands/.
 
-    Only removes the specific filenames orbit-install installs. Any other
+    Only removes the specific filenames missioncache-install installs. Any other
     user-level commands (whether existing or added by hand) are untouched.
     """
     dst = Path.home() / ".claude" / "commands"
@@ -443,29 +443,29 @@ def uninstall_user_commands(ctx: InstallContext) -> None:
 
 
 # ---------------------------------------------------------------------------
-# orbit-db CLI
+# missioncache-db CLI
 # ---------------------------------------------------------------------------
 
-def install_orbit_db(ctx: InstallContext) -> None:
-    """Install the orbit-db CLI as a standalone tool for terminal task management."""
-    ui.step("7", "orbit-db CLI")
+def install_missioncache_db(ctx: InstallContext) -> None:
+    """Install the missioncache-db CLI as a standalone tool for terminal task management."""
+    ui.step("7", "missioncache-db CLI")
     if ctx.mode == "local":
-        _pip_install_editable(_require_repo(ctx) / "orbit-db")
+        _pip_install_editable(_require_repo(ctx) / "missioncache-db")
     else:
-        _pipx_install("orbit-db")
-    if shutil.which("orbit-db"):
-        ui.detail(f"orbit-db available at {shutil.which('orbit-db')}")
+        _pipx_install("missioncache-db")
+    if shutil.which("missioncache-db"):
+        ui.detail(f"missioncache-db available at {shutil.which('missioncache-db')}")
     else:
-        ui.warn("orbit-db not on PATH - restart your shell")
-    state.record_component("orbit_db", {"mode": ctx.mode})
-    ui.success("orbit-db installed")
+        ui.warn("missioncache-db not on PATH - restart your shell")
+    state.record_component("missioncache_db", {"mode": ctx.mode})
+    ui.success("missioncache-db installed")
 
 
-def uninstall_orbit_db(ctx: InstallContext) -> None:
+def uninstall_missioncache_db(ctx: InstallContext) -> None:
     if ctx.mode != "local":
-        _pipx_uninstall("orbit-db")
-    state.remove_component("orbit_db")
-    ui.detail("orbit-db uninstalled")
+        _pipx_uninstall("missioncache-db")
+    state.remove_component("missioncache_db")
+    ui.detail("missioncache-db uninstalled")
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ def _copy_bundled_dir(package_path: str, dst_dir: Path) -> None:
     """Copy every *.md file out of the bundled package into dst_dir.
 
     package_path: dotted path to the bundled resource package, e.g.
-    "orbit_install.bundled.rules". Existing files are backed up to .bak.
+    "missioncache_install.bundled.rules". Existing files are backed up to .bak.
     """
     try:
         src_files = resources.files(package_path)
@@ -607,15 +607,15 @@ def _service_kind(skip: bool) -> str:
 
 # Order matters: plugin first (creates ~/.claude/ structure expected by hooks),
 # dashboard before statusline (statusline entry point ships with dashboard pkg),
-# orbit-auto is standalone.
+# missioncache-auto is standalone.
 ALL_COMPONENTS: tuple[str, ...] = (
     "plugin",
     "dashboard",
-    "orbit_auto",
+    "missioncache_auto",
     "statusline",
     "rules",
     "user_commands",
-    "orbit_db",
+    "missioncache_db",
     "codex",
     "codex_commands",
     "opencode",
@@ -627,11 +627,11 @@ ALL_COMPONENTS: tuple[str, ...] = (
 _INSTALLERS = {
     "plugin": install_plugin,
     "dashboard": install_dashboard,
-    "orbit_auto": install_orbit_auto,
+    "missioncache_auto": install_missioncache_auto,
     "statusline": install_statusline,
     "rules": install_rules,
     "user_commands": install_user_commands,
-    "orbit_db": install_orbit_db,
+    "missioncache_db": install_missioncache_db,
     "codex": mcp_clients.install_codex,
     "codex_commands": command_clients.install_codex_commands,
     "opencode": mcp_clients.install_opencode,
@@ -643,11 +643,11 @@ _INSTALLERS = {
 _UNINSTALLERS = {
     "plugin": uninstall_plugin,
     "dashboard": uninstall_dashboard,
-    "orbit_auto": uninstall_orbit_auto,
+    "missioncache_auto": uninstall_missioncache_auto,
     "statusline": uninstall_statusline,
     "rules": uninstall_rules,
     "user_commands": uninstall_user_commands,
-    "orbit_db": uninstall_orbit_db,
+    "missioncache_db": uninstall_missioncache_db,
     "codex": mcp_clients.uninstall_codex,
     "codex_commands": command_clients.uninstall_codex_commands,
     "opencode": mcp_clients.uninstall_opencode,

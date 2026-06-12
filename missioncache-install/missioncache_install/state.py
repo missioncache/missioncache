@@ -16,17 +16,46 @@ from typing import Any
 STATE_FILE = Path.home() / ".claude" / "orbit-install.state.json"
 STATE_SCHEMA_VERSION = 1
 
+# Component IDs renamed during the orbit->missioncache transition. Older
+# installs persisted the orbit-named keys; on load we rewrite them in place
+# so --update and --uninstall continue to find tracked components.
+_LEGACY_COMPONENT_KEY_MAP = {
+    "orbit_db": "missioncache_db",
+    "orbit_auto": "missioncache_auto",
+}
+
 
 def load() -> dict[str, Any]:
     """Load state from disk. Returns a fresh empty state if missing or corrupt."""
     if not STATE_FILE.exists():
         return _empty_state()
     try:
-        return json.loads(STATE_FILE.read_text())
+        state = json.loads(STATE_FILE.read_text())
     except json.JSONDecodeError:
         corrupt = STATE_FILE.with_suffix(".json.corrupt")
         STATE_FILE.rename(corrupt)
         return _empty_state()
+    return _migrate_legacy_component_keys(state)
+
+
+def _migrate_legacy_component_keys(state: dict[str, Any]) -> dict[str, Any]:
+    """Rename legacy orbit-named component keys to the missioncache names.
+
+    Only rewrites when the old key is present and the new key is absent so
+    a partially-migrated state never clobbers fresh entries. Persists back
+    to STATE_FILE only when at least one key was renamed.
+    """
+    components = state.get("components")
+    if not isinstance(components, dict):
+        return state
+    changed = False
+    for old_key, new_key in _LEGACY_COMPONENT_KEY_MAP.items():
+        if old_key in components and new_key not in components:
+            components[new_key] = components.pop(old_key)
+            changed = True
+    if changed:
+        save(state)
+    return state
 
 
 def save(state: dict[str, Any]) -> None:

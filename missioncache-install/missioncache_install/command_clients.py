@@ -68,7 +68,7 @@ VSCODE_USER_SETTINGS_PATH = (
 CODEX_MARKETPLACE_DIR = Path.home() / ".orbit" / "codex-marketplace"
 CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 
-# Codex plugin manifest version. Independent of orbit-install's version - the
+# Codex plugin manifest version. Independent of missioncache-install's version - the
 # plugin is a stable artifact whose bumps signal command-shape changes, not
 # installer-tooling changes.
 CODEX_PLUGIN_VERSION = "1.0.0"
@@ -131,7 +131,7 @@ def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
       a clear pointer to the failure the user already saw upstream.
     - ``tool not in ctx.mcp_success``: parent did not run in this session
       (e.g. ``--<tool>-commands --no-<tool>``). Skip with a pointer to
-      ``orbit-install --<tool>``, which is idempotent and detects pre-existing
+      ``missioncache-install --<tool>``, which is idempotent and detects pre-existing
       manual registrations.
 
     Returns True when the caller should proceed, False when it should return.
@@ -148,7 +148,7 @@ def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
         return False
     ui.warn(
         f"Skipping {tool} slash commands - {tool} MCP server was not "
-        f"registered in this run. Run `orbit-install --{tool}` first "
+        f"registered in this run. Run `missioncache-install --{tool}` first "
         "(idempotent; detects pre-existing manual registrations) so "
         "the commands have an MCP server to call."
     )
@@ -158,7 +158,7 @@ def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
 def _read_canonical_command(name: str, ctx: "InstallContext") -> str:
     """Read the source content of an orbit command by name (without `.md`).
 
-    PyPI mode: read from bundled package data (orbit_install.bundled.commands).
+    PyPI mode: read from bundled package data (missioncache_install.bundled.commands).
     Local mode: read from <repo>/commands/<name>.md so maintainer edits
     immediately flow through to non-Claude tools.
     """
@@ -168,7 +168,7 @@ def _read_canonical_command(name: str, ctx: "InstallContext") -> str:
         if not path.exists():
             raise FileNotFoundError(f"Local command source missing: {path}")
         return path.read_text()
-    files = resources.files("orbit_install.bundled.commands")
+    files = resources.files("missioncache_install.bundled.commands")
     return (files / f"{name}.md").read_text()
 
 
@@ -267,7 +267,7 @@ def install_opencode_commands(ctx: "InstallContext") -> None:
     if not mcp_clients._opencode_detected():
         ui.warn(
             "OpenCode CLI not found - skipping. "
-            "Install OpenCode, then run: orbit-install --update"
+            "Install OpenCode, then run: missioncache-install --update"
         )
         return
     if not _mcp_ready_for("opencode", ctx):
@@ -316,7 +316,7 @@ def install_vscode_commands(ctx: "InstallContext") -> None:
     if not mcp_clients._vscode_detected():
         ui.warn(
             "VSCode not found in /Applications - skipping. "
-            "Install VSCode, then run: orbit-install --update"
+            "Install VSCode, then run: missioncache-install --update"
         )
         return
     if not _mcp_ready_for("vscode", ctx):
@@ -488,7 +488,7 @@ def install_codex_commands(ctx: "InstallContext") -> None:
     if not shutil.which("codex"):
         ui.warn(
             "Codex CLI not found - skipping. "
-            "Install Codex, then run: orbit-install --update"
+            "Install Codex, then run: missioncache-install --update"
         )
         return
 
@@ -570,7 +570,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
                 "Orbit's slash commands inside Codex. Provides /orbit-go, /orbit-save, "
                 "/orbit-new, /orbit-done, /orbit-prompts, and /orbit-mode for managing "
                 "orbit projects. Requires the orbit MCP server to be registered "
-                "separately via `codex mcp add orbit -- mcp-orbit`."
+                "separately via `codex mcp add orbit -- mcp-missioncache`."
             ),
             "developerName": "Tomer Brami",
             "category": "Productivity",
@@ -651,7 +651,7 @@ def _enable_codex_plugin() -> None:
     and the active stanza gets appended. A bare substring check would have
     treated the comment as already-enabled and silently skipped activation.
 
-    We keep orbit-install dep-free by handling the file as plain text rather
+    We keep missioncache-install dep-free by handling the file as plain text rather
     than parsing/serializing TOML.
     """
     if not CODEX_CONFIG_TOML.exists():

@@ -1,15 +1,15 @@
-"""Entry point for `uvx orbit-install` / `pipx run orbit-install`.
+"""Entry point for `uvx missioncache-install` / `pipx run missioncache-install`.
 
 Invocation patterns:
-    uvx orbit-install                       # interactive install wizard
-    uvx orbit-install --all                 # install all components non-interactively
-    uvx orbit-install --dashboard           # install only the dashboard
-    uvx orbit-install --all --no-statusline # install everything except the statusline
-    uvx orbit-install --update              # refresh whatever is in state.json
-    uvx orbit-install --uninstall           # interactive uninstall wizard (TTY only)
-    uvx orbit-install --uninstall --all     # uninstall every tracked component
-    uvx orbit-install --uninstall codex,vscode  # uninstall a specific list
-    uvx orbit-install --local               # maintainer mode: editable installs from clone
+    uvx missioncache-install                       # interactive install wizard
+    uvx missioncache-install --all                 # install all components non-interactively
+    uvx missioncache-install --dashboard           # install only the dashboard
+    uvx missioncache-install --all --no-statusline # install everything except the statusline
+    uvx missioncache-install --update              # refresh whatever is in state.json
+    uvx missioncache-install --uninstall           # interactive uninstall wizard (TTY only)
+    uvx missioncache-install --uninstall --all     # uninstall every tracked component
+    uvx missioncache-install --uninstall codex,vscode  # uninstall a specific list
+    uvx missioncache-install --local               # maintainer mode: editable installs from clone
 
 Project data and DBs at `~/.orbit/` are never touched by any uninstall flow.
 """
@@ -35,7 +35,7 @@ INTERACTIVE_WIZARD = object()
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="orbit-install",
+        prog="missioncache-install",
         description="Bootstrap installer for Orbit (project manager for Claude Code).",
     )
     p.add_argument(
@@ -80,11 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     for flag, dest in (
         ("--plugin", "plugin"),
         ("--dashboard", "dashboard"),
-        ("--orbit-auto", "orbit_auto"),
+        ("--missioncache-auto", "missioncache_auto"),
         ("--statusline", "statusline"),
         ("--rules", "rules"),
         ("--user-commands", "user_commands"),
-        ("--orbit-db", "orbit_db"),
+        ("--missioncache-db", "missioncache_db"),
         ("--codex", "codex"),
         ("--codex-commands", "codex_commands"),
         ("--opencode", "opencode"),
@@ -103,11 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
     for flag, dest in (
         ("--no-plugin", "no_plugin"),
         ("--no-dashboard", "no_dashboard"),
-        ("--no-orbit-auto", "no_orbit_auto"),
+        ("--no-missioncache-auto", "no_missioncache_auto"),
         ("--no-statusline", "no_statusline"),
         ("--no-rules", "no_rules"),
         ("--no-user-commands", "no_user_commands"),
-        ("--no-orbit-db", "no_orbit_db"),
+        ("--no-missioncache-db", "no_missioncache_db"),
         ("--no-codex", "no_codex"),
         ("--no-codex-commands", "no_codex_commands"),
         ("--no-opencode", "no_opencode"),
@@ -228,7 +228,7 @@ def _filter_known_state(tracked: list[str]) -> list[str]:
     if unknown:
         ui.warn(
             f"State file references unknown components: {', '.join(unknown)}.\n"
-            "  These are not in this orbit-install version's ALL_COMPONENTS list. "
+            "  These are not in this missioncache-install version's ALL_COMPONENTS list. "
             "Skipping them."
         )
     return valid
@@ -321,7 +321,7 @@ def _run_uninstall(args: argparse.Namespace, ctx: installers.InstallContext) -> 
         installed = _filter_known_state(state.installed_components())
         if not installed:
             ui.fail(
-                "No prior orbit-install was tracked.\n"
+                "No prior missioncache-install was tracked.\n"
                 "  Use `--uninstall --all` to attempt a best-effort uninstall."
             )
             raise AssertionError("unreachable")  # ui.fail exits
@@ -400,11 +400,11 @@ def main() -> int:
         base = list(installers.ALL_COMPONENTS) if args.all else explicit
         selected = [c for c in base if c not in excluded]
         selected = _expand_implies(selected, excluded)
-        # statusline needs the orbit-statusline entry point, which ships in the
-        # orbit-dashboard package. Installing statusline without dashboard wires
+        # statusline needs the missioncache-statusline entry point, which ships in the
+        # missioncache-dashboard package. Installing statusline without dashboard wires
         # settings.json to a command that won't resolve. Auto-add dashboard.
         if "statusline" in selected and "dashboard" not in selected and "dashboard" not in excluded:
-            ui.warn("statusline depends on orbit-dashboard (provides the orbit-statusline entry point). Adding dashboard to the install.")
+            ui.warn("statusline depends on missioncache-dashboard (provides the missioncache-statusline entry point). Adding dashboard to the install.")
             selected.insert(selected.index("statusline"), "dashboard")
         if not selected:
             ui.warn("Component selection is empty after applying --no-* flags.")

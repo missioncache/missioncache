@@ -1,10 +1,10 @@
-"""Tests for orbit_install.__main__ - CLI parsing and component dispatch."""
+"""Tests for missioncache_install.__main__ - CLI parsing and component dispatch."""
 
 from __future__ import annotations
 
 import pytest
 
-from orbit_install.__main__ import (
+from missioncache_install.__main__ import (
     _excluded_components,
     _expand_implies,
     _explicit_components,
@@ -28,7 +28,7 @@ def test_uninstall_with_all_is_a_valid_combination() -> None:
     composes them: `--all` modifies `--uninstall` to skip the interactive
     selector. Bare `--uninstall` becomes the `INTERACTIVE_WIZARD` sentinel.
     """
-    from orbit_install.__main__ import INTERACTIVE_WIZARD
+    from missioncache_install.__main__ import INTERACTIVE_WIZARD
     parser = build_parser()
     args = parser.parse_args(["--uninstall", "--all"])
     assert args.uninstall is INTERACTIVE_WIZARD
@@ -56,7 +56,7 @@ def test_uninstall_bare_flag_is_distinguishable_from_empty_string() -> None:
     collide with the `--uninstall "$UNSET_VAR"` case and silently open
     the wizard mid-script.
     """
-    from orbit_install.__main__ import INTERACTIVE_WIZARD
+    from missioncache_install.__main__ import INTERACTIVE_WIZARD
     parser = build_parser()
 
     # Bare flag -> sentinel
@@ -122,11 +122,11 @@ def test_yes_flag_short_and_long() -> None:
     assert build_parser().parse_args(["-y"]).yes is True
 
 
-def test_orbit_auto_uses_dash_in_cli_but_underscore_internally() -> None:
-    """--orbit-auto maps to the `orbit_auto` component name internally."""
-    args = build_parser().parse_args(["--orbit-auto"])
-    assert args.orbit_auto is True
-    assert _explicit_components(args) == ["orbit_auto"]
+def test_missioncache_auto_uses_dash_in_cli_but_underscore_internally() -> None:
+    """--missioncache-auto maps to the `missioncache_auto` component name internally."""
+    args = build_parser().parse_args(["--missioncache-auto"])
+    assert args.missioncache_auto is True
+    assert _explicit_components(args) == ["missioncache_auto"]
 
 
 def test_user_commands_flag_naming() -> None:
@@ -136,11 +136,11 @@ def test_user_commands_flag_naming() -> None:
     assert _explicit_components(args) == ["user_commands"]
 
 
-def test_orbit_db_flag_naming() -> None:
-    """--orbit-db maps to the `orbit_db` component name."""
-    args = build_parser().parse_args(["--orbit-db"])
-    assert args.orbit_db is True
-    assert _explicit_components(args) == ["orbit_db"]
+def test_missioncache_db_flag_naming() -> None:
+    """--missioncache-db maps to the `missioncache_db` component name."""
+    args = build_parser().parse_args(["--missioncache-db"])
+    assert args.missioncache_db is True
+    assert _explicit_components(args) == ["missioncache_db"]
 
 
 @pytest.mark.parametrize("flag, dest", [
@@ -243,9 +243,9 @@ def test_all_no_codex_invocation_skips_codex_commands(monkeypatch) -> None:
     def fake_install(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--all", "--no-codex", "--yes"])
-    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
-    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--all", "--no-codex", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: None)
 
     rc = main()
 
@@ -256,15 +256,15 @@ def test_all_no_codex_invocation_skips_codex_commands(monkeypatch) -> None:
 
 
 def test_codex_only_invocation_implies_codex_commands(monkeypatch) -> None:
-    """End-to-end: `orbit-install --codex` installs both codex MCP + slash commands."""
+    """End-to-end: `missioncache-install --codex` installs both codex MCP + slash commands."""
     captured: list[list[str]] = []
 
     def fake_install(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--codex", "--yes"])
-    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
-    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--codex", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: None)
 
     rc = main()
 
@@ -277,7 +277,7 @@ def test_codex_only_invocation_implies_codex_commands(monkeypatch) -> None:
 
 
 def test_codex_with_no_codex_commands_installs_mcp_only(monkeypatch) -> None:
-    """`orbit-install --codex --no-codex-commands` installs MCP without slash commands."""
+    """`missioncache-install --codex --no-codex-commands` installs MCP without slash commands."""
     captured: list[list[str]] = []
 
     def fake_install(components, ctx):
@@ -285,10 +285,10 @@ def test_codex_with_no_codex_commands_installs_mcp_only(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "sys.argv",
-        ["orbit-install", "--codex", "--no-codex-commands", "--yes"],
+        ["missioncache-install", "--codex", "--no-codex-commands", "--yes"],
     )
-    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
-    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: None)
 
     rc = main()
 
@@ -300,15 +300,15 @@ def test_codex_with_no_codex_commands_installs_mcp_only(monkeypatch) -> None:
 
 
 def test_statusline_without_dashboard_auto_adds_dashboard(monkeypatch) -> None:
-    """--statusline alone pulls dashboard in too, since orbit-statusline lives in that package."""
+    """--statusline alone pulls dashboard in too, since missioncache-statusline lives in that package."""
     captured: list[list[str]] = []
 
     def fake_install(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--statusline", "--yes"])
-    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
-    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--statusline", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: None)
 
     rc = main()
 
@@ -327,9 +327,9 @@ def test_statusline_with_no_dashboard_does_not_auto_add(monkeypatch) -> None:
     def fake_install(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--statusline", "--no-dashboard", "--yes"])
-    monkeypatch.setattr("orbit_install.__main__.installers.install_components", fake_install)
-    monkeypatch.setattr("orbit_install.__main__.wizard.run", lambda ctx: None)
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--statusline", "--no-dashboard", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: None)
 
     rc = main()
 
@@ -343,14 +343,14 @@ def test_statusline_with_no_dashboard_does_not_auto_add(monkeypatch) -> None:
 #
 # Each test stubs `installers.uninstall_components` to capture the components
 # that would be removed, monkeypatches sys.argv to drive argparse, seeds
-# state.json via the orbit_install.state API, and asserts the dispatch made
+# state.json via the missioncache_install.state API, and asserts the dispatch made
 # the right call. State seeding goes through the real state.save/load to
 # catch schema regressions.
 # ---------------------------------------------------------------------------
 
 def _seed_install_state(installed: list[str]) -> None:
     """Populate state.json with components, mimicking a prior install."""
-    from orbit_install import state
+    from missioncache_install import state
     s = state.load()
     s.setdefault("components", {})
     for c in installed:
@@ -366,9 +366,9 @@ def test_uninstall_all_uninstalls_tracked_components(isolated_home, monkeypatch)
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "--all"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "--all"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -392,9 +392,9 @@ def test_uninstall_all_empty_state_is_safe_noop(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "--all"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "--all"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -414,9 +414,9 @@ def test_uninstall_positive_list_happy_path(isolated_home, monkeypatch) -> None:
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "codex_commands"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "codex_commands"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -439,9 +439,9 @@ def test_uninstall_codex_auto_expands_to_codex_commands(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "codex"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "codex"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -467,9 +467,9 @@ def test_uninstall_codex_does_not_auto_add_already_removed_child(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "codex"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "codex"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -493,9 +493,9 @@ def test_uninstall_empty_string_from_shell_var_is_rejected(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", ""])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", ""])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -524,9 +524,9 @@ def test_uninstall_separator_only_input_is_rejected(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", garbage_input])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", garbage_input])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -557,12 +557,12 @@ def test_wizard_pick_auto_expands_to_command_companion(
 
     # Mock the wizard to return only `codex` (simulating an index pick).
     monkeypatch.setattr(
-        "orbit_install.__main__.wizard.run_uninstall_wizard",
+        "missioncache_install.__main__.wizard.run_uninstall_wizard",
         lambda: ["codex"],
     )
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -588,12 +588,12 @@ def test_wizard_pick_does_not_expand_already_removed_companion(
         captured.append(list(components))
 
     monkeypatch.setattr(
-        "orbit_install.__main__.wizard.run_uninstall_wizard",
+        "missioncache_install.__main__.wizard.run_uninstall_wizard",
         lambda: ["codex"],
     )
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -614,9 +614,9 @@ def test_uninstall_positive_list_with_all_is_ambiguous_error(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "plugin", "--all"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "plugin", "--all"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -636,9 +636,9 @@ def test_uninstall_unknown_component_errors_with_valid_list(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "blorp"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "blorp"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     with pytest.raises(SystemExit):
@@ -657,9 +657,9 @@ def test_uninstall_tracked_but_not_installed_errors(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "codex"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "codex"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     with pytest.raises(SystemExit):
@@ -670,7 +670,7 @@ def test_uninstall_tracked_but_not_installed_errors(
 
 def test_uninstall_with_update_is_mutex_error(monkeypatch) -> None:
     """`--uninstall --update` is rejected at main() entry (different verbs)."""
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "--update"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "--update"])
 
     with pytest.raises(SystemExit) as exc:
         main()
@@ -686,9 +686,9 @@ def test_uninstall_dash_form_is_normalized(isolated_home, monkeypatch) -> None:
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "codex-commands"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "codex-commands"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -707,9 +707,9 @@ def test_uninstall_case_insensitive_normalization(isolated_home, monkeypatch) ->
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "Codex"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "Codex"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -727,10 +727,10 @@ def test_uninstall_positive_list_dedupes(isolated_home, monkeypatch) -> None:
         captured.append(list(components))
 
     monkeypatch.setattr(
-        "sys.argv", ["orbit-install", "--uninstall", "plugin,plugin,plugin"]
+        "sys.argv", ["missioncache-install", "--uninstall", "plugin,plugin,plugin"]
     )
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()
@@ -745,7 +745,7 @@ def test_uninstall_filters_unknown_state_keys_with_warning(
     """State.json with a no-longer-recognized component name is filtered + warned.
 
     Schema-evolution defense: an old state.json may name a component that
-    a future orbit-install version has deleted. The dispatcher should warn
+    a future missioncache-install version has deleted. The dispatcher should warn
     and skip rather than KeyError or silently include the orphan.
     """
     _seed_install_state(["plugin", "_legacy_component_"])
@@ -754,9 +754,9 @@ def test_uninstall_filters_unknown_state_keys_with_warning(
     def fake_uninstall(components, ctx):
         captured.append(list(components))
 
-    monkeypatch.setattr("sys.argv", ["orbit-install", "--uninstall", "--all"])
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--uninstall", "--all"])
     monkeypatch.setattr(
-        "orbit_install.__main__.installers.uninstall_components", fake_uninstall
+        "missioncache_install.__main__.installers.uninstall_components", fake_uninstall
     )
 
     rc = main()

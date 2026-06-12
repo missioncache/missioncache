@@ -1,4 +1,4 @@
-"""Tests for orbit_install.installers - consent flow and filesystem behavior.
+"""Tests for missioncache_install.installers - consent flow and filesystem behavior.
 
 These tests focus on the pure-logic pieces of the installers (consent prompts,
 symlink/copy helpers, uninstall preservation rules). The subprocess-heavy pieces
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from orbit_install import installers, settings, state
+from missioncache_install import installers, settings, state
 
 
 def _make_ctx(
@@ -146,7 +146,7 @@ def test_copy_bundled_dir_copies_md_files(
     dst = tmp_path / "dst"
     dst.mkdir()
 
-    installers._copy_bundled_dir("orbit_install.bundled.rules", dst)
+    installers._copy_bundled_dir("missioncache_install.bundled.rules", dst)
 
     assert (dst / "one.md").read_text() == "# one"
     assert (dst / "two.md").read_text() == "# two"
@@ -170,7 +170,7 @@ def test_copy_bundled_dir_backs_up_existing_file(
     dst.mkdir()
     (dst / "rule.md").write_text("user's version")
 
-    installers._copy_bundled_dir("orbit_install.bundled.rules", dst)
+    installers._copy_bundled_dir("missioncache_install.bundled.rules", dst)
 
     assert (dst / "rule.md").read_text() == "bundled version"
     assert (dst / "rule.md.bak").read_text() == "user's version"
@@ -192,7 +192,7 @@ def test_install_statusline_declines_overwrite_preserves_existing(
 ) -> None:
     """If the user declines, the existing non-orbit statusLine is untouched."""
     _write_existing_statusline("my-custom-statusline")
-    monkeypatch.setattr("orbit_install.ui.ask_yn", lambda *a, **k: False)
+    monkeypatch.setattr("missioncache_install.ui.ask_yn", lambda *a, **k: False)
 
     result = installers.install_statusline(_make_ctx())
 
@@ -207,15 +207,15 @@ def test_install_statusline_declines_overwrite_preserves_existing(
 def test_install_statusline_accepts_overwrite_creates_backup(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Accepting the overwrite writes orbit-statusline and backs up the original."""
+    """Accepting the overwrite writes missioncache-statusline and backs up the original."""
     _write_existing_statusline("my-custom-statusline")
-    monkeypatch.setattr("orbit_install.ui.ask_yn", lambda *a, **k: True)
+    monkeypatch.setattr("missioncache_install.ui.ask_yn", lambda *a, **k: True)
 
     result = installers.install_statusline(_make_ctx())
 
     assert result is True
     assert json.loads(settings.SETTINGS_FILE.read_text())["statusLine"]["command"] \
-        == "orbit-statusline"
+        == "missioncache-statusline"
     bak = settings.SETTINGS_FILE.with_suffix(".json.bak")
     assert bak.exists(), "Backup file must be written"
 
@@ -230,7 +230,7 @@ def test_install_statusline_no_existing_skips_prompt(
         prompts.append(a)
         return True
 
-    monkeypatch.setattr("orbit_install.ui.ask_yn", track)
+    monkeypatch.setattr("missioncache_install.ui.ask_yn", track)
 
     result = installers.install_statusline(_make_ctx())
 
@@ -246,7 +246,7 @@ def test_install_statusline_assume_yes_skips_prompt_even_with_conflict(
     _write_existing_statusline("my-other")
     prompts: list[Any] = []
     monkeypatch.setattr(
-        "orbit_install.ui.ask_yn",
+        "missioncache_install.ui.ask_yn",
         lambda *a, **k: prompts.append(a) or False,
     )
 
@@ -300,7 +300,7 @@ def test_uninstall_rules_preserves_files_without_marker(
 def test_uninstall_rules_removes_symlinks_pointing_at_repo(
     isolated_home: Path, tmp_path: Path
 ) -> None:
-    """Symlinks that point at a repo rules/ dir are orbit-installed and removable."""
+    """Symlinks that point at a repo rules/ dir are missioncache-installed and removable."""
     repo_rules = tmp_path / "repo" / "rules"
     repo_rules.mkdir(parents=True)
     src = repo_rules / "managed.md"
@@ -335,19 +335,19 @@ def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
 # pipx dist-name literals - rename tripwires
 # ---------------------------------------------------------------------------
 #
-# install_dashboard / install_orbit_auto / install_orbit_db call
+# install_dashboard / install_missioncache_auto / install_missioncache_db call
 # _pipx_install(<dist-name>) in pypi mode. The dist-name literal is the
 # string that goes to PyPI; a botched mechanical rename here (e.g.
-# "orbit-dashboard" silently rewritten to "missioncache-dashboard" before
+# "missioncache-dashboard" silently rewritten to "missioncache-dashboard" before
 # the PyPI package is republished) would survive every other gate. These
 # tests pin the EXACT literal each installer passes.
 
 @pytest.mark.parametrize(
     "installer_name, expected_dist",
     [
-        ("install_dashboard", "orbit-dashboard"),
-        ("install_orbit_auto", "orbit-auto"),
-        ("install_orbit_db", "orbit-db"),
+        ("install_dashboard", "missioncache-dashboard"),
+        ("install_missioncache_auto", "missioncache-auto"),
+        ("install_missioncache_db", "missioncache-db"),
     ],
 )
 def test_pypi_installer_passes_exact_dist_name(
@@ -394,55 +394,55 @@ def test_install_dashboard_records_state_with_pypi_dist_path(
 
     installers.install_dashboard(_make_ctx(mode="pypi"))
 
-    assert captured == ["orbit-dashboard"]
+    assert captured == ["missioncache-dashboard"]
     components = state.load().get("components", {})
     assert "dashboard" in components, \
         "install_dashboard must record the dashboard component in state"
     assert components["dashboard"]["mode"] == "pypi"
 
 
-def test_install_orbit_auto_records_state_under_orbit_auto_key(
+def test_install_missioncache_auto_records_state_under_missioncache_auto_key(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """install_orbit_auto records under the `orbit_auto` state key (rename tripwire)."""
+    """install_missioncache_auto records under the `missioncache_auto` state key (rename tripwire)."""
     captured: list[str] = []
     monkeypatch.setattr(
         installers, "_pipx_install", lambda pkg: captured.append(pkg)
     )
     monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
 
-    installers.install_orbit_auto(_make_ctx(mode="pypi"))
+    installers.install_missioncache_auto(_make_ctx(mode="pypi"))
 
-    assert captured == ["orbit-auto"]
+    assert captured == ["missioncache-auto"]
     components = state.load().get("components", {})
-    assert "orbit_auto" in components, \
-        "install_orbit_auto must record state under the literal key 'orbit_auto'"
+    assert "missioncache_auto" in components, \
+        "install_missioncache_auto must record state under the literal key 'missioncache_auto'"
 
 
-def test_install_orbit_db_records_state_under_orbit_db_key(
+def test_install_missioncache_db_records_state_under_missioncache_db_key(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """install_orbit_db records under the `orbit_db` state key (rename tripwire)."""
+    """install_missioncache_db records under the `missioncache_db` state key (rename tripwire)."""
     captured: list[str] = []
     monkeypatch.setattr(
         installers, "_pipx_install", lambda pkg: captured.append(pkg)
     )
     monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
 
-    installers.install_orbit_db(_make_ctx(mode="pypi"))
+    installers.install_missioncache_db(_make_ctx(mode="pypi"))
 
-    assert captured == ["orbit-db"]
+    assert captured == ["missioncache-db"]
     components = state.load().get("components", {})
-    assert "orbit_db" in components, \
-        "install_orbit_db must record state under the literal key 'orbit_db'"
+    assert "missioncache_db" in components, \
+        "install_missioncache_db must record state under the literal key 'missioncache_db'"
 
 
 @pytest.mark.parametrize(
     "installer_name, expected_dist",
     [
-        ("uninstall_dashboard", "orbit-dashboard"),
-        ("uninstall_orbit_auto", "orbit-auto"),
-        ("uninstall_orbit_db", "orbit-db"),
+        ("uninstall_dashboard", "missioncache-dashboard"),
+        ("uninstall_missioncache_auto", "missioncache-auto"),
+        ("uninstall_missioncache_db", "missioncache-db"),
     ],
 )
 def test_pypi_uninstaller_passes_exact_dist_name(
@@ -460,7 +460,7 @@ def test_pypi_uninstaller_passes_exact_dist_name(
     monkeypatch.setattr(
         installers, "_pipx_uninstall", lambda pkg: captured.append(pkg)
     )
-    # Avoid spawning `orbit-dashboard uninstall-service` for the dashboard
+    # Avoid spawning `missioncache-dashboard uninstall-service` for the dashboard
     # uninstall path.
     monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
 

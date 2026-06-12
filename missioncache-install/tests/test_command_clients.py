@@ -1,4 +1,4 @@
-"""Tests for orbit_install.command_clients - per-tool slash command installers.
+"""Tests for missioncache_install.command_clients - per-tool slash command installers.
 
 Coverage:
 - Render transformations (filename prefix, frontmatter strip, MCP rewrite)
@@ -9,7 +9,7 @@ Coverage:
 - Codex marketplace.json + plugin.json + config.toml stanza writes correctly
 - Uninstall removes only what install wrote (other commands/keys preserved)
 
-Bundled package access via `resources.files("orbit_install.bundled.commands")`
+Bundled package access via `resources.files("missioncache_install.bundled.commands")`
 is mocked with a `_FakeTraversable` because the bundled/ tree exists only in
 built wheels, not the editable dev install.
 """
@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from orbit_install import command_clients, installers, mcp_clients, state
+from missioncache_install import command_clients, installers, mcp_clients, state
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ def fake_bundled_commands(
         )
     monkeypatch.setattr(
         command_clients.resources, "files",
-        lambda pkg: _FakeTraversable(bundle_root) if pkg == "orbit_install.bundled.commands" else _FakeTraversable(tmp_path / "_no_such_pkg"),
+        lambda pkg: _FakeTraversable(bundle_root) if pkg == "missioncache_install.bundled.commands" else _FakeTraversable(tmp_path / "_no_such_pkg"),
     )
     return bundle_root
 
@@ -484,7 +484,7 @@ def test_install_codex_commands_preserves_existing_config_stanzas(
 
     command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
     command_clients.CODEX_CONFIG_TOML.write_text(
-        '[mcp_servers.orbit]\ncommand = "mcp-orbit"\n\n'
+        '[mcp_servers.orbit]\ncommand = "mcp-missioncache"\n\n'
         '[plugins."github@openai-curated"]\n'
     )
 
@@ -577,7 +577,7 @@ def test_uninstall_codex_commands_round_trips(
     )
     command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
     command_clients.CODEX_CONFIG_TOML.write_text(
-        '[mcp_servers.orbit]\ncommand = "mcp-orbit"\n'
+        '[mcp_servers.orbit]\ncommand = "mcp-missioncache"\n'
     )
 
     command_clients.install_codex_commands(_make_ctx())
@@ -594,7 +594,7 @@ def test_strip_codex_plugin_stanza_removes_only_orbit() -> None:
     """Stripping orbit's stanza must not touch other [plugins.*] sections."""
     text = (
         '[mcp_servers.orbit]\n'
-        'command = "mcp-orbit"\n'
+        'command = "mcp-missioncache"\n'
         '\n'
         '[plugins."github@openai-curated"]\n'
         '\n'
@@ -911,8 +911,8 @@ def test_install_codex_commands_skips_when_codex_mcp_not_run_this_session(
     # Gate must short-circuit BEFORE state.record_component or marketplace build.
     assert "codex_commands" not in state.load().get("components", {})
     assert success_calls == [], "no success message when parent MCP did not run"
-    assert any("orbit-install --codex" in m for m in warn_calls), (
-        f"expected pointer to `orbit-install --codex`; got {warn_calls!r}"
+    assert any("missioncache-install --codex" in m for m in warn_calls), (
+        f"expected pointer to `missioncache-install --codex`; got {warn_calls!r}"
     )
 
 
@@ -951,8 +951,8 @@ def test_install_opencode_commands_skips_when_opencode_mcp_not_ready(
     command_clients.install_opencode_commands(_make_ctx(mcp_ready=()))
 
     assert "opencode_commands" not in state.load().get("components", {})
-    assert any("orbit-install --opencode" in m for m in warn_calls), (
-        f"expected pointer to `orbit-install --opencode`; got {warn_calls!r}"
+    assert any("missioncache-install --opencode" in m for m in warn_calls), (
+        f"expected pointer to `missioncache-install --opencode`; got {warn_calls!r}"
     )
 
 
@@ -971,6 +971,6 @@ def test_install_vscode_commands_skips_when_vscode_mcp_not_ready(
     command_clients.install_vscode_commands(_make_ctx(mcp_ready=()))
 
     assert "vscode_commands" not in state.load().get("components", {})
-    assert any("orbit-install --vscode" in m for m in warn_calls), (
-        f"expected pointer to `orbit-install --vscode`; got {warn_calls!r}"
+    assert any("missioncache-install --vscode" in m for m in warn_calls), (
+        f"expected pointer to `missioncache-install --vscode`; got {warn_calls!r}"
     )

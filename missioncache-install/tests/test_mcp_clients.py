@@ -1,4 +1,4 @@
-"""Tests for orbit_install.mcp_clients - per-tool MCP server registration.
+"""Tests for missioncache_install.mcp_clients - per-tool MCP server registration.
 
 Focus: idempotent JSON-merge correctness, preservation of unknown user keys,
 and warn-and-skip when the corresponding tool is missing. Subprocess-driven
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from orbit_install import installers, mcp_clients, state
+from missioncache_install import installers, mcp_clients, state
 
 
 def _make_ctx() -> installers.InstallContext:
@@ -192,10 +192,10 @@ def _set_opencode_detected(monkeypatch: pytest.MonkeyPatch, present: bool) -> No
     )
 
 
-def _set_mcp_orbit_path_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pretend mcp-orbit is already on PATH so the prereq check returns True."""
+def _set_mcp_missioncache_path_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretend mcp-missioncache is already on PATH so the prereq check returns True."""
     monkeypatch.setattr(
-        mcp_clients, "_ensure_mcp_orbit_on_path", lambda: True
+        mcp_clients, "_ensure_mcp_missioncache_on_path", lambda: True
     )
 
 
@@ -204,12 +204,12 @@ def test_install_opencode_creates_entry_in_fresh_file(
 ) -> None:
     """First-time install writes a minimal config with mcp.orbit set."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.install_opencode(_make_ctx())
 
     data = json.loads(mcp_clients.OPENCODE_CONFIG_PATH.read_text())
-    assert data == {"mcp": {"orbit": {"type": "local", "command": ["mcp-orbit"]}}}
+    assert data == {"mcp": {"orbit": {"type": "local", "command": ["mcp-missioncache"]}}}
     assert state.load()["components"]["opencode"]["path"] == str(
         mcp_clients.OPENCODE_CONFIG_PATH
     )
@@ -220,7 +220,7 @@ def test_install_opencode_preserves_schema_and_other_top_level_keys(
 ) -> None:
     """OpenCode auto-injects $schema; the merge must leave it (and friends) intact."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     mcp_clients.OPENCODE_CONFIG_PATH.write_text(json.dumps({
@@ -235,7 +235,7 @@ def test_install_opencode_preserves_schema_and_other_top_level_keys(
     assert data["$schema"] == "https://opencode.ai/config.json"
     assert data["theme"] == "tokyonight"
     assert data["model"] == "claude-sonnet-4"
-    assert data["mcp"]["orbit"] == {"type": "local", "command": ["mcp-orbit"]}
+    assert data["mcp"]["orbit"] == {"type": "local", "command": ["mcp-missioncache"]}
 
 
 def test_install_opencode_preserves_other_mcp_servers(
@@ -243,7 +243,7 @@ def test_install_opencode_preserves_other_mcp_servers(
 ) -> None:
     """Existing entries under `mcp` must survive the merge."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     mcp_clients.OPENCODE_CONFIG_PATH.write_text(json.dumps({
@@ -258,7 +258,7 @@ def test_install_opencode_preserves_other_mcp_servers(
     data = json.loads(mcp_clients.OPENCODE_CONFIG_PATH.read_text())
     assert data["mcp"]["context7"]["url"] == "https://mcp.context7.com/mcp"
     assert data["mcp"]["tavily"]["command"] == ["tavily-mcp"]
-    assert data["mcp"]["orbit"]["command"] == ["mcp-orbit"]
+    assert data["mcp"]["orbit"]["command"] == ["mcp-missioncache"]
 
 
 def test_install_opencode_idempotent_when_orbit_already_set(
@@ -266,12 +266,12 @@ def test_install_opencode_idempotent_when_orbit_already_set(
 ) -> None:
     """Re-running with an already-correct entry should not rewrite the file."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     correct = {
         "$schema": "https://opencode.ai/config.json",
-        "mcp": {"orbit": {"type": "local", "command": ["mcp-orbit"]}},
+        "mcp": {"orbit": {"type": "local", "command": ["mcp-missioncache"]}},
     }
     mcp_clients.OPENCODE_CONFIG_PATH.write_text(json.dumps(correct, indent=2))
     mtime_before = mcp_clients.OPENCODE_CONFIG_PATH.stat().st_mtime_ns
@@ -291,7 +291,7 @@ def test_install_opencode_preserves_tab_indent(
 ) -> None:
     """A tab-indented OpenCode config stays tab-indented after merge."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     # Tab-indented input - matches what some users / editors produce.
@@ -336,7 +336,7 @@ def test_uninstall_opencode_removes_only_orbit(
         "theme": "tokyonight",
         "mcp": {
             "context7": {"type": "remote", "url": "https://mcp.context7.com/mcp"},
-            "orbit": {"type": "local", "command": ["mcp-orbit"]},
+            "orbit": {"type": "local", "command": ["mcp-missioncache"]},
         },
     }))
     state.record_component("opencode", {"path": str(mcp_clients.OPENCODE_CONFIG_PATH)})
@@ -389,7 +389,7 @@ def test_install_vscode_preserves_existing_servers(
     """Real users have ~17 existing servers in mcp.json; merge must keep them all."""
     monkeypatch.setattr(sys, "platform", "darwin")
     _set_vscode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     existing = {
@@ -408,7 +408,7 @@ def test_install_vscode_preserves_existing_servers(
     assert data["servers"]["github"]["command"] == "mcp-github"
     assert data["servers"]["jira"]["command"] == "mcp-jira"
     assert data["servers"]["context7"]["url"] == "https://mcp.context7.com/mcp"
-    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-orbit"}
+    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-missioncache"}
     assert data["inputs"] == [{"id": "github_token", "type": "promptString"}], (
         "Top-level keys other than `servers` must be preserved verbatim"
     )
@@ -420,7 +420,7 @@ def test_install_vscode_preserves_tab_indent(
     """The user's existing tab-indented VSCode mcp.json stays tab-indented."""
     monkeypatch.setattr(sys, "platform", "darwin")
     _set_vscode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     # Tab-indented input matching VSCode's default editor output.
@@ -436,7 +436,7 @@ def test_install_vscode_preserves_tab_indent(
     # Round-trip parses cleanly and contains both old and new entries.
     data = json.loads(out)
     assert data["servers"]["github"]["command"] == "mcp-github"
-    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-orbit"}
+    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-missioncache"}
 
 
 def test_uninstall_vscode_preserves_tab_indent(
@@ -447,7 +447,7 @@ def test_uninstall_vscode_preserves_tab_indent(
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(
         '{\n\t"servers": {\n\t\t"github": {\n\t\t\t"type": "stdio",\n'
         '\t\t\t"command": "mcp-github"\n\t\t},\n'
-        '\t\t"orbit": {\n\t\t\t"type": "stdio",\n\t\t\t"command": "mcp-orbit"\n\t\t}\n'
+        '\t\t"orbit": {\n\t\t\t"type": "stdio",\n\t\t\t"command": "mcp-missioncache"\n\t\t}\n'
         '\t}\n}'
     )
     state.record_component("vscode", {"path": str(mcp_clients.VSCODE_USER_MCP_PATH)})
@@ -465,11 +465,11 @@ def test_install_vscode_idempotent_when_orbit_already_set(
     """Re-running with the entry already correct should not touch the file."""
     monkeypatch.setattr(sys, "platform", "darwin")
     _set_vscode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(json.dumps({
-        "servers": {"orbit": {"type": "stdio", "command": "mcp-orbit"}}
+        "servers": {"orbit": {"type": "stdio", "command": "mcp-missioncache"}}
     }, indent=2))
     mtime_before = mcp_clients.VSCODE_USER_MCP_PATH.stat().st_mtime_ns
 
@@ -490,7 +490,7 @@ def test_uninstall_vscode_removes_only_orbit(
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(json.dumps({
         "servers": {
             "github": {"type": "stdio", "command": "mcp-github"},
-            "orbit": {"type": "stdio", "command": "mcp-orbit"},
+            "orbit": {"type": "stdio", "command": "mcp-missioncache"},
         },
         "inputs": [{"id": "tok", "type": "promptString"}],
     }))
@@ -523,14 +523,14 @@ def test_install_codex_warns_and_skips_when_cli_missing(
 def test_install_codex_runs_mcp_add_when_not_registered(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Happy path: `codex mcp list` shows nothing -> we run `codex mcp add orbit -- mcp-orbit`."""
+    """Happy path: `codex mcp list` shows nothing -> we run `codex mcp add orbit -- mcp-missioncache`."""
     # Make `which("codex")` truthy so detection passes; everything else can return None.
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-orbit",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
     )
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     calls: list[list[str]] = []
 
@@ -546,8 +546,8 @@ def test_install_codex_runs_mcp_add_when_not_registered(
     mcp_clients.install_codex(_make_ctx())
 
     assert ["codex", "mcp", "list"] in calls
-    assert ["codex", "mcp", "add", "orbit", "--", "mcp-orbit"] in calls
-    assert state.load()["components"]["codex"]["command"] == "mcp-orbit"
+    assert ["codex", "mcp", "add", "orbit", "--", "mcp-missioncache"] in calls
+    assert state.load()["components"]["codex"]["command"] == "mcp-missioncache"
 
 
 def test_install_codex_idempotent_when_orbit_listed(
@@ -557,16 +557,16 @@ def test_install_codex_idempotent_when_orbit_listed(
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-orbit",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
     )
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     calls: list[list[str]] = []
 
     def fake_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if cmd[:3] == ["codex", "mcp", "list"]:
-            return _proc(stdout="orbit  mcp-orbit  connected\nfoo  bar  connected\n")
+            return _proc(stdout="orbit  mcp-missioncache  connected\nfoo  bar  connected\n")
         return _proc()
 
     monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run)
@@ -577,7 +577,7 @@ def test_install_codex_idempotent_when_orbit_listed(
     assert not any(c[:4] == ["codex", "mcp", "add", "orbit"] for c in calls), (
         "Idempotent install must not call `codex mcp add` when orbit is already listed"
     )
-    assert state.load()["components"]["codex"]["command"] == "mcp-orbit"
+    assert state.load()["components"]["codex"]["command"] == "mcp-missioncache"
 
 
 # ---------------------------------------------------------------------------
@@ -591,9 +591,9 @@ def test_install_codex_sets_mcp_success_true_on_success(
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-orbit",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
     )
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
     monkeypatch.setattr(
         mcp_clients.subprocess_utils,
         "run",
@@ -612,13 +612,13 @@ def test_install_codex_sets_mcp_success_true_on_already_registered(
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-orbit",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
     )
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
     monkeypatch.setattr(
         mcp_clients.subprocess_utils,
         "run",
-        lambda cmd, **_: _proc(stdout="orbit  mcp-orbit  connected\n"),
+        lambda cmd, **_: _proc(stdout="orbit  mcp-missioncache  connected\n"),
     )
 
     ctx = _make_ctx()
@@ -649,9 +649,9 @@ def test_install_codex_sets_mcp_success_false_when_mcp_add_fails(
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
-        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-orbit",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
     )
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     def fake_run(cmd: list[str], **_: Any) -> _subprocess.CompletedProcess[str]:
         if cmd[:3] == ["codex", "mcp", "list"]:
@@ -672,7 +672,7 @@ def test_install_opencode_sets_mcp_success_true_on_success(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     ctx = _make_ctx()
     mcp_clients.install_opencode(ctx)
@@ -693,7 +693,7 @@ def test_install_opencode_sets_mcp_success_false_on_unparseable_config(
 ) -> None:
     """Truly malformed opencode.json (not just JSONC) must record failure."""
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     # Unclosed brace - json5 fallback can't recover this either.
@@ -715,7 +715,7 @@ def test_install_opencode_refuses_jsonc_and_preserves_user_file(
     regression test for the data-loss path that fix D originally introduced.
     """
     _set_opencode_detected(monkeypatch, True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     original = (
@@ -753,7 +753,7 @@ def test_install_vscode_refuses_jsonc_and_preserves_user_file(
     """Same refuse-and-preserve contract for VSCode mcp.json (JSONC by convention)."""
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(mcp_clients, "_vscode_detected", lambda: True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     original = (
@@ -785,7 +785,7 @@ def test_install_vscode_sets_mcp_success_true_on_success(
 ) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(mcp_clients, "_vscode_detected", lambda: True)
-    _set_mcp_orbit_path_ok(monkeypatch)
+    _set_mcp_missioncache_path_ok(monkeypatch)
 
     ctx = _make_ctx()
     mcp_clients.install_vscode(ctx)
@@ -806,10 +806,10 @@ def test_install_vscode_sets_mcp_success_false_on_non_darwin(
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("stdout, expected", [
-    ("orbit  mcp-orbit  connected\n", True),
+    ("orbit  mcp-missioncache  connected\n", True),
     ("orbit\n", True),
-    ("- orbit  mcp-orbit  connected\n", False),  # leading bullet -> first token is `-`
-    ("orbit-extra  mcp-orbit  connected\n", False),  # different name, must not match
+    ("- orbit  mcp-missioncache  connected\n", False),  # leading bullet -> first token is `-`
+    ("orbit-extra  mcp-missioncache  connected\n", False),  # different name, must not match
     ("(no servers configured)\n", False),
     ("", False),
 ])
@@ -826,16 +826,16 @@ def test_codex_orbit_registered_matching(
 
 
 # ---------------------------------------------------------------------------
-# _ensure_mcp_orbit_on_path
+# _ensure_mcp_missioncache_on_path
 # ---------------------------------------------------------------------------
 
-def test_ensure_mcp_orbit_on_path_returns_true_when_already_present(
+def test_ensure_mcp_missioncache_on_path_returns_true_when_already_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No pipx install when mcp-orbit is already on PATH."""
-    monkeypatch.setattr(mcp_clients.shutil, "which", lambda _: "/x/mcp-orbit")
+    """No pipx install when mcp-missioncache is already on PATH."""
+    monkeypatch.setattr(mcp_clients.shutil, "which", lambda _: "/x/mcp-missioncache")
     pipx_called = MagicMock()
     monkeypatch.setattr(installers, "_pipx_install", pipx_called)
 
-    assert mcp_clients._ensure_mcp_orbit_on_path() is True
+    assert mcp_clients._ensure_mcp_missioncache_on_path() is True
     pipx_called.assert_not_called()

@@ -1,4 +1,4 @@
-"""Tests for orbit_install.ui - colored output and interactive prompts."""
+"""Tests for missioncache_install.ui - colored output and interactive prompts."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import sys
 
 import pytest
 
-from orbit_install import ui
+from missioncache_install import ui
 
 
 def test_ask_yn_returns_default_when_stdin_not_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-interactive stdin (CI, pipes) returns the default silently.
 
-    This is what makes `orbit-install --all` safe in CI pipelines.
+    This is what makes `missioncache-install --all` safe in CI pipelines.
     """
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert ui.ask_yn("Proceed?", default=True) is True

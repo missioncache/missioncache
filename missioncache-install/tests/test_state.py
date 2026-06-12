@@ -1,11 +1,11 @@
-"""Tests for orbit_install.state - state file round-trip and recovery."""
+"""Tests for missioncache_install.state - state file round-trip and recovery."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from orbit_install import state
+from missioncache_install import state
 
 
 def test_load_returns_empty_state_when_file_missing(isolated_home: Path) -> None:
@@ -72,8 +72,54 @@ def test_multiple_components_coexist(isolated_home: Path) -> None:
     """Recording several components does not overwrite prior entries."""
     state.record_component("plugin", {"mode": "marketplace"})
     state.record_component("dashboard", {"port": 8787})
-    state.record_component("orbit_auto", {"mode": "pypi"})
+    state.record_component("missioncache_auto", {"mode": "pypi"})
 
     names = set(state.installed_components())
-    assert names == {"plugin", "dashboard", "orbit_auto"}, \
+    assert names == {"plugin", "dashboard", "missioncache_auto"}, \
         f"All three components should be tracked, got {names}"
+
+
+def test_load_migrates_legacy_orbit_component_keys(isolated_home: Path) -> None:
+    """Legacy orbit_db / orbit_auto component keys are rewritten on load.
+
+    Pre-rename installs persisted the orbit-named keys; load() must rename
+    them in place and rewrite the state file so --update/--uninstall see
+    the current names. A second load() must not rewrite again (no churn).
+    """
+    state.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    state.STATE_FILE.write_text(
+        json.dumps(
+            {
+                "schema_version": state.STATE_SCHEMA_VERSION,
+                "installed_at": "2026-01-01T00:00:00+00:00",
+                "mode": "pypi",
+                "components": {
+                    "orbit_db": {"mode": "pypi"},
+                    "orbit_auto": {"mode": "pypi"},
+                    "plugin": {"mode": "marketplace"},
+                },
+            }
+        )
+    )
+
+    result = state.load()
+
+    components = result["components"]
+    assert "orbit_db" not in components and "orbit_auto" not in components, \
+        "Legacy orbit-named keys must be renamed away on load"
+    assert components["missioncache_db"] == {"mode": "pypi"}, \
+        "missioncache_db must carry the metadata that was on orbit_db"
+    assert components["missioncache_auto"] == {"mode": "pypi"}, \
+        "missioncache_auto must carry the metadata that was on orbit_auto"
+    assert components["plugin"] == {"mode": "marketplace"}, \
+        "Untouched components must survive the migration unchanged"
+
+    on_disk = json.loads(state.STATE_FILE.read_text())
+    assert set(on_disk["components"].keys()) == {
+        "missioncache_db", "missioncache_auto", "plugin"
+    }, "Migration must persist the renamed keys back to disk"
+
+    first_mtime = state.STATE_FILE.stat().st_mtime_ns
+    state.load()
+    assert state.STATE_FILE.stat().st_mtime_ns == first_mtime, \
+        "A second load() on already-migrated state must not rewrite the file"

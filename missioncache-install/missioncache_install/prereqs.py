@@ -59,7 +59,7 @@ def report(p: Prereqs) -> None:
     # pipx is an optional fallback. uv's `uv tool install` covers the same job,
     # so "pipx not found" is only a real problem when uv is also missing. Showing
     # it as a yellow warning otherwise made uv-only users (the common case for
-    # anyone running `uvx orbit-install`) think something was broken.
+    # anyone running `uvx missioncache-install`) think something was broken.
     if p.pipx:
         ui.success(f"pipx ({p.pipx})")
     elif p.uv:
@@ -90,7 +90,7 @@ def ensure_claude_cli_or_warn(p: Prereqs) -> None:
     if not p.claude_cli:
         ui.warn(
             "Claude Code CLI not found - plugin registration will be skipped. "
-            "Install from https://claude.ai/code then run: orbit-install --update"
+            "Install from https://claude.ai/code then run: missioncache-install --update"
         )
 
 
@@ -103,7 +103,7 @@ def ensure_pip_runner_or_prompt(p: Prereqs) -> bool:
         return True
     ui.warn("Neither pipx nor uv is installed. These are needed for PyPI-based installs.")
     if not ui.ask_yn("Bootstrap pipx via `python -m pip install --user pipx`?", default=True):
-        ui.info("Install pipx manually, then re-run orbit-install:")
+        ui.info("Install pipx manually, then re-run missioncache-install:")
         ui.detail("  python3 -m pip install --user pipx")
         ui.detail("  python3 -m pipx ensurepath")
         return False
@@ -133,7 +133,7 @@ def bootstrap_pipx() -> bool:
                 ui.detail("  sudo dnf install pipx     (Fedora/RHEL)")
             else:
                 ui.detail("  See https://pipx.pypa.io/stable/installation/")
-            ui.detail("Then re-run: orbit-install")
+            ui.detail("Then re-run: missioncache-install")
             return False
         ui.warn(f"pip install failed:\n{e.stderr}")
         return False
