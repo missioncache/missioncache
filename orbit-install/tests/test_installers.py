@@ -317,8 +317,8 @@ def test_uninstall_rules_removes_symlinks_pointing_at_repo(
 
 
 def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
-    """Uninstalling components must never touch ~/.claude/orbit/ (project data)."""
-    orbit_data = isolated_home / ".claude" / "orbit" / "active" / "sample"
+    """Uninstalling components must never touch ~/.orbit/ (project data)."""
+    orbit_data = isolated_home / ".orbit" / "active" / "sample"
     orbit_data.mkdir(parents=True)
     (orbit_data / "sample-context.md").write_text("project state")
 
@@ -328,4 +328,4 @@ def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
     installers.uninstall_statusline(ctx)
 
     assert (orbit_data / "sample-context.md").read_text() == "project state", \
-        "User project data in ~/.claude/orbit/ must survive an uninstall"
+        "User project data in ~/.orbit/ must survive an uninstall"
