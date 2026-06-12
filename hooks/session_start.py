@@ -413,7 +413,7 @@ def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
     Returns an empty list when the project dir is missing (fresh cwd that
     Claude Code has never written transcripts in) or on filesystem I/O
     errors during glob/stat (with a stderr breadcrumb so the failure is
-    visible in ``~/.claude/logs/``).
+    visible in the session transcript JSONL under ``~/.claude/projects/``).
     """
     if not my_session_id:
         return []
@@ -463,7 +463,8 @@ def _projects_for_sessions(session_ids: list[str]) -> dict[str, str]:
     self-heal on the next SessionStart fire. Other ``sqlite3.Error``
     subclasses (DB corruption, schema drift, programming errors) emit a
     stderr breadcrumb so the warning's silent degradation is debuggable
-    from ``~/.claude/logs/``. Matches the pattern at
+    from the session transcript JSONL under ``~/.claude/projects/``.
+    Matches the pattern at
     ``_pickup_previous_session_binding`` (lines 347 / 358).
     """
     if not session_ids:
@@ -633,8 +634,8 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
     # Umbrella-cwd false-positive guard: if cwd has no spatial relationship
     # to the inherited project's repo, the cwd-pointer match alone is not
     # enough signal to inherit. Surface a stderr breadcrumb so the user can
-    # see in ~/.claude/logs/ why their statusline went blank instead of
-    # inheriting.
+    # see in the session transcript (~/.claude/projects/<cwd-key>/<sid>.jsonl)
+    # why their statusline went blank instead of inheriting.
     if not _is_cwd_compatible_with_inherited_project(cwd, project_name):
         print(
             f"<!-- orbit: skipping inherit of {project_name!r}: cwd {cwd} "
@@ -656,8 +657,9 @@ def _bind_session_to_project(session_id: str, project_name: str) -> None:
     per-session pointer file is also written so ``find_task_for_cwd``
     resolves correctly without waiting for ``/orbit:go``.
 
-    Failures log to stderr (visible in ``~/.claude/logs/``) so the user has
-    a breadcrumb when the statusline Project field stays blank after resume.
+    Failures log to stderr (captured in the session transcript JSONL under
+    ``~/.claude/projects/``) so the user has a breadcrumb when the
+    statusline Project field stays blank after resume.
     """
     from orbit_db import HOOKS_STATE_DB_PATH, init_hooks_state_db_schema  # type: ignore[import-not-found]
 
@@ -857,7 +859,8 @@ def main():
                     # Resume/compact requested an inherit but no previous
                     # binding was available. This is the user-visible
                     # "statusline went blank on resume" failure mode; surface
-                    # it so it's debuggable from ~/.claude/logs/.
+                    # it so it's debuggable from the session transcript JSONL
+                    # under ~/.claude/projects/.
                     print(
                         f"<!-- orbit: no previous binding to inherit (source={source}) -->",
                         file=sys.stderr,

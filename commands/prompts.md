@@ -14,7 +14,7 @@ Generate per-subtask prompts for an orbit project, optimized for autonomous para
 
 ## Prerequisites
 
-- Project must exist in `~/.claude/orbit/active/<project-name>/`
+- Project must exist in `~/.orbit/active/<project-name>/`
 - Project must have a `<project-name>-tasks.md` file with subtasks
 
 ## Workflow

@@ -164,7 +164,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 **What it does:**
 
 1. Find the active task via `find_task_for_cwd`. If no task, return.
-2. Find the context file under `~/.claude/orbit/<task.full_path>/<task.name>-context.md` (or the bare `context.md` fallback for subtask layouts).
+2. Find the context file under `~/.orbit/<task.full_path>/<task.name>-context.md` (or the bare `context.md` fallback for subtask layouts).
 3. Update the "Last Updated" timestamp line.
 4. Add an `- Auto-saved before compaction (<timestamp>)` bullet. If a `## Recent Changes` section exists, add it there; otherwise append a new section at the end.
 5. Write the file back.
@@ -203,8 +203,8 @@ Hooks write to a surprising number of places. Here is the complete map:
 
 | Path | Written by | Read by | Format |
 |------|-----------|---------|--------|
-| `~/.claude/tasks.db:heartbeats` | activity_tracker (via orbit_db subprocess) | orbit_db aggregator, dashboard | SQLite row |
-| `~/.claude/tasks.db:sessions` | orbit_db `process_heartbeats` (called by pre_compact) | dashboard, orbit MCP `get_task_time` | SQLite row |
+| `~/.orbit/tasks.db:heartbeats` | activity_tracker (via orbit_db subprocess) | orbit_db aggregator, dashboard | SQLite row |
+| `~/.orbit/tasks.db:sessions` | orbit_db `process_heartbeats` (called by pre_compact) | dashboard, orbit MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
 | `~/.claude/hooks-state.db:project_state` | `/orbit:go`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
@@ -277,17 +277,17 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 **Cause:** Either `orbit_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
 
-**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any orbit task" - check `~/.claude/orbit/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_orbit_pm__find_task_for_directory` from a live Claude session to see what it returns.
+**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any orbit task" - check `~/.orbit/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_orbit_pm__find_task_for_directory` from a live Claude session to see what it returns.
 
 ### "Heartbeats aren't being recorded"
 
 **Cause:** Four possibilities. In order of likelihood:
 1. The hook is timing out. `activity_tracker.py` has a 5-second budget and spawns a 2-second subprocess - if the SQLite lock is contended beyond 2s, the subprocess gets killed.
-2. `tasks.db` is locked or corrupted. Check `sqlite3 ~/.claude/tasks.db "SELECT count(*) FROM heartbeats"`.
+2. `tasks.db` is locked or corrupted. Check `sqlite3 ~/.orbit/tasks.db "SELECT count(*) FROM heartbeats"`.
 3. `find_task_for_cwd` returned no task, so there is nothing to attribute a heartbeat to.
 4. The prompt matched a skip pattern (slash command, shell command, one-word control).
 
-**Fix:** Run `activity_tracker.py` in isolation with a representative stdin payload and capture the output. Check `~/.claude/logs/` for any orbit-db errors. For contention issues, the answer is almost always "wait and retry" - lock contention that exceeds the 2-second budget is rare enough to ignore.
+**Fix:** Run `activity_tracker.py` in isolation with a representative stdin payload and capture the output. Check the session transcript JSONL (`~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl`) for hook stderr breadcrumbs and orbit-db errors. For contention issues, the answer is almost always "wait and retry" - lock contention that exceeds the 2-second budget is rare enough to ignore.
 
 ### "Task tracker reminder won't go away even after I flip the checkbox"
 

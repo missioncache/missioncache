@@ -218,7 +218,7 @@ conn.commit()
 
   # Write per-session project pointer read by find_task_for_cwd (orbit-db/__init__.py:1270).
   # Without this, /orbit:save cannot find the task when cwd is the repo root (only when
-  # cwd is under ~/.claude/orbit/active/<task>/). Format matches session_start.py's
+  # cwd is under ~/.orbit/active/<task>/). Format matches session_start.py's
   # write_session_project() exactly so either writer is interchangeable.
   SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
 import os, json, datetime, pathlib

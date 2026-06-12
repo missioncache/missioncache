@@ -64,10 +64,10 @@ orbit-auto status <task-name>
 
 ## Task Structure
 
-Tasks are organized in `~/.claude/orbit/active/<task-name>/`:
+Tasks are organized in `~/.orbit/active/<task-name>/`:
 
 ```
-~/.claude/orbit/active/my-feature/
+~/.orbit/active/my-feature/
 +-- my-feature-tasks.md      # Checkbox task list
 +-- my-feature-context.md    # Project context and learnings
 +-- my-feature-plan.md       # Implementation plan

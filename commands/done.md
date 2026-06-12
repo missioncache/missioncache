@@ -37,7 +37,7 @@ Before completing, show the user:
 
 Call `mcp__plugin_orbit_pm__complete_task` which:
 1. Updates project status to "completed" in database
-2. Moves files from `~/.claude/orbit/active/<name>/` to `~/.claude/orbit/completed/<name>/`
+2. Moves files from `~/.orbit/active/<name>/` to `~/.orbit/completed/<name>/`
 3. Records completion timestamp
 
 ### Step 4: Process Time Tracking
@@ -111,7 +111,7 @@ If the probe succeeds, include the emitted URL as a "Dashboard" line in the comp
 **Status:** active -> completed
 
 Moving files:
-  ~/.claude/orbit/active/kafka-consumer-fix/ -> ~/.claude/orbit/completed/kafka-consumer-fix/
+  ~/.orbit/active/kafka-consumer-fix/ -> ~/.orbit/completed/kafka-consumer-fix/
 
 Project completed successfully!
 

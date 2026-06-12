@@ -19,8 +19,7 @@ pip install orbit-db
 ```python
 from orbit_db import TaskDB
 
-db = TaskDB()            # defaults to ~/.claude/tasks.db
-db.initialize_db()
+db = TaskDB()            # defaults to ~/.orbit/tasks.db, override via TaskDB(db_path=...)
 repo_id = db.add_repo("/path/to/repo")
 task = db.create_task(name="my-task", repo_id=repo_id)
 db.record_heartbeat(task_id=task.id, directory="/path/to/repo")
@@ -37,9 +36,9 @@ orbit-db --help
 
 ## Storage
 
-All state lives in a single SQLite database at `~/.claude/tasks.db`
-(override with `TASK_DB_PATH`). The database is WAL-mode, auto-initializes
-on first access, and is safe for concurrent readers.
+All state lives in a single SQLite database at `~/.orbit/tasks.db`
+(override by passing `db_path` to `TaskDB`). The database is WAL-mode,
+auto-initializes on first access, and is safe for concurrent readers.
 
 ## License
 

@@ -94,7 +94,7 @@ In Claude Code:
 
 Restart your Claude Code session. The MCP server and bundled `orbit-db` are built on demand via `uvx`; no manual `pip install` is needed.
 
-**What you get:** per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.claude/tasks.db`, all 30+ MCP tools, and all orbit rules.
+**What you get:** per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.orbit/tasks.db`, all 30+ MCP tools, and all orbit rules.
 
 **What you give up:** local dashboard at `localhost:8787`, `orbit-auto` CLI for parallel execution, rich statusline.
 
@@ -180,7 +180,7 @@ Gives you the `orbit-db` CLI and the `orbit_db` Python library:
 ```python
 from orbit_db import TaskDB
 
-db = TaskDB()            # defaults to ~/.claude/tasks.db, override via TASK_DB_PATH
+db = TaskDB()            # defaults to ~/.orbit/tasks.db, override via TaskDB(db_path=...)
 db.initialize()
 repo_id = db.add_repo("/path/to/repo")
 task = db.create_task(name="my-task", repo_id=repo_id)
@@ -270,7 +270,7 @@ Should print the help text. Inside Claude Code, the MCP server is invoked via `u
 uvx orbit-install --uninstall
 ```
 
-Removes: plugin registration, pip packages, service units, settings.json entries, and any rule files still carrying the orbit ownership marker. Preserves: `~/.claude/orbit/` (project files), `~/.claude/tasks.db` (task history), rule files that you customized and edited past the marker, user-level slash commands other than the two orbit-shipped ones.
+Removes: plugin registration, pip packages, service units, settings.json entries, and any rule files still carrying the orbit ownership marker. Preserves: `~/.orbit/` (project files), `~/.orbit/tasks.db` (task history), rule files that you customized and edited past the marker, user-level slash commands other than the two orbit-shipped ones.
 
 ### Plugin-only install
 
@@ -300,7 +300,7 @@ pip uninstall orbit-db orbit-auto orbit-dashboard mcp-orbit orbit-install
 # and are safe to delete; rule files without the marker are user-authored.
 ```
 
-Orbit state in `~/.claude/tasks.db` and `~/.claude/orbit/` is preserved so you can reinstall without losing history. Delete those directories manually if you want a clean wipe.
+Orbit state in `~/.orbit/tasks.db` and `~/.orbit/` is preserved so you can reinstall without losing history. Delete those directories manually if you want a clean wipe.
 
 ## Troubleshooting
 

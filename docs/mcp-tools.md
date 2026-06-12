@@ -2,7 +2,7 @@
 
 This document covers the orbit MCP server: the 30 tools that expose orbit's task database, orbit files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/orbit:new`, `/orbit:go`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.claude/orbit/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
+It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.orbit/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
 If you are just trying to *use* orbit from a command or a script, the short version is: every tool lives under the `mcp__plugin_orbit_pm__` prefix in Claude Code (`mcp__plugin_orbit_pm__list_active_tasks`, `mcp__plugin_orbit_pm__get_task`, etc.), every tool returns a JSON dictionary, and errors come back as `{"error": true, "code": "...", "message": "..."}` instead of raising. The rest of this doc is for when you want to understand exactly what a tool does, what to pass it, and what to expect back.
 
@@ -123,7 +123,7 @@ The resolution order is documented in `find_task_for_cwd`: per-session file (`pr
 
 ### `create_task`
 
-**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.claude/orbit/active/<name>/`. Slash commands generally call `create_orbit_files` instead because it does more in one step, but `create_task` is the minimal primitive.
+**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.orbit/active/<name>/`. Slash commands generally call `create_orbit_files` instead because it does more in one step, but `create_task` is the minimal primitive.
 
 **Parameters:**
 - `name: str` - Task name in kebab-case. Validated by `orbit.validate_task_name()`.
@@ -181,7 +181,7 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 
 ## Orbit file tools (`tools_docs.py`)
 
-These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~/.claude/orbit/active/<project>/`. They are the bridge between the DB (which stores task metadata) and the filesystem (which stores human-readable project state).
+These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~/.orbit/active/<project>/`. They are the bridge between the DB (which stores task metadata) and the filesystem (which stores human-readable project state).
 
 ### `create_orbit_files`
 
@@ -331,7 +331,7 @@ The `formatted` string is `"1h 23m"`-style output from `db.format_duration`. The
 
 **Returns:** `{"scanned_count": int, "tasks": list[{"id", "name", "repo_id"}]}`.
 
-Scanning walks `~/.claude/orbit/active/` and `~/.claude/orbit/completed/` under each repo's orbit paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
+Scanning walks `~/.orbit/active/` and `~/.orbit/completed/` under each repo's orbit paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
 
 ## Iteration log tools (`tools_iteration.py`)
 
@@ -543,7 +543,7 @@ Any tool that takes a filesystem path runs it through `helpers._validate_path(pa
 3. Resolves the path (`Path(path).resolve()`).
 4. If `must_be_under` is set, verifies the resolved path is inside that directory.
 
-The `must_be_under` check is what prevents `update_context_file` from writing to arbitrary files - it is always called with `must_be_under=settings.orbit_root`, so a path like `/tmp/evil.md` or `~/.claude/orbit/../evil.md` gets rejected.
+The `must_be_under` check is what prevents `update_context_file` from writing to arbitrary files - it is always called with `must_be_under=settings.orbit_root`, so a path like `/tmp/evil.md` or `~/.orbit/../evil.md` gets rejected.
 
 Tools that should *not* restrict paths (e.g., `record_heartbeat` with a `directory` arg pointing at a repo root) omit `must_be_under` and just get null-byte and empty-string checks.
 
@@ -615,7 +615,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 **Cause:** Path validation is resolving to a different place than you expected. `_validate_path` calls `Path.resolve()`, which follows symlinks and normalizes `..`. If the resolved path falls outside `ORBIT_ROOT`, you get `VALIDATION_ERROR` - if it resolves inside but the file is not there, you get `FILE_NOT_FOUND`.
 
-**Fix:** Print the path you are passing and run it through `Path(path).resolve()` manually in a Python REPL. Compare against the expected `~/.claude/orbit/active/<name>/...` shape.
+**Fix:** Print the path you are passing and run it through `Path(path).resolve()` manually in a Python REPL. Compare against the expected `~/.orbit/active/<name>/...` shape.
 
 ### "Task shows up under the wrong repo after `create_orbit_files`"
 
