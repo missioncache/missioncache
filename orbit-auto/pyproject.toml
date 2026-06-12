@@ -1,6 +1,6 @@
 [project]
 name = "orbit-auto"
-version = "3.0.1"
+version = "3.0.2"
 description = "Orbit Auto - Autonomous AI Development Tool for Orbit Projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "orbit-db>=1.0.0",
+    "orbit-db>=1.0.5",
 ]
 
 [project.scripts]

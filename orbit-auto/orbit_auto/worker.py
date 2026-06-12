@@ -12,7 +12,7 @@ from typing import Optional
 
 from orbit_auto.claude_runner import ClaudeRunner
 from orbit_auto.dag import DAG
-from orbit_auto.db_logger import ExecutionLogger
+from orbit_auto.db_logger import ExecutionLogger, warn_if_migration_required
 from orbit_auto.models import Visibility
 from orbit_auto.state import StateManager
 from orbit_auto.task_parser import extract_prompt_content, parse_prompt_yaml
@@ -134,18 +134,23 @@ class Worker:
             from orbit_db import DB_PATH, TaskDB
 
             db_path = DB_PATH
-            if db_path.exists() and self.execution_id is not None:
-                # Create a lightweight logger that wraps TaskDB
-                self._db_logger = _WorkerDBLogger(
-                    TaskDB(str(db_path)),
-                    self.execution_id,
-                    self.worker_id,
-                )
+            if not db_path.exists():
+                # Fresh install: deliberate no-op. Unmigrated legacy data:
+                # warn once per process with the full migration recipe.
+                warn_if_migration_required()
+                return
+            # Create a lightweight logger that wraps TaskDB
+            self._db_logger = _WorkerDBLogger(
+                TaskDB(str(db_path)),
+                self.execution_id,
+                self.worker_id,
+            )
         except ImportError:
             pass
         except Exception as e:
             # Match db_logger.py: surface to stderr instead of silent disable.
-            # First line only - migration errors carry multi-line shell snippets.
+            # First line only - keeps unexpected multi-line errors from
+            # flooding stderr.
             import sys
 
             first_line = str(e).splitlines()[0] if str(e) else ""
