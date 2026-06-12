@@ -329,3 +329,145 @@ def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
 
     assert (orbit_data / "sample-context.md").read_text() == "project state", \
         "User project data in ~/.orbit/ must survive an uninstall"
+
+
+# ---------------------------------------------------------------------------
+# pipx dist-name literals - rename tripwires
+# ---------------------------------------------------------------------------
+#
+# install_dashboard / install_orbit_auto / install_orbit_db call
+# _pipx_install(<dist-name>) in pypi mode. The dist-name literal is the
+# string that goes to PyPI; a botched mechanical rename here (e.g.
+# "orbit-dashboard" silently rewritten to "missioncache-dashboard" before
+# the PyPI package is republished) would survive every other gate. These
+# tests pin the EXACT literal each installer passes.
+
+@pytest.mark.parametrize(
+    "installer_name, expected_dist",
+    [
+        ("install_dashboard", "orbit-dashboard"),
+        ("install_orbit_auto", "orbit-auto"),
+        ("install_orbit_db", "orbit-db"),
+    ],
+)
+def test_pypi_installer_passes_exact_dist_name(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    installer_name: str,
+    expected_dist: str,
+) -> None:
+    """In pypi mode, each installer must pass its exact PyPI dist-name literal.
+
+    Rename tripwire: if the source rename sweep changes the literal at the
+    call-site without updating these tests, the parametrize id reveals the
+    exact installer that drifted.
+    """
+    captured: list[str] = []
+
+    def fake_pipx_install(package: str) -> None:
+        captured.append(package)
+
+    monkeypatch.setattr(installers, "_pipx_install", fake_pipx_install)
+    # Neutralize the side-effects that follow _pipx_install in install_dashboard
+    # so the test exercises the install path without trying to actually find
+    # the entry-point binary on PATH.
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installer = getattr(installers, installer_name)
+    installer(_make_ctx(mode="pypi"))
+
+    assert captured == [expected_dist], (
+        f"{installer_name} must call _pipx_install exactly once with "
+        f"the literal {expected_dist!r}, got {captured!r}"
+    )
+
+
+def test_install_dashboard_records_state_with_pypi_dist_path(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """install_dashboard records the dashboard component in state after pipx install."""
+    captured: list[str] = []
+    monkeypatch.setattr(
+        installers, "_pipx_install", lambda pkg: captured.append(pkg)
+    )
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installers.install_dashboard(_make_ctx(mode="pypi"))
+
+    assert captured == ["orbit-dashboard"]
+    components = state.load().get("components", {})
+    assert "dashboard" in components, \
+        "install_dashboard must record the dashboard component in state"
+    assert components["dashboard"]["mode"] == "pypi"
+
+
+def test_install_orbit_auto_records_state_under_orbit_auto_key(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """install_orbit_auto records under the `orbit_auto` state key (rename tripwire)."""
+    captured: list[str] = []
+    monkeypatch.setattr(
+        installers, "_pipx_install", lambda pkg: captured.append(pkg)
+    )
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installers.install_orbit_auto(_make_ctx(mode="pypi"))
+
+    assert captured == ["orbit-auto"]
+    components = state.load().get("components", {})
+    assert "orbit_auto" in components, \
+        "install_orbit_auto must record state under the literal key 'orbit_auto'"
+
+
+def test_install_orbit_db_records_state_under_orbit_db_key(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """install_orbit_db records under the `orbit_db` state key (rename tripwire)."""
+    captured: list[str] = []
+    monkeypatch.setattr(
+        installers, "_pipx_install", lambda pkg: captured.append(pkg)
+    )
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installers.install_orbit_db(_make_ctx(mode="pypi"))
+
+    assert captured == ["orbit-db"]
+    components = state.load().get("components", {})
+    assert "orbit_db" in components, \
+        "install_orbit_db must record state under the literal key 'orbit_db'"
+
+
+@pytest.mark.parametrize(
+    "installer_name, expected_dist",
+    [
+        ("uninstall_dashboard", "orbit-dashboard"),
+        ("uninstall_orbit_auto", "orbit-auto"),
+        ("uninstall_orbit_db", "orbit-db"),
+    ],
+)
+def test_pypi_uninstaller_passes_exact_dist_name(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    installer_name: str,
+    expected_dist: str,
+) -> None:
+    """In pypi mode, each uninstaller must pass the same exact dist-name literal.
+
+    The PyPI dist-name on install MUST equal the dist-name on uninstall - any
+    drift between the two strands the user with an orphaned pipx package.
+    """
+    captured: list[str] = []
+    monkeypatch.setattr(
+        installers, "_pipx_uninstall", lambda pkg: captured.append(pkg)
+    )
+    # Avoid spawning `orbit-dashboard uninstall-service` for the dashboard
+    # uninstall path.
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    uninstaller = getattr(installers, installer_name)
+    uninstaller(_make_ctx(mode="pypi"))
+
+    assert captured == [expected_dist], (
+        f"{installer_name} must call _pipx_uninstall exactly once with "
+        f"the literal {expected_dist!r}, got {captured!r}"
+    )
