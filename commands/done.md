@@ -79,7 +79,7 @@ print("Cleared project_state for session " + sid + " (rows: " + str(cur.rowcount
 ' 2>/dev/null
 
   # Also delete the per-session project pointer written by /orbit:go and /orbit:new.
-  # Read by find_task_for_cwd (orbit-db); leaving it in place would make /orbit:save
+  # Read by find_task_for_cwd (missioncache-db); leaving it in place would make /orbit:save
   # still find this task after completion.
   rm -f "$HOME/.claude/hooks/state/projects/${SESSION_ID}.json" 2>/dev/null
 fi
@@ -93,7 +93,7 @@ Replace `<project-name>` with the kebab-case project name, then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
-DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
+DASHBOARD_URL="${MISSIONCACHE_DASHBOARD_URL:-http://localhost:8787}"
 if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
   echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
 fi

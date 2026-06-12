@@ -64,7 +64,7 @@ Extract project name and mode assignments from the command arguments.
 **Format:** `<project-name> <range:mode,range:mode,...>`
 
 **Mode values:**
-- `auto` - Autonomous mode (prompt-driven, orbit-auto compatible)
+- `auto` - Autonomous mode (prompt-driven, missioncache-auto compatible)
 - `inter` - Interactive mode (conversation-driven)
 
 **Range formats:**

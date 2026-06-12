@@ -78,7 +78,7 @@ mcp__plugin_orbit_pm__rename_task(
 )
 ```
 
-Pre-launch check: do not run this when an `orbit-auto` execution is
+Pre-launch check: do not run this when an `missioncache-auto` execution is
 active for this project. The MCP tool refuses with INVALID_STATE in that
 case; if the user sees that error, surface it and tell them to stop the
 auto run first.
@@ -147,7 +147,7 @@ behavior on existing sessions.
 
 - **Subtasks are out of scope.** Rename the parent project; subtasks ride
   along.
-- **The CLI equivalent** is `orbit-db rename-task <old-name> <new-name>`
+- **The CLI equivalent** is `missioncache-db rename-task <old-name> <new-name>`
   for batch / external use. The dashboard has a Rename button in the
   project modal for the same purpose.
 - **The new name must be kebab-case** (lowercase letters, digits, and

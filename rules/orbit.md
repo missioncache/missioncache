@@ -24,11 +24,11 @@ After finishing a coding task and updating orbit files (`~/.orbit/active/<projec
 
 2. **Aggregate time tracking**:
    ```bash
-   orbit-db process-heartbeats 2>/dev/null
+   missioncache-db process-heartbeats 2>/dev/null
    ```
 
-   The `orbit-db` CLI is installed by `uvx orbit-install` and put on PATH. Do NOT
-   use `python3 -m orbit_db` here - the system `python3` rarely has the module
+   The `missioncache-db` CLI is installed by `uvx orbit-install` and put on PATH. Do NOT
+   use `python3 -m missioncache_db` here - the system `python3` rarely has the module
    available, and `2>/dev/null` would silently swallow the import error.
 
 This ensures session time is properly recorded in the task database.

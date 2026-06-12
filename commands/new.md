@@ -7,7 +7,7 @@ argument-hint: "[project-name] [--jira TICKET]"
 
 Create development documentation for a new feature or project. This command creates the plan, context, and tasks files - everything you need to start working interactively.
 
-`/orbit:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `orbit-auto`. Most interactive workflows do not need it.
+`/orbit:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `missioncache-auto`. Most interactive workflows do not need it.
 
 ## Workflow
 
@@ -198,7 +198,7 @@ Replace `<project-name>` with the kebab-case project name, then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
-DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
+DASHBOARD_URL="${MISSIONCACHE_DASHBOARD_URL:-http://localhost:8787}"
 if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
   echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
 fi
@@ -229,7 +229,7 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 
 **Next step:** Start working on task 1. The plan, context, and tasks files have everything you need.
 
-**Optional - only for autonomous execution:** If you'll run this project via `orbit-auto` (parallel workers), run `/orbit:prompts my-feature` to generate per-subtask prompts with agent/skill recommendations. Skip this step for interactive work - it generates prompt files you won't read.
+**Optional - only for autonomous execution:** If you'll run this project via `missioncache-auto` (parallel workers), run `/orbit:prompts my-feature` to generate per-subtask prompts with agent/skill recommendations. Skip this step for interactive work - it generates prompt files you won't read.
 ```
 
 ---
