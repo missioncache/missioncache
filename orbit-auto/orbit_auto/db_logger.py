@@ -7,11 +7,38 @@ and their output for dashboard visualization.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from orbit_auto.models import Config
+
+_migration_warned = False
+
+
+def warn_if_migration_required() -> None:
+    """Warn (once per process) when orbit data still lives at legacy paths.
+
+    Called by the dashboard-logging init paths (ExecutionLogger here,
+    Worker in worker.py) when ``~/.orbit/tasks.db`` is missing. Two cases:
+    fresh install (no data anywhere) - nothing to say, stay silent; or
+    unmigrated data at the legacy ``~/.claude/`` location - dashboard
+    logging stays disabled, so print the full migration recipe to stderr
+    exactly once, not once per logger or worker init.
+    """
+    global _migration_warned
+    if _migration_warned:
+        return
+    try:
+        from orbit_db import OrbitMigrationRequired, check_legacy_paths
+    except ImportError:
+        return
+    try:
+        check_legacy_paths()
+    except OrbitMigrationRequired as e:
+        _migration_warned = True
+        print(f"orbit-auto: dashboard logging disabled:\n{e}", file=sys.stderr)
 
 
 class ExecutionLogger:
@@ -62,24 +89,26 @@ class ExecutionLogger:
         """Initialize database connection if orbit_db is available.
 
         Logging is optional: if orbit_db isn't installed (ImportError) we
-        run silently. Other failures (DB corruption, lock contention,
-        OrbitMigrationRequired) get surfaced to stderr so the user can
-        see WHY their run produced no dashboard logs - silent disabling
-        was a worse default.
+        run silently, and a missing DB on a fresh install is a deliberate
+        no-op. A missing DB caused by unmigrated legacy data warns once
+        per process via warn_if_migration_required. Unexpected TaskDB
+        construction failures get surfaced to stderr so the user can see
+        WHY their run produced no dashboard logs - silent disabling was a
+        worse default.
         """
-        import sys
-
         try:
             from orbit_db import DB_PATH, TaskDB
 
             if DB_PATH.exists():
                 self._db = TaskDB(str(DB_PATH))
                 self._enabled = True
+            else:
+                warn_if_migration_required()
         except ImportError:
             pass
         except Exception as e:
-            # First line only - migration errors carry a multi-line shell snippet
-            # that would otherwise spam stderr on every worker init.
+            # First line only - keeps unexpected multi-line errors from
+            # flooding stderr.
             first_line = str(e).splitlines()[0] if str(e) else ""
             print(
                 f"orbit-auto: dashboard logging disabled ({type(e).__name__}: {first_line})",

@@ -213,10 +213,13 @@ def validate_task_name(name: str) -> None:
         )
 
 
-def _check_legacy_paths() -> None:
+def check_legacy_paths() -> None:
     """Raise OrbitMigrationRequired if orbit data exists at legacy paths
     but not at the new path. Reads module-level DB_PATH / _LEGACY_DB /
-    _LEGACY_ORBIT_ROOT at call time so tests can monkeypatch them."""
+    _LEGACY_ORBIT_ROOT at call time so tests can monkeypatch them.
+
+    Public API: orbit-auto calls this directly (orbit-db>=1.0.5) to warn
+    about unmigrated data without constructing a TaskDB."""
     if not DB_PATH.exists() and (_LEGACY_DB.exists() or _LEGACY_ORBIT_ROOT.exists()):
         raise OrbitMigrationRequired(
             "Orbit data found at legacy ~/.claude/ paths but not at ~/.orbit/.\n"
@@ -751,7 +754,7 @@ class TaskDB:
         # not self.db_path. Callers passing a custom db_path still get the
         # check against the user's primary install location - intentional, so
         # alternate-path TaskDB usage doesn't bypass the migration prompt.
-        _check_legacy_paths()
+        check_legacy_paths()
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
