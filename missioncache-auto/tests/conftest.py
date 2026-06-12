@@ -1,8 +1,8 @@
-"""Shared fixtures and test data for orbit-auto tests."""
+"""Shared fixtures and test data for missioncache-auto tests."""
 
 import pytest
 
-from orbit_auto.dag import DAG
+from missioncache_auto.dag import DAG
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 [project]
-name = "mcp-orbit"
-version = "0.2.15"
+name = "mcp-missioncache"
+version = "1.0.0"
 description = "MCP server for the orbit Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "orbit-db>=1.0.2",
+    "missioncache-db>=1.0.0",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
@@ -40,11 +40,11 @@ Repository = "https://github.com/tomerbr1/orbit-pm"
 Issues = "https://github.com/tomerbr1/orbit-pm/issues"
 
 [project.scripts]
-mcp-orbit = "mcp_orbit.server:main"
+mcp-missioncache = "mcp_missioncache.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mcp_orbit"]
+packages = ["src/mcp_missioncache"]

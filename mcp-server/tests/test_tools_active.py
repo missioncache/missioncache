@@ -15,7 +15,7 @@ import pathlib
 
 import pytest
 
-from mcp_orbit import active_task, tools_active
+from mcp_missioncache import active_task, tools_active
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -23,9 +23,9 @@ from mcp_orbit import active_task, tools_active
 
 @pytest.fixture
 def project_dir(tmp_path, monkeypatch):
-    """Create a fake orbit project under a sandboxed orbit_root."""
-    orbit_root = tmp_path / ".orbit"
-    project = orbit_root / "active" / "demo-project"
+    """Create a fake orbit project under a sandboxed root_dir."""
+    root_dir = tmp_path / ".orbit"
+    project = root_dir / "active" / "demo-project"
     project.mkdir(parents=True)
     (project / "demo-project-tasks.md").write_text(
         "# Demo Project Tasks\n"
@@ -36,10 +36,10 @@ def project_dir(tmp_path, monkeypatch):
         "- [x] 9. Already done\n"
     )
 
-    # Re-bind ORBIT_ROOT-like settings used by orbit.get_orbit_files.
-    from mcp_orbit import config
+    # Re-bind MISSIONCACHE_ROOT-like settings used by orbit.get_orbit_files.
+    from mcp_missioncache import config
 
-    monkeypatch.setattr(config.settings, "orbit_root", orbit_root)
+    monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
     monkeypatch.setattr(
         active_task,
@@ -183,7 +183,7 @@ class TestSetActiveOrbitTasks:
 
     def test_path_traversal_project_name_rejected(self, project_dir):
         """``project_name`` flows into ``orbit.get_orbit_files`` which builds a
-        path under ORBIT_ROOT. Reject traversal-shaped names at the boundary."""
+        path under MISSIONCACHE_ROOT. Reject traversal-shaped names at the boundary."""
         result = asyncio.run(
             tools_active.set_active_orbit_tasks(
                 project_name="../../etc",
@@ -304,7 +304,7 @@ class TestUpdateTasksFileAutoClear:
     """
 
     def test_auto_clear_removes_completed_number_from_pointer(self, project_dir):
-        from mcp_orbit import tools_docs
+        from mcp_missioncache import tools_docs
 
         active_task.write_pointer("sess-1", "demo-project", ["54a", "54b"])
 
@@ -322,7 +322,7 @@ class TestUpdateTasksFileAutoClear:
         assert pointer["task_numbers"] == ["54b"]
 
     def test_auto_clear_removes_pointer_file_when_set_drains(self, project_dir):
-        from mcp_orbit import tools_docs
+        from mcp_missioncache import tools_docs
 
         active_task.write_pointer("sess-1", "demo-project", ["54a"])
 
@@ -336,7 +336,7 @@ class TestUpdateTasksFileAutoClear:
 
     def test_other_project_pointers_untouched(self, project_dir):
         """Different project name = different pointer scope."""
-        from mcp_orbit import tools_docs
+        from mcp_missioncache import tools_docs
 
         active_task.write_pointer("sess-1", "demo-project", ["54a"])
         active_task.write_pointer("sess-2", "other-project", ["54a"])
@@ -353,7 +353,7 @@ class TestUpdateTasksFileAutoClear:
         assert active_task.read_pointer("sess-2")["task_numbers"] == ["54a"]
 
     def test_no_completions_means_no_sweep(self, project_dir):
-        from mcp_orbit import tools_docs
+        from mcp_missioncache import tools_docs
 
         active_task.write_pointer("sess-1", "demo-project", ["54a"])
 

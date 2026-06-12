@@ -1,6 +1,6 @@
 [project]
-name = "orbit-dashboard"
-version = "1.0.4"
+name = "missioncache-dashboard"
+version = "1.0.0"
 description = "Orbit Dashboard - Task analytics and autonomous execution monitoring for Claude Code orbit projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "orbit-db>=1.0.0",
+    "missioncache-db>=1.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "duckdb>=1.1.0",
@@ -32,8 +32,8 @@ dependencies = [
 ]
 
 [project.scripts]
-orbit-dashboard = "orbit_dashboard.cli:main"
-orbit-statusline = "orbit_dashboard.statusline:main"
+missioncache-dashboard = "missioncache_dashboard.cli:main"
+missioncache-statusline = "missioncache_dashboard.statusline:main"
 
 [project.optional-dependencies]
 rss = [
@@ -60,7 +60,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["orbit_dashboard"]
+packages = ["missioncache_dashboard"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

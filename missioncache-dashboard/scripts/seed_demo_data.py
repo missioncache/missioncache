@@ -3,12 +3,12 @@
 
 Usage (always via HOME override - this is the safety mechanism):
 
-    HOME=/tmp/orbit-demo python3.11 orbit-dashboard/scripts/seed_demo_data.py
+    HOME=/tmp/orbit-demo python3.11 missioncache-dashboard/scripts/seed_demo_data.py
 
 Then run the dashboard against the same HOME on an alternate port:
 
-    HOME=/tmp/orbit-demo ORBIT_DASHBOARD_PORT=8789 \\
-        python3.11 orbit-dashboard/server.py
+    HOME=/tmp/orbit-demo MISSIONCACHE_DASHBOARD_PORT=8789 \\
+        python3.11 missioncache-dashboard/server.py
 
     open http://localhost:8789
 
@@ -46,7 +46,7 @@ def safety_check() -> Path:
             "REFUSING to seed: $HOME resolves to your real user home "
             f"({real_home}).\nRun with an isolated HOME instead:\n"
             "    HOME=/tmp/orbit-demo python3.11 "
-            "orbit-dashboard/scripts/seed_demo_data.py"
+            "missioncache-dashboard/scripts/seed_demo_data.py"
         )
 
     existing_db = demo_home / ".claude" / "tasks.db"
@@ -71,7 +71,7 @@ NOW = datetime.now().replace(microsecond=0)
 
 
 def iso(dt: datetime) -> str:
-    """Format a datetime as the orbit_db canonical local-time ISO string."""
+    """Format a datetime as the missioncache_db canonical local-time ISO string."""
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -607,12 +607,12 @@ def make_tasks_file(project: dict) -> str:
 # =============================================================================
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create schema via orbit_db's SCHEMA_SQL plus the claude_session_cache table.
+    """Create schema via missioncache_db's SCHEMA_SQL plus the claude_session_cache table.
 
-    We import orbit_db so the schema stays in sync with the canonical source.
+    We import missioncache_db so the schema stays in sync with the canonical source.
     """
-    # Import here so the script can fail fast if orbit_db is missing.
-    from orbit_db import SCHEMA_SQL  # type: ignore[import-not-found]
+    # Import here so the script can fail fast if missioncache_db is missing.
+    from missioncache_db import SCHEMA_SQL  # type: ignore[import-not-found]
 
     conn.executescript(SCHEMA_SQL)
     conn.execute("""
@@ -873,7 +873,7 @@ def seed_claude_jsonl_files(
 def seed_auto_execution(
     conn: sqlite3.Connection, task_ids: dict[str, int]
 ) -> None:
-    """Insert one completed orbit-auto run on kafka-consumer-fix with a
+    """Insert one completed missioncache-auto run on kafka-consumer-fix with a
     realistic iteration log stream so the DAG visualization lights up."""
     task_id = task_ids["kafka-consumer-fix"]
     started = NOW - timedelta(hours=30)
@@ -889,7 +889,7 @@ def seed_auto_execution(
 
     # Log lines for the DAG execution
     log_entries = [
-        (0, None, None, "info",    "Starting orbit-auto execution on kafka-consumer-fix"),
+        (0, None, None, "info",    "Starting missioncache-auto execution on kafka-consumer-fix"),
         (2, None, None, "info",    "Parsed 4 subtasks from tasks.md"),
         (3, None, None, "info",    "Dependency graph: 1 -> 2, 1 -> 3, {2,3} -> 4"),
         (5, None, None, "info",    "Dispatching 2 workers"),
@@ -984,7 +984,7 @@ def main() -> None:
 
         seed_auto_execution(conn, task_ids)
         log_count = conn.execute("SELECT count(*) FROM auto_execution_logs").fetchone()[0]
-        print(f"  seeded 1 orbit-auto execution with {log_count} log lines")
+        print(f"  seeded 1 missioncache-auto execution with {log_count} log lines")
 
         seed_claude_jsonl_files(conn, demo_home, task_ids)
         tracked = sum(1 for e in CLAUDE_SESSIONS if "task" in e)
@@ -1001,7 +1001,7 @@ def main() -> None:
     # dashboard's lifespan startup uses (AnalyticsDB.sync_from_sqlite), which
     # lazily creates the DuckDB file + schema on first connect.
     print("  syncing SQLite -> DuckDB...")
-    from orbit_dashboard.lib.analytics_db import AnalyticsDB  # type: ignore[import-not-found]
+    from missioncache_dashboard.lib.analytics_db import AnalyticsDB  # type: ignore[import-not-found]
     sync_result = AnalyticsDB().sync_from_sqlite()
     print(f"  sync result: {sync_result}")
 
@@ -1011,8 +1011,8 @@ def main() -> None:
     print("Next step - run the dashboard on port 8789 so it does not collide")
     print("with your real dashboard on 8787:")
     print()
-    print(f"    HOME={demo_home} ORBIT_DASHBOARD_PORT=8789 \\")
-    print("        python3.11 orbit-dashboard/server.py")
+    print(f"    HOME={demo_home} MISSIONCACHE_DASHBOARD_PORT=8789 \\")
+    print("        python3.11 missioncache-dashboard/server.py")
     print()
     print("Then open http://localhost:8789 and take screenshots.")
     print()

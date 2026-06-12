@@ -8,7 +8,7 @@ from pydantic import Field
 
 from .app import mcp
 from .db import get_db
-from .errors import OrbitError, TaskNotFoundError
+from .errors import MissionCacheError, TaskNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ async def create_plan(
             "status": "draft",
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error creating plan")

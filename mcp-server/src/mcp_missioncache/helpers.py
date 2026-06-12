@@ -9,7 +9,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-import orbit_db  # type: ignore[import-not-found]
+import missioncache_db  # type: ignore[import-not-found]
 
 from . import orbit
 from .config import settings
@@ -70,7 +70,7 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
     Mirrors ``hooks/session_start.py:_bind_session_to_project``. The two
     helpers are deliberately not yet extracted to a shared library; if a
     third caller appears, this is the right time to lift them into
-    ``orbit_db``.
+    ``missioncache_db``.
 
     Direct SQL only - the dashboard may not be running, and degrading
     silently to HTTP would re-introduce the failure mode this binding is
@@ -86,15 +86,15 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
         logger.warning("Skipping session binding: invalid session_id shape")
         return False
 
-    # Resolve orbit_db symbols via attribute access (not module-level
-    # `from orbit_db import X`) so test fixtures that monkeypatch
-    # ``orbit_db.HOOKS_STATE_DB_PATH`` to a tmp path are honored.
-    db_path = orbit_db.HOOKS_STATE_DB_PATH
+    # Resolve missioncache_db symbols via attribute access (not module-level
+    # `from missioncache_db import X`) so test fixtures that monkeypatch
+    # ``missioncache_db.HOOKS_STATE_DB_PATH`` to a tmp path are honored.
+    db_path = missioncache_db.HOOKS_STATE_DB_PATH
     try:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(db_path))
         try:
-            orbit_db.init_hooks_state_db_schema(conn)
+            missioncache_db.init_hooks_state_db_schema(conn)
             conn.execute(
                 "INSERT INTO project_state (session_id, project_name, updated_at) "
                 "VALUES (?, ?, datetime('now', 'localtime')) "
@@ -116,7 +116,7 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
         Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
     )
     try:
-        orbit_db.atomic_write_json(
+        missioncache_db.atomic_write_json(
             pointer_file,
             {
                 "projectName": project_name,
@@ -243,7 +243,7 @@ def _resolve_task_dir(
         identifier = task_id if task_id is not None else (task_name or "unknown")
         raise TaskNotFoundError(identifier)
 
-    task_dir = settings.orbit_root / task.full_path
+    task_dir = settings.root / task.full_path
     return task_dir, task.name
 
 
@@ -281,7 +281,7 @@ def _task_to_summary(
     # Check if orbit files exist
     has_orbit_files = False
     if task.full_path:
-        task_dir = settings.orbit_root / task.full_path
+        task_dir = settings.root / task.full_path
         has_orbit_files = task_dir.exists() and any(
             (task_dir / f).exists()
             for f in [
@@ -323,7 +323,7 @@ def _task_to_detail(
     progress = None
     if task.full_path:
         progress = _parse_task_progress(
-            settings.orbit_root / task.full_path, task.name
+            settings.root / task.full_path, task.name
         )
 
     # Get subtasks if this is a parent task

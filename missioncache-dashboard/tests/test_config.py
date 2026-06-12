@@ -1,10 +1,10 @@
-"""Tests for orbit-dashboard/lib/config.py."""
+"""Tests for missioncache-dashboard/lib/config.py."""
 
 import json
 
 import pytest
 
-from orbit_dashboard.lib import config
+from missioncache_dashboard.lib import config
 
 
 @pytest.fixture
@@ -12,7 +12,7 @@ def tmp_config(tmp_path, monkeypatch):
     """Redirect CONFIG_FILE to a temp dir and clear env vars for each test."""
     tmp_file = tmp_path / "orbit-dashboard-config.json"
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_file)
-    monkeypatch.delenv("ORBIT_DASHBOARD_URL", raising=False)
+    monkeypatch.delenv("MISSIONCACHE_DASHBOARD_URL", raising=False)
     return tmp_file
 
 
@@ -91,11 +91,11 @@ class TestDashboardUrl:
 
     def test_env_var_overrides_file(self, tmp_config, monkeypatch):
         tmp_config.write_text('{"dashboard_url": "http://localhost:9999"}')
-        monkeypatch.setenv("ORBIT_DASHBOARD_URL", "http://from-env:1234")
+        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "http://from-env:1234")
         assert config.get_dashboard_url() == "http://from-env:1234"
 
     def test_env_var_overrides_default(self, tmp_config, monkeypatch):
-        monkeypatch.setenv("ORBIT_DASHBOARD_URL", "http://from-env:1234")
+        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "http://from-env:1234")
         assert config.get_dashboard_url() == "http://from-env:1234"
 
 

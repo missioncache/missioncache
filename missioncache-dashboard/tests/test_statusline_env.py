@@ -1,6 +1,6 @@
-"""Tests for ORBIT_DASHBOARD_URL env var read at statusline import time.
+"""Tests for MISSIONCACHE_DASHBOARD_URL env var read at statusline import time.
 
-The statusline module reads ORBIT_DASHBOARD_URL exactly once - at import -
+The statusline module reads MISSIONCACHE_DASHBOARD_URL exactly once - at import -
 into a module-level ``_DASHBOARD_URL`` binding. The whole statusline's
 OSC 8 hyperlinks point at whatever value that binding ends up holding.
 If the env-var name or the default URL is silently renamed (e.g. by a
@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-import orbit_dashboard.statusline as mod
+import missioncache_dashboard.statusline as mod
 
 
 @pytest.fixture
@@ -29,10 +29,10 @@ def reload_statusline():
 
     Yields a callable that triggers a reload against the current
     environment. After the test, reloads one final time under the
-    original ORBIT_DASHBOARD_URL value so module-level state matches
+    original MISSIONCACHE_DASHBOARD_URL value so module-level state matches
     what every other test in the suite expects.
     """
-    original_url_env = os.environ.get("ORBIT_DASHBOARD_URL")
+    original_url_env = os.environ.get("MISSIONCACHE_DASHBOARD_URL")
 
     def _reload():
         return importlib.reload(mod)
@@ -44,22 +44,22 @@ def reload_statusline():
         # so the module-level _DASHBOARD_URL binding matches what the
         # rest of the suite saw at original import.
         if original_url_env is None:
-            os.environ.pop("ORBIT_DASHBOARD_URL", None)
+            os.environ.pop("MISSIONCACHE_DASHBOARD_URL", None)
         else:
-            os.environ["ORBIT_DASHBOARD_URL"] = original_url_env
+            os.environ["MISSIONCACHE_DASHBOARD_URL"] = original_url_env
         importlib.reload(mod)
 
 
 class TestDashboardUrlEnvVar:
     def test_env_var_overrides_default(self, monkeypatch, reload_statusline):
-        """When ORBIT_DASHBOARD_URL is set, the module-level binding picks it up."""
-        monkeypatch.setenv("ORBIT_DASHBOARD_URL", "http://from-env:9999")
+        """When MISSIONCACHE_DASHBOARD_URL is set, the module-level binding picks it up."""
+        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "http://from-env:9999")
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == "http://from-env:9999"
 
     def test_default_when_env_var_absent(self, monkeypatch, reload_statusline):
-        """When ORBIT_DASHBOARD_URL is unset, the default localhost URL is used."""
-        monkeypatch.delenv("ORBIT_DASHBOARD_URL", raising=False)
+        """When MISSIONCACHE_DASHBOARD_URL is unset, the default localhost URL is used."""
+        monkeypatch.delenv("MISSIONCACHE_DASHBOARD_URL", raising=False)
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == "http://localhost:8787"
 
@@ -70,11 +70,11 @@ class TestDashboardUrlEnvVar:
         env-var lookup but leaves consumers exporting the old name, or
         vice-versa, this test catches it.
         """
-        monkeypatch.delenv("ORBIT_DASHBOARD_URL", raising=False)
+        monkeypatch.delenv("MISSIONCACHE_DASHBOARD_URL", raising=False)
         # Set near-miss names that must NOT be picked up.
-        monkeypatch.setenv("ORBIT_DASHBOARD_URI", "http://wrong-var:1111")
+        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URI", "http://wrong-var:1111")
         monkeypatch.setenv("DASHBOARD_URL", "http://wrong-var:2222")
-        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "http://wrong-var:3333")
+        monkeypatch.setenv("ORBIT_DASHBOARD_URL", "http://wrong-var:3333")
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == "http://localhost:8787"
 
@@ -87,7 +87,7 @@ class TestDashboardUrlEnvVar:
         renders. This test asserts the full string, not a substring
         match.
         """
-        monkeypatch.delenv("ORBIT_DASHBOARD_URL", raising=False)
+        monkeypatch.delenv("MISSIONCACHE_DASHBOARD_URL", raising=False)
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == "http://localhost:8787"
 
@@ -100,6 +100,6 @@ class TestDashboardUrlEnvVar:
         so a "helpful" rename that switches to ``or default`` fallback
         semantics gets flagged.
         """
-        monkeypatch.setenv("ORBIT_DASHBOARD_URL", "")
+        monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "")
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == ""

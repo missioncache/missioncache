@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from orbit_db import TaskDB, ORBIT_ROOT
+from missioncache_db import TaskDB, MISSIONCACHE_ROOT
 
 
 @pytest.fixture
@@ -19,8 +19,8 @@ def db(tmp_path, monkeypatch):
     orbit_root.mkdir()
     (orbit_root / "active").mkdir()
 
-    # Patch ORBIT_ROOT so find_task_for_cwd uses our tmp dir
-    monkeypatch.setattr("orbit_db.ORBIT_ROOT", orbit_root)
+    # Patch MISSIONCACHE_ROOT so find_task_for_cwd uses our tmp dir
+    monkeypatch.setattr("missioncache_db.MISSIONCACHE_ROOT", orbit_root)
 
     db = TaskDB(db_path=db_path)
     db.initialize()
@@ -102,7 +102,7 @@ class TestFindTaskForCwd:
 
         # Create per-session project file
         state_dir = tmp_path / "state"
-        monkeypatch.setattr("orbit_db.Path", type(orbit_root))  # keep Path as is
+        monkeypatch.setattr("missioncache_db.Path", type(orbit_root))  # keep Path as is
         # We need to patch the state_dir location used inside find_task_for_cwd
         # The method constructs: Path.home() / ".claude" / "hooks" / "state"
         # Instead, write the session project file where the code looks for it

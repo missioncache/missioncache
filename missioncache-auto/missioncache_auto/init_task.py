@@ -7,7 +7,7 @@ Creates the directory structure and template files for a new task.
 from datetime import datetime
 from pathlib import Path
 
-from orbit_auto.templates import CONTEXT_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE
+from missioncache_auto.templates import CONTEXT_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE
 
 
 def init_task(
@@ -36,9 +36,9 @@ def init_task(
         FileExistsError: If task directory already exists
     """
     # Create in centralized orbit root
-    from orbit_db import ORBIT_ROOT
+    from missioncache_db import MISSIONCACHE_ROOT
 
-    orbit_active = ORBIT_ROOT / "active"
+    orbit_active = MISSIONCACHE_ROOT / "active"
     orbit_active.mkdir(parents=True, exist_ok=True)
 
     # Create task directory

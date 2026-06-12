@@ -1,5 +1,5 @@
 """
-Plan validation for orbit-auto parallel execution.
+Plan validation for missioncache-auto parallel execution.
 
 Runs after DAG build, before user confirmation. No Claude call needed -
 pure deterministic checks on prompt files and task structure.
@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from orbit_auto.dag import DAG
-from orbit_auto.task_parser import parse_prompt_yaml, parse_tasks_md
+from missioncache_auto.dag import DAG
+from missioncache_auto.task_parser import parse_prompt_yaml, parse_tasks_md
 
 
 class Severity(Enum):

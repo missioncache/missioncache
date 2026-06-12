@@ -1,18 +1,18 @@
 """Tests for error classes - no I/O, no mocking."""
 
-from mcp_orbit.errors import (
+from mcp_missioncache.errors import (
     ErrorCode,
     InvalidStateError,
-    OrbitError,
+    MissionCacheError,
     TaskNotFoundError,
     ValidationError,
 )
 
 
-class TestOrbitError:
+class TestMissionCacheError:
     def test_to_dict_structure(self):
         """to_dict returns correct keys and values."""
-        err = OrbitError(ErrorCode.OPERATION_FAILED, "something broke", {"key": "val"})
+        err = MissionCacheError(ErrorCode.OPERATION_FAILED, "something broke", {"key": "val"})
         d = err.to_dict()
         assert d == {
             "error": True,

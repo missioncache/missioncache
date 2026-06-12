@@ -1,5 +1,5 @@
 """
-Git worktree management for orbit-auto parallel execution.
+Git worktree management for missioncache-auto parallel execution.
 
 Creates isolated worktrees for each worker and merges changes back
 after execution completes.
@@ -44,14 +44,14 @@ class WorktreeManager:
         self.worktrees: dict[int, WorktreeInfo] = {}
 
     def _branch_name(self, worker_id: int) -> str:
-        return f"orbit-auto/{self.task_name}/worker-{worker_id}"
+        return f"missioncache-auto/{self.task_name}/worker-{worker_id}"
 
     def _worktree_path(self, worker_id: int) -> Path:
         return (
             self.project_root
             / ".claude"
             / "worktrees"
-            / f"orbit-auto-{self.task_name}-w{worker_id}"
+            / f"missioncache-auto-{self.task_name}-w{worker_id}"
         )
 
     def create_worktrees(self) -> dict[int, Path]:
@@ -150,7 +150,7 @@ class WorktreeManager:
                 info.branch,
                 "--no-edit",
                 "-m",
-                f"Merge orbit-auto worker {info.worker_id} ({self.task_name})",
+                f"Merge missioncache-auto worker {info.worker_id} ({self.task_name})",
             ],
             cwd=self.project_root,
             capture_output=True,

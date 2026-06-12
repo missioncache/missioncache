@@ -1,10 +1,10 @@
-"""Tests for orbit_auto.claude_runner module."""
+"""Tests for missioncache_auto.claude_runner module."""
 
 import time
 from pathlib import Path
 
-from orbit_auto.claude_runner import ClaudeRunner, StreamContext, build_generic_prompt
-from orbit_auto.models import Visibility
+from missioncache_auto.claude_runner import ClaudeRunner, StreamContext, build_generic_prompt
+from missioncache_auto.models import Visibility
 
 
 class TestExtractTag:

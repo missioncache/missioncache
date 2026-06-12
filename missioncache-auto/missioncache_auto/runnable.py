@@ -7,7 +7,7 @@ Determines which tasks can currently run based on:
 - Dependencies (explicit and sequential)
 
 This mirrors the logic in the orbit MCP server's get_runnable_tasks()
-to enable orbit-auto to filter tasks without needing MCP connectivity.
+to enable missioncache-auto to filter tasks without needing MCP connectivity.
 """
 
 from __future__ import annotations
@@ -190,7 +190,7 @@ def get_runnable_tasks(tasks_file: Path) -> RunnableResult:
             completed.append(tm)
             continue
 
-        # Only autonomous tasks can be "runnable" for orbit-auto
+        # Only autonomous tasks can be "runnable" for missioncache-auto
         if tm.mode != "auto":
             continue
 

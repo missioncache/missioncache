@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_orbit.errors import ValidationError
-from mcp_orbit.helpers import (
+from mcp_missioncache.errors import ValidationError
+from mcp_missioncache.helpers import (
     _resolve_session_id,
     _resolve_to_git_root,
     _validate_path,

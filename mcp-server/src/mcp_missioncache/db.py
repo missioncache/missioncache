@@ -1,6 +1,6 @@
-"""Database wrapper for orbit_db."""
+"""Database wrapper for missioncache_db."""
 
-from orbit_db import Repository, Task, TaskDB, TaskStatus
+from missioncache_db import Repository, Task, TaskDB, TaskStatus
 
 from .config import settings
 

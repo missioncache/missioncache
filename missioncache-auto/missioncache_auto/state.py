@@ -1,5 +1,5 @@
 """
-State management for orbit-auto parallel execution.
+State management for missioncache-auto parallel execution.
 
 Provides atomic state file operations with file locking to ensure
 safe concurrent access between multiple worker processes.
@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from orbit_auto.dag import DAG
+from missioncache_auto.dag import DAG
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -35,7 +35,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
     os.replace(tmp_path, str(path))
 
 
-from orbit_auto.models import State, Task, TaskStatus
+from missioncache_auto.models import State, Task, TaskStatus
 
 
 class StateManager:

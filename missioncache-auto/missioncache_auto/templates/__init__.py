@@ -1,7 +1,7 @@
 """
-Templates for orbit-auto task initialization.
+Templates for missioncache-auto task initialization.
 
-These templates are used when creating new tasks with `orbit-auto init`.
+These templates are used when creating new tasks with `missioncache-auto init`.
 """
 
 TASKS_TEMPLATE = """# {task_name} - Tasks
@@ -67,17 +67,17 @@ CONTEXT_TEMPLATE = """# {task_name} - Context
 
 ## Gotchas
 
-(Things to watch out for - orbit-auto will read this)
+(Things to watch out for - missioncache-auto will read this)
 
 ---
 
 ## Key Learnings
 
-(orbit-auto will add important discoveries here)
+(missioncache-auto will add important discoveries here)
 
 ## Blockers
 
-(orbit-auto will add blocking issues here if encountered)
+(missioncache-auto will add blocking issues here if encountered)
 """
 
 PLAN_TEMPLATE = """# {task_name} - Plan

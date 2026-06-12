@@ -12,7 +12,7 @@ import pathlib
 
 import pytest
 
-from mcp_orbit import active_task
+from mcp_missioncache import active_task
 
 
 def _state_dir(tmp_path: pathlib.Path) -> pathlib.Path:

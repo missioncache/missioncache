@@ -1,3 +1,3 @@
-"""Shared fixtures for orbit-dashboard tests."""
+"""Shared fixtures for missioncache-dashboard tests."""
 
 import pytest

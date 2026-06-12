@@ -80,10 +80,10 @@ def _is_valid_session_id(value: object) -> bool:
         and bool(_SESSION_ID_CHARSET_RE.match(value))
     )
 
-# Bundled orbit-db path for marketplace installs (no system pip install).
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+# Bundled missioncache-db path for marketplace installs (no system pip install).
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 
 OWNERSHIP_MARKER = "<!-- orbit-plugin:managed"
@@ -168,7 +168,7 @@ def _is_cwd_compatible_with_inherited_project(
     location, skip the inherit and let the new session start clean - the
     user can run ``/orbit:go`` to bind their actual intent.
 
-    Lookup-failure modes are treated conservatively: if orbit_db is
+    Lookup-failure modes are treated conservatively: if missioncache_db is
     unavailable, the task lookup raises, the task was renamed/deleted, or
     the repo row was deleted, this returns ``True`` (inherit proceeds) so a
     transient infrastructure issue does not silently blank the statusline.
@@ -178,7 +178,7 @@ def _is_cwd_compatible_with_inherited_project(
     so they always inherit on the cwd-pointer match alone.
     """
     try:
-        from orbit_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import TaskDB  # type: ignore[import-not-found]
     except ImportError:
         return True
 
@@ -330,7 +330,7 @@ def write_session_pid(session_id: str) -> None:
     if pid is None:
         return
 
-    from orbit_db import atomic_write_json  # type: ignore[import-not-found]
+    from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
 
     atomic_write_json(
         _SESSION_PID_DIR / f"{session_id}.json",
@@ -469,7 +469,7 @@ def _projects_for_sessions(session_ids: list[str]) -> dict[str, str]:
     """
     if not session_ids:
         return {}
-    from orbit_db import HOOKS_STATE_DB_PATH  # type: ignore[import-not-found]
+    from missioncache_db import HOOKS_STATE_DB_PATH  # type: ignore[import-not-found]
 
     try:
         conn = sqlite3.connect(str(HOOKS_STATE_DB_PATH))
@@ -562,7 +562,7 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
       * sqlite3 lock contention is silent (recoverable, dashboard writes the
         same DB); other sqlite3 errors log to stderr for diagnosability.
     """
-    from orbit_db import HOOKS_STATE_DB_PATH  # type: ignore[import-not-found]
+    from missioncache_db import HOOKS_STATE_DB_PATH  # type: ignore[import-not-found]
 
     cwd_key = str(cwd).replace("/", "-")
     pointer_file = Path.home() / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
@@ -661,7 +661,7 @@ def _bind_session_to_project(session_id: str, project_name: str) -> None:
     ``~/.claude/projects/``) so the user has a breadcrumb when the
     statusline Project field stays blank after resume.
     """
-    from orbit_db import HOOKS_STATE_DB_PATH, init_hooks_state_db_schema  # type: ignore[import-not-found]
+    from missioncache_db import HOOKS_STATE_DB_PATH, init_hooks_state_db_schema  # type: ignore[import-not-found]
 
     try:
         # Ensure parent dir exists - on a fresh install ~/.claude/ may be
@@ -718,7 +718,7 @@ def write_cwd_session_pointer(session_id: str) -> None:
     if not session_id:
         return
 
-    from orbit_db import atomic_write_json  # type: ignore[import-not-found]
+    from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
 
     cwd_key = str(Path.cwd()).replace("/", "-")
     pointer_file = (
@@ -746,7 +746,7 @@ def write_session_project(task_name: str, session_id: str) -> None:
     if not session_id:
         return
 
-    from orbit_db import atomic_write_json  # type: ignore[import-not-found]
+    from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
 
     project_file = Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
     atomic_write_json(
@@ -801,7 +801,7 @@ def get_session_context() -> tuple[str | None, str | None]:
 
 def main():
     """Check for active task and output context."""
-    # Write term-session mapping BEFORE OrbitDB (independent of task detection)
+    # Write term-session mapping BEFORE MissionCacheDB (independent of task detection)
     session_id, source = get_session_context()
     if session_id:
         write_term_session_mapping(session_id)
@@ -905,11 +905,11 @@ def main():
                     file=sys.stderr,
                 )
 
-    # Always attempt to refresh rule files, even if orbit_db is unavailable.
+    # Always attempt to refresh rule files, even if missioncache_db is unavailable.
     install_bundled_rules()
 
     try:
-        from orbit_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         cwd = os.getcwd()
@@ -928,7 +928,7 @@ def main():
             # Write session-specific project file for statusline display.
             # This is the per-session pointer that find_task_for_cwd reads
             # for heartbeat routing; the old shared pending-task.json file
-            # was vestigial and removed in mcp-orbit 0.2.13.
+            # was vestigial and removed in mcp-missioncache 0.2.13.
             if session_id:
                 write_session_project(task.name, session_id)
 
@@ -975,7 +975,7 @@ Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system remin
             print(output)
 
     except ImportError:
-        # orbit_db not available, skip silently
+        # missioncache_db not available, skip silently
         pass
     except Exception as e:
         # Don't fail the session start

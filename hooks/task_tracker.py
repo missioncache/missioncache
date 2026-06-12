@@ -21,10 +21,11 @@ import re
 import sys
 from pathlib import Path
 
-# Bundled orbit-db path for marketplace installs (no system pip install).
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+# Bundled missioncache-db path for marketplace installs (no system pip install).
+# Path segment tracks the in-repo package dir; data-dir literals stay orbit-named until Task 71.
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 # Skip patterns - do not check for divergence on these prompts (match
 # activity_tracker.py:16-25 behavior for consistency).
@@ -128,7 +129,7 @@ def main() -> None:
     session_id = data.get("session_id", "")
 
     try:
-        from orbit_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         task = db.find_task_for_cwd(cwd, session_id)
@@ -137,15 +138,15 @@ def main() -> None:
 
         # Orbit files live under ~/.orbit/<full_path>/, not under the
         # repo path. `task.full_path` already includes the "active/<name>"
-        # segment. This matches settings.orbit_root in the MCP server
-        # (mcp_orbit/config.py:15) and the helpers in mcp_orbit/helpers.py.
+        # segment. This matches settings.root in the MCP server
+        # (mcp_missioncache/config.py:15) and the helpers in mcp_missioncache/helpers.py.
         orbit_root = Path.home() / ".orbit"
         orbit_dir = orbit_root / task.full_path
 
         # Two supported filename layouts:
         # - Top-level tasks: `{task.name}-tasks.md` / `{task.name}-context.md`
         # - Subtasks (nested under a parent task dir): `tasks.md` / `context.md`
-        # Mirrors the candidate lists in mcp-server/src/mcp_orbit/helpers.py
+        # Mirrors the candidate lists in mcp-server/src/mcp_missioncache/helpers.py
         # and hooks/stop.py.
         tasks_file = next(
             (
@@ -192,7 +193,7 @@ def main() -> None:
         print(build_reminder(divergent_tasks, str(tasks_file)))
 
     except ImportError:
-        # orbit_db not available, skip silently
+        # missioncache_db not available, skip silently
         pass
     except Exception as e:
         # Don't fail the prompt submission

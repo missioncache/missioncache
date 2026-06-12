@@ -1,6 +1,6 @@
 [project]
-name = "orbit-db"
-version = "1.0.5"
+name = "missioncache-db"
+version = "1.0.0"
 description = "SQLite-based task and time tracking database for the orbit Claude Code plugin"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,11 +28,11 @@ Repository = "https://github.com/tomerbr1/orbit-pm"
 Issues = "https://github.com/tomerbr1/orbit-pm/issues"
 
 [project.scripts]
-orbit-db = "orbit_db:main"
+missioncache-db = "missioncache_db:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["orbit_db"]
+packages = ["missioncache_db"]

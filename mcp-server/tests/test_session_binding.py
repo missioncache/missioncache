@@ -23,40 +23,40 @@ import sqlite3
 
 import pytest
 
-from mcp_orbit import db as db_module
-from mcp_orbit import tools_docs, tools_tasks
+from mcp_missioncache import db as db_module
+from mcp_missioncache import tools_docs, tools_tasks
 
 
 @pytest.fixture
 def isolated_orbit(tmp_path, monkeypatch):
-    """Bind ORBIT_ROOT, DB_PATH, Path.home(), and HOOKS_STATE_DB_PATH to tmp.
+    """Bind MISSIONCACHE_ROOT, DB_PATH, Path.home(), and HOOKS_STATE_DB_PATH to tmp.
 
-    Mirrors test_rename.py's fixture but also redirects orbit_db's
+    Mirrors test_rename.py's fixture but also redirects missioncache_db's
     HOOKS_STATE_DB_PATH so the binding writes land under tmp and don't
     contaminate the user's real ~/.claude/hooks-state.db.
     """
-    orbit_root = tmp_path / ".orbit"
-    orbit_root.mkdir()
+    root_dir = tmp_path / ".orbit"
+    root_dir.mkdir()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     db_path = tmp_path / "tasks.db"
     hooks_db_path = fake_home / ".claude" / "hooks-state.db"
 
-    import orbit_db
-    from mcp_orbit import config, orbit
+    import missioncache_db
+    from mcp_missioncache import config, orbit
 
-    monkeypatch.setattr(config.settings, "orbit_root", orbit_root)
+    monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(config.settings, "db_path", db_path)
     monkeypatch.setattr(orbit, "settings", config.settings)
-    monkeypatch.setattr(orbit_db, "ORBIT_ROOT", orbit_root)
-    monkeypatch.setattr(orbit_db, "DB_PATH", db_path)
-    monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", hooks_db_path)
-    monkeypatch.setattr(orbit_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
-    monkeypatch.setattr(orbit_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", root_dir)
+    monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
+    monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", hooks_db_path)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", tmp_path / "no-legacy-orbit")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
     monkeypatch.setattr(db_module, "_db", None)
 
-    return tmp_path, orbit_root, fake_home, hooks_db_path
+    return tmp_path, root_dir, fake_home, hooks_db_path
 
 
 def _read_project_state(hooks_db_path: pathlib.Path, session_id: str) -> str | None:
@@ -98,7 +98,7 @@ class TestCreateOrbitFilesBinding:
         break would land on a phantom row instead of polluting the
         developer's real session in ~/.claude/hooks-state.db.
         """
-        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         sid = "00000000-0000-0000-0000-000000000000"
@@ -128,7 +128,7 @@ class TestCreateOrbitFilesBinding:
         Backward-compat: existing callers that don't pass session_id (CLI
         tests, scripts) keep working. session_bound=False signals the no-op.
         """
-        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
 
@@ -152,7 +152,7 @@ class TestCreateOrbitFilesBinding:
         (projects/<sid>.json). Without validation, ``"../../../tmp/pwn"``
         would write outside ~/.claude/. Helper rejects on charset.
         """
-        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
 
@@ -183,7 +183,7 @@ class TestCreateOrbitFilesBinding:
         already had a project bound (e.g., via /orbit:go for project A)
         creates a NEW project B - the statusline should follow to B.
         """
-        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         sid = "shared-sid-1234"
@@ -215,7 +215,7 @@ class TestCreateOrbitFilesBinding:
         MCP subprocess. With session_id omitted, the tool resolves it from the
         env, so the binding lands without the caller threading the id through.
         """
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         env_sid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -237,7 +237,7 @@ class TestCreateOrbitFilesBinding:
         """Precedence: an explicit session_id overrides the env fallback, so a
         caller targeting a specific session is never silently redirected to the
         ambient one."""
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         explicit = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -273,7 +273,7 @@ class TestCreateTaskBinding:
         non-coding project. The MCP-side binding makes coding and
         non-coding paths uniform.
         """
-        _tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        _tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         sid = "noncoding-sid-abc"
 
         result = asyncio.run(
@@ -298,7 +298,7 @@ class TestCreateTaskBinding:
         callers other than /orbit:new (tests, manual MCP). The binding
         contract should be uniform across both task types.
         """
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         sid = "coding-sid-xyz"
@@ -318,7 +318,7 @@ class TestCreateTaskBinding:
 
     def test_no_binding_when_session_id_omitted(self, isolated_orbit):
         """create_task without session_id reports session_bound=False, doesn't fail."""
-        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        _tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
 
         result = asyncio.run(
             tools_tasks.create_task(
@@ -334,7 +334,7 @@ class TestCreateTaskBinding:
     def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
         """create_task resolves CLAUDE_CODE_SESSION_ID when session_id omitted,
         so /orbit:new's non-coding branch binds without a client-side id."""
-        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        _tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         env_sid = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
 
@@ -364,7 +364,7 @@ class TestGetTaskBinding:
     def test_binds_session_when_session_id_provided(self, isolated_orbit):
         """Happy path: get_task(project_name, session_id) writes both
         project_state and per-session pointer atomically with the lookup."""
-        tmp_path, _orbit_root, fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         sid = "11111111-1111-1111-1111-111111111111"
@@ -408,7 +408,7 @@ class TestGetTaskBinding:
         response shape entirely, not set to False - so old clients that do
         not know about the field do not break.
         """
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
 
@@ -435,7 +435,7 @@ class TestGetTaskBinding:
         verifying the task exists, which would tie a session to a phantom
         project name and confuse downstream callers.
         """
-        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        _tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         sid = "22222222-2222-2222-2222-222222222222"
 
         result = asyncio.run(
@@ -455,7 +455,7 @@ class TestGetTaskBinding:
         fail the tool, they just skip the binding step and return
         session_bound=False so the caller can recover via /orbit:go.
         """
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
 
@@ -484,7 +484,7 @@ class TestGetTaskBinding:
     def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
         """/orbit:go can omit session_id - get_task resolves it from the env
         var, so the resume binding lands without the slash-command bash step."""
-        tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
         repo_path.mkdir()
         env_sid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
@@ -522,25 +522,25 @@ class TestBindSessionToProject:
     """
 
     def test_returns_false_for_empty_session_id(self, isolated_orbit):
-        from mcp_orbit.helpers import _bind_session_to_project
+        from mcp_missioncache.helpers import _bind_session_to_project
 
         assert _bind_session_to_project("", "any-project") is False
         assert _bind_session_to_project(None, "any-project") is False
 
     def test_returns_false_for_empty_project_name(self, isolated_orbit):
-        from mcp_orbit.helpers import _bind_session_to_project
+        from mcp_missioncache.helpers import _bind_session_to_project
 
         assert _bind_session_to_project("valid-sid-1234", "") is False
 
     def test_returns_false_for_session_id_with_path_traversal(self, isolated_orbit):
-        from mcp_orbit.helpers import _bind_session_to_project
+        from mcp_missioncache.helpers import _bind_session_to_project
 
         assert _bind_session_to_project("../etc/passwd", "any") is False
         assert _bind_session_to_project("a/b", "any") is False
 
     def test_returns_false_for_oversized_session_id(self, isolated_orbit):
         """129-char id is one over the bound (128); rejects."""
-        from mcp_orbit.helpers import _bind_session_to_project
+        from mcp_missioncache.helpers import _bind_session_to_project
 
         assert _bind_session_to_project("a" * 129, "any") is False
 
@@ -549,9 +549,9 @@ class TestBindSessionToProject:
 
         Synthetic all-zeros UUID; never collide with a real session_id.
         """
-        from mcp_orbit.helpers import _bind_session_to_project
+        from mcp_missioncache.helpers import _bind_session_to_project
 
-        _tmp_path, _orbit_root, _fake_home, hooks_db = isolated_orbit
+        _tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         sid = "00000000-0000-0000-0000-000000000000"
         assert _bind_session_to_project(sid, "valid-project") is True
         assert _read_project_state(hooks_db, sid) == "valid-project"

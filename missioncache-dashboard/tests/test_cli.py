@@ -1,10 +1,10 @@
-"""Tests for orbit_dashboard.cli."""
+"""Tests for missioncache_dashboard.cli."""
 
 import socket
 
 import pytest
 
-from orbit_dashboard import cli
+from missioncache_dashboard import cli
 
 
 # --- Template rendering -------------------------------------------------------
@@ -12,36 +12,36 @@ from orbit_dashboard import cli
 
 class TestRenderPlist:
     def test_default_port_omits_env_block(self):
-        out = cli.render_plist("/usr/local/bin/orbit-dashboard", cli.DEFAULT_PORT)
+        out = cli.render_plist("/usr/local/bin/missioncache-dashboard", cli.DEFAULT_PORT)
         assert "com.orbit.dashboard" in out
-        assert "/usr/local/bin/orbit-dashboard" in out
+        assert "/usr/local/bin/missioncache-dashboard" in out
         assert "<string>serve</string>" in out
         assert "EnvironmentVariables" not in out
 
     def test_custom_port_adds_env_block(self):
-        out = cli.render_plist("/usr/local/bin/orbit-dashboard", 9000)
+        out = cli.render_plist("/usr/local/bin/missioncache-dashboard", 9000)
         assert "EnvironmentVariables" in out
-        assert "ORBIT_DASHBOARD_PORT" in out
+        assert "MISSIONCACHE_DASHBOARD_PORT" in out
         assert "<string>9000</string>" in out
 
     def test_includes_log_paths(self):
-        out = cli.render_plist("/bin/orbit-dashboard", cli.DEFAULT_PORT)
-        assert "orbit-dashboard-stdout.log" in out
-        assert "orbit-dashboard-stderr.log" in out
+        out = cli.render_plist("/bin/missioncache-dashboard", cli.DEFAULT_PORT)
+        assert "missioncache-dashboard-stdout.log" in out
+        assert "missioncache-dashboard-stderr.log" in out
 
 
 class TestRenderSystemdUnit:
     def test_default_port_omits_env_line(self):
-        out = cli.render_systemd_unit("/usr/local/bin/orbit-dashboard", cli.DEFAULT_PORT)
-        assert "ExecStart=/usr/local/bin/orbit-dashboard serve" in out
+        out = cli.render_systemd_unit("/usr/local/bin/missioncache-dashboard", cli.DEFAULT_PORT)
+        assert "ExecStart=/usr/local/bin/missioncache-dashboard serve" in out
         assert "Environment=" not in out
 
     def test_custom_port_adds_env_line(self):
-        out = cli.render_systemd_unit("/usr/local/bin/orbit-dashboard", 9000)
-        assert "Environment=ORBIT_DASHBOARD_PORT=9000" in out
+        out = cli.render_systemd_unit("/usr/local/bin/missioncache-dashboard", 9000)
+        assert "Environment=MISSIONCACHE_DASHBOARD_PORT=9000" in out
 
     def test_restart_always(self):
-        out = cli.render_systemd_unit("/bin/orbit-dashboard", cli.DEFAULT_PORT)
+        out = cli.render_systemd_unit("/bin/missioncache-dashboard", cli.DEFAULT_PORT)
         assert "Restart=always" in out
         assert "WantedBy=default.target" in out
 
@@ -111,8 +111,8 @@ class TestStatusWindows:
 
 class TestResolveBinary:
     def test_returns_which_result(self, monkeypatch):
-        monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/local/bin/orbit-dashboard")
-        assert cli.resolve_binary() == "/usr/local/bin/orbit-dashboard"
+        monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/local/bin/missioncache-dashboard")
+        assert cli.resolve_binary() == "/usr/local/bin/missioncache-dashboard"
 
     def test_raises_when_not_on_path(self, monkeypatch):
         monkeypatch.setattr(cli.shutil, "which", lambda name: None)

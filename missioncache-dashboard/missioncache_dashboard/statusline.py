@@ -191,7 +191,8 @@ STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
 HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
 SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
-ORBIT_ACTIVE = Path.home() / ".orbit" / "active"
+# Path literal stays orbit-named until Task 71.
+MISSIONCACHE_ACTIVE = Path.home() / ".orbit" / "active"
 
 
 def _get_hooks_db() -> sqlite3.Connection | None:
@@ -584,7 +585,7 @@ def _parse_task_progress(tasks_content: str) -> str:
       "[TBD]"   - no real tasks defined yet (empty file or only template placeholder)
 
     Counts ALL checklist items flatly, including nested subtasks, matching
-    the reference implementation in mcp-server/src/mcp_orbit/orbit.py:407.
+    the reference implementation in mcp-server/src/mcp_missioncache/orbit.py:407.
     """
     completed = len(
         re.findall(r"^\s*[-*]\s*\[x\]", tasks_content, re.MULTILINE | re.IGNORECASE)
@@ -636,8 +637,8 @@ def _read_active_task_pointer(session_id: str) -> dict | None:
         return None
 
 
-# Match a checklist line. Mirrors mcp_orbit.tasks_parse._CHECKLIST_RE but
-# duplicated here so the statusline stays free of any mcp_orbit dependency.
+# Match a checklist line. Mirrors mcp_missioncache.tasks_parse._CHECKLIST_RE but
+# duplicated here so the statusline stays free of any mcp_missioncache dependency.
 # Captures (1) checked? marker, (2) number, (3) trailing text.
 _CHECKLIST_RE = re.compile(
     r"^\s*[-*]\s*\[\s*([xX ])\s*\]\s*([0-9]+(?:[.][0-9]+)*[a-z]?)\s*\.\s*(.*?)\s*$"
@@ -783,10 +784,10 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
         return ProjectInfo()
 
     display = name
-    project_dir = ORBIT_ACTIVE / name
-    if ORBIT_ACTIVE.is_dir():
+    project_dir = MISSIONCACHE_ACTIVE / name
+    if MISSIONCACHE_ACTIVE.is_dir():
         if not project_dir.is_dir():
-            for parent in ORBIT_ACTIVE.iterdir():
+            for parent in MISSIONCACHE_ACTIVE.iterdir():
                 nested = parent / name
                 if parent.is_dir() and nested.is_dir():
                     display = f"{parent.name}/{name}"
@@ -1270,7 +1271,7 @@ def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
 # ============ LINE BUILDING ============
 
 _HEALTH_LINK_URL = "https://status.claude.com"
-_DASHBOARD_URL = os.environ.get("ORBIT_DASHBOARD_URL", "http://localhost:8787")
+_DASHBOARD_URL = os.environ.get("MISSIONCACHE_DASHBOARD_URL", "http://localhost:8787")
 
 
 def _health_link(text: str) -> str:

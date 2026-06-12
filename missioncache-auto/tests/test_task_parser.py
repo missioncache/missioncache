@@ -1,8 +1,8 @@
-"""Tests for orbit_auto.task_parser module."""
+"""Tests for missioncache_auto.task_parser module."""
 
 from pathlib import Path
 
-from orbit_auto.task_parser import (
+from missioncache_auto.task_parser import (
     extract_prompt_content,
     get_task_progress,
     get_uncompleted_tasks,

@@ -26,10 +26,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# Bundled orbit-db path for marketplace installs (no system pip install).
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+# Bundled missioncache-db path for marketplace installs (no system pip install).
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 ERROR_FILE = (
     Path.home() / ".claude" / "hooks" / "state" / "last-precompact-error.json"
@@ -41,8 +41,8 @@ RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 0.4  # exponential backoff between retries
 
 
-# ── Atomic write helpers (duplicated from mcp_orbit.orbit; keeping the hook
-#    self-contained avoids dragging the full mcp_orbit transitive imports
+# ── Atomic write helpers (duplicated from mcp_missioncache.orbit; keeping the hook
+#    self-contained avoids dragging the full mcp_missioncache transitive imports
 #    into the PreCompact hot path) ────────────────────────────────────────
 
 
@@ -298,9 +298,9 @@ def main():
     session_id = payload.get("session_id") or os.environ.get("CLAUDE_SESSION_ID")
 
     try:
-        from orbit_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import TaskDB  # type: ignore[import-not-found]
     except ImportError:
-        # No orbit-db on sys.path - cannot resolve task. Bail quietly.
+        # No missioncache-db on sys.path - cannot resolve task. Bail quietly.
         return
 
     try:

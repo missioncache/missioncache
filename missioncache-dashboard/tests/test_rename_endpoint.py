@@ -1,10 +1,10 @@
 """Tests for the dashboard rename_task_endpoint.
 
 Calls the endpoint function directly (no TestClient / lifespan boot)
-with a sandboxed orbit-db so we don't touch the user's real ~/.orbit/.
+with a sandboxed missioncache-db so we don't touch the user's real ~/.orbit/.
 The HTTPException raise paths are inspected directly via pytest.raises.
 
-Most rename behavior is covered in orbit-db/tests/test_rename.py and
+Most rename behavior is covered in missioncache-db/tests/test_rename.py and
 mcp-server/tests/test_rename.py - this file just locks in the
 endpoint's wire-up: 200 happy path, 400 / 404 / 409 error mappings,
 and the post-rename DuckDB sync trigger.
@@ -18,13 +18,13 @@ import pathlib
 import pytest
 from fastapi import HTTPException
 
-import orbit_db
-from orbit_dashboard import server
+import missioncache_db
+from missioncache_dashboard import server
 
 
 @pytest.fixture
 def sandboxed(tmp_path, monkeypatch):
-    """Sandbox orbit-db's filesystem layout and ~/.claude/ for the
+    """Sandbox missioncache-db's filesystem layout and ~/.claude/ for the
     duration of the test so neither the server nor the rename primitive
     touches the user's real data."""
     orbit_root = tmp_path / ".orbit"
@@ -33,10 +33,10 @@ def sandboxed(tmp_path, monkeypatch):
     fake_home.mkdir()
     db_path = tmp_path / "tasks.db"
 
-    monkeypatch.setattr(orbit_db, "ORBIT_ROOT", orbit_root)
-    monkeypatch.setattr(orbit_db, "DB_PATH", db_path)
-    monkeypatch.setattr(orbit_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
-    monkeypatch.setattr(orbit_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", orbit_root)
+    monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", tmp_path / "no-legacy-orbit")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
 
     # The endpoint also calls server.get_db() to trigger a DuckDB sync.
@@ -57,7 +57,7 @@ def sandboxed(tmp_path, monkeypatch):
 
 
 def _seed_active(orbit_root: pathlib.Path, name: str, repo_path: pathlib.Path) -> int:
-    db = orbit_db.TaskDB(db_path=orbit_db.DB_PATH)
+    db = missioncache_db.TaskDB(db_path=missioncache_db.DB_PATH)
     db.initialize()
     repo_path.mkdir(parents=True, exist_ok=True)
     repo_id = db.add_repo(str(repo_path), short_name=repo_path.name)
@@ -149,7 +149,7 @@ def test_collision_returns_409_already_exists(sandboxed):
 def test_running_auto_returns_409_invalid_state(sandboxed):
     tmp, orbit_root, _fake = sandboxed
     tid = _seed_active(orbit_root, "with-auto", tmp / "repo")
-    db = orbit_db.TaskDB(db_path=orbit_db.DB_PATH)
+    db = missioncache_db.TaskDB(db_path=missioncache_db.DB_PATH)
     with db.connection() as conn:
         conn.execute(
             "INSERT INTO auto_executions (task_id, status, started_at) "

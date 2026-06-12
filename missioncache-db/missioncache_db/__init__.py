@@ -5,41 +5,41 @@ Task Database Manager for Claude Code orbit system.
 Provides SQLite-based cross-repo task tracking with WakaTime-style time tracking.
 
 Usage:
-    python orbit_db.py init                      # Initialize database
-    python orbit_db.py add-repo <path> [name]    # Add repository to track
-    python orbit_db.py add-repos-glob <pattern>  # Add repos from glob pattern
-    python orbit_db.py scan [repo_id]            # Scan repos for tasks
-    python orbit_db.py list-active               # List all active tasks
-    python orbit_db.py list-repos                # List tracked repositories
-    python orbit_db.py get-task <task_id>        # Get task details (JSON)
-    python orbit_db.py heartbeat [task_id]       # Record activity heartbeat
-    python orbit_db.py heartbeat-auto            # Auto-detect task from cwd
-    python orbit_db.py process-heartbeats        # Aggregate heartbeats into sessions
-    python orbit_db.py task-time <task_id> [period]  # Get time spent
-    python orbit_db.py prune [days]              # Prune old completed tasks
-    python orbit_db.py complete-task <task_id>   # Mark task as completed
-    python orbit_db.py reopen-task <task_id>     # Reopen a completed task
-    python orbit_db.py rename-task <old-name> <new-name>  # Rename a project
-    python orbit_db.py list-completed [days]     # List recently completed tasks
-    python orbit_db.py get-task-by-name <name>   # Find task by name
+    python missioncache_db.py init                      # Initialize database
+    python missioncache_db.py add-repo <path> [name]    # Add repository to track
+    python missioncache_db.py add-repos-glob <pattern>  # Add repos from glob pattern
+    python missioncache_db.py scan [repo_id]            # Scan repos for tasks
+    python missioncache_db.py list-active               # List all active tasks
+    python missioncache_db.py list-repos                # List tracked repositories
+    python missioncache_db.py get-task <task_id>        # Get task details (JSON)
+    python missioncache_db.py heartbeat [task_id]       # Record activity heartbeat
+    python missioncache_db.py heartbeat-auto            # Auto-detect task from cwd
+    python missioncache_db.py process-heartbeats        # Aggregate heartbeats into sessions
+    python missioncache_db.py task-time <task_id> [period]  # Get time spent
+    python missioncache_db.py prune [days]              # Prune old completed tasks
+    python missioncache_db.py complete-task <task_id>   # Mark task as completed
+    python missioncache_db.py reopen-task <task_id>     # Reopen a completed task
+    python missioncache_db.py rename-task <old-name> <new-name>  # Rename a project
+    python missioncache_db.py list-completed [days]     # List recently completed tasks
+    python missioncache_db.py get-task-by-name <name>   # Find task by name
 
 Keyword Management:
-    python orbit_db.py add-keyword <keyword>     # Add custom tag keyword
-    python orbit_db.py remove-keyword <keyword>  # Remove custom tag keyword
-    python orbit_db.py list-keywords             # List all tag keywords
-    python orbit_db.py backfill-tags             # Backfill tags for existing tasks
+    python missioncache_db.py add-keyword <keyword>     # Add custom tag keyword
+    python missioncache_db.py remove-keyword <keyword>  # Remove custom tag keyword
+    python missioncache_db.py list-keywords             # List all tag keywords
+    python missioncache_db.py backfill-tags             # Backfill tags for existing tasks
 
 Non-Coding Task Management:
-    python orbit_db.py create-task [--type TYPE] [--jira TICKET] <name>  # Create task
-    python orbit_db.py add-update <task_id> <note>                       # Add timestamped update
-    python orbit_db.py get-updates <task_id> [limit]                     # Get task updates
-    python orbit_db.py today-updates [task_id]                           # Get today's updates
+    python missioncache_db.py create-task [--type TYPE] [--jira TICKET] <name>  # Create task
+    python missioncache_db.py add-update <task_id> <note>                       # Add timestamped update
+    python missioncache_db.py get-updates <task_id> [limit]                     # Get task updates
+    python missioncache_db.py today-updates [task_id]                           # Get today's updates
 
 Migration:
-    python orbit_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.orbit/
+    python missioncache_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.orbit/
 
 Cleanup:
-    python orbit_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
+    python missioncache_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
 """
 
 import json
@@ -65,10 +65,11 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 DB_PATH = Path.home() / ".orbit" / "tasks.db"
-ORBIT_ROOT = Path.home() / ".orbit"
+# Path literal stays ".orbit" (or ".claude/orbit") until Task 71 migrates the data dir.
+MISSIONCACHE_ROOT = Path.home() / ".orbit"
 
 # Shared session-state database used by the dashboard, statusline, and hooks.
-# Multiple writers exist (dashboard's HTTP API, hooks at SessionStart, orbit-db's
+# Multiple writers exist (dashboard's HTTP API, hooks at SessionStart, missioncache-db's
 # rename sweep). The dashboard authors the schema, but every writer should call
 # init_hooks_state_db_schema() to be tolerant of fresh installs where the
 # dashboard never ran.
@@ -77,7 +78,8 @@ HOOKS_STATE_DB_PATH = Path.home() / ".claude" / "hooks-state.db"
 # Legacy paths for the pre-Phase-11 ~/.claude/ layout. Used by the migration
 # guard below.
 _LEGACY_DB = Path.home() / ".claude" / "tasks.db"
-_LEGACY_ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+# Path literal stays ".orbit" (or ".claude/orbit") until Task 71 migrates the data dir.
+_LEGACY_MISSIONCACHE_ROOT = Path.home() / ".claude" / "orbit"
 
 
 def atomic_write_json(path: Path, payload: object) -> None:
@@ -161,7 +163,7 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-class OrbitMigrationRequired(RuntimeError):
+class MissionCacheMigrationRequired(RuntimeError):
     """Raised when orbit data is at legacy ~/.claude/ paths but the new
     ~/.orbit/ DB doesn't exist. Caught by CLI entry points to print a
     user-friendly migration message; subclasses RuntimeError so existing
@@ -186,7 +188,7 @@ class FilesystemCollisionError(RenameError):
 
 
 class AutoRunActiveError(RenameError):
-    """An orbit-auto run is currently in progress on this task."""
+    """An missioncache-auto run is currently in progress on this task."""
 
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -195,7 +197,7 @@ _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 def validate_task_name(name: str) -> None:
     """Validate a project / task name for filesystem and DB safety.
 
-    Mirrors ``mcp_orbit.orbit.validate_task_name`` exactly so the same
+    Mirrors ``mcp_missioncache.orbit.validate_task_name`` exactly so the same
     inputs are accepted/rejected on every surface (CLI, MCP, dashboard).
     The check is split into three branches so each failure mode gets a
     specific user-facing message.
@@ -214,14 +216,14 @@ def validate_task_name(name: str) -> None:
 
 
 def check_legacy_paths() -> None:
-    """Raise OrbitMigrationRequired if orbit data exists at legacy paths
+    """Raise MissionCacheMigrationRequired if orbit data exists at legacy paths
     but not at the new path. Reads module-level DB_PATH / _LEGACY_DB /
-    _LEGACY_ORBIT_ROOT at call time so tests can monkeypatch them.
+    _LEGACY_MISSIONCACHE_ROOT at call time so tests can monkeypatch them.
 
-    Public API: orbit-auto calls this directly (orbit-db>=1.0.5) to warn
+    Public API: missioncache-auto calls this directly (missioncache-db>=1.0.5) to warn
     about unmigrated data without constructing a TaskDB."""
-    if not DB_PATH.exists() and (_LEGACY_DB.exists() or _LEGACY_ORBIT_ROOT.exists()):
-        raise OrbitMigrationRequired(
+    if not DB_PATH.exists() and (_LEGACY_DB.exists() or _LEGACY_MISSIONCACHE_ROOT.exists()):
+        raise MissionCacheMigrationRequired(
             "Orbit data found at legacy ~/.claude/ paths but not at ~/.orbit/.\n"
             "Migrate before starting orbit:\n"
             "  mkdir -p ~/.orbit\n"
@@ -233,7 +235,7 @@ def check_legacy_paths() -> None:
         )
 
 # Non-git folder to track with shadow repo (only this folder gets shadow commits)
-SHADOW_TRACKED_FOLDER = Path(os.environ.get("ORBIT_SHADOW_FOLDER", str(Path.home() / "work")))
+SHADOW_TRACKED_FOLDER = Path(os.environ.get("MISSIONCACHE_SHADOW_FOLDER", str(Path.home() / "work")))
 
 DEFAULT_CONFIG = {
     "idle_timeout_seconds": 300,  # 5 minutes
@@ -531,7 +533,7 @@ BEGIN
     UPDATE tasks SET archived_at = datetime('now', 'localtime') WHERE id = NEW.id;
 END;
 
--- Auto execution runs (orbit-auto)
+-- Auto execution runs (missioncache-auto)
 CREATE TABLE IF NOT EXISTS auto_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -680,7 +682,7 @@ class Session:
 
 @dataclass
 class AutoExecution:
-    """An orbit-auto execution run."""
+    """An missioncache-auto execution run."""
 
     id: int
     task_id: int
@@ -713,7 +715,7 @@ class AutoExecution:
 
 @dataclass
 class AutoExecutionLog:
-    """A log entry from an orbit-auto execution."""
+    """A log entry from an missioncache-auto execution."""
 
     id: int
     execution_id: int
@@ -748,7 +750,7 @@ class TaskDB:
         self.db_path = db_path or DB_PATH
         self._connection: Optional[sqlite3.Connection] = None
         # Guard against using orbit while data still lives at legacy paths.
-        # Raises OrbitMigrationRequired (RuntimeError subclass) so callers
+        # Raises MissionCacheMigrationRequired (RuntimeError subclass) so callers
         # using `except Exception` catch it normally; CLI entry points pretty-print.
         # Note: the guard inspects module-level DB_PATH (the canonical path),
         # not self.db_path. Callers passing a custom db_path still get the
@@ -770,7 +772,7 @@ class TaskDB:
             self._connection.execute("PRAGMA busy_timeout = 5000")
             # Auto-init schema on first open. SCHEMA_SQL is fully idempotent
             # (28 CREATE ... IF NOT EXISTS clauses), so this is safe for both
-            # fresh and existing DBs. Without this, the bare `orbit-db` CLI
+            # fresh and existing DBs. Without this, the bare `missioncache-db` CLI
             # and any other first-time caller would crash on "no such table"
             # errors because __init__ only ever created an empty DB file.
             self._connection.executescript(SCHEMA_SQL)
@@ -982,7 +984,7 @@ class TaskDB:
         discovered_tasks = []
 
         # Scan active tasks from centralized orbit root
-        active_dir = ORBIT_ROOT / "active"
+        active_dir = MISSIONCACHE_ROOT / "active"
         if active_dir.exists():
             for task_dir in active_dir.iterdir():
                 if task_dir.is_dir() and not task_dir.name.startswith("."):
@@ -1029,7 +1031,7 @@ class TaskDB:
         if not repo:
             return None
 
-        relative_path = str(task_dir.relative_to(ORBIT_ROOT))
+        relative_path = str(task_dir.relative_to(MISSIONCACHE_ROOT))
         task_name = task_dir.name
 
         # Parse metadata from markdown files
@@ -1428,7 +1430,7 @@ class TaskDB:
                 subtask, or unexpected full_path shape.
             NameCollisionError: another task in the same repo has that name.
             FilesystemCollisionError: target orbit directory already exists.
-            AutoRunActiveError: an orbit-auto run is currently running.
+            AutoRunActiveError: an missioncache-auto run is currently running.
         """
         raw_input = new_name
         new_name = new_name.strip().lower()
@@ -1495,13 +1497,13 @@ class TaskDB:
             ).fetchone()
             if running:
                 raise AutoRunActiveError(
-                    "Cannot rename while orbit-auto is running on this project. "
+                    "Cannot rename while missioncache-auto is running on this project. "
                     "Stop the run and try again."
                 )
 
         # Filesystem collision pre-check.
-        old_dir = ORBIT_ROOT / task.full_path
-        new_dir = ORBIT_ROOT / new_full_path
+        old_dir = MISSIONCACHE_ROOT / task.full_path
+        new_dir = MISSIONCACHE_ROOT / new_full_path
         if new_dir.exists():
             raise FilesystemCollisionError(
                 f"Directory '{new_dir}' already exists. Pick a different name."
@@ -1580,10 +1582,10 @@ class TaskDB:
                     h1_skipped.append(f.name)
 
         # DB update - re-check the auto-run guard inside the same
-        # connection used for the UPDATE so a concurrent orbit-auto INSERT
+        # connection used for the UPDATE so a concurrent missioncache-auto INSERT
         # between the pre-flight check and the UPDATE is caught. Narrow
         # except sqlite3.Error so unrelated bugs (KeyError, attribute
-        # mistakes, OrbitMigrationRequired) don't silently trigger a
+        # mistakes, MissionCacheMigrationRequired) don't silently trigger a
         # misdirected FS rollback.
         try:
             with self.connection() as conn:
@@ -1594,7 +1596,7 @@ class TaskDB:
                 ).fetchone()
                 if running:
                     raise AutoRunActiveError(
-                        "Cannot rename while orbit-auto is running on this project. "
+                        "Cannot rename while missioncache-auto is running on this project. "
                         "Stop the run and try again."
                     )
                 conn.execute(
@@ -1803,7 +1805,7 @@ class TaskDB:
                     pass  # Fall through to other methods
 
         # Priority 3: Check if cwd is under centralized orbit root
-        orbit_active = ORBIT_ROOT / "active"
+        orbit_active = MISSIONCACHE_ROOT / "active"
         try:
             relative = cwd_path.relative_to(orbit_active)
             parts = relative.parts
@@ -2373,7 +2375,7 @@ class TaskDB:
 
         # Get file modification time from centralized orbit root
         if task.full_path:
-            task_dir = ORBIT_ROOT / task.full_path
+            task_dir = MISSIONCACHE_ROOT / task.full_path
             if task_dir.exists():
                 task_name = task_dir.name
                 candidate_files = [
@@ -2569,7 +2571,7 @@ class TaskDB:
         normalized = (
             task_full_path[4:] if task_full_path.startswith("dev/") else task_full_path
         )
-        task_dir = ORBIT_ROOT / normalized
+        task_dir = MISSIONCACHE_ROOT / normalized
 
         # Try multiple file patterns in order of priority
         tasks_file = None
@@ -2589,15 +2591,15 @@ class TaskDB:
         parent_context = task_dir / "shared-context.md"
 
         # Pattern 4: Completed folder (flat format)
-        completed_tasks = ORBIT_ROOT / "completed" / f"{task_name}-tasks.md"
-        completed_context = ORBIT_ROOT / "completed" / f"{task_name}-context.md"
+        completed_tasks = MISSIONCACHE_ROOT / "completed" / f"{task_name}-tasks.md"
+        completed_context = MISSIONCACHE_ROOT / "completed" / f"{task_name}-context.md"
 
         # Pattern 5: Completed folder (subdirectory format)
         completed_subdir_tasks = (
-            ORBIT_ROOT / "completed" / task_name / f"{task_name}-tasks.md"
+            MISSIONCACHE_ROOT / "completed" / task_name / f"{task_name}-tasks.md"
         )
         completed_subdir_context = (
-            ORBIT_ROOT / "completed" / task_name / f"{task_name}-context.md"
+            MISSIONCACHE_ROOT / "completed" / task_name / f"{task_name}-context.md"
         )
 
         if standalone_tasks.exists():
@@ -3163,7 +3165,7 @@ def main():
 
         elif command == "add-repo":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py add-repo <path> [short_name]")
+                print("Usage: missioncache_db.py add-repo <path> [short_name]")
                 sys.exit(1)
             path = sys.argv[2]
             short_name = sys.argv[3] if len(sys.argv) > 3 else None
@@ -3172,7 +3174,7 @@ def main():
 
         elif command == "add-repos-glob":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py add-repos-glob <pattern>")
+                print("Usage: missioncache_db.py add-repos-glob <pattern>")
                 sys.exit(1)
             pattern = sys.argv[2]
             repo_ids = db.add_repos_from_glob(pattern)
@@ -3212,7 +3214,7 @@ def main():
 
         elif command == "heartbeat":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py heartbeat <task_id> [session_id]")
+                print("Usage: missioncache_db.py heartbeat <task_id> [session_id]")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             session_id = sys.argv[3] if len(sys.argv) > 3 else None
@@ -3234,7 +3236,7 @@ def main():
 
         elif command == "task-time":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py task-time <task_id> [period]")
+                print("Usage: missioncache_db.py task-time <task_id> [period]")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             period = sys.argv[3] if len(sys.argv) > 3 else "all"
@@ -3255,7 +3257,7 @@ def main():
 
         elif command == "get-task":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py get-task <task_id>")
+                print("Usage: missioncache_db.py get-task <task_id>")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             task = db.get_task(task_id)
@@ -3288,7 +3290,7 @@ def main():
 
         elif command == "complete-task":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py complete-task <task_id>")
+                print("Usage: missioncache_db.py complete-task <task_id>")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             task = db.get_task(task_id)
@@ -3346,10 +3348,10 @@ def main():
 
             if not name:
                 print(
-                    "Usage: orbit_db.py create-task [--type coding|non-coding] [--jira TICKET] <name>"
+                    "Usage: missioncache_db.py create-task [--type coding|non-coding] [--jira TICKET] <name>"
                 )
                 print(
-                    "       orbit_db.py create-task --type non-coding --name 'Sprint planning'"
+                    "       missioncache_db.py create-task --type non-coding --name 'Sprint planning'"
                 )
                 sys.exit(1)
 
@@ -3366,7 +3368,7 @@ def main():
 
         elif command == "add-update":
             if len(sys.argv) < 4:
-                print("Usage: orbit_db.py add-update <task_id> <note>")
+                print("Usage: missioncache_db.py add-update <task_id> <note>")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             note = " ".join(sys.argv[3:])  # Join remaining args as note
@@ -3386,7 +3388,7 @@ def main():
 
         elif command == "get-updates":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py get-updates <task_id> [limit]")
+                print("Usage: missioncache_db.py get-updates <task_id> [limit]")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             limit = int(sys.argv[3]) if len(sys.argv) > 3 else 10
@@ -3410,7 +3412,7 @@ def main():
 
         elif command == "set-jira":
             if len(sys.argv) < 4:
-                print("Usage: orbit_db.py set-jira <task_id> <jira_key>")
+                print("Usage: missioncache_db.py set-jira <task_id> <jira_key>")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             jira_key = sys.argv[3]
@@ -3434,7 +3436,7 @@ def main():
 
         elif command == "add-keyword":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py add-keyword <keyword>")
+                print("Usage: missioncache_db.py add-keyword <keyword>")
                 sys.exit(1)
             keyword = sys.argv[2]
             if db.add_keyword(keyword):
@@ -3445,7 +3447,7 @@ def main():
 
         elif command == "remove-keyword":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py remove-keyword <keyword>")
+                print("Usage: missioncache_db.py remove-keyword <keyword>")
                 sys.exit(1)
             keyword = sys.argv[2]
             if db.remove_keyword(keyword):
@@ -3510,7 +3512,7 @@ def main():
 
         elif command == "reopen-task":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py reopen-task <task_id>")
+                print("Usage: missioncache_db.py reopen-task <task_id>")
                 sys.exit(1)
             task_id = int(sys.argv[2])
             task = db.get_task(task_id)
@@ -3549,9 +3551,9 @@ def main():
             print(json.dumps(output, indent=2))
 
         elif command == "rename-task":
-            # Usage: orbit-db rename-task <old-name> <new-name>
+            # Usage: missioncache-db rename-task <old-name> <new-name>
             if len(sys.argv) < 4:
-                print("Usage: orbit-db rename-task <old-name> <new-name>")
+                print("Usage: missioncache-db rename-task <old-name> <new-name>")
                 sys.exit(1)
             old_name = sys.argv[2]
             new_name_input = sys.argv[3]
@@ -3592,7 +3594,7 @@ def main():
 
         elif command == "get-task-by-name":
             if len(sys.argv) < 3:
-                print("Usage: orbit_db.py get-task-by-name <name> [--status <status>]")
+                print("Usage: missioncache_db.py get-task-by-name <name> [--status <status>]")
                 sys.exit(1)
             name = sys.argv[2]
             status = None
@@ -3625,8 +3627,8 @@ def main():
             import shutil
 
             dry_run = "--dry-run" in sys.argv
-            orbit_active = ORBIT_ROOT / "active"
-            orbit_completed = ORBIT_ROOT / "completed"
+            orbit_active = MISSIONCACHE_ROOT / "active"
+            orbit_completed = MISSIONCACHE_ROOT / "completed"
 
             if not dry_run:
                 orbit_active.mkdir(parents=True, exist_ok=True)
@@ -3703,7 +3705,7 @@ def main():
                     "WHERE status = 'active' AND type = 'coding'"
                 ).fetchall()
                 for row in rows:
-                    task_dir = ORBIT_ROOT / row["full_path"]
+                    task_dir = MISSIONCACHE_ROOT / row["full_path"]
                     has_files = (
                         task_dir.exists()
                         and task_dir.is_dir()
@@ -3734,7 +3736,7 @@ def main():
 
             # --- B2: Move orphaned repo-local files ---
             print("=== B2: Move orphaned repo-local files ===")
-            dev_dir = ORBIT_ROOT
+            dev_dir = MISSIONCACHE_ROOT
             files_moved = 0
 
             # statusline-layout-improvement files
@@ -3743,7 +3745,7 @@ def main():
                 sl_files = list(src_completed.glob("statusline-layout-improvement-*"))
                 if sl_files:
                     dest_dir = (
-                        ORBIT_ROOT / "completed" / "statusline-layout-improvement"
+                        MISSIONCACHE_ROOT / "completed" / "statusline-layout-improvement"
                     )
                     if dry_run:
                         print(f"  {prefix}Move {len(sl_files)} files -> {dest_dir}")

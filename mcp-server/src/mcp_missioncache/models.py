@@ -69,7 +69,7 @@ class TaskDetail(TaskSummary):
     recent_updates: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class OrbitFiles(BaseModel):
+class MissionCacheFiles(BaseModel):
     """Orbit file paths for a task."""
 
     task_dir: str

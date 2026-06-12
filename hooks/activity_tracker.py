@@ -16,9 +16,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Plugin-bundled orbit-db, made importable from the subprocess via PYTHONPATH
+# Plugin-bundled missioncache-db, made importable from the subprocess via PYTHONPATH
 # so marketplace installs work without requiring a system `pip install`.
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
 
 SKIP_PATTERNS = [
     re.compile(r"^/\w+"),        # Slash commands
@@ -60,15 +60,15 @@ def main():
     session_id = data.get("session_id", "")
 
     env = {**os.environ, "CLAUDE_SESSION_ID": session_id}
-    if _BUNDLED_ORBIT_DB.is_dir():
+    if _BUNDLED_MISSIONCACHE_DB.is_dir():
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = (
-            f"{_BUNDLED_ORBIT_DB}{os.pathsep}{existing}" if existing else str(_BUNDLED_ORBIT_DB)
+            f"{_BUNDLED_MISSIONCACHE_DB}{os.pathsep}{existing}" if existing else str(_BUNDLED_MISSIONCACHE_DB)
         )
 
     try:
         subprocess.run(
-            [sys.executable, "-m", "orbit_db", "heartbeat-auto"],
+            [sys.executable, "-m", "missioncache_db", "heartbeat-auto"],
             cwd=cwd,
             timeout=2,
             capture_output=True,

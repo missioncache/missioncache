@@ -1,8 +1,8 @@
-"""Tests for orbit_auto.models module."""
+"""Tests for missioncache_auto.models module."""
 
 from datetime import datetime
 
-from orbit_auto.models import Config, State, Task, TaskStatus
+from missioncache_auto.models import Config, State, Task, TaskStatus
 
 
 class TestTaskDisplayId:

@@ -1,5 +1,5 @@
 """
-Database logging for orbit-auto executions.
+Database logging for missioncache-auto executions.
 
 Integrates with the orbit task database to log execution runs
 and their output for dashboard visualization.
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from orbit_auto.models import Config
+    from missioncache_auto.models import Config
 
 _migration_warned = False
 
@@ -31,19 +31,19 @@ def warn_if_migration_required() -> None:
     if _migration_warned:
         return
     try:
-        from orbit_db import OrbitMigrationRequired, check_legacy_paths
+        from missioncache_db import MissionCacheMigrationRequired, check_legacy_paths
     except ImportError:
         return
     try:
         check_legacy_paths()
-    except OrbitMigrationRequired as e:
+    except MissionCacheMigrationRequired as e:
         _migration_warned = True
-        print(f"orbit-auto: dashboard logging disabled:\n{e}", file=sys.stderr)
+        print(f"missioncache-auto: dashboard logging disabled:\n{e}", file=sys.stderr)
 
 
 class ExecutionLogger:
     """
-    Logs orbit-auto execution runs to the task database.
+    Logs missioncache-auto execution runs to the task database.
 
     This enables the dashboard to display execution history,
     progress, and streaming logs.
@@ -86,9 +86,9 @@ class ExecutionLogger:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize database connection if orbit_db is available.
+        """Initialize database connection if missioncache_db is available.
 
-        Logging is optional: if orbit_db isn't installed (ImportError) we
+        Logging is optional: if missioncache_db isn't installed (ImportError) we
         run silently, and a missing DB on a fresh install is a deliberate
         no-op. A missing DB caused by unmigrated legacy data warns once
         per process via warn_if_migration_required. Unexpected TaskDB
@@ -97,7 +97,7 @@ class ExecutionLogger:
         worse default.
         """
         try:
-            from orbit_db import DB_PATH, TaskDB
+            from missioncache_db import DB_PATH, TaskDB
 
             if DB_PATH.exists():
                 self._db = TaskDB(str(DB_PATH))
@@ -111,7 +111,7 @@ class ExecutionLogger:
             # flooding stderr.
             first_line = str(e).splitlines()[0] if str(e) else ""
             print(
-                f"orbit-auto: dashboard logging disabled ({type(e).__name__}: {first_line})",
+                f"missioncache-auto: dashboard logging disabled ({type(e).__name__}: {first_line})",
                 file=sys.stderr,
             )
 
@@ -332,5 +332,5 @@ def create_logger(
     config: Optional[Config] = None,
     mode: str = "parallel",
 ) -> ExecutionLogger:
-    """Create an execution logger for orbit-auto."""
+    """Create an execution logger for missioncache-auto."""
     return ExecutionLogger(task_name, config, mode)

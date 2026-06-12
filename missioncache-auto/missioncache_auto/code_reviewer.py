@@ -1,5 +1,5 @@
 """
-Optional two-stage code review for orbit-auto tasks.
+Optional two-stage code review for missioncache-auto tasks.
 
 Runs after a task completes successfully:
 - Stage 1 (spec compliance): Checks implementation matches the prompt spec
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orbit_auto.claude_runner import ClaudeRunner
-from orbit_auto.models import Visibility
+from missioncache_auto.claude_runner import ClaudeRunner
+from missioncache_auto.models import Visibility
 
 
 def run_tdd_review(

@@ -1,7 +1,7 @@
-"""Tests for orbit_auto.plan_validator module."""
+"""Tests for missioncache_auto.plan_validator module."""
 
-from orbit_auto.dag import DAG
-from orbit_auto.plan_validator import Severity, ValidationIssue, has_errors, validate_plan
+from missioncache_auto.dag import DAG
+from missioncache_auto.plan_validator import Severity, ValidationIssue, has_errors, validate_plan
 
 
 def _write_prompt(prompts_dir, task_id, title="Task", deps=None, has_criteria=True):

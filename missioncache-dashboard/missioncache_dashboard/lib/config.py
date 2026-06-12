@@ -140,9 +140,9 @@ def set_repo_overrides(overrides: dict[str, dict[str, Any]]) -> None:
 def get_dashboard_url() -> str:
     """Return the dashboard URL.
 
-    Precedence: ORBIT_DASHBOARD_URL env var, config file, hardcoded default.
+    Precedence: MISSIONCACHE_DASHBOARD_URL env var, config file, hardcoded default.
     """
-    return os.environ.get("ORBIT_DASHBOARD_URL") or _read()["dashboard_url"]
+    return os.environ.get("MISSIONCACHE_DASHBOARD_URL") or _read()["dashboard_url"]
 
 
 def get_statusline_config() -> dict[str, Any]:

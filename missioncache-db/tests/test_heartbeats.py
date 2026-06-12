@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from orbit_db import TaskDB
+from missioncache_db import TaskDB
 
 
 @pytest.fixture

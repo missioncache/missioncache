@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from orbit_db import (
+from missioncache_db import (
     AutoRunActiveError,
     FilesystemCollisionError,
     NameCollisionError,
@@ -19,7 +19,7 @@ from .db import get_db
 from .errors import (
     ErrorCode,
     InvalidStateError,
-    OrbitError,
+    MissionCacheError,
     TaskNotFoundError,
     ValidationError,
 )
@@ -321,7 +321,7 @@ async def get_task(
 
         return result
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting task")
@@ -347,7 +347,7 @@ async def find_task_for_directory(
     """
     Find the active task for a given directory.
 
-    Lookup priority (see orbit_db.find_task_for_cwd):
+    Lookup priority (see missioncache_db.find_task_for_cwd):
     1. pending-project.json (cwd match)
     2. projects/<session_id>.json - requires session_id arg
     3. cwd under ~/.orbit/active/<task>/
@@ -368,7 +368,7 @@ async def find_task_for_directory(
         detail = _task_to_detail(task, include_subtasks=False, include_updates=False)
         return {"found": True, "task": detail.model_dump()}
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error finding task for directory")
@@ -448,8 +448,8 @@ async def create_task(
             else:
                 repo_id = repo.id
 
-            # Create active/<name>/ directory under ORBIT_ROOT
-            task_dir = settings.orbit_root / settings.active_dir_name / name
+            # Create active/<name>/ directory under MISSIONCACHE_ROOT
+            task_dir = settings.root / settings.active_dir_name / name
             task_dir.mkdir(parents=True, exist_ok=True)
             orbit_path = str(task_dir)
 
@@ -480,7 +480,7 @@ async def create_task(
         result["session_bound"] = session_bound
         return result
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error creating task")
@@ -531,9 +531,9 @@ async def complete_task(
 
         # Move files if requested
         if move_files and task.task_type == "coding":
-            source = settings.orbit_root / task.full_path
+            source = settings.root / task.full_path
             if source.exists():
-                dest = settings.orbit_root / settings.completed_dir_name / task.name
+                dest = settings.root / settings.completed_dir_name / task.name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(source), str(dest))
                 logger.info(f"Moved {source} to {dest}")
@@ -550,7 +550,7 @@ async def complete_task(
             time_total_formatted=db.format_duration(time_total),
         ).model_dump()
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error completing task")
@@ -602,9 +602,9 @@ async def reopen_task(
 
         # Move files back if requested
         if move_files and task.task_type == "coding":
-            source = settings.orbit_root / settings.completed_dir_name / task.name
+            source = settings.root / settings.completed_dir_name / task.name
             if source.exists():
-                dest = settings.orbit_root / settings.active_dir_name / task.name
+                dest = settings.root / settings.active_dir_name / task.name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(source), str(dest))
                 logger.info(f"Moved {source} to {dest}")
@@ -619,7 +619,7 @@ async def reopen_task(
             new_status="active",
         ).model_dump()
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error reopening task")
@@ -656,7 +656,7 @@ async def rename_task(
     Refuses to rename when:
     - Another project in the same repo has the target name (ALREADY_EXISTS)
     - The target orbit directory already exists on disk (ALREADY_EXISTS)
-    - An orbit-auto run is in progress on the project (INVALID_STATE)
+    - An missioncache-auto run is in progress on the project (INVALID_STATE)
     - The task is a subtask (VALIDATION_ERROR; rename the parent instead)
     """
     db = get_db()
@@ -679,9 +679,9 @@ async def rename_task(
         try:
             result = db.rename_task(task.id, new_name)
         except NameCollisionError as e:
-            raise OrbitError(ErrorCode.ALREADY_EXISTS, str(e))
+            raise MissionCacheError(ErrorCode.ALREADY_EXISTS, str(e))
         except FilesystemCollisionError as e:
-            raise OrbitError(ErrorCode.ALREADY_EXISTS, str(e))
+            raise MissionCacheError(ErrorCode.ALREADY_EXISTS, str(e))
         except AutoRunActiveError as e:
             raise InvalidStateError(str(e), current_state="auto-running")
         except ValueError as e:
@@ -705,7 +705,7 @@ async def rename_task(
             warnings=result.get("warnings", []),
         ).model_dump()
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error renaming task")
@@ -743,7 +743,7 @@ async def add_task_update(
             "note": note,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error adding task update")
@@ -772,7 +772,7 @@ async def get_task_updates(
             "total_count": len(updates),
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting task updates")

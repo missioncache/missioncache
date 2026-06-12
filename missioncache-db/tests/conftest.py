@@ -1,9 +1,9 @@
-"""Shared fixtures for orbit-db tests."""
+"""Shared fixtures for missioncache-db tests."""
 
 import pytest
 from pathlib import Path
 
-from orbit_db import TaskDB
+from missioncache_db import TaskDB
 
 
 @pytest.fixture

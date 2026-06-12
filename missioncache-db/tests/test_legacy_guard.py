@@ -1,10 +1,10 @@
 """Tests for the legacy-path migration guard.
 
-Covers the OrbitMigrationRequired exception raised by TaskDB.__init__ when
+Covers the MissionCacheMigrationRequired exception raised by TaskDB.__init__ when
 orbit data exists at the pre-Phase-11 ~/.claude/ paths but the new
 ~/.orbit/tasks.db hasn't been created yet.
 
-The guard reads module-level DB_PATH / _LEGACY_DB / _LEGACY_ORBIT_ROOT at
+The guard reads module-level DB_PATH / _LEGACY_DB / _LEGACY_MISSIONCACHE_ROOT at
 call time so tests can monkeypatch them to point at tmp paths instead of
 the real user home.
 """
@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit_db
-from orbit_db import OrbitMigrationRequired, TaskDB
+import missioncache_db
+from missioncache_db import MissionCacheMigrationRequired, TaskDB
 
 
 @pytest.fixture
@@ -30,9 +30,9 @@ def isolated_paths(tmp_path, monkeypatch):
     legacy_db = legacy_dir / "tasks.db"
     legacy_orbit = legacy_dir / "orbit"
 
-    monkeypatch.setattr(orbit_db, "DB_PATH", new_db)
-    monkeypatch.setattr(orbit_db, "_LEGACY_DB", legacy_db)
-    monkeypatch.setattr(orbit_db, "_LEGACY_ORBIT_ROOT", legacy_orbit)
+    monkeypatch.setattr(missioncache_db, "DB_PATH", new_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", legacy_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", legacy_orbit)
 
     return SimpleNamespace(
         new_db=new_db,
@@ -60,7 +60,7 @@ def test_legacy_db_only_raises(isolated_paths):
     """Legacy DB present but new not -> migration required."""
     isolated_paths.legacy_db.parent.mkdir(parents=True)
     isolated_paths.legacy_db.touch()
-    with pytest.raises(OrbitMigrationRequired) as exc_info:
+    with pytest.raises(MissionCacheMigrationRequired) as exc_info:
         TaskDB(db_path=isolated_paths.new_db)
     msg = str(exc_info.value)
     assert "legacy ~/.claude/ paths" in msg
@@ -70,7 +70,7 @@ def test_legacy_db_only_raises(isolated_paths):
 def test_legacy_orbit_dir_only_raises(isolated_paths):
     """Legacy orbit dir present but new DB not -> migration required."""
     isolated_paths.legacy_orbit.mkdir(parents=True)
-    with pytest.raises(OrbitMigrationRequired):
+    with pytest.raises(MissionCacheMigrationRequired):
         TaskDB(db_path=isolated_paths.new_db)
 
 
@@ -87,7 +87,7 @@ def test_both_legacy_and_new_present(isolated_paths):
 
 
 def test_exception_is_runtime_error_subclass():
-    """OrbitMigrationRequired must be catchable by `except Exception`,
+    """MissionCacheMigrationRequired must be catchable by `except Exception`,
     not BaseException-only like SystemExit. Hooks rely on this."""
-    assert issubclass(OrbitMigrationRequired, RuntimeError)
-    assert issubclass(OrbitMigrationRequired, Exception)
+    assert issubclass(MissionCacheMigrationRequired, RuntimeError)
+    assert issubclass(MissionCacheMigrationRequired, Exception)
