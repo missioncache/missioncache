@@ -2783,3 +2783,139 @@ class TestParallelSessionDetection:
         assert mod._projects_for_sessions(["sid-a"]) == {}
         err = capsys.readouterr().err
         assert "project_state" not in err
+
+
+# ── activity_tracker ──────────────────────────────────────────────────────
+
+
+class TestActivityTracker:
+    """Tests for the UserPromptSubmit heartbeat hook (activity_tracker.py).
+
+    The hook is a thin wrapper around a subprocess invocation; its contract
+    is exactly the argv, env, and exception-swallowing behavior. These tests
+    are the rename tripwire for the bundled-orbit-db wiring: any mechanical
+    rename sweep that renames the ``orbit_db`` module or the bundled
+    ``orbit-db`` directory must update the literals here too, or the hook
+    breaks silently on every prompt.
+    """
+
+    def _reload_module(self):
+        import importlib
+        import hooks.activity_tracker as mod
+
+        importlib.reload(mod)
+        return mod
+
+    def _feed_stdin(self, monkeypatch, payload: dict) -> None:
+        monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
+
+    def test_invokes_orbit_db_heartbeat_auto_with_exact_argv(self, monkeypatch):
+        """argv must be exactly [sys.executable, "-m", "orbit_db", "heartbeat-auto"].
+
+        This is the rename tripwire. The literal "orbit_db" is the Python
+        module name spawned by the subprocess; the literal "heartbeat-auto"
+        is the CLI subcommand on that module. A rename sweep that misses
+        either string here would silently break time tracking for every
+        prompt without raising - the hook swallows OSError from a missing
+        module.
+        """
+        recorded: dict = {}
+
+        def _recorder(argv, **kwargs):
+            recorded["argv"] = argv
+            recorded["kwargs"] = kwargs
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(subprocess, "run", _recorder)
+        self._feed_stdin(
+            monkeypatch,
+            {"prompt": "do something real", "session_id": "sid-x", "cwd": "/tmp"},
+        )
+
+        mod = self._reload_module()
+        mod.main()
+
+        assert recorded["argv"] == [sys.executable, "-m", "orbit_db", "heartbeat-auto"]
+
+    def test_subprocess_env_carries_bundled_orbit_db_on_pythonpath(self, monkeypatch):
+        """PYTHONPATH passed to the subprocess must contain the bundled
+        ``orbit-db`` directory path segment.
+
+        The marketplace install ships orbit-db source inside the plugin tree
+        rather than installing it to site-packages, so the subprocess can
+        only import it if the bundled dir is on PYTHONPATH. A rename of
+        either the bundled dir name or the env-var injection logic must
+        be caught here.
+        """
+        recorded: dict = {}
+
+        def _recorder(argv, **kwargs):
+            recorded["env"] = kwargs.get("env")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(subprocess, "run", _recorder)
+        self._feed_stdin(
+            monkeypatch,
+            {"prompt": "do something real", "session_id": "sid-x", "cwd": "/tmp"},
+        )
+
+        mod = self._reload_module()
+        mod.main()
+
+        env = recorded["env"]
+        assert env is not None, "subprocess.run must be called with an explicit env="
+        assert "PYTHONPATH" in env
+        bundled = str(mod._BUNDLED_ORBIT_DB)
+        # The bundled dir must appear as a discrete segment of PYTHONPATH
+        # (split on os.pathsep) so existing PYTHONPATH entries can coexist
+        # without breaking the subprocess import.
+        segments = env["PYTHONPATH"].split(os.pathsep)
+        assert bundled in segments, (
+            f"PYTHONPATH segments {segments!r} must include bundled orbit-db dir "
+            f"{bundled!r} so the subprocess can import the module."
+        )
+
+    def test_subprocess_env_carries_claude_session_id(self, monkeypatch):
+        """CLAUDE_SESSION_ID is the only signal the heartbeat subprocess has
+        for which session this prompt belongs to. Lock the env var name and
+        the value pass-through so a rename of the env var (or accidentally
+        dropping the wiring) is caught.
+        """
+        recorded: dict = {}
+
+        def _recorder(argv, **kwargs):
+            recorded["env"] = kwargs.get("env")
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(subprocess, "run", _recorder)
+        self._feed_stdin(
+            monkeypatch,
+            {"prompt": "real work", "session_id": "abc-123", "cwd": "/tmp"},
+        )
+
+        mod = self._reload_module()
+        mod.main()
+
+        assert recorded["env"]["CLAUDE_SESSION_ID"] == "abc-123"
+
+    def test_oserror_from_subprocess_is_swallowed(self, monkeypatch):
+        """The hook contract documents ``except (TimeoutExpired, OSError): pass``
+        so a missing python interpreter, broken venv, or fork() failure does
+        not crash Claude Code on prompt submit. Without this test, a refactor
+        that narrows the except clause would slip through review and start
+        propagating exceptions on every prompt.
+        """
+
+        def _exploder(argv, **kwargs):
+            raise OSError("simulated fork failure")
+
+        monkeypatch.setattr(subprocess, "run", _exploder)
+        self._feed_stdin(
+            monkeypatch,
+            {"prompt": "work", "session_id": "sid-x", "cwd": "/tmp"},
+        )
+
+        mod = self._reload_module()
+        # Must not raise. The hook is a fire-and-forget side effect; any
+        # exception here would interrupt the user's prompt submission.
+        mod.main()
