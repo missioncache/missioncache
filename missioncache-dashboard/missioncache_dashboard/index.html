@@ -6840,8 +6840,8 @@
         // =============================================================================
         // Rename Project (modal inline form)
         // =============================================================================
-        // The regex MUST stay in sync with orbit-db's _TASK_NAME_RE
-        // (orbit-db/orbit_db/__init__.py). Server-side validation runs again
+        // The regex MUST stay in sync with missioncache-db's _TASK_NAME_RE
+        // (missioncache-db/missioncache_db/__init__.py). Server-side validation runs again
         // anyway - this is just for instant UX feedback.
         const RENAME_TASK_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -6875,7 +6875,7 @@
 
         function _renameClientValidate(name) {
             // Returns null on valid, or a friendly error message string.
-            // Mirrors orbit-db.validate_task_name's three branches.
+            // Mirrors missioncache-db.validate_task_name's three branches.
             if (!name) return 'Project name cannot be empty.';
             if (name.startsWith('-')) {
                 return 'Project name must start with a letter or digit, not a hyphen.';
@@ -6891,7 +6891,7 @@
             const input = document.getElementById('taskRenameInput');
             const status = document.getElementById('taskRenameStatus');
             const raw = input.value;
-            // Trim + lowercase mirrors orbit-db's server-side normalization.
+            // Trim + lowercase mirrors missioncache-db's server-side normalization.
             const normalized = (raw || '').trim().toLowerCase();
 
             const clientError = _renameClientValidate(normalized);
@@ -7204,7 +7204,7 @@
                         ${blockingSummaryHtml}
                         ${data.project_mode !== 'interactive' && runnableCount > 0 ? `
                             <div class="structure-command">
-                                <code>orbit-auto ${data.task_name} -w ${Math.min(runnableCount, 8)}</code>
+                                <code>missioncache-auto ${data.task_name} -w ${Math.min(runnableCount, 8)}</code>
                             </div>
                         ` : ''}
                     </div>

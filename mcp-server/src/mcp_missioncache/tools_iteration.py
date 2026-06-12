@@ -8,7 +8,7 @@ from pydantic import Field
 from . import iteration_log
 from .app import mcp
 from .db import get_db
-from .errors import OrbitError
+from .errors import MissionCacheError
 from .helpers import _resolve_task_dir
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ async def log_iteration(
             "log_file": str(iteration_log.get_iteration_log_path(task_dir, resolved_name)),
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error logging iteration")
@@ -125,7 +125,7 @@ async def log_iteration_completion(
             "duration_seconds": duration_seconds,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error logging iteration completion")
@@ -160,7 +160,7 @@ async def get_iteration_status(
             "prompts": prompts,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting iteration status")

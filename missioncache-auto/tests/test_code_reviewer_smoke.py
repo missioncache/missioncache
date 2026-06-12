@@ -1,17 +1,17 @@
-"""Import-smoke tests for ``orbit_auto.code_reviewer``.
+"""Import-smoke tests for ``missioncache_auto.code_reviewer``.
 
 The module is wired in only when ``--enable-review`` / ``--spec-review-only``
 / ``--tdd`` is passed, so it is invisible to the rest of the test suite
 and any botched rename of an imported symbol would silently survive.
 
 These tests force import-time resolution of its dependencies (importing
-``code_reviewer`` triggers ``from orbit_auto.claude_runner import
-ClaudeRunner`` and ``from orbit_auto.models import Visibility``) and pin
+``code_reviewer`` triggers ``from missioncache_auto.claude_runner import
+ClaudeRunner`` and ``from missioncache_auto.models import Visibility``) and pin
 the public surface so the rename sweep cannot quietly delete or rename
 one of the three review entrypoints.
 """
 
-import orbit_auto.code_reviewer as code_reviewer
+import missioncache_auto.code_reviewer as code_reviewer
 
 
 class TestCodeReviewerImport:
@@ -36,12 +36,12 @@ class TestCodeReviewerImport:
         assert callable(code_reviewer.run_quality_review)
 
     def test_claude_runner_dependency_resolved(self):
-        """The ``from orbit_auto.claude_runner import ClaudeRunner`` line
+        """The ``from missioncache_auto.claude_runner import ClaudeRunner`` line
         at the top of code_reviewer.py executes at import time. If
         ``ClaudeRunner`` is ever renamed without updating this import,
         the smoke test above already fails - this test just makes the
         actual dependency explicit."""
-        from orbit_auto.claude_runner import ClaudeRunner
+        from missioncache_auto.claude_runner import ClaudeRunner
 
         assert ClaudeRunner is not None
 
@@ -49,6 +49,6 @@ class TestCodeReviewerImport:
         """Same idea for ``Visibility`` - it is imported at module top
         and passed into every ``ClaudeRunner(visibility=Visibility.NONE)``
         call inside the review functions."""
-        from orbit_auto.models import Visibility
+        from missioncache_auto.models import Visibility
 
         assert Visibility.NONE in tuple(Visibility)

@@ -2,8 +2,8 @@
 
 import pytest
 
-from mcp_orbit.errors import ValidationError
-from mcp_orbit.orbit import (
+from mcp_missioncache.errors import ValidationError
+from mcp_missioncache.orbit import (
     _append_to_section,
     _update_section,
     format_tasks_markdown,

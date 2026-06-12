@@ -8,7 +8,7 @@ a directed acyclic graph for parallel task execution.
 from collections import defaultdict
 from pathlib import Path
 
-from orbit_auto.models import Task, TaskStatus
+from missioncache_auto.models import Task, TaskStatus
 
 
 class CycleDetectedError(Exception):

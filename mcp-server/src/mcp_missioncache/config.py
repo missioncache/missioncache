@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     db_path: Path = Path.home() / ".orbit" / "tasks.db"
 
     # Centralized orbit root directory
-    orbit_root: Path = Path.home() / ".orbit"
+    root: Path = Path.home() / ".orbit"
 
     # Active and completed subdirectory names
     active_dir_name: str = "active"
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     dashboard_url: str = "http://localhost:8787"
 
     class Config:
-        env_prefix = "ORBIT_"
+        env_prefix = "MISSIONCACHE_"
 
 
 settings = Settings()

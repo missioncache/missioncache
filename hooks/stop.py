@@ -11,10 +11,10 @@ import os
 import sys
 from pathlib import Path
 
-# Bundled orbit-db path for marketplace installs (no system pip install).
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+# Bundled missioncache-db path for marketplace installs (no system pip install).
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
             return
 
         # Check for active task
-        from orbit_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import TaskDB  # type: ignore[import-not-found]
 
         db = TaskDB()
         cwd = input_data.get("cwd", os.getcwd())
@@ -60,9 +60,9 @@ def main():
         if not task.full_path:
             return
 
-        from orbit_db import ORBIT_ROOT
+        from missioncache_db import MISSIONCACHE_ROOT
 
-        task_dir = ORBIT_ROOT / task.full_path
+        task_dir = MISSIONCACHE_ROOT / task.full_path
         has_orbit_files = task_dir.exists() and any(
             (task_dir / f).exists()
             for f in [

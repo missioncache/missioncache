@@ -1,12 +1,12 @@
 """Orbit Dashboard CLI.
 
-Entry point for the `orbit-dashboard` console script. Subcommands:
+Entry point for the `missioncache-dashboard` console script. Subcommands:
 
-    orbit-dashboard serve               Run the dashboard (default).
-    orbit-dashboard install-service     Register as launchd / systemd service.
-    orbit-dashboard uninstall-service   Remove the service.
-    orbit-dashboard reinstall-service   Uninstall + install (Python path fix).
-    orbit-dashboard status              Show installed / running state.
+    missioncache-dashboard serve               Run the dashboard (default).
+    missioncache-dashboard install-service     Register as launchd / systemd service.
+    missioncache-dashboard uninstall-service   Remove the service.
+    missioncache-dashboard reinstall-service   Uninstall + install (Python path fix).
+    missioncache-dashboard status              Show installed / running state.
 
 Platform support: macOS (launchd) and Linux (systemd --user). Windows
 prints manual instructions and exits 0 - Task Scheduler support is
@@ -58,7 +58,7 @@ def render_plist(binary_path: str, port: int) -> str:
         env_block = (
             "    <key>EnvironmentVariables</key>\n"
             "    <dict>\n"
-            f"        <key>ORBIT_DASHBOARD_PORT</key>\n"
+            f"        <key>MISSIONCACHE_DASHBOARD_PORT</key>\n"
             f"        <string>{port}</string>\n"
             "    </dict>\n"
         )
@@ -79,9 +79,9 @@ def render_plist(binary_path: str, port: int) -> str:
         "    <key>KeepAlive</key>\n"
         "    <true/>\n"
         "    <key>StandardOutPath</key>\n"
-        f"    <string>{logs / 'orbit-dashboard-stdout.log'}</string>\n"
+        f"    <string>{logs / 'missioncache-dashboard-stdout.log'}</string>\n"
         "    <key>StandardErrorPath</key>\n"
-        f"    <string>{logs / 'orbit-dashboard-stderr.log'}</string>\n"
+        f"    <string>{logs / 'missioncache-dashboard-stderr.log'}</string>\n"
         f"{env_block}"
         "</dict>\n"
         "</plist>\n"
@@ -90,7 +90,7 @@ def render_plist(binary_path: str, port: int) -> str:
 
 def render_systemd_unit(binary_path: str, port: int) -> str:
     """Render the systemd user unit pointing at the pip-installed binary."""
-    env_line = f"Environment=ORBIT_DASHBOARD_PORT={port}\n" if port != DEFAULT_PORT else ""
+    env_line = f"Environment=MISSIONCACHE_DASHBOARD_PORT={port}\n" if port != DEFAULT_PORT else ""
     return (
         "[Unit]\n"
         "Description=Orbit Dashboard\n"
@@ -150,12 +150,12 @@ def resolve_port(requested: int) -> int:
 
 
 def resolve_binary() -> str:
-    """Return the absolute path of the installed `orbit-dashboard` script."""
-    found = shutil.which("orbit-dashboard")
+    """Return the absolute path of the installed `missioncache-dashboard` script."""
+    found = shutil.which("missioncache-dashboard")
     if not found:
         raise SystemExit(
-            "Could not find `orbit-dashboard` on PATH. This command must be "
-            "run from the same environment where `orbit-dashboard` is pip-"
+            "Could not find `missioncache-dashboard` on PATH. This command must be "
+            "run from the same environment where `missioncache-dashboard` is pip-"
             "installed (pipx, uv tool, or a venv)."
         )
     return found
@@ -179,7 +179,7 @@ def install_launchd(port: int) -> None:
     plist.write_text(render_plist(binary, port))
     subprocess.run(["launchctl", "load", str(plist)], check=True)
     print(f"  launchd service loaded: {LAUNCHD_LABEL}")
-    print(f"  Logs: {log_dir()}/orbit-dashboard-{{stdout,stderr}}.log")
+    print(f"  Logs: {log_dir()}/missioncache-dashboard-{{stdout,stderr}}.log")
 
 
 def uninstall_launchd() -> None:
@@ -219,16 +219,16 @@ def uninstall_systemd() -> None:
 
 
 def cmd_serve(_args: argparse.Namespace) -> int:
-    """Run the dashboard via uvicorn. Reads ORBIT_DASHBOARD_PORT env var."""
-    import uvicorn  # local import: keeps `orbit-dashboard --help` fast
+    """Run the dashboard via uvicorn. Reads MISSIONCACHE_DASHBOARD_PORT env var."""
+    import uvicorn  # local import: keeps `missioncache-dashboard --help` fast
 
-    port = int(os.environ.get("ORBIT_DASHBOARD_PORT", str(DEFAULT_PORT)))
-    uvicorn.run("orbit_dashboard.server:app", host="127.0.0.1", port=port)
+    port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
+    uvicorn.run("missioncache_dashboard.server:app", host="127.0.0.1", port=port)
     return 0
 
 
 def cmd_install_service(_args: argparse.Namespace) -> int:
-    port = int(os.environ.get("ORBIT_DASHBOARD_PORT", str(DEFAULT_PORT)))
+    port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
     port = resolve_port(port)
 
     if sys.platform == "darwin":
@@ -238,7 +238,7 @@ def cmd_install_service(_args: argparse.Namespace) -> int:
     elif sys.platform == "win32":
         print(
             "Windows service registration is not yet supported.\n"
-            "Run 'orbit-dashboard serve' manually, or add your own Task "
+            "Run 'missioncache-dashboard serve' manually, or add your own Task "
             "Scheduler entry. See docs/installation.md#windows."
         )
         return 0
@@ -311,7 +311,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="orbit-dashboard",
+        prog="missioncache-dashboard",
         description="Orbit Dashboard - task analytics and autonomous execution monitoring.",
     )
     sub = parser.add_subparsers(dest="command")

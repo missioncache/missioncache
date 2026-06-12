@@ -32,7 +32,7 @@ class Visibility(str, Enum):
 
 @dataclass
 class Task:
-    """Represents a single task in the orbit-auto loop."""
+    """Represents a single task in the missioncache-auto loop."""
 
     id: str
     title: str
@@ -56,7 +56,7 @@ class Task:
 
 @dataclass
 class State:
-    """State of the entire orbit-auto execution."""
+    """State of the entire missioncache-auto execution."""
 
     status: str  # "running", "completed", "failed"
     started: datetime
@@ -104,7 +104,7 @@ class State:
 
 @dataclass
 class Config:
-    """Configuration for orbit-auto execution."""
+    """Configuration for missioncache-auto execution."""
 
     max_workers: int = 8
     max_retries: int = 3
@@ -172,9 +172,9 @@ class TaskPaths:
     @classmethod
     def from_task_name(cls, task_name: str) -> "TaskPaths":
         """Create TaskPaths from task name. Uses centralized orbit root."""
-        from orbit_db import ORBIT_ROOT
+        from missioncache_db import MISSIONCACHE_ROOT
 
-        task_dir = ORBIT_ROOT / "active" / task_name
+        task_dir = MISSIONCACHE_ROOT / "active" / task_name
         return cls(
             task_dir=task_dir,
             tasks_file=task_dir / f"{task_name}-tasks.md",

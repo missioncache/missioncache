@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from orbit_db import TaskDB
+from missioncache_db import TaskDB
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ class TestInitialize:
     def test_auto_init_without_explicit_initialize(self, tmp_path):
         """A bare TaskDB() + query should work without calling initialize() first.
 
-        Regression: the `orbit-db list-active` CLI (and any other first-time
+        Regression: the `missioncache-db list-active` CLI (and any other first-time
         caller) used to crash with `sqlite3.OperationalError: no such table:
         tasks` because __init__ only created an empty DB file. Fresh connection
         opens now auto-run the idempotent schema DDL.

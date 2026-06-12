@@ -7,7 +7,7 @@ from pydantic import Field
 
 from .app import mcp
 from .db import get_db, repo_to_dict
-from .errors import ErrorCode, OrbitError, TaskNotFoundError, ValidationError
+from .errors import ErrorCode, MissionCacheError, TaskNotFoundError, ValidationError
 from .helpers import _resolve_to_git_root, _validate_path
 from .models import HeartbeatResult, ProcessHeartbeatsResult
 
@@ -64,7 +64,7 @@ async def record_heartbeat(
             task_name=task.name if task else "",
         ).model_dump()
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error recording heartbeat")
@@ -124,7 +124,7 @@ async def get_task_time(
             "session_count": sessions,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting task time")
@@ -177,7 +177,7 @@ async def add_repo(
             "short_name": repo.short_name if repo else short_name,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error adding repo")
@@ -240,7 +240,7 @@ async def set_task_repo(
         )
         repo = db.get_repo_by_path(target_repo_path)
         if not repo:
-            raise OrbitError(
+            raise MissionCacheError(
                 ErrorCode.REPO_NOT_FOUND,
                 f"Repository at {target_repo_path!r} is not registered. Call add_repo first.",
                 {"repo_path": target_repo_path},
@@ -271,7 +271,7 @@ async def set_task_repo(
             "repo_path": target_repo_path,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error setting task repo")

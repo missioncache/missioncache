@@ -4,7 +4,7 @@ Covers the full rename primitive: normalization, validation, no-op,
 DB+FS collision detection, active-auto guard, file rename, H1 rewrite
 (matched + edited), DB+FS atomicity, and session-pointer sweep.
 
-Tests sandbox both ORBIT_ROOT (via monkeypatching the module constant)
+Tests sandbox both MISSIONCACHE_ROOT (via monkeypatching the module constant)
 and ~/.claude/ (via monkeypatching Path.home) so they never touch the
 user's real orbit data.
 """
@@ -17,8 +17,8 @@ import sqlite3
 
 import pytest
 
-import orbit_db
-from orbit_db import (
+import missioncache_db
+from missioncache_db import (
     AutoRunActiveError,
     FilesystemCollisionError,
     NameCollisionError,
@@ -28,7 +28,7 @@ from orbit_db import (
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """TaskDB + sandboxed ORBIT_ROOT + sandboxed Path.home().
+    """TaskDB + sandboxed MISSIONCACHE_ROOT + sandboxed Path.home().
 
     Returns (db, orbit_root, fake_home) so tests can introspect both
     the filesystem state and the seeded session pointers.
@@ -38,12 +38,12 @@ def env(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    monkeypatch.setattr(orbit_db, "ORBIT_ROOT", orbit_root)
+    monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", orbit_root)
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
     # HOOKS_STATE_DB_PATH was captured with the real Path.home() at import time;
     # redirect to the sandbox so the rename sweep writes there too.
     monkeypatch.setattr(
-        orbit_db, "HOOKS_STATE_DB_PATH", fake_home / ".claude" / "hooks-state.db"
+        missioncache_db, "HOOKS_STATE_DB_PATH", fake_home / ".claude" / "hooks-state.db"
     )
 
     db_path = tmp_path / "tasks.db"
@@ -285,7 +285,7 @@ class TestRenameCollisions:
             db.rename_task(tid, "orphan-dir")
 
 
-# ── active orbit-auto guard ───────────────────────────────────────────────
+# ── active missioncache-auto guard ───────────────────────────────────────────────
 
 
 class TestRenameAutoGuard:
@@ -300,7 +300,7 @@ class TestRenameAutoGuard:
             )
             conn.commit()
 
-        with pytest.raises(AutoRunActiveError, match="orbit-auto is running"):
+        with pytest.raises(AutoRunActiveError, match="missioncache-auto is running"):
             db.rename_task(tid, "new-name")
 
     def test_completed_auto_execution_does_not_block(self, env):
@@ -373,7 +373,7 @@ class TestRenameNonCoding:
 class TestRenameSessionSweep:
     def test_pending_task_json_no_longer_swept(self, env):
         """The legacy ``pending-task.json`` file is no longer maintained
-        by rename_task as of orbit-db 1.0.4 / mcp-orbit 0.2.13. The file
+        by rename_task as of missioncache-db 1.0.4 / mcp-missioncache 0.2.13. The file
         is documented as vestigial state (see docs/hooks.md); the per-
         session ``projects/<sid>.json`` pointer is the only live writer.
 

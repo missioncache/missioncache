@@ -7,7 +7,7 @@ update_tasks_file completed-numbers diff.
 
 from __future__ import annotations
 
-from mcp_orbit.tasks_parse import (
+from mcp_missioncache.tasks_parse import (
     ChecklistItem,
     find_item,
     parse_tasks_md,

@@ -5,7 +5,7 @@ lines like ``- [ ] 54a. M11.2 - VSCode statusline extension``. Parsing
 is consumed by the MCP tool layer (validating task numbers passed to
 ``set_active_orbit_tasks``) and the ``update_tasks_file`` completion
 diff. The statusline has its own duplicate of the regex to keep
-orbit-dashboard free of any mcp_orbit dependency.
+missioncache-dashboard free of any mcp_missioncache dependency.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 [project]
-name = "orbit-pm-tests"
+name = "missioncache-tests"
 version = "0.0.0"
 requires-python = ">=3.11"
 
@@ -9,10 +9,9 @@ test = ["pytest>=7.0", "pytest-cov>=4.0"]
 [tool.pytest.ini_options]
 testpaths = [
     "mcp-server/tests",
-    "orbit-db/tests",
-    "orbit-auto/tests",
-    "orbit-dashboard/tests",
+    "missioncache-db/tests",
+    "missioncache-auto/tests",
+    "missioncache-dashboard/tests",
     "hooks/tests",
-    "statusline/tests",
 ]
 addopts = "-v --tb=short -x --import-mode=importlib"

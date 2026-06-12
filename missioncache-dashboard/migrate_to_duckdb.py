@@ -27,11 +27,11 @@ from typing import Optional
 import duckdb
 
 # Paths
-from orbit_db import DB_PATH, ORBIT_ROOT
+from missioncache_db import DB_PATH, MISSIONCACHE_ROOT
 
 SQLITE_PATH = DB_PATH
-DUCKDB_PATH = ORBIT_ROOT / "tasks.duckdb"
-BACKUP_PATH = ORBIT_ROOT / "tasks.db.backup"
+DUCKDB_PATH = MISSIONCACHE_ROOT / "tasks.duckdb"
+BACKUP_PATH = MISSIONCACHE_ROOT / "tasks.db.backup"
 
 
 def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:

@@ -10,17 +10,17 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from orbit_db import validate_task_name as _orbit_db_validate_task_name
+from missioncache_db import validate_task_name as _missioncache_db_validate_task_name
 
 from .config import settings
-from .errors import ErrorCode, OrbitError, OrbitFileNotFoundError, ValidationError
-from .models import OrbitFiles, TaskProgress
+from .errors import ErrorCode, MissionCacheError, MissionCacheFileNotFoundError, ValidationError
+from .models import MissionCacheFiles, TaskProgress
 from .tasks_parse import parse_tasks_md
 
 
 # NOTE: ``_file_lock`` and ``_atomic_update_text`` below are duplicated in
 # ``hooks/pre_compact.py`` to keep the PreCompact hook self-contained
-# (avoids dragging mcp_orbit's transitive imports into the hook hot path).
+# (avoids dragging mcp_missioncache's transitive imports into the hook hot path).
 # If you change locking semantics here, mirror the change in the hook.
 
 
@@ -62,15 +62,15 @@ def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
 def validate_task_name(name: str) -> None:
     """Validate task name is safe for filesystem and git branch use.
 
-    Delegates to ``orbit_db.validate_task_name`` (the single source of
+    Delegates to ``missioncache_db.validate_task_name`` (the single source of
     truth for the regex and per-branch error messages) and re-raises
     its ``ValueError`` as the structured ``ValidationError`` that mcp
     callers and tests already expect. Keeping the wrap thin here means
-    a future tightening of the rule lands in one place (orbit-db) and
+    a future tightening of the rule lands in one place (missioncache-db) and
     propagates to every surface.
     """
     try:
-        _orbit_db_validate_task_name(name)
+        _missioncache_db_validate_task_name(name)
     except ValueError as e:
         raise ValidationError(str(e), field="task_name") from e
 
@@ -124,12 +124,12 @@ def format_tasks_markdown(tasks: list) -> tuple[str, int]:
 
 
 def get_task_dir(task_name: str, active: bool = True) -> Path:
-    """Get the task directory path under ORBIT_ROOT."""
+    """Get the task directory path under MISSIONCACHE_ROOT."""
     subdir = settings.active_dir_name if active else settings.completed_dir_name
-    return settings.orbit_root / subdir / task_name
+    return settings.root / subdir / task_name
 
 
-def get_orbit_files(task_name: str, full_path: str | None = None) -> OrbitFiles:
+def get_orbit_files(task_name: str, full_path: str | None = None) -> MissionCacheFiles:
     """Get paths to all orbit files for a task.
 
     When ``full_path`` is given (e.g. ``active/parent/subtask`` for nested
@@ -139,7 +139,7 @@ def get_orbit_files(task_name: str, full_path: str | None = None) -> OrbitFiles:
     "create files" - which would otherwise overwrite the archived content.
     """
     if full_path:
-        candidate_dirs = [settings.orbit_root / full_path]
+        candidate_dirs = [settings.root / full_path]
     else:
         candidate_dirs = [
             get_task_dir(task_name, active=True),
@@ -167,7 +167,7 @@ def get_orbit_files(task_name: str, full_path: str | None = None) -> OrbitFiles:
 
     prompts_dir = chosen_dir / "prompts"
 
-    return OrbitFiles(
+    return MissionCacheFiles(
         task_dir=str(chosen_dir),
         plan_file=plan_file,
         context_file=context_file,
@@ -184,8 +184,8 @@ def create_orbit_files(
     tasks: list[str] | None = None,
     plan_content: dict[str, str] | None = None,
     force: bool = False,
-) -> OrbitFiles:
-    """Create orbit files for a task under ORBIT_ROOT.
+) -> MissionCacheFiles:
+    """Create orbit files for a task under MISSIONCACHE_ROOT.
 
     Args:
         task_name: Task name (kebab-case)
@@ -195,12 +195,12 @@ def create_orbit_files(
         tasks: List of task descriptions for tasks.md
         plan_content: Optional dict with plan sections (summary, goals, etc.)
         force: If True, overwrite existing files. If False (default), raise
-            OrbitError(ALREADY_EXISTS) when any of plan/context/tasks already
+            MissionCacheError(ALREADY_EXISTS) when any of plan/context/tasks already
             exist on disk for this task. Prevents silent data loss when the
             same name is reused.
 
     Returns:
-        OrbitFiles with paths to created files
+        MissionCacheFiles with paths to created files
     """
     validate_task_name(task_name)
     task_dir = get_task_dir(task_name)
@@ -223,7 +223,7 @@ def create_orbit_files(
             if p.exists()
         ]
         if existing:
-            raise OrbitError(
+            raise MissionCacheError(
                 ErrorCode.ALREADY_EXISTS,
                 f"Orbit files for '{task_name}' already exist. "
                 f"Pass force=True to overwrite, or pick a different name.",
@@ -237,7 +237,7 @@ def create_orbit_files(
     task_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = get_timestamp()
-    templates = resources.files("mcp_orbit.templates")
+    templates = resources.files("mcp_missioncache.templates")
 
     # Create context.md
     context_template = templates.joinpath("context.md").read_text()
@@ -299,7 +299,7 @@ def create_orbit_files(
     plan_file = task_dir / f"{task_name}-plan.md"
     plan_file.write_text(plan_md)
 
-    return OrbitFiles(
+    return MissionCacheFiles(
         task_dir=str(task_dir),
         plan_file=str(plan_file),
         context_file=str(context_file),
@@ -331,7 +331,7 @@ def update_context_file(
     """
     path = Path(context_file)
     if not path.exists():
-        raise OrbitFileNotFoundError(str(path))
+        raise MissionCacheFileNotFoundError(str(path))
 
     def _transform(content: str) -> str:
         # Stamp inside the lock so serialized writers each get a fresh
@@ -457,7 +457,7 @@ def update_tasks_file(
     """
     path = Path(tasks_file)
     if not path.exists():
-        raise OrbitFileNotFoundError(str(path))
+        raise MissionCacheFileNotFoundError(str(path))
 
     updates_made: list[str] = []
     completed_numbers_seen: list[str] = []

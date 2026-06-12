@@ -1,5 +1,5 @@
 """
-Worker process for parallel orbit-auto execution.
+Worker process for parallel missioncache-auto execution.
 
 Each worker claims and executes tasks atomically,
 respecting dependencies via the shared state manager.
@@ -10,12 +10,12 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from orbit_auto.claude_runner import ClaudeRunner
-from orbit_auto.dag import DAG
-from orbit_auto.db_logger import ExecutionLogger, warn_if_migration_required
-from orbit_auto.models import Visibility
-from orbit_auto.state import StateManager
-from orbit_auto.task_parser import extract_prompt_content, parse_prompt_yaml
+from missioncache_auto.claude_runner import ClaudeRunner
+from missioncache_auto.dag import DAG
+from missioncache_auto.db_logger import ExecutionLogger, warn_if_migration_required
+from missioncache_auto.models import Visibility
+from missioncache_auto.state import StateManager
+from missioncache_auto.task_parser import extract_prompt_content, parse_prompt_yaml
 
 
 def _extract_task_title(prompt_file: Path) -> str:
@@ -131,7 +131,7 @@ class Worker:
     def _init_db_logger(self) -> None:
         """Initialize the database logger for this worker."""
         try:
-            from orbit_db import DB_PATH, TaskDB
+            from missioncache_db import DB_PATH, TaskDB
 
             db_path = DB_PATH
             if not db_path.exists():
@@ -155,7 +155,7 @@ class Worker:
 
             first_line = str(e).splitlines()[0] if str(e) else ""
             print(
-                f"orbit-auto worker {self.worker_id}: db logger disabled ({type(e).__name__}: {first_line})",
+                f"missioncache-auto worker {self.worker_id}: db logger disabled ({type(e).__name__}: {first_line})",
                 file=sys.stderr,
             )
 
@@ -267,7 +267,7 @@ class Worker:
 
         # Stage 0: TDD compliance review (BLOCKING when tdd_mode enabled)
         if self.tdd_mode:
-            from orbit_auto.code_reviewer import run_tdd_review
+            from missioncache_auto.code_reviewer import run_tdd_review
 
             try:
                 passed, summary = run_tdd_review(
@@ -286,7 +286,7 @@ class Worker:
 
         # Stage 1: Spec compliance review (advisory)
         if self.enable_review or self.spec_review_only:
-            from orbit_auto.code_reviewer import run_spec_review
+            from missioncache_auto.code_reviewer import run_spec_review
 
             try:
                 passed, summary = run_spec_review(
@@ -302,7 +302,7 @@ class Worker:
 
         # Stage 2: Code quality review (advisory, unless spec-only mode)
         if self.enable_review:
-            from orbit_auto.code_reviewer import run_quality_review
+            from missioncache_auto.code_reviewer import run_quality_review
 
             try:
                 passed, summary = run_quality_review(

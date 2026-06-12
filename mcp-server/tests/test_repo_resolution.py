@@ -5,7 +5,7 @@ is unenforceable - models can skip the bash step, and non-Claude MCP clients
 have no equivalent. ``create_orbit_files`` and ``set_task_repo`` resolve
 server-side instead, with an explicit ``resolve_git_root=False`` opt-out for
 monorepo sub-package use cases. These tests exercise the wrapper layer
-end-to-end with a temp SQLite + ``ORBIT_ROOT`` so the resolution behavior
+end-to-end with a temp SQLite + ``MISSIONCACHE_ROOT`` so the resolution behavior
 is locked in.
 """
 
@@ -16,13 +16,13 @@ import pathlib
 
 import pytest
 
-from mcp_orbit import db as db_module
-from mcp_orbit import tools_docs, tools_tracking
+from mcp_missioncache import db as db_module
+from mcp_missioncache import tools_docs, tools_tracking
 
 
 @pytest.fixture
 def isolated_orbit(tmp_path, monkeypatch):
-    """Bind ORBIT_ROOT and DB to a temp dir; reset the TaskDB singleton.
+    """Bind MISSIONCACHE_ROOT and DB to a temp dir; reset the TaskDB singleton.
 
     Also guards against test environments where ``tmp_path`` is itself
     nested under a directory with ``.git`` - the walker would climb out
@@ -38,13 +38,13 @@ def isolated_orbit(tmp_path, monkeypatch):
             )
         walker = walker.parent
 
-    orbit_root = tmp_path / ".orbit"
-    orbit_root.mkdir()
+    root_dir = tmp_path / ".orbit"
+    root_dir.mkdir()
     db_path = tmp_path / "tasks.db"
 
-    from mcp_orbit import config, orbit
+    from mcp_missioncache import config, orbit
 
-    monkeypatch.setattr(config.settings, "orbit_root", orbit_root)
+    monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(config.settings, "db_path", db_path)
     monkeypatch.setattr(orbit, "settings", config.settings)
     # Force a fresh TaskDB next get_db() call.

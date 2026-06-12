@@ -7,8 +7,8 @@ no DB or MCP tooling required.
 
 from __future__ import annotations
 
-from mcp_orbit.models import TaskSummary
-from mcp_orbit.tools_tasks import _format_prioritized_display, _format_tasks_table
+from mcp_missioncache.models import TaskSummary
+from mcp_missioncache.tools_tasks import _format_prioritized_display, _format_tasks_table
 
 
 def _summary(

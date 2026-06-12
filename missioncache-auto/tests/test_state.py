@@ -1,13 +1,13 @@
-"""Integration tests for orbit-auto StateManager.
+"""Integration tests for missioncache-auto StateManager.
 
 Tests use tmp_path for the state directory and real file I/O.
 """
 
 import pytest
 
-from orbit_auto.dag import DAG
-from orbit_auto.models import TaskStatus
-from orbit_auto.state import StateManager
+from missioncache_auto.dag import DAG
+from missioncache_auto.models import TaskStatus
+from missioncache_auto.state import StateManager
 
 
 @pytest.fixture

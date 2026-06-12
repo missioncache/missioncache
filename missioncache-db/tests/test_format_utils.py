@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orbit_db import TaskDB
+from missioncache_db import TaskDB
 
 
 class TestFormatDuration:

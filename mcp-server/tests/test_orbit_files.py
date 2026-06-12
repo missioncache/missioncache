@@ -1,15 +1,15 @@
 """Integration tests for orbit file create/update operations.
 
-Tests use tmp_path for all file I/O and monkeypatch to redirect orbit_root.
+Tests use tmp_path for all file I/O and monkeypatch to redirect root_dir.
 """
 
 import re
 
 import pytest
 
-from mcp_orbit.config import Settings
-from mcp_orbit.errors import ErrorCode, OrbitError, OrbitFileNotFoundError
-from mcp_orbit.orbit import (
+from mcp_missioncache.config import Settings
+from mcp_missioncache.errors import ErrorCode, MissionCacheError, MissionCacheFileNotFoundError
+from mcp_missioncache.orbit import (
     create_orbit_files,
     get_orbit_files,
     parse_task_progress,
@@ -19,10 +19,10 @@ from mcp_orbit.orbit import (
 
 
 @pytest.fixture(autouse=True)
-def _redirect_orbit_root(tmp_path, monkeypatch):
-    """Point orbit_root to tmp_path so file operations don't touch real filesystem."""
-    test_settings = Settings(orbit_root=tmp_path / "orbit")
-    monkeypatch.setattr("mcp_orbit.orbit.settings", test_settings)
+def _redirect_root_dir(tmp_path, monkeypatch):
+    """Point root_dir to tmp_path so file operations don't touch real filesystem."""
+    test_settings = Settings(root=tmp_path / "orbit")
+    monkeypatch.setattr("mcp_missioncache.orbit.settings", test_settings)
 
 
 # ── create_orbit_files ────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ class TestCreateOrbitFiles:
         """Re-creating a project with the same name raises ALREADY_EXISTS."""
         create_orbit_files(task_name="dup-task", tasks=["one"])
 
-        with pytest.raises(OrbitError) as excinfo:
+        with pytest.raises(MissionCacheError) as excinfo:
             create_orbit_files(task_name="dup-task", tasks=["two"])
 
         assert excinfo.value.code == ErrorCode.ALREADY_EXISTS
@@ -84,7 +84,7 @@ class TestCreateOrbitFiles:
 
         original_tasks = Path(first.tasks_file).read_text()
 
-        with pytest.raises(OrbitError):
+        with pytest.raises(MissionCacheError):
             create_orbit_files(task_name="preserve-task", tasks=["clobber"])
 
         assert Path(first.tasks_file).read_text() == original_tasks
@@ -113,7 +113,7 @@ class TestCreateOrbitFiles:
         must check both, otherwise fresh prefixed files would shadow
         existing legacy content at read time.
         """
-        from mcp_orbit.orbit import get_task_dir
+        from mcp_missioncache.orbit import get_task_dir
 
         task_dir = get_task_dir("legacy-task")
         task_dir.mkdir(parents=True, exist_ok=True)
@@ -121,7 +121,7 @@ class TestCreateOrbitFiles:
         (task_dir / "context.md").write_text("# legacy context content")
         (task_dir / "tasks.md").write_text("- [ ] legacy task")
 
-        with pytest.raises(OrbitError) as excinfo:
+        with pytest.raises(MissionCacheError) as excinfo:
             create_orbit_files(task_name="legacy-task", tasks=["new"])
 
         assert excinfo.value.code == ErrorCode.ALREADY_EXISTS
@@ -148,12 +148,12 @@ class TestGetOrbitFiles:
         completed project used to report has_orbit_files=False because the
         lookup only scanned active/.
         """
-        from mcp_orbit.orbit import settings
+        from mcp_missioncache.orbit import settings
 
         create_orbit_files(task_name="archived-task", tasks=["done"])
 
-        active_dir = settings.orbit_root / "active" / "archived-task"
-        completed_dir = settings.orbit_root / "completed" / "archived-task"
+        active_dir = settings.root / "active" / "archived-task"
+        completed_dir = settings.root / "completed" / "archived-task"
         completed_dir.parent.mkdir(parents=True, exist_ok=True)
         active_dir.rename(completed_dir)
         assert not active_dir.exists()
@@ -176,11 +176,11 @@ class TestGetOrbitFiles:
     def test_active_takes_priority_over_completed(self, tmp_path):
         """If a project exists in both active/ AND completed/ (e.g., reopened
         without deleting the archived copy), the active version wins."""
-        from mcp_orbit.orbit import settings
+        from mcp_missioncache.orbit import settings
 
         create_orbit_files(task_name="dual-task", tasks=["active-version"])
 
-        completed_dir = settings.orbit_root / "completed" / "dual-task"
+        completed_dir = settings.root / "completed" / "dual-task"
         completed_dir.mkdir(parents=True, exist_ok=True)
         (completed_dir / "dual-task-tasks.md").write_text("completed-version")
 
@@ -549,7 +549,7 @@ class TestAtomicWrites:
         self, tmp_path, sample_tasks_md_hierarchical
     ):
         """N concurrent update_tasks_file calls each marking a different
-        task complete must all land. Mirrors the orbit-auto parallel path
+        task complete must all land. Mirrors the missioncache-auto parallel path
         where multiple workers report progress on disjoint subtasks.
         """
         import threading

@@ -1,8 +1,8 @@
-"""Tests for Pydantic models in mcp_orbit.models."""
+"""Tests for Pydantic models in mcp_missioncache.models."""
 
 import pytest
 
-from mcp_orbit.models import (
+from mcp_missioncache.models import (
     HeartbeatResult,
     ListTasksResult,
     TaskDetail,

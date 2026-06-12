@@ -1,6 +1,6 @@
-"""Tests for orbit_auto.runnable module."""
+"""Tests for missioncache_auto.runnable module."""
 
-from orbit_auto.runnable import (
+from missioncache_auto.runnable import (
     TaskModeInfo,
     _get_sequential_dependencies,
     get_runnable_tasks,

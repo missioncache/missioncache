@@ -7,7 +7,7 @@ A FastAPI server that provides:
 2. Plans APIs - Parallel execution monitoring
 3. Auto APIs - Orbit-auto execution tracking
 
-Port: 8787 (override with ORBIT_DASHBOARD_PORT env var)
+Port: 8787 (override with MISSIONCACHE_DASHBOARD_PORT env var)
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from orbit_dashboard.lib import config
-from orbit_dashboard.lib.analytics_db import (
+from missioncache_dashboard.lib import config
+from missioncache_dashboard.lib.analytics_db import (
     AnalyticsDB,
     get_db,
     get_claude_hourly_activity,
@@ -47,35 +47,35 @@ from orbit_dashboard.lib.analytics_db import (
     import_tasks_md,
 )
 
-# Import SQLite OrbitDB for auto execution queries (these tables are only in SQLite)
-from orbit_db import (
+# Import SQLite MissionCacheDB for auto execution queries (these tables are only in SQLite)
+from missioncache_db import (
     AutoExecution,
     AutoExecutionLog,
     AutoRunActiveError,
     FilesystemCollisionError,
     HOOKS_STATE_DB_PATH,
     NameCollisionError,
-    TaskDB as OrbitTaskDB,
+    TaskDB,
     init_hooks_state_db_schema,
 )
 
 
-def get_sqlite_db() -> OrbitTaskDB:
-    """Get an OrbitDB instance for auto execution queries."""
-    return OrbitTaskDB()
+def get_sqlite_db() -> TaskDB:
+    """Get a MissionCacheDB instance for auto execution queries."""
+    return TaskDB()
 
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
-ORBIT_ROOT = Path.home() / ".orbit"
+MISSIONCACHE_ROOT = Path.home() / ".orbit"
 
 
 def _init_hooks_state_db() -> None:
     """Initialize hooks-state.db with the shared schema and dashboard migrations.
 
-    Schema base lives in ``orbit_db.init_hooks_state_db_schema`` so that hooks
+    Schema base lives in ``missioncache_db.init_hooks_state_db_schema`` so that hooks
     and the dashboard cannot drift on column shapes. Dashboard-specific
     migrations (added columns) layer on top here.
     """
@@ -102,7 +102,7 @@ def _resolve_orbit_path(full_path: str) -> Path:
     """Resolve DB full_path to centralized orbit directory, stripping legacy dev/ prefix."""
     if full_path.startswith("dev/"):
         full_path = full_path[4:]
-    return ORBIT_ROOT / full_path
+    return MISSIONCACHE_ROOT / full_path
 
 
 # Background sync task
@@ -186,7 +186,8 @@ app.add_middleware(
 # Paths
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
-ORBIT_DB_SCRIPT = CLAUDE_DIR / "scripts" / "orbit_db.py"
+# Path literal stays orbit-named until Task 71.
+MISSIONCACHE_DB_SCRIPT = CLAUDE_DIR / "scripts" / "orbit_db.py"
 HOOKS_STATE_DB = HOOKS_STATE_DB_PATH
 
 # Cache TTLs
@@ -859,8 +860,8 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         candidate_dirs = []
 
         # Centralized orbit root (primary)
-        candidate_dirs.append(ORBIT_ROOT / "active" / task_name)
-        candidate_dirs.append(ORBIT_ROOT / "completed" / task_name)
+        candidate_dirs.append(MISSIONCACHE_ROOT / "active" / task_name)
+        candidate_dirs.append(MISSIONCACHE_ROOT / "completed" / task_name)
 
         # Legacy: repo-local paths for unmigrated tasks
         repo = Path(repo_path)
@@ -1388,8 +1389,8 @@ async def api_task_files(task_id: int):
     if not task_dir.exists():
         # Try alternate paths
         possible_paths = [
-            ORBIT_ROOT / "active" / task.name,
-            ORBIT_ROOT / "completed" / task.name,
+            MISSIONCACHE_ROOT / "active" / task.name,
+            MISSIONCACHE_ROOT / "completed" / task.name,
             # Legacy: repo-local paths
             repo_path / "dev" / "active" / task.name,
             repo_path / "dev" / "completed" / task.name,
@@ -1957,7 +1958,7 @@ async def api_auto_projects():
     - Repo short_name (looked up from the task DB)
     """
     projects = []
-    active_dir = ORBIT_ROOT / "active"
+    active_dir = MISSIONCACHE_ROOT / "active"
     db = get_sqlite_db()
 
     if active_dir.exists():
@@ -2440,7 +2441,7 @@ async def update_statusline_settings(payload: StatuslinePayload):
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     """Serve the main dashboard HTML from bundled package data."""
-    html = importlib.resources.files("orbit_dashboard").joinpath("index.html").read_text()
+    html = importlib.resources.files("missioncache_dashboard").joinpath("index.html").read_text()
     return HTMLResponse(html)
 
 
@@ -2466,7 +2467,7 @@ _HEARTBEAT_SKIP_PATTERNS = [
 async def hook_heartbeat(body: dict):
     """HTTP hook: record activity heartbeat on UserPromptSubmit.
 
-    Replaces activity-tracker.sh -> npx tsx -> python3 orbit_db chain.
+    Replaces activity-tracker.sh -> npx tsx -> python3 missioncache_db chain.
     """
     # Skip in subagent context
     if body.get("agent_id"):
@@ -2683,7 +2684,7 @@ async def hook_task_created(body: dict):
 async def rename_task_endpoint(task_id: int, body: dict):
     """Rename a project / task.
 
-    Delegates to ``orbit_db.TaskDB.rename_task`` (the source-of-truth
+    Delegates to ``missioncache_db.TaskDB.rename_task`` (the source-of-truth
     primitive) and triggers a SQLite -> DuckDB sync so the dashboard's
     read endpoints reflect the new name immediately on the next call.
 
@@ -2819,5 +2820,5 @@ async def stream_updates():
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("ORBIT_DASHBOARD_PORT", "8787"))
+    port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", "8787"))
     uvicorn.run(app, host="127.0.0.1", port=port)

@@ -1,6 +1,6 @@
-"""Entry point for running orbit-db as a module: python -m orbit_db"""
+"""Entry point for running missioncache-db as a module: python -m missioncache_db"""
 
-from orbit_db import main
+from missioncache_db import main
 
 if __name__ == "__main__":
     main()

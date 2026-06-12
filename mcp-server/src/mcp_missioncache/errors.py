@@ -18,7 +18,7 @@ class ErrorCode(str, Enum):
     ALREADY_EXISTS = "ALREADY_EXISTS"
 
 
-class OrbitError(Exception):
+class MissionCacheError(Exception):
     """Base exception for orbit errors with structured response."""
 
     def __init__(
@@ -39,7 +39,7 @@ class OrbitError(Exception):
         }
 
 
-class TaskNotFoundError(OrbitError):
+class TaskNotFoundError(MissionCacheError):
     """Task not found in database."""
 
     def __init__(self, task_id: int | str, message: str | None = None):
@@ -50,7 +50,7 @@ class TaskNotFoundError(OrbitError):
         )
 
 
-class OrbitFileNotFoundError(OrbitError):
+class MissionCacheFileNotFoundError(MissionCacheError):
     """File not found on filesystem."""
 
     def __init__(self, path: str, message: str | None = None):
@@ -61,7 +61,7 @@ class OrbitFileNotFoundError(OrbitError):
         )
 
 
-class ValidationError(OrbitError):
+class ValidationError(MissionCacheError):
     """Input validation failed."""
 
     def __init__(self, message: str, field: str | None = None):
@@ -69,7 +69,7 @@ class ValidationError(OrbitError):
         super().__init__(ErrorCode.VALIDATION_ERROR, message, details)
 
 
-class InvalidStateError(OrbitError):
+class InvalidStateError(MissionCacheError):
     """Operation invalid for current state."""
 
     def __init__(

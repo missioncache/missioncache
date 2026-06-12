@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-import orbit_dashboard.statusline as mod
+import missioncache_dashboard.statusline as mod
 
 
 # ── is_version_reviewed ──────────────────────────────────────────────────
@@ -522,7 +522,7 @@ class TestGetProjectInfo:
 
     @staticmethod
     def _seed_binding(tmp_path, monkeypatch, session_id, project_name):
-        """Point HOOKS_STATE_DB + ORBIT_ACTIVE at tmp_path and write a fresh
+        """Point HOOKS_STATE_DB + MISSIONCACHE_ACTIVE at tmp_path and write a fresh
         project_state row for (session_id, project_name)."""
         import sqlite3
         from datetime import datetime
@@ -530,7 +530,7 @@ class TestGetProjectInfo:
         db_path = tmp_path / "hooks-state.db"
         monkeypatch.setattr(mod, "HOOKS_STATE_DB", db_path)
         orbit_active = tmp_path / ".orbit" / "active"
-        monkeypatch.setattr(mod, "ORBIT_ACTIVE", orbit_active)
+        monkeypatch.setattr(mod, "MISSIONCACHE_ACTIVE", orbit_active)
 
         conn = sqlite3.connect(str(db_path))
         try:

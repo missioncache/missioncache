@@ -1,8 +1,8 @@
-"""Tests for orbit_auto.dag module."""
+"""Tests for missioncache_auto.dag module."""
 
 import pytest
 
-from orbit_auto.dag import DAG, CycleDetectedError
+from missioncache_auto.dag import DAG, CycleDetectedError
 
 
 class TestAddTaskAndProperties:

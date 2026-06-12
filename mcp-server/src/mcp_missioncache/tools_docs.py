@@ -10,7 +10,7 @@ from . import active_task, orbit
 from .app import mcp
 from .config import settings
 from .db import get_db
-from .errors import OrbitError, OrbitFileNotFoundError, TaskNotFoundError
+from .errors import MissionCacheError, MissionCacheFileNotFoundError, TaskNotFoundError
 from .helpers import (
     _bind_session_to_project,
     _notify_dashboard_task_created,
@@ -108,7 +108,7 @@ async def create_orbit_files(
         else:
             repo_id = repo.id
 
-        # Create the files under ORBIT_ROOT
+        # Create the files under MISSIONCACHE_ROOT
         files = orbit.create_orbit_files(
             task_name=project_name,
             description=description,
@@ -148,7 +148,7 @@ async def create_orbit_files(
             "session_bound": session_bound,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error creating orbit files")
@@ -202,7 +202,7 @@ async def get_orbit_files(
             "files": files.model_dump(),
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting orbit files")
@@ -234,7 +234,7 @@ async def update_context_file(
     Read/Edit calls.
     """
     try:
-        _validate_path(context_file, "context_file", must_be_under=settings.orbit_root)
+        _validate_path(context_file, "context_file", must_be_under=settings.root)
         content = orbit.update_context_file(
             context_file=context_file,
             next_steps=next_steps,
@@ -261,7 +261,7 @@ async def update_context_file(
             ],
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error updating context file")
@@ -297,7 +297,7 @@ async def update_tasks_file(
     Returns progress info.
     """
     try:
-        _validate_path(tasks_file, "tasks_file", must_be_under=settings.orbit_root)
+        _validate_path(tasks_file, "tasks_file", must_be_under=settings.root)
         result = orbit.update_tasks_file(
             tasks_file=tasks_file,
             completed_tasks=completed_tasks,
@@ -332,7 +332,7 @@ async def update_tasks_file(
             "active_pointers_cleared_for_sessions": cleared_sessions,
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error updating tasks file")
@@ -371,11 +371,11 @@ async def get_orbit_progress(
             }
 
         if tasks_file:
-            _validate_path(file_path, "tasks_file", must_be_under=settings.orbit_root)
+            _validate_path(file_path, "tasks_file", must_be_under=settings.root)
 
         path = Path(file_path)
         if not path.exists():
-            raise OrbitFileNotFoundError(file_path)
+            raise MissionCacheFileNotFoundError(file_path)
 
         content = path.read_text()
         progress = orbit.parse_task_progress(content)
@@ -386,7 +386,7 @@ async def get_orbit_progress(
             "progress": progress.model_dump(),
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting progress")

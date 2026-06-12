@@ -5,8 +5,8 @@ DuckDB-based Analytics Database for Orbit Dashboard.
 Provides fast analytics queries for the orbit dashboard.
 Uses DuckDB for 10-100x faster aggregate queries compared to SQLite.
 
-This module is used by the orbit-dashboard FastAPI server for read operations.
-Write operations (heartbeats) are still handled by the orbit_db package.
+This module is used by the missioncache-dashboard FastAPI server for read operations.
+Write operations (heartbeats) are still handled by the missioncache_db package.
 """
 
 from __future__ import annotations
@@ -3249,7 +3249,7 @@ def refresh_claude_session_cache(
     Returns:
         Dict mapping hour to activity metrics
     """
-    from orbit_dashboard.lib.jsonl_parser import get_jsonl_files_for_date, parse_session_file
+    from missioncache_dashboard.lib.jsonl_parser import get_jsonl_files_for_date, parse_session_file
 
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")

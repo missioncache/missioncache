@@ -11,21 +11,21 @@ import multiprocessing
 import time
 from pathlib import Path
 
-from orbit_auto.dag import DAG
-from orbit_auto.plan_validator import Severity, validate_plan, has_errors
-from orbit_auto.db_logger import create_logger
-from orbit_auto.display import Display, create_display
-from orbit_auto.models import Config, TaskPaths, TaskStatus
-from orbit_auto.runnable import get_runnable_tasks, get_blocking_summary
-from orbit_auto.state import StateManager
-from orbit_auto.task_parser import parse_tasks_md
-from orbit_auto.worker import Worker
-from orbit_auto.worktree import WorktreeManager
+from missioncache_auto.dag import DAG
+from missioncache_auto.plan_validator import Severity, validate_plan, has_errors
+from missioncache_auto.db_logger import create_logger
+from missioncache_auto.display import Display, create_display
+from missioncache_auto.models import Config, TaskPaths, TaskStatus
+from missioncache_auto.runnable import get_runnable_tasks, get_blocking_summary
+from missioncache_auto.state import StateManager
+from missioncache_auto.task_parser import parse_tasks_md
+from missioncache_auto.worker import Worker
+from missioncache_auto.worktree import WorktreeManager
 
 
 class ParallelRunner:
     """
-    Runs orbit-auto in parallel mode with multiple workers.
+    Runs missioncache-auto in parallel mode with multiple workers.
 
     This mode:
     - Parses dependencies from prompt YAML frontmatter
@@ -118,7 +118,7 @@ class ParallelRunner:
                 return 3
 
         # Check for already-completed tasks in tasks.md
-        # This allows orbit-auto to resume after interruption
+        # This allows missioncache-auto to resume after interruption
         pre_completed = self._get_pre_completed_tasks()
 
         # Check for tasks blocked by interactive tasks
@@ -456,7 +456,7 @@ def run_parallel(
     dry_run: bool = False,
 ) -> int:
     """
-    Convenience function to run orbit-auto in parallel mode.
+    Convenience function to run missioncache-auto in parallel mode.
 
     Returns exit code (0=success, 1=failed, 2=blocked, 3=error).
     """

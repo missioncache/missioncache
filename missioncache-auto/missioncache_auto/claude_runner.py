@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from orbit_auto.models import ExecutionResult, Visibility
+from missioncache_auto.models import ExecutionResult, Visibility
 
 
 @dataclass
@@ -84,9 +84,9 @@ class ClaudeRunner:
             cmd.extend(["--name", session_name])
 
         # Set up environment to signal autonomous execution
-        # This allows hooks to skip when running in orbit-auto mode
+        # This allows hooks to skip when running in missioncache-auto mode
         env = os.environ.copy()
-        env["ORBIT_AUTO_MODE"] = "1"
+        env["MISSIONCACHE_AUTO_MODE"] = "1"
         env["CLAUDE_CODE_HIDE_CWD"] = "1"
 
         # Run Claude
@@ -414,11 +414,11 @@ def build_generic_prompt(
             "1. Read the tasks file to understand the full task list",
             "2. Read the context file for project-specific information",
             "3. Complete the current task following the acceptance criteria",
-            "4. DO NOT mark the task checkbox - orbit-auto handles task completion tracking",
+            "4. DO NOT mark the task checkbox - missioncache-auto handles task completion tracking",
             "",
             "## Output Tags (REQUIRED)",
             "",
-            "**CRITICAL:** orbit-auto detects success via these tags. Without them, the task is marked FAILED.",
+            "**CRITICAL:** missioncache-auto detects success via these tags. Without them, the task is marked FAILED.",
             "",
             "Always include:",
             "- <learnings>What you learned from this attempt</learnings>",

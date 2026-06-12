@@ -13,12 +13,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orbit_auto.claude_runner import ClaudeRunner, build_generic_prompt
-from orbit_auto.db_logger import create_logger
-from orbit_auto.display import Display, create_display
-from orbit_auto.models import Config, ExecutionResult, TaskPaths
-from orbit_auto.runnable import get_runnable_tasks, get_blocking_summary
-from orbit_auto.task_parser import (
+from missioncache_auto.claude_runner import ClaudeRunner, build_generic_prompt
+from missioncache_auto.db_logger import create_logger
+from missioncache_auto.display import Display, create_display
+from missioncache_auto.models import Config, ExecutionResult, TaskPaths
+from missioncache_auto.runnable import get_runnable_tasks, get_blocking_summary
+from missioncache_auto.task_parser import (
     extract_prompt_content,
     get_first_uncompleted_task,
     get_prompt_for_task,
@@ -26,12 +26,12 @@ from orbit_auto.task_parser import (
     update_timestamps,
     validate_prompts_exist,
 )
-from orbit_auto.worker import git_commit_task
+from missioncache_auto.worker import git_commit_task
 
 
 class SequentialRunner:
     """
-    Runs orbit-auto in sequential mode - one task at a time.
+    Runs missioncache-auto in sequential mode - one task at a time.
 
     This is the main execution mode for orbit tasks, handling:
     - Task discovery and ordering
@@ -61,8 +61,8 @@ class SequentialRunner:
         self.start_time = time.time()
 
         # Task DB integration
-        self.orbit_db_script = Path.home() / ".claude" / "scripts" / "orbit_db.py"
-        self.orbit_db_enabled = self.orbit_db_script.exists()
+        self.missioncache_db_script = Path.home() / ".claude" / "scripts" / "orbit_db.py"
+        self.missioncache_db_enabled = self.missioncache_db_script.exists()
 
         # Database logging for dashboard
         self.logger = create_logger(task_name, config, mode="sequential")
@@ -293,7 +293,7 @@ class SequentialRunner:
             if self.config.tdd_mode and self.use_prompts:
                 prompt_file = get_prompt_for_task(self.paths.prompts_dir, task_number)
                 if prompt_file:
-                    from orbit_auto.code_reviewer import run_tdd_review
+                    from missioncache_auto.code_reviewer import run_tdd_review
 
                     try:
                         tdd_passed, tdd_summary = run_tdd_review(
@@ -535,11 +535,11 @@ class SequentialRunner:
 
     def _process_heartbeats(self) -> None:
         """Process heartbeats for task DB time tracking."""
-        if not self.orbit_db_enabled:
+        if not self.missioncache_db_enabled:
             return
         try:
             subprocess.run(
-                ["python3", str(self.orbit_db_script), "process-heartbeats"],
+                ["python3", str(self.missioncache_db_script), "process-heartbeats"],
                 capture_output=True,
                 check=False,
             )
@@ -548,7 +548,7 @@ class SequentialRunner:
 
     def _update_task_progress(self) -> None:
         """Update task progress in task DB."""
-        if not self.orbit_db_enabled:
+        if not self.missioncache_db_enabled:
             return
 
         completed, total = get_task_progress(self.paths.tasks_file)
@@ -558,7 +558,7 @@ class SequentialRunner:
             subprocess.run(
                 [
                     "python3",
-                    str(self.orbit_db_script),
+                    str(self.missioncache_db_script),
                     "add-update",
                     self.task_name,
                     f"[PROGRESS] {completed}/{total} ({percent}%)",
@@ -571,11 +571,11 @@ class SequentialRunner:
 
     def _complete_task_in_db(self) -> None:
         """Mark task as completed in task DB."""
-        if not self.orbit_db_enabled:
+        if not self.missioncache_db_enabled:
             return
         try:
             subprocess.run(
-                ["python3", str(self.orbit_db_script), "complete-task", self.task_name],
+                ["python3", str(self.missioncache_db_script), "complete-task", self.task_name],
                 capture_output=True,
                 check=False,
             )
@@ -589,7 +589,7 @@ def run_sequential(
     config: Config | None = None,
 ) -> int:
     """
-    Convenience function to run orbit-auto in sequential mode.
+    Convenience function to run missioncache-auto in sequential mode.
 
     Returns exit code (0=success, 1=failed, 2=blocked, 3=error).
     """

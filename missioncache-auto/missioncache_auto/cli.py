@@ -1,7 +1,7 @@
 """
 Command-line interface for Orbit Auto.
 
-Provides the main entry point and argument parsing for all orbit-auto commands.
+Provides the main entry point and argument parsing for all missioncache-auto commands.
 """
 
 import argparse
@@ -9,11 +9,11 @@ import os
 import sys
 from pathlib import Path
 
-from orbit_auto.display import create_display
-from orbit_auto.init_task import init_task
-from orbit_auto.models import Config, Visibility
-from orbit_auto.parallel import run_parallel
-from orbit_auto.sequential import run_sequential
+from missioncache_auto.display import create_display
+from missioncache_auto.init_task import init_task
+from missioncache_auto.models import Config, Visibility
+from missioncache_auto.parallel import run_parallel
+from missioncache_auto.sequential import run_sequential
 
 
 def find_project_root() -> Path:
@@ -51,17 +51,17 @@ def parse_args() -> argparse.Namespace:
             sys.argv.insert(first_positional_idx + 1, "run")
 
     parser = argparse.ArgumentParser(
-        prog="orbit-auto",
+        prog="missioncache-auto",
         description="Orbit Auto - Autonomous AI Development for Orbit Projects",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  orbit-auto my-feature                    # Parallel (default, 8 workers)
-  orbit-auto my-feature -w 12              # Parallel with 12 workers
-  orbit-auto my-feature --sequential       # Sequential mode
-  orbit-auto my-feature --dry-run          # Show execution plan
-  orbit-auto init my-feature "description" # Initialize project
-  orbit-auto status my-feature             # Show project status
+  missioncache-auto my-feature                    # Parallel (default, 8 workers)
+  missioncache-auto my-feature -w 12              # Parallel with 12 workers
+  missioncache-auto my-feature --sequential       # Sequential mode
+  missioncache-auto my-feature --dry-run          # Show execution plan
+  missioncache-auto init my-feature "description" # Initialize project
+  missioncache-auto status my-feature             # Show project status
 
 Exit Codes:
   0  All tasks completed successfully
@@ -76,8 +76,8 @@ Exit Codes:
         "-v",
         "--visibility",
         choices=["verbose", "minimal", "none"],
-        default=os.environ.get("ORBIT_AUTO_VISIBILITY", "verbose"),
-        help="Output visibility level (env: ORBIT_AUTO_VISIBILITY)",
+        default=os.environ.get("MISSIONCACHE_AUTO_VISIBILITY", "verbose"),
+        help="Output visibility level (env: MISSIONCACHE_AUTO_VISIBILITY)",
     )
     parser.add_argument(
         "--no-color",
@@ -88,7 +88,7 @@ Exit Codes:
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
     # Run command (default when just task name given)
-    run_parser = subparsers.add_parser("run", help="Run orbit-auto on a project")
+    run_parser = subparsers.add_parser("run", help="Run missioncache-auto on a project")
     _add_run_arguments(run_parser)
 
     # Init command
@@ -195,7 +195,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Run orbit-auto on a task."""
+    """Run missioncache-auto on a task."""
     project_root = find_project_root()
     display = create_display(use_color=not args.no_color)
 
@@ -237,9 +237,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show task status."""
-    from orbit_auto.models import TaskPaths
-    from orbit_auto.runnable import get_blocking_summary, get_runnable_tasks
-    from orbit_auto.task_parser import get_task_progress, parse_tasks_md
+    from missioncache_auto.models import TaskPaths
+    from missioncache_auto.runnable import get_blocking_summary, get_runnable_tasks
+    from missioncache_auto.task_parser import get_task_progress, parse_tasks_md
 
     display = create_display(use_color=not args.no_color)
     paths = TaskPaths.from_task_name(args.task_name)
@@ -301,7 +301,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    """Main entry point for orbit-auto CLI."""
+    """Main entry point for missioncache-auto CLI."""
     args = parse_args()
 
     # Handle commands using match statement (Python 3.10+)
@@ -309,7 +309,7 @@ def main() -> int:
         case "run" | None:
             if not hasattr(args, "task_name"):
                 print("Error: project_name required")
-                print("Usage: orbit-auto <project-name> [options]")
+                print("Usage: missioncache-auto <project-name> [options]")
                 return 1
             return cmd_run(args)
         case "init":

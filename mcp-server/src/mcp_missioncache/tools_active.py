@@ -21,7 +21,7 @@ from pydantic import Field
 
 from . import active_task, orbit
 from .app import mcp
-from .errors import ErrorCode, OrbitError, ValidationError
+from .errors import ErrorCode, MissionCacheError, ValidationError
 from .helpers import _resolve_session_id
 from .tasks_parse import find_item, parse_tasks_md
 
@@ -96,7 +96,7 @@ async def set_active_orbit_tasks(
 
         files = orbit.get_orbit_files(project_name)
         if not files.tasks_file:
-            raise OrbitError(
+            raise MissionCacheError(
                 ErrorCode.FILE_NOT_FOUND,
                 f"No tasks.md found for project '{project_name}'",
                 {"project_name": project_name},
@@ -143,7 +143,7 @@ async def set_active_orbit_tasks(
             "pointer_path": str(path),
         }
 
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error in set_active_orbit_tasks")
@@ -176,7 +176,7 @@ async def clear_active_orbit_tasks(
             )
         removed = active_task.clear_pointer(session_id)
         return {"success": True, "session_id": session_id, "cleared": removed}
-    except OrbitError as e:
+    except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error in clear_active_orbit_tasks")

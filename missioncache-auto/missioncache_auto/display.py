@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TextIO
 
-from orbit_auto.dag import DAG
+from missioncache_auto.dag import DAG
 
 
 # ANSI Color codes
@@ -71,7 +71,7 @@ class Display:
         print(*args, file=self.config.output, **kwargs)
 
     def header(self, title: str = "ORBIT AUTO") -> None:
-        """Print the orbit-auto header."""
+        """Print the missioncache-auto header."""
         self._print()
         self._print(f"  {self.c.CYAN}{self.c.BOLD}=== {title} ==={self.c.NC}")
         self._print()

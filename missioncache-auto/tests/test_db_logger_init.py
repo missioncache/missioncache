@@ -5,7 +5,7 @@ The ``DB_PATH.exists()`` gate in both ``Worker._init_db_logger`` and
 was missing, even when the cause was unmigrated orbit data at the legacy
 ``~/.claude/`` paths - the exact scenario the migration guard exists for.
 Both sites now route the missing-DB case through
-``warn_if_migration_required``, which calls orbit-db's public
+``warn_if_migration_required``, which calls missioncache-db's public
 ``check_legacy_paths`` directly and prints the FULL migration recipe
 (including the ``mv`` commands) to stderr once per process. These tests
 pin that contract:
@@ -20,20 +20,20 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit_db
+import missioncache_db
 
-from orbit_auto import db_logger as db_logger_module
-from orbit_auto.db_logger import ExecutionLogger
-from orbit_auto.worker import Worker, _WorkerDBLogger
+from missioncache_auto import db_logger as db_logger_module
+from missioncache_auto.db_logger import ExecutionLogger
+from missioncache_auto.worker import Worker, _WorkerDBLogger
 
 
 @pytest.fixture
 def isolated_paths(tmp_path, monkeypatch):
     """Redirect DB_PATH and the legacy paths into tmp_path subdirs.
 
-    Mirrors orbit-db's test_legacy_guard.py fixture: check_legacy_paths
-    reads module-level DB_PATH / _LEGACY_DB / _LEGACY_ORBIT_ROOT at call
-    time, so monkeypatching the orbit_db module attributes is enough -
+    Mirrors missioncache-db's test_legacy_guard.py fixture: check_legacy_paths
+    reads module-level DB_PATH / _LEGACY_DB / _LEGACY_MISSIONCACHE_ROOT at call
+    time, so monkeypatching the missioncache_db module attributes is enough -
     the production init paths import them at call time too.
 
     Also resets the module-level warn-once flag so each test observes
@@ -43,9 +43,9 @@ def isolated_paths(tmp_path, monkeypatch):
     legacy_db = tmp_path / "claude" / "tasks.db"
     legacy_orbit = tmp_path / "claude" / "orbit"
 
-    monkeypatch.setattr(orbit_db, "DB_PATH", new_db)
-    monkeypatch.setattr(orbit_db, "_LEGACY_DB", legacy_db)
-    monkeypatch.setattr(orbit_db, "_LEGACY_ORBIT_ROOT", legacy_orbit)
+    monkeypatch.setattr(missioncache_db, "DB_PATH", new_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", legacy_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", legacy_orbit)
     monkeypatch.setattr(db_logger_module, "_migration_warned", False)
 
     return SimpleNamespace(
@@ -79,7 +79,7 @@ class TestWorkerInitDbLogger:
         worker = _make_worker(tmp_path)
 
         err = capsys.readouterr().err
-        assert "orbit-auto: dashboard logging disabled" in err
+        assert "missioncache-auto: dashboard logging disabled" in err
         assert "mv ~/.claude/tasks.db" in err
         assert worker._db_logger is None
 
@@ -113,7 +113,7 @@ class TestExecutionLoggerInitDb:
         logger = ExecutionLogger("sample")
 
         err = capsys.readouterr().err
-        assert "orbit-auto: dashboard logging disabled" in err
+        assert "missioncache-auto: dashboard logging disabled" in err
         assert "mv ~/.claude/tasks.db" in err
         assert logger._enabled is False
 

@@ -1,6 +1,6 @@
 """Integration tests for session_start, pre_compact, and stop hooks.
 
-Tests mock orbit_db and use tmp_path for file I/O.
+Tests mock missioncache_db and use tmp_path for file I/O.
 """
 
 import json
@@ -69,7 +69,7 @@ class TestSessionStart:
         monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-42")
         monkeypatch.setattr("os.getcwd", lambda: "/fake/repo")
 
-        with patch.dict("sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}):
+        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}):
             # Re-import to pick up mocked module
             import importlib
             import hooks.session_start as mod
@@ -143,7 +143,7 @@ class TestSessionStart:
         monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-99")
         monkeypatch.setattr("os.getcwd", lambda: "/repo")
 
-        with patch.dict("sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}):
+        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}):
             import importlib
             import hooks.session_start as mod
 
@@ -165,26 +165,26 @@ class TestSessionStartResumePickup:
     binding to the new sid before write_cwd_session_pointer overwrites the
     breadcrumb that points back to the old sid.
 
-    Test fixtures use orbit_db's real ``init_hooks_state_db_schema`` rather
+    Test fixtures use missioncache_db's real ``init_hooks_state_db_schema`` rather
     than hand-rolled DDL so a future column add in production is caught here
     instead of silently passing because the test seeded its own minimal shape.
     """
 
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
-        """Redirect Path.home() and orbit_db.HOOKS_STATE_DB_PATH onto ``home``.
+        """Redirect Path.home() and missioncache_db.HOOKS_STATE_DB_PATH onto ``home``.
 
-        ``HOOKS_STATE_DB_PATH`` is captured at orbit_db import time using the
+        ``HOOKS_STATE_DB_PATH`` is captured at missioncache_db import time using the
         real ``Path.home()``, so monkeypatching ``pathlib.Path.home`` alone
-        leaves orbit_db reading the user's real DB. Patch both.
+        leaves missioncache_db reading the user's real DB. Patch both.
 
         Returns the redirected hooks-state.db path for assertion convenience.
         """
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
         db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
         return db_path
 
     @classmethod
@@ -197,7 +197,7 @@ class TestSessionStartResumePickup:
         """
         import sqlite3 as _sqlite3
 
-        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
 
         db_path = home / ".claude" / "hooks-state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -494,10 +494,10 @@ class TestSessionStartResumePickup:
         self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
 
         mod = self._reload_module()
-        # Replace TaskDB on the real orbit_db module with a no-task mock so
+        # Replace TaskDB on the real missioncache_db module with a no-task mock so
         # find_task_for_cwd returns None (we're testing the pickup path, not
         # the existing task-detection path).
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
@@ -506,7 +506,7 @@ class TestSessionStartResumePickup:
         # test is about the resume-pickup path, not the cwd-validation gate -
         # the gate has its own coverage in TestPickupCwdCompatibilityGate.
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         # New session inherited the project binding.
@@ -547,7 +547,7 @@ class TestPickupCwdCompatibilityGate:
     repo). If the repo lives *under* the cwd (umbrella case) or in an
     unrelated location, skip the inherit and let the new session start clean.
 
-    Non-coding tasks (no repo_id) and lookup failures (orbit_db unavailable,
+    Non-coding tasks (no repo_id) and lookup failures (missioncache_db unavailable,
     task renamed/deleted, repo deleted) are treated conservatively: inherit
     proceeds, preserving the prior behavior. The gate only fires when we have
     affirmative evidence the inherit is wrong.
@@ -555,11 +555,11 @@ class TestPickupCwdCompatibilityGate:
 
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
         db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
         return db_path
 
     @staticmethod
@@ -577,7 +577,7 @@ class TestPickupCwdCompatibilityGate:
     def _seed_project_state(home: Path, rows: list[tuple[str, str]]) -> Path:
         import sqlite3 as _sqlite3
 
-        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
 
         db_path = home / ".claude" / "hooks-state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -596,20 +596,20 @@ class TestPickupCwdCompatibilityGate:
 
     @staticmethod
     def _mock_taskdb(monkeypatch, *, task=None, repo=None) -> None:
-        """Replace ``orbit_db.TaskDB`` with a mock whose ``get_task_by_name``
+        """Replace ``missioncache_db.TaskDB`` with a mock whose ``get_task_by_name``
         returns ``task`` and ``get_repo`` returns ``repo``.
 
         Pass ``task=None`` to simulate "task not found" (renamed/deleted).
         Pass ``repo=None`` with a task to simulate "task exists but repo
         orphaned" (deleted repo row).
         """
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.get_task_by_name.return_value = task
         mock_db.get_repo.return_value = repo
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
 
     def _reload_module(self):
         import importlib
@@ -751,12 +751,12 @@ class TestPickupCwdCompatibilityGate:
         self._seed_pointer(tmp_path, cwd, "prev-sid")
         self._seed_project_state(tmp_path, [("prev-sid", "some-project")])
 
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         def _raising_taskdb():
             raise RuntimeError("simulated DB connection failure")
 
-        monkeypatch.setattr(orbit_db, "TaskDB", _raising_taskdb)
+        monkeypatch.setattr(missioncache_db, "TaskDB", _raising_taskdb)
 
         mod = self._reload_module()
         assert mod._pickup_previous_session_binding(cwd, "new-sid") == "some-project"
@@ -804,18 +804,18 @@ class TestSessionStartSourceGating:
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
         """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
         db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
         return db_path
 
     @staticmethod
     def _seed_for_inheritance(home: Path, cwd: Path) -> None:
         """Seed the cwd-pointer + project_state row that inheritance reads."""
         import sqlite3 as _sqlite3
-        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
 
         cwd_key = str(cwd).replace("/", "-")
         pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
@@ -847,12 +847,12 @@ class TestSessionStartSourceGating:
         umbrella-cwd fix) takes the conservative-inherit branch and does not
         spuriously skip valid pickups under test.
         """
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
 
     def _reload_module(self):
         import importlib
@@ -1253,11 +1253,11 @@ class TestPreCompact:
         return task_dir, ctx_file, mock_task, mock_repo
 
     def _run(self, monkeypatch, mock_db, transcript_path=None):
-        """Reload pre_compact with stdin payload and mock orbit_db."""
+        """Reload pre_compact with stdin payload and mock missioncache_db."""
         payload = {"transcript_path": str(transcript_path) if transcript_path else "", "cwd": "/fake/cwd"}
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
         with patch.dict(
-            "sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}
+            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
         ):
             import importlib
             import hooks.pre_compact as mod
@@ -1443,7 +1443,7 @@ class TestStop:
         """Helper to run stop.main() with given stdin and mock DB."""
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(stdin_data)))
 
-        with patch.dict("sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}):
+        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}):
             import importlib
             import hooks.stop as mod
 
@@ -1548,7 +1548,7 @@ class TestTaskTracker:
         """Helper to run task_tracker.main() with given stdin and mock DB."""
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(stdin_data)))
 
-        module_patch = {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}
+        module_patch = {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
         with patch.dict("sys.modules", module_patch):
             import importlib
             import hooks.task_tracker as mod
@@ -1829,7 +1829,7 @@ class TestTaskTracker:
     def test_subtask_layout_divergence(self, tmp_path, monkeypatch, capsys):
         """Subtask directories use plain tasks.md/context.md (no prefix).
 
-        Mirrors the layout that orbit_db's scan_repo treats as a subtask
+        Mirrors the layout that missioncache_db's scan_repo treats as a subtask
         marker. Verifies the hook falls back to the non-prefixed filenames
         when the prefixed form is absent.
         """
@@ -1911,7 +1911,7 @@ class TestSessionStartTaskDiscipline:
         monkeypatch.setattr("os.getcwd", lambda: str(task_dir))
 
         with patch.dict(
-            "sys.modules", {"orbit_db": MagicMock(TaskDB=lambda: mock_db)}
+            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
         ):
             import importlib
             import hooks.session_start as mod
@@ -1945,11 +1945,11 @@ class TestParallelSessionDetection:
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
         """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
         db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(orbit_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
         return db_path
 
     @staticmethod
@@ -1978,7 +1978,7 @@ class TestParallelSessionDetection:
     def _seed_project_state(cls, home: Path, rows: list[tuple[str, str]]) -> Path:
         """Seed project_state with (sid, project) rows using the real schema."""
         import sqlite3 as _sqlite3
-        from orbit_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
 
         db_path = home / ".claude" / "hooks-state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2265,12 +2265,12 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "other-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         # new-sid did NOT inherit "carried-over" because parallel sessions
@@ -2314,12 +2314,12 @@ class TestParallelSessionDetection:
         )
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         conn = _sqlite3.connect(str(db_path))
@@ -2356,11 +2356,11 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "other-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         out = capsys.readouterr().out
@@ -2396,11 +2396,11 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "other-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         out = capsys.readouterr().out
@@ -2423,11 +2423,11 @@ class TestParallelSessionDetection:
         self._seed_project_state(tmp_path, [("my-sid", "alpha")])
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         out = capsys.readouterr().out
@@ -2468,11 +2468,11 @@ class TestParallelSessionDetection:
         # The prior session's recorded pid is dead -> proven not parallel.
         self._seed_pid_record(tmp_path, "prev-sid", self._dead_pid(), start_time=None)
 
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         out = capsys.readouterr().out
@@ -2503,11 +2503,11 @@ class TestParallelSessionDetection:
         # Other session's recorded pid is this (alive) test process.
         self._seed_pid_record(tmp_path, "other-sid", os.getpid(), start_time=None)
 
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         out = capsys.readouterr().out
@@ -2551,12 +2551,12 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "prev-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         conn = _sqlite3.connect(str(db_path))
@@ -2604,12 +2604,12 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "third-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         conn = _sqlite3.connect(str(db_path))
@@ -2655,12 +2655,12 @@ class TestParallelSessionDetection:
         self._seed_transcript(tmp_path, cwd, "other-sid")
 
         mod = self._reload_module()
-        import orbit_db  # type: ignore[import-not-found]
+        import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
         mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(orbit_db, "TaskDB", lambda: mock_db)
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
         conn = _sqlite3.connect(str(db_path))
@@ -2793,9 +2793,9 @@ class TestActivityTracker:
 
     The hook is a thin wrapper around a subprocess invocation; its contract
     is exactly the argv, env, and exception-swallowing behavior. These tests
-    are the rename tripwire for the bundled-orbit-db wiring: any mechanical
-    rename sweep that renames the ``orbit_db`` module or the bundled
-    ``orbit-db`` directory must update the literals here too, or the hook
+    are the rename tripwire for the bundled-missioncache-db wiring: any mechanical
+    rename sweep that renames the ``missioncache_db`` module or the bundled
+    ``missioncache-db`` directory must update the literals here too, or the hook
     breaks silently on every prompt.
     """
 
@@ -2809,10 +2809,10 @@ class TestActivityTracker:
     def _feed_stdin(self, monkeypatch, payload: dict) -> None:
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
 
-    def test_invokes_orbit_db_heartbeat_auto_with_exact_argv(self, monkeypatch):
-        """argv must be exactly [sys.executable, "-m", "orbit_db", "heartbeat-auto"].
+    def test_invokes_missioncache_db_heartbeat_auto_with_exact_argv(self, monkeypatch):
+        """argv must be exactly [sys.executable, "-m", "missioncache_db", "heartbeat-auto"].
 
-        This is the rename tripwire. The literal "orbit_db" is the Python
+        This is the rename tripwire. The literal "missioncache_db" is the Python
         module name spawned by the subprocess; the literal "heartbeat-auto"
         is the CLI subcommand on that module. A rename sweep that misses
         either string here would silently break time tracking for every
@@ -2835,13 +2835,13 @@ class TestActivityTracker:
         mod = self._reload_module()
         mod.main()
 
-        assert recorded["argv"] == [sys.executable, "-m", "orbit_db", "heartbeat-auto"]
+        assert recorded["argv"] == [sys.executable, "-m", "missioncache_db", "heartbeat-auto"]
 
-    def test_subprocess_env_carries_bundled_orbit_db_on_pythonpath(self, monkeypatch):
+    def test_subprocess_env_carries_bundled_missioncache_db_on_pythonpath(self, monkeypatch):
         """PYTHONPATH passed to the subprocess must contain the bundled
-        ``orbit-db`` directory path segment.
+        ``missioncache-db`` directory path segment.
 
-        The marketplace install ships orbit-db source inside the plugin tree
+        The marketplace install ships missioncache-db source inside the plugin tree
         rather than installing it to site-packages, so the subprocess can
         only import it if the bundled dir is on PYTHONPATH. A rename of
         either the bundled dir name or the env-var injection logic must
@@ -2865,13 +2865,13 @@ class TestActivityTracker:
         env = recorded["env"]
         assert env is not None, "subprocess.run must be called with an explicit env="
         assert "PYTHONPATH" in env
-        bundled = str(mod._BUNDLED_ORBIT_DB)
+        bundled = str(mod._BUNDLED_MISSIONCACHE_DB)
         # The bundled dir must appear as a discrete segment of PYTHONPATH
         # (split on os.pathsep) so existing PYTHONPATH entries can coexist
         # without breaking the subprocess import.
         segments = env["PYTHONPATH"].split(os.pathsep)
         assert bundled in segments, (
-            f"PYTHONPATH segments {segments!r} must include bundled orbit-db dir "
+            f"PYTHONPATH segments {segments!r} must include bundled missioncache-db dir "
             f"{bundled!r} so the subprocess can import the module."
         )
 
