@@ -31,13 +31,13 @@ Clicking a row opens a modal with four tabs:
 
 The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the orbit files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
 
-The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.claude/orbit/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_orbit_progress()` at `orbit-dashboard/orbit_dashboard/server.py:833`, which flags `orbit_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
+The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.orbit/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_orbit_progress()` at `orbit-dashboard/orbit_dashboard/server.py:833`, which flags `orbit_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 ### Activity view
 
 The Activity view is the richest part of the dashboard and the most complicated, because it merges two independent sources of time data:
 
-1. **Orbit heartbeats** from `~/.claude/tasks.db` - these are WakaTime-style per-prompt activity pings that the `UserPromptSubmit` hook records when the current directory matches a tracked orbit project. They are aggregated into `sessions` rows by `TaskDB.process_heartbeats()`.
+1. **Orbit heartbeats** from `~/.orbit/tasks.db` - these are WakaTime-style per-prompt activity pings that the `UserPromptSubmit` hook records when the current directory matches a tracked orbit project. They are aggregated into `sessions` rows by `TaskDB.process_heartbeats()`.
 2. **Claude Code JSONL transcripts** from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` - these are the full conversation logs Claude Code writes for its own reasons (session history, resume). Every message has a timestamp, so the dashboard can reconstruct active time even when no orbit project was loaded.
 
 The Activity view surfaces both, separately where it matters and merged where the user just wants "how much time did I spend today":
@@ -94,7 +94,7 @@ Heartbeat time is the pure orbit-native answer: how much activity did `activity_
 
 It is under-counting-prone when:
 
-- The user worked on the project from a cwd outside `~/.claude/orbit/active/<project>/` and without loading the project at session start (covered in `architecture.md` invariants).
+- The user worked on the project from a cwd outside `~/.orbit/active/<project>/` and without loading the project at session start (covered in `architecture.md` invariants).
 - The user spent time in the repo but outside the orbit directory tree (for example, editing source files in `src/`).
 - The user used `/orbit:go` mid-session in a session that did not resolve a task at SessionStart, because mid-session loads do not write `projects/<session-id>.json`.
 
@@ -114,7 +114,7 @@ for i in range(1, len(sorted_ts)):
 return int(active_seconds)
 ```
 
-JSONL sessions are parsed lazily and cached in the `claude_session_cache` table in `~/.claude/tasks.db` (not in DuckDB). The cache key is `(session_id, file_mtime)`, so when a new message is appended to an existing JSONL file the mtime changes and the dashboard reparses; unchanged files hit the cache and cost nothing.
+JSONL sessions are parsed lazily and cached in the `claude_session_cache` table in `~/.orbit/tasks.db` (not in DuckDB). The cache key is `(session_id, file_mtime)`, so when a new message is appended to an existing JSONL file the mtime changes and the dashboard reparses; unchanged files hit the cache and cost nothing.
 
 ### Joining JSONL time to tasks
 
@@ -267,7 +267,7 @@ The SSE stream is not heavily used by the frontend - the UI uses lazy per-view f
 
 ## The dual-database sync
 
-The sync from SQLite to DuckDB is the mechanism that lets the dashboard read fast without locking out writes. The sync itself is simple: it reads all rows from the orbit-db tables in `~/.claude/tasks.db` and upserts them into `~/.claude/tasks.duckdb`. There is no incremental log; every sync is a full-table copy, though only changed rows end up actually writing.
+The sync from SQLite to DuckDB is the mechanism that lets the dashboard read fast without locking out writes. The sync itself is simple: it reads all rows from the orbit-db tables in `~/.orbit/tasks.db` and upserts them into `~/.orbit/tasks.duckdb`. There is no incremental log; every sync is a full-table copy, though only changed rows end up actually writing.
 
 Sync runs in four places:
 
@@ -449,7 +449,7 @@ This is almost always the heartbeat-vs-JSONL merge at work. See [Time accounting
 
 **Cause:** Most likely the `claude_session_cache` is missing or got moved to a different database file. The anti-join that identifies untracked sessions requires `claude_session_cache` and `sessions` to live in the same SQLite file.
 
-**Fix:** Check `sqlite3 ~/.claude/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` at `orbit-dashboard/orbit_dashboard/lib/analytics_db.py:2946`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
+**Fix:** Check `sqlite3 ~/.orbit/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` at `orbit-dashboard/orbit_dashboard/lib/analytics_db.py:2946`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
 
 ### "Dashboard shows stale data"
 

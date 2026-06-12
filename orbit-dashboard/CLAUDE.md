@@ -18,8 +18,8 @@ open http://localhost:8787
 
 | Database | File | Purpose |
 |----------|------|---------|
-| SQLite | `~/.claude/tasks.db` | Source of truth for **writes** (heartbeats, sessions) |
-| DuckDB | `~/.claude/tasks.duckdb` | Analytics database for **reads** (fast columnar queries) |
+| SQLite | `~/.orbit/tasks.db` | Source of truth for **writes** (heartbeats, sessions) |
+| DuckDB | `~/.orbit/tasks.duckdb` | Analytics database for **reads** (fast columnar queries) |
 
 **Data flow:** Claude Code hooks -> SQLite -> sync -> DuckDB -> Dashboard
 
@@ -79,15 +79,15 @@ GET /health        # Health check
 ## Orbit Location Detection
 
 The `parse_orbit_progress()` function intelligently finds orbit files in the centralized location:
-- Primary path: `~/.claude/orbit/{active,completed}/<task-name>/`
+- Primary path: `~/.orbit/{active,completed}/<task-name>/`
 - Legacy fallback: repo-local `dev/{active,completed}/` paths (for older projects)
 
 ### Search Order
 
 For a task with `full_path = "active/task-name"`:
 
-1. Centralized active: `~/.claude/orbit/active/task-name/`
-2. Centralized completed: `~/.claude/orbit/completed/task-name/`
+1. Centralized active: `~/.orbit/active/task-name/`
+2. Centralized completed: `~/.orbit/completed/task-name/`
 3. Legacy repo-local: `{repo_path}/dev/active/task-name/` (fallback)
 4. Legacy completed: `{repo_path}/dev/completed/task-name/` (fallback)
 
@@ -99,7 +99,7 @@ Within a task directory, looks for files in order:
 
 ### Orphan Task Handling
 
-Tasks can become "orphans" when orbit files are moved to `~/.claude/orbit/completed/` but the database `status` field isn't updated.
+Tasks can become "orphans" when orbit files are moved to `~/.orbit/completed/` but the database `status` field isn't updated.
 
 **Detection:** `parse_orbit_progress()` returns `orbit_in_completed: true` when orbit files are found in a completed path.
 
@@ -155,8 +155,8 @@ Install for Python 3.11:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.claude/tasks.db` | SQLite source database |
-| `~/.claude/tasks.duckdb` | DuckDB analytics database |
+| `~/.orbit/tasks.db` | SQLite source database |
+| `~/.orbit/tasks.duckdb` | DuckDB analytics database |
 | `~/Library/LaunchAgents/com.orbit.dashboard.plist` | Launchd service config |
 
 ## Code Style

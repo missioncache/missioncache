@@ -3,7 +3,7 @@
 ## Architecture
 
 - **MCP Server**: Primary interface (`mcp-server/src/mcp_orbit/`)
-- **Database**: `orbit-db/` package (SQLite at `~/.claude/tasks.db`)
+- **Database**: `orbit-db/` package (SQLite at `~/.orbit/tasks.db`)
 - **Hooks**: Auto-save on compaction, detect active project on start
 - **Commands**: Slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`, `/orbit:done`, `/orbit:prompts`, `/orbit:mode`)
 - **Orbit Auto**: Autonomous execution CLI (`orbit-auto/`)
@@ -91,8 +91,8 @@ orbit-db provides `OrbitDB` class with these key tables:
 
 ## Dashboard Dual-DB Pattern
 
-- **SQLite** (`~/.claude/tasks.db`): Source of truth for writes
-- **DuckDB** (`~/.claude/tasks.duckdb`): Analytics database for fast reads
+- **SQLite** (`~/.orbit/tasks.db`): Source of truth for writes
+- **DuckDB** (`~/.orbit/tasks.duckdb`): Analytics database for fast reads
 - `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` handles DuckDB operations
 
 ## Testing

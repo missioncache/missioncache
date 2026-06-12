@@ -52,7 +52,7 @@ Windows service registration is not yet supported. The installer will register t
 uvx orbit-install --uninstall
 ```
 
-Removes: plugin registration, pip packages, service units, settings.json entries. Preserves: `~/.claude/orbit/` (projects), `~/.claude/tasks.db` (task history).
+Removes: plugin registration, pip packages, service units, settings.json entries. Preserves: `~/.orbit/` (projects and task history).
 
 ## License
 

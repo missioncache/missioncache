@@ -8,8 +8,8 @@ If you are just looking to *use* orbit, start with the [README](../README.md) in
 
 Orbit is not one program. It is six small programs that agree on two files and one database:
 
-- **Two files**: `~/.claude/orbit/<status>/<project>/<project>-tasks.md` and `<project>-context.md`. These are the human- and Claude-readable source of truth for what a project is doing.
-- **One database**: `~/.claude/tasks.db` (SQLite). This is the source of truth for cross-project metadata: which projects exist, when they were last worked on, how much time was spent, and which repository they belong to.
+- **Two files**: `~/.orbit/<status>/<project>/<project>-tasks.md` and `<project>-context.md`. These are the human- and Claude-readable source of truth for what a project is doing.
+- **One database**: `~/.orbit/tasks.db` (SQLite). This is the source of truth for cross-project metadata: which projects exist, when they were last worked on, how much time was spent, and which repository they belong to.
 
 Everything else is either a producer (hooks write heartbeats, MCP tools create files) or a consumer (the dashboard reads the DB, the statusline reads both DB and files, orbit-auto reads the tasks file and writes iteration logs). When you are trying to understand any component, ask: is it writing to the files, writing to the DB, or reading them?
 
@@ -32,7 +32,7 @@ Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` r
 
 `orbit-db` is the only place in the codebase that writes raw SQL. Everything else goes through its Python API. This is intentional - the schema has grown over time, there are triggers, and there is an invariant about where `claude_session_cache` lives (covered below) that you will violate the first time you try to open the DB directly from somewhere else.
 
-The package exposes a single `TaskDB` class that wraps a `sqlite3.Connection` with WAL mode enabled. You get it by calling `TaskDB()` (no arguments - it finds the DB at `~/.claude/tasks.db`). Every other component constructs its own instance; there is no global or singleton, because the consumers (hooks, MCP subprocess, orbit-auto, dashboard) are all different processes.
+The package exposes a single `TaskDB` class that wraps a `sqlite3.Connection` with WAL mode enabled. You get it by calling `TaskDB()` (no arguments - it finds the DB at `~/.orbit/tasks.db`). Every other component constructs its own instance; there is no global or singleton, because the consumers (hooks, MCP subprocess, orbit-auto, dashboard) are all different processes.
 
 The file is ~3,400 lines, but the mental model is small:
 
@@ -61,7 +61,7 @@ The hook also prints a short "Active Task Detected" block to stdout, which Claud
 
 Every time the user hits enter, Claude Code fires `UserPromptSubmit`. Orbit registers two independent scripts on this hook:
 
-- `hooks/activity_tracker.py` spawns a short-lived subprocess (`python -m orbit_db heartbeat-auto`) with a hard 2-second timeout and `PYTHONPATH` set to the plugin-bundled `orbit-db`. The subprocess calls `TaskDB.record_heartbeat_auto(cwd, session_id)`, which delegates to `find_task_for_cwd` - that checks `projects/<session-id>.json` and then pattern-matches `cwd` against `~/.claude/orbit/active/<task>/` and tracked-repo legacy paths. If a match is found, a row is inserted into the `heartbeats` table with the current timestamp and session ID. The subprocess boundary is deliberate: SQLite lock contention on the task DB can otherwise stall the heartbeat call for up to its 5-second `busy_timeout`, which would eat the entire `UserPromptSubmit` hook budget. The 2-second subprocess deadline bounds that worst case. Skip patterns filter out slash commands, shell commands, yes/no confirmations, and empty prompts so they do not inflate the count.
+- `hooks/activity_tracker.py` spawns a short-lived subprocess (`python -m orbit_db heartbeat-auto`) with a hard 2-second timeout and `PYTHONPATH` set to the plugin-bundled `orbit-db`. The subprocess calls `TaskDB.record_heartbeat_auto(cwd, session_id)`, which delegates to `find_task_for_cwd` - that checks `projects/<session-id>.json` and then pattern-matches `cwd` against `~/.orbit/active/<task>/` and repo-local legacy `dev/active/` layouts. If a match is found, a row is inserted into the `heartbeats` table with the current timestamp and session ID. The subprocess boundary is deliberate: SQLite lock contention on the task DB can otherwise stall the heartbeat call for up to its 5-second `busy_timeout`, which would eat the entire `UserPromptSubmit` hook budget. The 2-second subprocess deadline bounds that worst case. Skip patterns filter out slash commands, shell commands, yes/no confirmations, and empty prompts so they do not inflate the count.
 - `hooks/task_tracker.py` checks for "divergence" between the tasks file and the context file (headings like `### Task 3` present in context while `- [ ] 3. ...` is still unchecked in tasks) and prints a reminder to stdout so Claude sees it. This is the guardrail that keeps the tasks file honest.
 
 Both hooks have a 5-second budget. If no task matches the current directory or session, they both exit silently; there is no penalty for running orbit in a repo that has no projects.
@@ -97,7 +97,7 @@ This is the load-bearing piece of orbit's memory story. Without it, the context 
 
 ### 6. Dashboard reflection
 
-Separately from the per-session flow above, the dashboard is a persistent process reading from a DuckDB copy of the SQLite DB. At startup (or on explicit `GET /api/sync`) it copies tables from `~/.claude/tasks.db` into `~/.claude/tasks.duckdb`, which it then uses for fast aggregate queries. The dashboard also reads orbit files directly from disk to render task modals, and it reads `~/.claude/projects/<cwd>/*.jsonl` files (Claude Code's own transcript store) to render untracked activity.
+Separately from the per-session flow above, the dashboard is a persistent process reading from a DuckDB copy of the SQLite DB. At startup (or on explicit `GET /api/sync`) it copies tables from `~/.orbit/tasks.db` into `~/.orbit/tasks.duckdb`, which it then uses for fast aggregate queries. The dashboard also reads orbit files directly from disk to render task modals, and it reads `~/.claude/projects/<cwd>/*.jsonl` files (Claude Code's own transcript store) to render untracked activity.
 
 See [The dual-database pattern](#the-dual-database-pattern) for the details of why there are two DB files and what trade-offs it makes.
 
@@ -105,8 +105,8 @@ See [The dual-database pattern](#the-dual-database-pattern) for the details of w
 
 Orbit's state lives in three places:
 
-1. **Structured data** in SQLite at `~/.claude/tasks.db`, plus the DuckDB analytics mirror at `~/.claude/tasks.duckdb`.
-2. **Human-readable project state** in markdown files under `~/.claude/orbit/{active,completed}/<project>/`.
+1. **Structured data** in SQLite at `~/.orbit/tasks.db`, plus the DuckDB analytics mirror at `~/.orbit/tasks.duckdb`.
+2. **Human-readable project state** in markdown files under `~/.orbit/{active,completed}/<project>/`.
 3. **Ephemeral hook state** in JSON files under `~/.claude/hooks/state/`.
 
 ### SQLite schema
@@ -128,7 +128,7 @@ The canonical tables are all defined in `orbit-db/orbit_db/__init__.py`. There i
 
 Triggers keep `updated_at` fresh on every row update and set `completed_at`/`archived_at` when `status` transitions into the corresponding state. The `tasks` table has a `UNIQUE(repo_id, full_path)` constraint that matters during scan - rescanning the same repo should not produce duplicate rows.
 
-**Created by the dashboard (also in `~/.claude/tasks.db`):**
+**Created by the dashboard (also in `~/.orbit/tasks.db`):**
 
 | Table | Purpose | Key columns |
 |-------|---------|-------------|
@@ -140,7 +140,7 @@ This is the thing that will bite you first if you refactor the storage layer. Th
 
 ### The dual-database pattern
 
-The dashboard reads from DuckDB (`~/.claude/tasks.duckdb`), not from SQLite directly. The trade-off is explicit:
+The dashboard reads from DuckDB (`~/.orbit/tasks.duckdb`), not from SQLite directly. The trade-off is explicit:
 
 - **Writes go to SQLite.** Heartbeats, task creation, completion, scanning, session aggregation - all of that is standard SQLite via `orbit-db`. SQLite handles concurrent writers across processes well enough for orbit's write volume.
 - **Analytics reads go to DuckDB.** The dashboard runs a lot of aggregate queries (day-of-week buckets, 30-day heatmaps, repo breakdowns, trend deltas), and DuckDB is 10-100x faster than SQLite for those.
@@ -152,10 +152,10 @@ If you are adding a new dashboard endpoint: do the read against DuckDB via `anal
 
 ### Files on disk
 
-Projects have their own directory on disk under `~/.claude/orbit/`:
+Projects have their own directory on disk under `~/.orbit/`:
 
 ```
-~/.claude/orbit/
+~/.orbit/
 ├── active/
 │   └── <project-name>/
 │       ├── <project-name>-plan.md       # Optional: implementation plan
@@ -337,7 +337,7 @@ Do not add dependencies. The statusline uses stdlib only because installing pack
 
 ### 6. Run the dashboard somewhere non-default
 
-The dashboard reads from `~/.claude/tasks.db` and `~/.claude/tasks.duckdb` and listens on port 8787 by default. To change:
+The dashboard reads from `~/.orbit/tasks.db` and `~/.orbit/tasks.duckdb` and listens on port 8787 by default. To change:
 
 - `DUCKDB_PATH` and `SQLITE_PATH` in `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` control the read paths.
 - The port is the argument to `uvicorn.run(...)` in `orbit-dashboard/orbit_dashboard/server.py`.
@@ -349,12 +349,12 @@ launchd config lives at `~/Library/LaunchAgents/com.orbit.dashboard.plist`. It e
 
 These are the things that will trip you up if you are new to the codebase, collected from bugs that have actually shipped.
 
-- **Never open `~/.claude/tasks.db` outside of `orbit-db` or `analytics_db`.** The schema has triggers, the WAL settings matter, and `claude_session_cache` is implicitly required to live in that same file. Opening it from a new script almost always breaks something.
+- **Never open `~/.orbit/tasks.db` outside of `orbit-db` or `analytics_db`.** The schema has triggers, the WAL settings matter, and `claude_session_cache` is implicitly required to live in that same file. Opening it from a new script almost always breaks something.
 - **`claude_session_cache` must stay in `tasks.db`, not `tasks.duckdb`.** The untracked-session anti-join is a `LEFT JOIN` against the `sessions` table. Separate databases means the join silently returns empty.
-- **`full_path` on the `tasks` row must match the actual directory location under `~/.claude/orbit/`.** `/orbit:done` moves the directory *and* updates `full_path` *and* sets `status=completed`. If you write code that does one and not the others, you get orphan tasks that the dashboard renders in the wrong list.
+- **`full_path` on the `tasks` row must match the actual directory location under `~/.orbit/`.** `/orbit:done` moves the directory *and* updates `full_path` *and* sets `status=completed`. If you write code that does one and not the others, you get orphan tasks that the dashboard renders in the wrong list.
 - **Hook failures must be silent.** Any exception in any hook will be swallowed by a top-level `try/except` and printed to stderr. This is intentional - a broken hook should never block Claude Code from working. If your new hook throws uncaught exceptions, Claude Code will still keep running, but you will never know the hook is broken.
 - **MCP tool docstrings are the tool description.** They are not optional. Claude reads them to decide when to call the tool.
-- **`projects/<session-id>.json` is the only path that routes automatic heartbeats to a task when `cwd` is outside `~/.claude/orbit/active/<task>/`.** `session_start.py` is its sole writer, and it only writes it when it resolves a task at `SessionStart`. If a user loads a project mid-session via `/orbit:go` in a session that did not resolve at start, subsequent `UserPromptSubmit` heartbeats will not attribute to the new task (cwd pattern matching will not help, and this file will not exist). `/orbit:go` masks this by recording an explicit initial heartbeat, but that covers only the one call. If you add a new "load project mid-session" command, write this file yourself or accept the tracking gap.
+- **`projects/<session-id>.json` is the only path that routes automatic heartbeats to a task when `cwd` is outside `~/.orbit/active/<task>/`.** `session_start.py` is its sole writer, and it only writes it when it resolves a task at `SessionStart`. If a user loads a project mid-session via `/orbit:go` in a session that did not resolve at start, subsequent `UserPromptSubmit` heartbeats will not attribute to the new task (cwd pattern matching will not help, and this file will not exist). `/orbit:go` masks this by recording an explicit initial heartbeat, but that covers only the one call. If you add a new "load project mid-session" command, write this file yourself or accept the tracking gap.
 - **`process_heartbeats()` drains unprocessed heartbeats into aggregated sessions in a single pass.** Each row is aggregated exactly once and then marked `processed=1`, so calling it twice is safe (the second call is a no-op). Calling it zero times means newly accumulated time will not appear in the dashboard until `PreCompact` fires. orbit-auto and some MCP tools invoke it manually to keep the dashboard fresh.
 - **Repo ID resolution is order-dependent in `scan_repos()`.** If you call `create_orbit_files` with a brand-new repo path, the same call will register the repo and may assign the task's `repo_id` to the wrong row if there are unresolved ambiguities. This has been fixed multiple times; if you are touching that path, re-test the "brand new repo with existing tasks" case manually.
 - **The dashboard's `_get_jsonl_task_times()` joins by `cwd = repo.path`.** Multiple tasks sharing a repo all draw from the same JSONL pool, and the only disambiguator is `c.date >= DATE(t.created_at)`. Overlapping tasks on the same repo can therefore double-count - known limitation.

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Orbit Auto is an autonomous AI development tool that enables Claude to work continuously on programming tasks until completion. It uses iterative loops where AI reads its previous work via the file system.
 
-**This repository contains a custom implementation integrated with our orbit task management system.** The scripts here work with the `~/.claude/orbit/active/<task-name>/` directory structure and support features like `/orbit:go`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
+**This repository contains a custom implementation integrated with our orbit task management system.** The scripts here work with the `~/.orbit/active/<task-name>/` directory structure and support features like `/orbit:go`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
 
 **CLI Command:** `orbit-auto`
 **Core Philosophy:** "Iteration beats perfection on the first attempt"
@@ -58,7 +58,7 @@ orbit-auto/
 ### Task Directory Structure
 When running orbit-auto, tasks are organized in the centralized orbit directory:
 ```
-~/.claude/orbit/
+~/.orbit/
 +-- active/
 |   +-- <task-name>/
 |       +-- <task-name>-tasks.md      # Checkbox items
@@ -88,7 +88,7 @@ When running orbit-auto, tasks are organized in the centralized orbit directory:
 - Log can be deleted after task completion
 
 ### Task DB Integration
-Scripts integrate with `~/.claude/scripts/orbit_db.py` when available:
+Scripts integrate with the `orbit-db` package (lazy-imported, optional) when available:
 - Time tracking via heartbeat processing
 - Progress updates with `[PROGRESS] X/Y (Z%)` format
 - Task completion marking
@@ -274,8 +274,8 @@ Example output with `verbose`:
 -------------------------------------------------------------------
 
   * Working...
-  14:32:05 Read ~/.claude/orbit/active/my-task/my-task-tasks.md
-  14:32:06 Read ~/.claude/orbit/active/my-task/my-task-context.md
+  14:32:05 Read ~/.orbit/active/my-task/my-task-tasks.md
+  14:32:06 Read ~/.orbit/active/my-task/my-task-context.md
   14:32:08 Edit src/components/Button.tsx
   14:32:15 Bash npm run typecheck
   14:32:28 Done (23s, 5 tools)
@@ -527,8 +527,8 @@ When orbit-auto encounters `[WAIT]`:
 
 ### Quick Start
 1. `orbit-auto init my-feature "Description"`
-2. Edit `~/.claude/orbit/active/my-feature/my-feature-tasks.md` with tasks
-3. Add context to `~/.claude/orbit/active/my-feature/my-feature-context.md`
+2. Edit `~/.orbit/active/my-feature/my-feature-tasks.md` with tasks
+3. Add context to `~/.orbit/active/my-feature/my-feature-context.md`
 4. `orbit-auto my-feature`  # or `orbit-auto my-feature --sequential`
 
 ### Integration with /orbit:go

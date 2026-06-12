@@ -16,7 +16,7 @@ All orbit skills use the `orbit:` prefix:
 
 ## Orbit Project Updates
 
-After finishing a coding task and updating orbit files (`~/.claude/orbit/active/<project>/*`):
+After finishing a coding task and updating orbit files (`~/.orbit/active/<project>/*`):
 
 1. **Update timestamps** in both `-tasks.md` and `-context.md`:
    - Run `date '+%Y-%m-%d %H:%M'` to get local time
@@ -35,7 +35,7 @@ This ensures session time is properly recorded in the task database.
 
 ## Context Preservation for Orbit Projects
 
-When working on a project with orbit files (`~/.claude/orbit/active/<project-name>/`), proactively keep context updated to survive auto-compaction.
+When working on a project with orbit files (`~/.orbit/active/<project-name>/`), proactively keep context updated to survive auto-compaction.
 
 ### Milestone-Based Updates
 

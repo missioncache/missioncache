@@ -2,7 +2,7 @@
 
 This document covers `orbit-auto`, the autonomous execution CLI that runs Claude Code in a loop over an orbit project's task list until every box is checked, something blocks, or the retry budget runs out. It is the component with the least amount of magic and the most amount of subprocess orchestration - once you understand the core loop, everything else is a variation on it.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (orbit file layout, `~/.claude/orbit/active/<project>/`, `tasks.db`, heartbeats, `auto_executions`, `auto_execution_logs`). If a term in this doc is not defined here, it is defined there.
+It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (orbit file layout, `~/.orbit/active/<project>/`, `tasks.db`, heartbeats, `auto_executions`, `auto_execution_logs`). If a term in this doc is not defined here, it is defined there.
 
 If you are just trying to *use* orbit-auto, the short version is: run `orbit-auto <project>` from inside your project's git repo, answer the confirmation prompt, and watch. The rest of this doc is for when you want to understand what it is doing, debug a run, or change how it behaves.
 
@@ -37,7 +37,7 @@ The difference is not just speed. Sequential mode walks the task list top to bot
 Every orbit-auto run operates on the same directory:
 
 ```
-~/.claude/orbit/active/<project>/
+~/.orbit/active/<project>/
 ├── <project>-tasks.md         # Checkbox items, parsed every iteration
 ├── <project>-context.md       # Durable learnings, decisions, gotchas
 ├── <project>-plan.md          # Implementation plan (optional, read-only)
@@ -123,7 +123,7 @@ Parallel mode is what you want when you have a project with a `prompts/` directo
 
 Parallel mode requires:
 
-1. **A prompts directory.** `~/.claude/orbit/active/<project>/prompts/` must exist and must contain `task-NN-prompt.md` files. If it does not, `ParallelRunner.validate()` returns an error and the CLI exits with code 3.
+1. **A prompts directory.** `~/.orbit/active/<project>/prompts/` must exist and must contain `task-NN-prompt.md` files. If it does not, `ParallelRunner.validate()` returns an error and the CLI exits with code 3.
 2. **YAML frontmatter on every prompt.** Each prompt file must start with a `---` delimited block containing at minimum `task_id: "NN"`. `task_title` is strongly recommended (used for display and commits). `dependencies: ["01", "03"]` is optional but required for anything other than strict sequential order.
 3. **Task numbers that match.** The prompt file's `task_id` must correspond to an uncompleted line in `<project>-tasks.md`. The plan validator (`plan_validator.py:validate_plan`) cross-references the two and warns about mismatches.
 
@@ -378,7 +378,7 @@ The dashboard's log viewer has a per-level filter, so sprinkling `debug` liberal
 
 ### Workers that cannot log
 
-`_WorkerDBLogger` in `worker.py` is a lightweight wrapper around `TaskDB` that each worker process instantiates on startup. If `orbit_db` cannot be imported (which happens in some install configurations) or `~/.claude/tasks.db` does not exist, the logger silently becomes a no-op. Every `log()` call is wrapped in try/except with a bare `pass`, so logging failures never crash a worker. This is deliberate: the dashboard is a nice-to-have, not a dependency, and an orbit-auto run must succeed in minimal-install environments too.
+`_WorkerDBLogger` in `worker.py` is a lightweight wrapper around `TaskDB` that each worker process instantiates on startup. If `orbit_db` cannot be imported (which happens in some install configurations) or `~/.orbit/tasks.db` does not exist on a fresh install, the logger silently becomes a no-op. One exception to the silence: if the DB is missing because orbit data still lives at the legacy `~/.claude/` paths, `warn_if_migration_required` (in `db_logger.py`, shared by `ExecutionLogger` and `Worker`) prints the full migration recipe to stderr - once per process, not once per worker - so you know why the run produced no dashboard logs and how to fix it. Every `log()` call is wrapped in try/except with a bare `pass`, so logging failures never crash a worker. This is deliberate: the dashboard is a nice-to-have, not a dependency, and an orbit-auto run must succeed in minimal-install environments too.
 
 ## Advanced features
 
@@ -551,7 +551,7 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Cause:** The orbit-auto process was killed (SIGKILL, OS crash) before `ExecutionLogger.finish()` ran. The `auto_executions` row still has `status=running`.
 
-**Fix:** Start a new run. The next `ExecutionLogger.start()` on the same task does not touch the old row, but `_cleanup_old_executions()` will eventually delete it via the retention policy. If you want to clean it up immediately, `UPDATE auto_executions SET status='cancelled' WHERE id=<id>` via `sqlite3 ~/.claude/tasks.db` is fine - the dashboard will refresh on its next poll.
+**Fix:** Start a new run. The next `ExecutionLogger.start()` on the same task does not touch the old row, but `_cleanup_old_executions()` will eventually delete it via the retention policy. If you want to clean it up immediately, `UPDATE auto_executions SET status='cancelled' WHERE id=<id>` via `sqlite3 ~/.orbit/tasks.db` is fine - the dashboard will refresh on its next poll.
 
 ### "Task times out at 1800s but I want it to keep going"
 

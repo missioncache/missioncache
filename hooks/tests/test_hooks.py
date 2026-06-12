@@ -959,8 +959,9 @@ class TestSessionStartSourceGating:
         """A successful inherit logs a stderr breadcrumb naming project + source.
 
         The breadcrumb is the user's only signal that auto-binding fired. If
-        the statusline ever shows an unexpected project, this line in
-        ``~/.claude/logs/`` is the first place to look. Format-locking via
+        the statusline ever shows an unexpected project, this line in the
+        session transcript JSONL under ``~/.claude/projects/`` is the first
+        place to look. Format-locking via
         substring asserts (not a full-string match) so the wording can
         evolve without test churn; the three invariants - the "inherited"
         verb, the project name, and the source value - stay.
@@ -2719,7 +2720,7 @@ class TestParallelSessionDetection:
     ):
         """``sqlite3.Error`` (non-OperationalError) raised by connect()
         must NOT propagate. A breadcrumb fires so silent degradation is
-        visible in ``~/.claude/logs/``.
+        visible in the session transcript JSONL under ``~/.claude/projects/``.
         """
         import sqlite3 as _sqlite3
 

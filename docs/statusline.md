@@ -128,7 +128,7 @@ Tables the statusline reads:
 
 `hooks-state.db` is the main contact point between the statusline and the rest of the plugin - it is how SessionStart tells the statusline "this session is on project X", and it is how `/orbit:go` tells the statusline "switch to project Y mid-session" without restarting Claude Code.
 
-### `~/.claude/orbit/active/<project>/<project>-tasks.md`
+### `~/.orbit/active/<project>/<project>-tasks.md`
 
 Read for the progress bracket. Parsing is a simple regex scan for completed (`- [x]`) and pending (`- [ ]`) lines - see `_parse_task_progress()`. The format matches the MCP server's canonical parser in `mcp-server/src/mcp_orbit/orbit.py`, counting all checklist items flatly including hierarchical subtasks.
 
@@ -137,7 +137,7 @@ Two special cases for display:
 - **Empty file or no checklists at all:** shows `[TBD]` instead of `[0/0]`.
 - **Template placeholder:** a single pending item with text exactly `TBD` also shows `[TBD]`, so freshly initialized projects do not display `[0/1]` until you write real tasks.
 
-### `~/.claude/tasks.db`
+### `~/.orbit/tasks.db`
 
 **The statusline does not read `tasks.db` directly.** This is intentional. `tasks.db` is orbit-db's domain and reading it from the statusline would require importing `orbit_db`, which is slow and adds a fork boundary. All the time and task data the statusline needs comes through `hooks-state.db` (written by hooks and the dashboard) or directly from the filesystem (`<project>-tasks.md`).
 
@@ -175,7 +175,7 @@ Here is what each line builds from, so you can trace a display issue back to its
 
 ### Line 1: Project + Last Action
 
-- **Project** - `get_project_info(session_id, duration_sec)`. Reads `project_state` from `hooks-state.db`. If the row is older than `max(duration_sec + 60, 60)` seconds, it is considered stale and ignored. Looks for the project directory under `ORBIT_ACTIVE = ~/.claude/orbit/active/`, supports nested subtask layouts (`parent/child`), and reads the tasks file to compute the progress bracket. Wraps both the name and the bracket in OSC 8 links.
+- **Project** - `get_project_info(session_id, duration_sec)`. Reads `project_state` from `hooks-state.db`. If the row is older than `max(duration_sec + 60, 60)` seconds, it is considered stale and ignored. Looks for the project directory under `ORBIT_ACTIVE = ~/.orbit/active/`, supports nested subtask layouts (`parent/child`), and reads the tasks file to compute the progress bracket. Wraps both the name and the bracket in OSC 8 links.
 - **Last Action** - `get_last_action_time(session_id)`. Reads `last_prompt_at` from `session_state` and formats it as "Apr 14 10:00".
 
 Empty on a session with no active orbit project.
@@ -273,7 +273,7 @@ Things that are slow and gated by threads + timeouts:
 
 Things to avoid adding:
 - Any subprocess call that is not already cached or gated
-- Any DB query against `~/.claude/tasks.db` (WAL lock contention with `orbit-db` writers)
+- Any DB query against `~/.orbit/tasks.db` (WAL lock contention with `orbit-db` writers)
 - Any synchronous HTTP call that is not cached
 
 The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) is there because subprocess stderr can corrupt the ANSI display if it leaks. Do not remove it.
