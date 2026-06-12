@@ -15,8 +15,8 @@
       "command": "uvx",
       "args": [
         "--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server",
-        "--with", "${CLAUDE_PLUGIN_ROOT}/orbit-db",
-        "mcp-orbit"
+        "--with", "${CLAUDE_PLUGIN_ROOT}/missioncache-db",
+        "mcp-missioncache"
       ]
     }
   }

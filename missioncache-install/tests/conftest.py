@@ -1,4 +1,4 @@
-"""Shared fixtures for orbit-install tests.
+"""Shared fixtures for missioncache-install tests.
 
 All tests that touch disk get a sandboxed home directory via `isolated_home`.
 This redirects Path.home() and the module-level STATE_FILE / SETTINGS_FILE
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit_install import command_clients, mcp_clients, settings, state
+from missioncache_install import command_clients, mcp_clients, settings, state
 
 
 @pytest.fixture

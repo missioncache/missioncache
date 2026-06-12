@@ -30,11 +30,11 @@ _error_console = Console(stderr=True, style="bold red")
 _COMPONENT_LABELS: dict[str, str] = {
     "plugin": "Core plugin",
     "dashboard": "Dashboard",
-    "orbit_auto": "orbit-auto CLI",
+    "missioncache_auto": "missioncache-auto CLI",
     "statusline": "Statusline",
     "rules": "Rules",
     "user_commands": "User commands",
-    "orbit_db": "orbit-db CLI",
+    "missioncache_db": "missioncache-db CLI",
     "codex": "Codex MCP",
     "codex_commands": "Codex slash commands",
     "opencode": "OpenCode MCP",

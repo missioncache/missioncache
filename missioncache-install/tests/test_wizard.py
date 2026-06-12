@@ -1,4 +1,4 @@
-"""Tests for orbit_install.wizard - component-prompt flow.
+"""Tests for missioncache_install.wizard - component-prompt flow.
 
 Focus: verify that the y/N prompt fires for each component the user can
 actually install, and is silently skipped for MCP-tool integrations whose
@@ -14,7 +14,7 @@ import sys
 
 import pytest
 
-from orbit_install import installers, mcp_clients, state, wizard
+from missioncache_install import installers, mcp_clients, state, wizard
 
 
 @pytest.fixture
@@ -218,7 +218,7 @@ def test_uninstall_wizard_fails_loudly_on_empty_state(
         wizard.run_uninstall_wizard()
 
     assert failures, "Empty state must call ui.fail, not silently return None"
-    assert "No prior orbit-install" in failures[0], (
+    assert "No prior missioncache-install" in failures[0], (
         "Empty-state error must explain why nothing can be uninstalled"
     )
 
@@ -320,7 +320,7 @@ def test_uninstall_wizard_filters_unknown_state_keys(
 ) -> None:
     """State.json with no-longer-recognized component names is filtered + warned.
 
-    Schema-evolution defense: a stale state.json from an older orbit-install
+    Schema-evolution defense: a stale state.json from an older missioncache-install
     version may reference deleted component names. The wizard must warn
     and skip them rather than offering them to the user (who would pick a
     number that maps to a silent no-op uninstall).

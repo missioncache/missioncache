@@ -2,7 +2,7 @@
 
 Three tools are supported in Phase 11.1:
 
-- Codex (CLI: codex 0.125.0+) - registered via `codex mcp add orbit -- mcp-orbit`.
+- Codex (CLI: codex 0.125.0+) - registered via `codex mcp add orbit -- mcp-missioncache`.
   Codex owns the TOML round-trip, so no third-party TOML library is needed.
 - OpenCode (CLI: opencode 1.4.x+) - direct JSON merge into
   ~/.config/opencode/opencode.json. The `opencode mcp add` subcommand is
@@ -13,7 +13,7 @@ Three tools are supported in Phase 11.1:
 
 Claude Code uses the existing plugin manifest flow (see install_plugin in
 installers.py); this module is only for tools that consume the orbit MCP
-server via the `mcp-orbit` binary on PATH. Each writer is idempotent and
+server via the `mcp-missioncache` binary on PATH. Each writer is idempotent and
 warn-and-skips when the tool itself is not installed on the system.
 
 Schemas verified against codex 0.125.0 and opencode 1.4.3 on 2026-04-26;
@@ -56,11 +56,11 @@ VSCODE_APP_PATHS: tuple[Path, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# Shared: ensure mcp-orbit is on PATH (prereq for every non-Claude tool)
+# Shared: ensure mcp-missioncache is on PATH (prereq for every non-Claude tool)
 # ---------------------------------------------------------------------------
 
-def _ensure_mcp_orbit_on_path() -> bool:
-    """Install mcp-orbit via pipx/uv if not already on PATH. Idempotent.
+def _ensure_mcp_missioncache_on_path() -> bool:
+    """Install mcp-missioncache via pipx/uv if not already on PATH. Idempotent.
 
     Returns True when registration should proceed, False when the prereq
     install failed outright. A successful pipx install whose binary has not
@@ -68,27 +68,27 @@ def _ensure_mcp_orbit_on_path() -> bool:
     config entry is stored as a literal command string, and the tool resolves
     it on its own next session, after the user's shell rehashes.
     """
-    if shutil.which("mcp-orbit"):
-        ui.detail(f"mcp-orbit already on PATH at {shutil.which('mcp-orbit')}")
+    if shutil.which("mcp-missioncache"):
+        ui.detail(f"mcp-missioncache already on PATH at {shutil.which('mcp-missioncache')}")
         return True
-    ui.detail("Installing mcp-orbit (required for non-Claude MCP clients)")
+    ui.detail("Installing mcp-missioncache (required for non-Claude MCP clients)")
     # Late import: installers imports this module at the top, so dodge the
     # circular at module-load time. _pipx_install handles pipx -> uv fallback.
     from . import installers
     try:
-        installers._pipx_install("mcp-orbit")
+        installers._pipx_install("mcp-missioncache")
     except subprocess_utils.CommandFailed as e:
-        ui.warn(f"Failed to install mcp-orbit: {e.stderr.strip() or 'unknown error'}")
+        ui.warn(f"Failed to install mcp-missioncache: {e.stderr.strip() or 'unknown error'}")
         return False
-    if shutil.which("mcp-orbit"):
-        ui.detail(f"mcp-orbit installed at {shutil.which('mcp-orbit')}")
+    if shutil.which("mcp-missioncache"):
+        ui.detail(f"mcp-missioncache installed at {shutil.which('mcp-missioncache')}")
     else:
-        ui.warn("mcp-orbit installed but not on PATH yet - restart your shell to use it")
+        ui.warn("mcp-missioncache installed but not on PATH yet - restart your shell to use it")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Codex: codex mcp add orbit -- mcp-orbit
+# Codex: codex mcp add orbit -- mcp-missioncache
 # ---------------------------------------------------------------------------
 
 def install_codex(ctx: "InstallContext") -> None:
@@ -97,30 +97,30 @@ def install_codex(ctx: "InstallContext") -> None:
     if not shutil.which("codex"):
         ui.warn(
             "Codex CLI not found - skipping. "
-            "Install Codex, then run: orbit-install --update"
+            "Install Codex, then run: missioncache-install --update"
         )
         ctx.mcp_success["codex"] = False
         return
-    if not _ensure_mcp_orbit_on_path():
-        ui.warn("Skipping Codex registration - mcp-orbit prereq failed")
+    if not _ensure_mcp_missioncache_on_path():
+        ui.warn("Skipping Codex registration - mcp-missioncache prereq failed")
         ctx.mcp_success["codex"] = False
         return
     if _codex_orbit_registered():
         ui.detail("orbit already registered with Codex")
-        state.record_component("codex", {"command": "mcp-orbit"})
+        state.record_component("codex", {"command": "mcp-missioncache"})
         ui.success("Codex MCP integration confirmed")
         ctx.mcp_success["codex"] = True
         return
-    ui.detail("Running: codex mcp add orbit -- mcp-orbit")
+    ui.detail("Running: codex mcp add orbit -- mcp-missioncache")
     try:
-        subprocess_utils.run(["codex", "mcp", "add", "orbit", "--", "mcp-orbit"])
+        subprocess_utils.run(["codex", "mcp", "add", "orbit", "--", "mcp-missioncache"])
     except subprocess_utils.CommandFailed as e:
         ui.warn(
             f"codex mcp add failed: {e.stderr.strip() or e.stdout.strip() or 'unknown error'}"
         )
         ctx.mcp_success["codex"] = False
         return
-    state.record_component("codex", {"command": "mcp-orbit"})
+    state.record_component("codex", {"command": "mcp-missioncache"})
     ui.success("Codex MCP integration installed")
     ctx.mcp_success["codex"] = True
 
@@ -173,16 +173,16 @@ def install_opencode(ctx: "InstallContext") -> None:
     if not _opencode_detected():
         ui.warn(
             "OpenCode CLI not found - skipping. "
-            "Install OpenCode, then run: orbit-install --update"
+            "Install OpenCode, then run: missioncache-install --update"
         )
         ctx.mcp_success["opencode"] = False
         return
-    if not _ensure_mcp_orbit_on_path():
-        ui.warn("Skipping OpenCode registration - mcp-orbit prereq failed")
+    if not _ensure_mcp_missioncache_on_path():
+        ui.warn("Skipping OpenCode registration - mcp-missioncache prereq failed")
         ctx.mcp_success["opencode"] = False
         return
 
-    desired = {"type": "local", "command": ["mcp-orbit"]}
+    desired = {"type": "local", "command": ["mcp-missioncache"]}
     OPENCODE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         data, indent, used_jsonc = _load_json_object(OPENCODE_CONFIG_PATH)
@@ -274,16 +274,16 @@ def install_vscode(ctx: "InstallContext") -> None:
     if not _vscode_detected():
         ui.warn(
             "VSCode not found in /Applications - skipping. "
-            "Install VSCode, then run: orbit-install --update"
+            "Install VSCode, then run: missioncache-install --update"
         )
         ctx.mcp_success["vscode"] = False
         return
-    if not _ensure_mcp_orbit_on_path():
-        ui.warn("Skipping VSCode registration - mcp-orbit prereq failed")
+    if not _ensure_mcp_missioncache_on_path():
+        ui.warn("Skipping VSCode registration - mcp-missioncache prereq failed")
         ctx.mcp_success["vscode"] = False
         return
 
-    desired = {"type": "stdio", "command": "mcp-orbit"}
+    desired = {"type": "stdio", "command": "mcp-missioncache"}
     VSCODE_USER_MCP_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         data, indent, used_jsonc = _load_json_object(VSCODE_USER_MCP_PATH)

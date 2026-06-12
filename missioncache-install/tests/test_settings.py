@@ -1,4 +1,4 @@
-"""Tests for orbit_install.settings - user-facing ~/.claude/settings.json edits.
+"""Tests for missioncache_install.settings - user-facing ~/.claude/settings.json edits.
 
 These are the tests that guard the user's machine: anything the installer
 writes to settings.json must be reversible, idempotent, and never clobber
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orbit_install import settings
+from missioncache_install import settings
 
 
 def test_load_returns_empty_dict_when_settings_missing(isolated_home: Path) -> None:
@@ -35,7 +35,7 @@ def test_set_statusline_backs_up_existing_different_command(isolated_home: Path)
     settings.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     settings.SETTINGS_FILE.write_text(json.dumps(original))
 
-    bak = settings.set_statusline("orbit-statusline")
+    bak = settings.set_statusline("missioncache-statusline")
 
     assert bak is not None, \
         "set_statusline should return the backup path when overwriting a different command"
@@ -43,17 +43,17 @@ def test_set_statusline_backs_up_existing_different_command(isolated_home: Path)
     assert json.loads(bak.read_text()) == original, \
         "Backup must contain the user's original settings"
     assert json.loads(settings.SETTINGS_FILE.read_text())["statusLine"]["command"] \
-        == "orbit-statusline"
+        == "missioncache-statusline"
 
 
 def test_set_statusline_no_backup_when_identical(isolated_home: Path) -> None:
     """Idempotent re-install (same command) should not create redundant backups."""
     settings.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     settings.SETTINGS_FILE.write_text(json.dumps({
-        "statusLine": {"type": "command", "command": "orbit-statusline"}
+        "statusLine": {"type": "command", "command": "missioncache-statusline"}
     }))
 
-    bak = settings.set_statusline("orbit-statusline")
+    bak = settings.set_statusline("missioncache-statusline")
 
     assert bak is None, \
         "Re-writing the same statusLine command should not produce a backup"
@@ -61,17 +61,17 @@ def test_set_statusline_no_backup_when_identical(isolated_home: Path) -> None:
 
 def test_set_statusline_fresh_install_no_backup(isolated_home: Path) -> None:
     """With no existing statusLine, install is clean with no backup."""
-    bak = settings.set_statusline("orbit-statusline")
+    bak = settings.set_statusline("missioncache-statusline")
     assert bak is None, "Fresh install should not produce a backup file"
     assert json.loads(settings.SETTINGS_FILE.read_text())["statusLine"]["command"] \
-        == "orbit-statusline"
+        == "missioncache-statusline"
 
 
 def test_unset_statusline_removes_block(isolated_home: Path) -> None:
     """unset_statusline() strips the statusLine key from settings."""
     settings.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     settings.SETTINGS_FILE.write_text(json.dumps({
-        "statusLine": {"type": "command", "command": "orbit-statusline"},
+        "statusLine": {"type": "command", "command": "missioncache-statusline"},
         "otherKey": "keepMe",
     }))
 

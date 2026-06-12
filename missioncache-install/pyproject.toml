@@ -1,6 +1,6 @@
 [project]
-name = "orbit-install"
-version = "1.0.3"
+name = "missioncache-install"
+version = "1.0.0"
 description = "Bootstrap installer for Orbit - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: System :: Installation/Setup",
 ]
 
-# Runtime deps kept minimal to preserve `uvx orbit-install` cold-start UX.
+# Runtime deps kept minimal to preserve `uvx missioncache-install` cold-start UX.
 # rich powers the install wizard's panels, tables, prompts, and styled output;
 # its own deps (markdown-it-py, mdurl, pygments) are pure-Python and small.
 # pyfiglet provides the gradient ORBIT banner.
@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.scripts]
-orbit-install = "orbit_install.__main__:main"
+missioncache-install = "missioncache_install.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -55,7 +55,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["orbit_install"]
+packages = ["missioncache_install"]
 
 # Bundle the repo's rules/, user-commands/, and commands/ into the wheel so end
 # users can install them without cloning. Source of truth stays in the repo root;
@@ -66,9 +66,9 @@ packages = ["orbit_install"]
 # command_clients.py - one source, three rendered destinations). Claude reads the
 # same files via its plugin manifest, not the bundle.
 [tool.hatch.build.targets.wheel.force-include]
-"../rules" = "orbit_install/bundled/rules"
-"../user-commands" = "orbit_install/bundled/user_commands"
-"../commands" = "orbit_install/bundled/commands"
+"../rules" = "missioncache_install/bundled/rules"
+"../user-commands" = "missioncache_install/bundled/user_commands"
+"../commands" = "missioncache_install/bundled/commands"
 
 [tool.hatch.build.targets.sdist]
 exclude = [

@@ -1,7 +1,7 @@
 """Read/write ~/.claude/settings.json safely.
 
 Always backs up before destructive edits. Every function is idempotent so
-`orbit-install` can be re-run without duplicating entries.
+`missioncache-install` can be re-run without duplicating entries.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def disable_plugin(plugin_id: str) -> None:
         save(s)
 
 
-def set_statusline(command: str = "orbit-statusline") -> Path | None:
+def set_statusline(command: str = "missioncache-statusline") -> Path | None:
     """Set statusLine.command. Backs up when overwriting a different existing command.
 
     Returns the backup path if one was written, otherwise None.

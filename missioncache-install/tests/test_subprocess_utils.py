@@ -1,4 +1,4 @@
-"""Tests for orbit_install.subprocess_utils - command runner with error surfacing."""
+"""Tests for missioncache_install.subprocess_utils - command runner with error surfacing."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from orbit_install.subprocess_utils import CommandFailed, run
+from missioncache_install.subprocess_utils import CommandFailed, run
 
 
 def test_run_returns_result_on_zero_exit() -> None:
