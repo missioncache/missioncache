@@ -2,34 +2,34 @@
 
 ## Architecture
 
-- **MCP Server**: Primary interface (`mcp-server/src/mcp_orbit/`)
-- **Database**: `orbit-db/` package (SQLite at `~/.orbit/tasks.db`)
+- **MCP Server**: Primary interface (`mcp-server/src/mcp_missioncache/`)
+- **Database**: `missioncache-db/` package (SQLite at `~/.orbit/tasks.db`)
 - **Hooks**: Auto-save on compaction, detect active project on start
 - **Commands**: Slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`, `/orbit:done`, `/orbit:prompts`, `/orbit:mode`)
-- **Orbit Auto**: Autonomous execution CLI (`orbit-auto/`)
-- **Orbit Dashboard**: Web UI at localhost:8787 (`orbit-dashboard/`)
-- **Statusline**: Optional terminal status display (bundled in `orbit-dashboard/orbit_dashboard/statusline.py`, installed via the `orbit-statusline` pip entry point)
+- **Orbit Auto**: Autonomous execution CLI (`missioncache-auto/`)
+- **Orbit Dashboard**: Web UI at localhost:8787 (`missioncache-dashboard/`)
+- **Statusline**: Optional terminal status display (bundled in `missioncache-dashboard/missioncache_dashboard/statusline.py`, installed via the `missioncache-statusline` pip entry point)
 - **Rules** (`rules/`): Claude behavioral guidance symlinked into `~/.claude/rules/` by the installer
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `mcp-server/src/mcp_orbit/server.py` | MCP entry point, registers all tools |
-| `mcp-server/src/mcp_orbit/db.py` | orbit_db wrapper |
-| `mcp-server/src/mcp_orbit/orbit.py` | File operations (create, update, parse) |
-| `mcp-server/src/mcp_orbit/iteration_log.py` | Autonomous loop logging |
-| `mcp-server/src/mcp_orbit/models.py` | Pydantic response models |
-| `mcp-server/src/mcp_orbit/errors.py` | OrbitError, OrbitFileNotFoundError |
-| `mcp-server/src/mcp_orbit/config.py` | Configuration via ORBIT_ env vars |
-| `mcp-server/src/mcp_orbit/tools_tasks.py` | Task lifecycle tools |
-| `mcp-server/src/mcp_orbit/tools_docs.py` | Documentation tools |
-| `mcp-server/src/mcp_orbit/tools_tracking.py` | Time tracking tools |
-| `mcp-server/src/mcp_orbit/tools_iteration.py` | Iteration logging tools |
-| `mcp-server/src/mcp_orbit/tools_planning.py` | Planning tools |
-| `orbit-db/orbit_db/__init__.py` | Core database layer (~3400 lines) |
-| `orbit-auto/orbit_auto/cli.py` | Orbit Auto CLI entry point |
-| `orbit-dashboard/orbit_dashboard/server.py` | FastAPI dashboard backend |
+| `mcp-server/src/mcp_missioncache/server.py` | MCP entry point, registers all tools |
+| `mcp-server/src/mcp_missioncache/db.py` | missioncache_db wrapper |
+| `mcp-server/src/mcp_missioncache/orbit.py` | File operations (create, update, parse) |
+| `mcp-server/src/mcp_missioncache/iteration_log.py` | Autonomous loop logging |
+| `mcp-server/src/mcp_missioncache/models.py` | Pydantic response models |
+| `mcp-server/src/mcp_missioncache/errors.py` | MissionCacheError, MissionCacheFileNotFoundError |
+| `mcp-server/src/mcp_missioncache/config.py` | Configuration via MISSIONCACHE_ env vars |
+| `mcp-server/src/mcp_missioncache/tools_tasks.py` | Task lifecycle tools |
+| `mcp-server/src/mcp_missioncache/tools_docs.py` | Documentation tools |
+| `mcp-server/src/mcp_missioncache/tools_tracking.py` | Time tracking tools |
+| `mcp-server/src/mcp_missioncache/tools_iteration.py` | Iteration logging tools |
+| `mcp-server/src/mcp_missioncache/tools_planning.py` | Planning tools |
+| `missioncache-db/missioncache_db/__init__.py` | Core database layer (~3400 lines) |
+| `missioncache-auto/missioncache_auto/cli.py` | Orbit Auto CLI entry point |
+| `missioncache-dashboard/missioncache_dashboard/server.py` | FastAPI dashboard backend |
 | `hooks/hooks.json` | Hook definitions |
 | `hooks/session_start.py` | SessionStart hook |
 | `hooks/pre_compact.py` | PreCompact hook |
@@ -56,7 +56,7 @@ MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServe
        db = get_db()
        try:
            return {"success": True, ...}
-       except OrbitError as e:
+       except MissionCacheError as e:
            return e.to_dict()
        except Exception as e:
            logger.exception("Error in my_tool")
@@ -81,7 +81,7 @@ MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServe
 
 ## Database
 
-orbit-db provides `OrbitDB` class with these key tables:
+missioncache-db provides the `TaskDB` class with these key tables:
 - `repositories` - Tracked git repos
 - `tasks` - Projects (name, status, jira_key, tags)
 - `heartbeats` - WakaTime-style activity records
@@ -93,51 +93,51 @@ orbit-db provides `OrbitDB` class with these key tables:
 
 - **SQLite** (`~/.orbit/tasks.db`): Source of truth for writes
 - **DuckDB** (`~/.orbit/tasks.duckdb`): Analytics database for fast reads
-- `orbit-dashboard/orbit_dashboard/lib/analytics_db.py` handles DuckDB operations
+- `missioncache-dashboard/missioncache_dashboard/lib/analytics_db.py` handles DuckDB operations
 
 ## Testing
 
 ```bash
 # Run MCP server manually
-cd mcp-server && uvx --from . mcp-orbit
+cd mcp-server && uvx --from . mcp-missioncache
 
 # Test imports
-uvx --from . python -c "from mcp_orbit.server import mcp; print('OK')"
+uvx --from . python -c "from mcp_missioncache.server import mcp; print('OK')"
 
 # Run dashboard locally (via the pip-installed entry point)
-orbit-dashboard serve
+missioncache-dashboard serve
 
 # Test orbit-auto
-orbit-auto --dry-run my-project
+missioncache-auto --dry-run my-project
 ```
 
 ## Installation
 
 Two paths depending on context:
 
-**Public user install** (plugin core + dashboard + orbit-auto + statusline, via PyPI):
+**Public user install** (plugin core + dashboard + orbit-auto + statusline, via PyPI; live once the missioncache-* packages publish at Task 74):
 ```bash
-uvx orbit-install
+uvx missioncache-install
 # or
-pipx run orbit-install
+pipx run missioncache-install
 ```
 
 **Maintainer install** (clone + editable pip installs + local marketplace for fast iteration):
 ```bash
 git clone https://github.com/tomerbr1/orbit-pm.git
 cd orbit-pm
-uvx orbit-install --local
+uvx missioncache-install --local
 ```
 
-Or manually, without `orbit-install`:
+Or manually, without `missioncache-install`:
 ```bash
-pip install -e ./orbit-db
-pip install -e ./orbit-auto
-pip install -e ./orbit-dashboard
+pip install -e ./missioncache-db
+pip install -e ./missioncache-auto
+pip install -e ./missioncache-dashboard
 claude plugins install orbit@local
 ```
 
-The `@local` suffix refers to the local marketplace that `orbit-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@orbit-pm` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.
+The `@local` suffix refers to the local marketplace that `missioncache-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@orbit-pm` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.
 
 ## Dependencies
 

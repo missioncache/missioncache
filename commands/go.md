@@ -114,7 +114,7 @@ Replace `<project-name>` with the resumed project name, then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
-DASHBOARD_URL="${ORBIT_DASHBOARD_URL:-http://localhost:8787}"
+DASHBOARD_URL="${MISSIONCACHE_DASHBOARD_URL:-http://localhost:8787}"
 if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
   echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
 fi
@@ -216,7 +216,7 @@ conn.execute(
 conn.commit()
 ' 2>/dev/null
 
-  # Write per-session project pointer read by find_task_for_cwd (orbit-db/__init__.py:1270).
+  # Write per-session project pointer read by find_task_for_cwd (missioncache-db/__init__.py:1270).
   # Without this, /orbit:save cannot find the task when cwd is the repo root (only when
   # cwd is under ~/.orbit/active/<task>/). Format matches session_start.py's
   # write_session_project() exactly so either writer is interchangeable.
