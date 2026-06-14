@@ -512,7 +512,7 @@ class TestGetProjectInfo:
     """End-to-end statusline resolution: a project_state binding plus a
     tasks.md file must yield BOTH the project name and the subtask count.
 
-    This is the behavior that ``/orbit:new`` depends on: after the command
+    This is the behavior that ``/missioncache:new`` depends on: after the command
     binds the current session to the freshly-created project, the next
     statusline render must show ``<name> [0/N]`` automatically. The bug it
     guards against is a binding written under the wrong session_id (stale
@@ -555,7 +555,7 @@ class TestGetProjectInfo:
     def test_binding_plus_tasks_file_yields_name_and_progress(
         self, tmp_path, monkeypatch
     ):
-        """The /orbit:new success path: bound session + tasks file -> the
+        """The /missioncache:new success path: bound session + tasks file -> the
         statusline shows the project name and the [0/N] subtask count."""
         orbit_active = self._seed_binding(
             tmp_path, monkeypatch, "sess-new", "my-feature"
@@ -596,7 +596,7 @@ class TestGetProjectInfo:
         """The bug being fixed: when the binding is written under a different
         session_id than the statusline's, get_project_info finds nothing -
         no name AND no count. This is what a stale-cwd-pointer binding in
-        /orbit:new produced before the env-var-first resolver fix."""
+        /missioncache:new produced before the env-var-first resolver fix."""
         orbit_active = self._seed_binding(
             tmp_path, monkeypatch, "bound-under-wrong-sid", "my-feature"
         )

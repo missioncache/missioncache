@@ -10,18 +10,18 @@ Assign workflow modes (autonomous or interactive) to specific tasks in an orbit 
 ## Quick Start
 
 ```
-/orbit:mode my-project 1-4:auto,5-6:inter,7-10:auto
+/missioncache:mode my-project 1-4:auto,5-6:inter,7-10:auto
 ```
 
 ## Workflow
 
 ### Step 0: Handle No-Args Invocation
 
-If invoked bare (`/orbit:mode` with no arguments), switch to interactive mode before running Step 1.
+If invoked bare (`/missioncache:mode` with no arguments), switch to interactive mode before running Step 1.
 
-**Step 0a: Detect project.** Resolve the current Claude session and look up the active project, using the same SESSION_ID resolver pattern as `/orbit:save` (pointer-first, mtime fallback). If no project is found, print `Usage: /orbit:mode <project> <range:mode,...>` and stop.
+**Step 0a: Detect project.** Resolve the current Claude session and look up the active project, using the same SESSION_ID resolver pattern as `/missioncache:save` (pointer-first, mtime fallback). If no project is found, print `Usage: /missioncache:mode <project> <range:mode,...>` and stop.
 
-**Step 0b: Show tasks.** Call `mcp__plugin_orbit_pm__get_orbit_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
+**Step 0b: Show tasks.** Call `mcp__plugin_missioncache_pm__get_orbit_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
 
 ```markdown
 ## Tasks in: <project-name>
@@ -77,7 +77,7 @@ Extract project name and mode assignments from the command arguments.
 
 1. Get the project's orbit files:
    ```
-   mcp__plugin_orbit_pm__get_orbit_files(project_name="<project-name>")
+   mcp__plugin_missioncache_pm__get_orbit_files(project_name="<project-name>")
    ```
 
 2. Read the tasks file to see current task list and any existing mode markers.
@@ -122,13 +122,13 @@ Updated 10 tasks:
 
 Autonomous tasks need prompts. Run:
 ```
-/orbit:prompts my-project
+/missioncache:prompts my-project
 ```
 ```
 
 ### Step 5: Suggest Prompt Generation
 
-If any tasks were set to `auto` and don't have prompts yet, suggest running `/orbit:prompts`.
+If any tasks were set to `auto` and don't have prompts yet, suggest running `/missioncache:prompts`.
 
 ## Mode Markers in tasks.md
 
@@ -170,17 +170,17 @@ This means task 7 can only run after tasks 3 and 5 are complete. Set dependencie
 
 ```
 # Set all tasks to autonomous
-/orbit:mode my-project all:auto
+/missioncache:mode my-project all:auto
 
 # Set specific ranges
-/orbit:mode my-project 1-3:auto,4:inter,5-8:auto
+/missioncache:mode my-project 1-3:auto,4:inter,5-8:auto
 
 # Change a task from auto to interactive
-/orbit:mode my-project 5:inter
+/missioncache:mode my-project 5:inter
 ```
 
 ## MCP Tools Used
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__get_orbit_files` | Get paths to project's orbit files |
+| `mcp__plugin_missioncache_pm__get_orbit_files` | Get paths to project's orbit files |

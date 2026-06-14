@@ -7,7 +7,7 @@ argument-hint: "<project-name>"
 
 Generate per-subtask prompts for an orbit project, optimized for autonomous parallel execution via `missioncache-auto`. Each prompt bundles task context, agent recommendations, and skill hints into a self-contained input for a fresh Claude Code worker.
 
-**This is an autonomous-workflow tool.** Most interactive workflows do not need it - the plan, context, and tasks files are sufficient when you're working directly with Claude. Run `/orbit:prompts` only when:
+**This is an autonomous-workflow tool.** Most interactive workflows do not need it - the plan, context, and tasks files are sufficient when you're working directly with Claude. Run `/missioncache:prompts` only when:
 - You plan to run the project via `missioncache-auto`
 - Subtasks have changed and the existing per-task prompts need to be regenerated
 - Prompts were skipped initially and you now want to switch to autonomous execution
@@ -314,7 +314,7 @@ If blocked waiting for human input:
 ## Example Usage
 
 ```
-User: /orbit:prompts auth-feature
+User: /missioncache:prompts auth-feature
 
 Claude: Let me analyze the subtasks and check agent/skill coverage...
 

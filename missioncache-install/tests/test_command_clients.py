@@ -88,7 +88,7 @@ def fake_bundled_commands(
 
     Tests that need real command content can write into the returned path
     before invoking install_*. Default content is a minimal valid command
-    file with frontmatter + an mcp__plugin_orbit_pm__* reference so the
+    file with frontmatter + an mcp__plugin_missioncache_pm__* reference so the
     transformations have something to chew on.
     """
     bundle_root = tmp_path / "bundle"
@@ -102,7 +102,7 @@ def fake_bundled_commands(
             f"\n"
             f"# /{name}\n"
             f"\n"
-            f"Body for {name}. Calls `mcp__plugin_orbit_pm__list_active_tasks`.\n"
+            f"Body for {name}. Calls `mcp__plugin_missioncache_pm__list_active_tasks`.\n"
         )
     monkeypatch.setattr(
         command_clients.resources, "files",
@@ -150,19 +150,19 @@ def test_render_substitutes_mcp_prefix_everywhere() -> None:
         "---\n"
         'description: "x"\n'
         "---\n"
-        "Call `mcp__plugin_orbit_pm__list_active_tasks(repo_path='.')`.\n"
-        "Also `mcp__plugin_orbit_pm__get_task` and a stray reference.\n"
+        "Call `mcp__plugin_missioncache_pm__list_active_tasks(repo_path='.')`.\n"
+        "Also `mcp__plugin_missioncache_pm__get_task` and a stray reference.\n"
     )
     rendered = command_clients._render_for_non_claude(src)
-    assert "mcp__plugin_orbit_pm__" not in rendered
-    assert rendered.count("mcp__orbit__list_active_tasks") == 1
-    assert rendered.count("mcp__orbit__get_task") == 1
+    assert "mcp__plugin_missioncache_pm__" not in rendered
+    assert rendered.count("mcp__missioncache__list_active_tasks") == 1
+    assert rendered.count("mcp__missioncache__get_task") == 1
 
 
 def test_render_handles_file_without_frontmatter() -> None:
-    src = "Plain markdown.\n`mcp__plugin_orbit_pm__foo`\n"
+    src = "Plain markdown.\n`mcp__plugin_missioncache_pm__foo`\n"
     rendered = command_clients._render_for_non_claude(src)
-    assert rendered == "Plain markdown.\n`mcp__orbit__foo`\n"
+    assert rendered == "Plain markdown.\n`mcp__missioncache__foo`\n"
 
 
 def test_render_preserves_other_frontmatter_keys() -> None:
@@ -198,7 +198,7 @@ def test_install_opencode_commands_writes_six_files(
 
     files = sorted(p.name for p in command_clients.OPENCODE_COMMANDS_DIR.glob("*.md"))
     assert files == sorted(
-        f"orbit-{name}.md" for name in command_clients.CANONICAL_COMMANDS
+        f"missioncache-{name}.md" for name in command_clients.CANONICAL_COMMANDS
     )
     info = state.load()["components"]["opencode_commands"]
     assert len(info["files"]) == 6
@@ -213,10 +213,10 @@ def test_install_opencode_commands_renders_transformations(
 
     command_clients.install_opencode_commands(_make_ctx())
 
-    content = (command_clients.OPENCODE_COMMANDS_DIR / "orbit-go.md").read_text()
+    content = (command_clients.OPENCODE_COMMANDS_DIR / "missioncache-load.md").read_text()
     assert "argument-hint:" not in content
-    assert "mcp__plugin_orbit_pm__" not in content
-    assert "mcp__orbit__list_active_tasks" in content
+    assert "mcp__plugin_missioncache_pm__" not in content
+    assert "mcp__missioncache__list_active_tasks" in content
 
 
 def test_install_opencode_commands_skips_when_tool_missing(
@@ -285,7 +285,7 @@ def test_install_vscode_commands_writes_prompt_md_and_registers_location(
 
     files = sorted(p.name for p in command_clients.VSCODE_PROMPTS_DIR.glob("*.prompt.md"))
     assert files == sorted(
-        f"orbit-{name}.prompt.md" for name in command_clients.CANONICAL_COMMANDS
+        f"missioncache-{name}.prompt.md" for name in command_clients.CANONICAL_COMMANDS
     )
     settings_data = json.loads(command_clients.VSCODE_USER_SETTINGS_PATH.read_text())
     assert settings_data["chat.promptFilesLocations"][
@@ -431,28 +431,28 @@ def test_install_codex_commands_builds_full_marketplace_tree(
 
     command_clients.install_codex_commands(_make_ctx())
 
-    plugin_dir = command_clients.CODEX_MARKETPLACE_DIR / "plugins" / "orbit"
+    plugin_dir = command_clients.CODEX_MARKETPLACE_DIR / "plugins" / "missioncache"
     assert (plugin_dir / ".codex-plugin" / "plugin.json").exists()
     assert (
         command_clients.CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
     ).exists()
     cmds = sorted(p.name for p in (plugin_dir / "commands").glob("*.md"))
     assert cmds == sorted(
-        f"orbit-{name}.md" for name in command_clients.CANONICAL_COMMANDS
+        f"missioncache-{name}.md" for name in command_clients.CANONICAL_COMMANDS
     )
 
     manifest = json.loads(
         (plugin_dir / ".codex-plugin" / "plugin.json").read_text()
     )
-    assert manifest["name"] == "orbit"
+    assert manifest["name"] == "missioncache"
     assert manifest["version"] == command_clients.CODEX_PLUGIN_VERSION
 
     marketplace = json.loads(
         (command_clients.CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json").read_text()
     )
-    assert marketplace["name"] == "orbit"
+    assert marketplace["name"] == "missioncache"
     assert marketplace["plugins"][0]["source"] == {
-        "source": "local", "path": "./plugins/orbit"
+        "source": "local", "path": "./plugins/missioncache"
     }
 
 
@@ -469,7 +469,7 @@ def test_install_codex_commands_writes_config_stanza(
     command_clients.install_codex_commands(_make_ctx())
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert '[plugins."orbit@orbit"]' in text
+    assert '[plugins."missioncache@missioncache"]' in text
 
 
 def test_install_codex_commands_preserves_existing_config_stanzas(
@@ -493,7 +493,7 @@ def test_install_codex_commands_preserves_existing_config_stanzas(
     text = command_clients.CODEX_CONFIG_TOML.read_text()
     assert "[mcp_servers.orbit]" in text
     assert '[plugins."github@openai-curated"]' in text
-    assert '[plugins."orbit@orbit"]' in text
+    assert '[plugins."missioncache@missioncache"]' in text
 
 
 def test_install_codex_commands_idempotent_on_config(
@@ -510,7 +510,7 @@ def test_install_codex_commands_idempotent_on_config(
     command_clients.install_codex_commands(_make_ctx())
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert text.count('[plugins."orbit@orbit"]') == 1
+    assert text.count('[plugins."missioncache@missioncache"]') == 1
 
 
 def test_install_codex_commands_skips_when_codex_missing(
@@ -585,7 +585,7 @@ def test_uninstall_codex_commands_round_trips(
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
     assert "[mcp_servers.orbit]" in text
-    assert '[plugins."orbit@orbit"]' not in text
+    assert '[plugins."missioncache@missioncache"]' not in text
     assert not command_clients.CODEX_MARKETPLACE_DIR.exists()
     assert "codex_commands" not in state.load().get("components", {})
 
@@ -598,13 +598,13 @@ def test_strip_codex_plugin_stanza_removes_only_orbit() -> None:
         '\n'
         '[plugins."github@openai-curated"]\n'
         '\n'
-        '[plugins."orbit@orbit"]\n'
+        '[plugins."missioncache@missioncache"]\n'
         '\n'
         '[some.other.section]\n'
         'key = "value"\n'
     )
     out = command_clients._strip_codex_plugin_stanza(text)
-    assert '[plugins."orbit@orbit"]' not in out
+    assert '[plugins."missioncache@missioncache"]' not in out
     assert '[plugins."github@openai-curated"]' in out
     assert '[some.other.section]' in out
     assert 'key = "value"' in out
@@ -613,7 +613,7 @@ def test_strip_codex_plugin_stanza_removes_only_orbit() -> None:
 def test_strip_codex_plugin_stanza_handles_body_lines() -> None:
     """If the orbit stanza has body content (overrides), strip those too."""
     text = (
-        '[plugins."orbit@orbit"]\n'
+        '[plugins."missioncache@missioncache"]\n'
         'enabled = true\n'
         'foo = "bar"\n'
         '\n'
@@ -621,7 +621,7 @@ def test_strip_codex_plugin_stanza_handles_body_lines() -> None:
         'k = "v"\n'
     )
     out = command_clients._strip_codex_plugin_stanza(text)
-    assert '[plugins."orbit@orbit"]' not in out
+    assert '[plugins."missioncache@missioncache"]' not in out
     assert 'enabled = true' not in out
     assert 'foo = "bar"' not in out
     assert '[other]\nk = "v"\n' in out
@@ -635,25 +635,25 @@ def test_strip_codex_plugin_stanza_handles_body_lines() -> None:
 def test_strip_codex_plugin_stanza_strips_orbit_subsections() -> None:
     """A user-added subsection of orbit must be stripped, not leaked.
 
-    Bug: substring `[plugins."orbit@orbit".overrides]` starts with `[` and
+    Bug: substring `[plugins."missioncache@missioncache".overrides]` starts with `[` and
     ends with `]`, so a naive "any header ends skip" parser would treat it
     as a sibling section and leak the subsection plus everything after it.
     """
     text = (
-        '[plugins."orbit@orbit"]\n'
+        '[plugins."missioncache@missioncache"]\n'
         'enabled = true\n'
         '\n'
-        '[plugins."orbit@orbit".overrides]\n'
+        '[plugins."missioncache@missioncache".overrides]\n'
         'x = 1\n'
         '\n'
-        '[plugins."orbit@orbit".env]\n'
+        '[plugins."missioncache@missioncache".env]\n'
         'KEY = "value"\n'
         '\n'
         '[other.section]\n'
         'k = "v"\n'
     )
     out = command_clients._strip_codex_plugin_stanza(text)
-    assert '[plugins."orbit@orbit"' not in out
+    assert '[plugins."missioncache@missioncache"' not in out
     assert 'enabled = true' not in out
     assert 'x = 1' not in out
     assert 'KEY = "value"' not in out
@@ -748,32 +748,32 @@ def test_install_codex_commands_skips_state_record_on_marketplace_failure(
         "state must NOT record success when marketplace registration fails"
     )
     if command_clients.CODEX_CONFIG_TOML.exists():
-        assert '[plugins."orbit@orbit"]' not in command_clients.CODEX_CONFIG_TOML.read_text(), (
+        assert '[plugins."missioncache@missioncache"]' not in command_clients.CODEX_CONFIG_TOML.read_text(), (
             "stanza must NOT be written when marketplace registration failed"
         )
 
 
 def test_render_rewrites_orbit_slash_cross_references() -> None:
-    """Body cross-refs like /orbit:prompts must rewrite to /orbit-prompts."""
+    """Body cross-refs like /missioncache:prompts must rewrite to /missioncache-prompts."""
     src = (
         "---\n"
         'description: "x"\n'
         "---\n"
-        "After this finishes, run `/orbit:prompts <project>` to generate prompts.\n"
-        "See also `/orbit:save` and `/orbit:done`.\n"
+        "After this finishes, run `/missioncache:prompts <project>` to generate prompts.\n"
+        "See also `/missioncache:save` and `/missioncache:done`.\n"
     )
     rendered = command_clients._render_for_non_claude(src)
-    assert "/orbit:prompts" not in rendered
-    assert "/orbit-prompts" in rendered
-    assert "/orbit-save" in rendered
-    assert "/orbit-done" in rendered
+    assert "/missioncache:prompts" not in rendered
+    assert "/missioncache-prompts" in rendered
+    assert "/missioncache-save" in rendered
+    assert "/missioncache-done" in rendered
 
 
 def test_render_does_not_rewrite_unrelated_colons() -> None:
-    """The /orbit: rewrite must not match URLs, timestamps, or namespaces."""
+    """The /missioncache: rewrite must not match URLs, timestamps, or namespaces."""
     src = "Body with https://example.com and 12:30:00 timestamp.\n"
     rendered = command_clients._render_for_non_claude(src)
-    assert rendered == src, "no /orbit: literal -> no rewrite"
+    assert rendered == src, "no /missioncache: literal -> no rewrite"
 
 
 def test_install_opencode_commands_warns_on_partial(
@@ -842,13 +842,13 @@ def test_enable_codex_plugin_treats_commented_stanza_as_absent(
     """A commented-out stanza is not active; install must add the live one."""
     command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
     command_clients.CODEX_CONFIG_TOML.write_text(
-        '# [plugins."orbit@orbit"]\n# disabled for testing\n'
+        '# [plugins."missioncache@missioncache"]\n# disabled for testing\n'
     )
 
     command_clients._enable_codex_plugin()
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert '# [plugins."orbit@orbit"]' in text, "comment must be preserved"
+    assert '# [plugins."missioncache@missioncache"]' in text, "comment must be preserved"
     # The non-commented stanza must now also exist.
     assert command_clients._CODEX_PLUGIN_STANZA_RE.search(text), (
         "live stanza must be appended even though a comment matches the substring"
@@ -896,7 +896,7 @@ def test_install_codex_commands_skips_when_codex_mcp_not_run_this_session(
     """User runs `--codex-commands --no-codex`: parent never ran -> child skips.
 
     The pre-fix behavior was to warn and proceed, leaving registered commands
-    that call mcp__orbit__* tools that aren't registered with Codex.
+    that call mcp__missioncache__* tools that aren't registered with Codex.
     """
     _set_codex_present(monkeypatch, True)
 
@@ -973,4 +973,43 @@ def test_install_vscode_commands_skips_when_vscode_mcp_not_ready(
     assert "vscode_commands" not in state.load().get("components", {})
     assert any("missioncache-install --vscode" in m for m in warn_calls), (
         f"expected pointer to `missioncache-install --vscode`; got {warn_calls!r}"
+    )
+
+
+def test_codex_install_and_uninstall_use_same_marketplace_name(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_bundled_commands: Path,
+) -> None:
+    """Install registers the Codex marketplace under marketplace.json's `name`;
+    uninstall must `codex plugin marketplace remove` that exact name. A mismatch
+    (the half-applied rename: register `missioncache`, remove `orbit`) leaves a
+    phantom marketplace registered forever. The argv is the contract - assert it,
+    because stubbing subprocess.run hides a wrong literal.
+    """
+    _set_codex_present(monkeypatch, True)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        command_clients.subprocess_utils,
+        "run",
+        lambda cmd, **kw: (calls.append(list(cmd)), _proc())[1],
+    )
+    command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    command_clients.CODEX_CONFIG_TOML.write_text("")
+
+    command_clients.install_codex_commands(_make_ctx())
+    registered_name = json.loads(
+        (
+            command_clients.CODEX_MARKETPLACE_DIR
+            / ".agents" / "plugins" / "marketplace.json"
+        ).read_text()
+    )["name"]
+
+    command_clients.uninstall_codex_commands(_make_ctx())
+
+    removes = [c for c in calls if c[:4] == ["codex", "plugin", "marketplace", "remove"]]
+    assert removes, "uninstall never called `codex plugin marketplace remove`"
+    assert removes[-1][4] == registered_name, (
+        f"uninstall removes {removes[-1][4]!r} but install registered "
+        f"{registered_name!r} - install/uninstall marketplace names diverged"
     )

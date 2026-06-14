@@ -45,7 +45,7 @@ pipx run orbit-install
 
 The interactive wizard asks which components to install (default is all) and runs:
 
-1. **Plugin core** - installs the Claude Code plugin. In the default PyPI mode this registers `tomerbr1/orbit-pm` as a marketplace and installs `orbit@orbit-pm`. In `--local` mode (from a clone) it sets up a local marketplace at `~/.claude/plugins/local-marketplace/` and installs `orbit@local` instead.
+1. **Plugin core** - installs the Claude Code plugin. In the default PyPI mode this registers `tomerbr1/orbit-pm` as a marketplace and installs `missioncache@orbit-pm`. In `--local` mode (from a clone) it sets up a local marketplace at `~/.claude/plugins/local-marketplace/` and installs `missioncache@local` instead.
 2. **Dashboard** - pip-installs `orbit-dashboard` (which pulls in `orbit-db` as a dependency, giving your own tooling access to the task DB) and wires up a background service (launchd on macOS, systemd on Linux) via `orbit-dashboard install-service`
 3. **Orbit Auto CLI** - pip-installs `orbit-auto` (also pulls in `orbit-db` as a dependency)
 4. **Statusline** - wires `orbit-statusline` (a console entry point shipped in `orbit-dashboard`) into `~/.claude/settings.json`. Selecting statusline without dashboard auto-adds dashboard, since that is where the entry point ships from.
@@ -89,16 +89,16 @@ In Claude Code:
 
 ```
 /plugin marketplace add tomerbr1/orbit-pm
-/plugin install orbit@orbit-pm
+/plugin install missioncache@orbit-pm
 ```
 
 Restart your Claude Code session. The MCP server and bundled `orbit-db` are built on demand via `uvx`; no manual `pip install` is needed.
 
-**What you get:** per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.orbit/tasks.db`, all 30+ MCP tools, and all orbit rules.
+**What you get:** per-project plan/context/tasks files, `/missioncache:load` resume, time heartbeat tracking in `~/.orbit/tasks.db`, all 30+ MCP tools, and all orbit rules.
 
 **What you give up:** local dashboard at `localhost:8787`, `orbit-auto` CLI for parallel execution, rich statusline.
 
-You can always upgrade to the full install later by running `uvx orbit-install --dashboard --statusline --orbit-auto --yes`. In PyPI mode (the default when not running from a clone), the installer does not create a local marketplace, so your existing `orbit@orbit-pm` install stays untouched.
+You can always upgrade to the full install later by running `uvx orbit-install --dashboard --statusline --orbit-auto --yes`. In PyPI mode (the default when not running from a clone), the installer does not create a local marketplace, so your existing `missioncache@orbit-pm` install stays untouched.
 
 ## Manual install (no installer)
 
@@ -112,7 +112,7 @@ pip install orbit-db orbit-auto orbit-dashboard mcp-orbit
 
 # Claude Code plugin (do this inside Claude Code, not the shell)
 #   /plugin marketplace add tomerbr1/orbit-pm
-#   /plugin install orbit@orbit-pm
+#   /plugin install missioncache@orbit-pm
 
 # Dashboard background service (after pip install orbit-dashboard)
 orbit-dashboard install-service    # launchd on macOS, systemd on Linux
@@ -157,7 +157,7 @@ cat > ~/.claude/plugins/local-marketplace/.claude-plugin/marketplace.json <<'EOF
 EOF
 ln -s "$PWD" ~/.claude/plugins/local-marketplace/orbit
 claude plugins marketplace add ~/.claude/plugins/local-marketplace
-claude plugins install orbit@local
+claude plugins install missioncache@local
 
 # Dashboard service
 orbit-dashboard install-service
@@ -209,10 +209,10 @@ For the Claude Code plugin, the bundled `uvx --with` flow is still preferred bec
 
 ### Plugin core
 
-Inside Claude Code, type `/orbit:` - you should see the slash commands autocomplete. Then:
+Inside Claude Code, type `/missioncache:` - you should see the slash commands autocomplete. Then:
 
 ```
-/orbit:new
+/missioncache:new
 ```
 
 Should prompt you to create a new project.
@@ -277,7 +277,7 @@ Removes: plugin registration, pip packages, service units, settings.json entries
 In Claude Code:
 
 ```
-/plugin uninstall orbit@orbit-pm
+/plugin uninstall missioncache@orbit-pm
 /plugin marketplace remove tomerbr1/orbit-pm
 ```
 
@@ -285,7 +285,7 @@ In Claude Code:
 
 ```bash
 # Plugin
-claude plugins uninstall orbit@local   # (or orbit@orbit-pm)
+claude plugins uninstall missioncache@local   # (or missioncache@orbit-pm)
 
 # Dashboard service
 orbit-dashboard uninstall-service      # or remove the plist/unit manually
@@ -337,7 +337,7 @@ Check `~/.claude/settings.json` - the `statusLine.command` should be the bare st
 Claude Code caches plugin content. Refresh:
 
 ```bash
-claude plugins install orbit@local
+claude plugins install missioncache@local
 ```
 
 Then restart your Claude Code session. Skill-only edits can use `/reload-plugins` instead of a full restart.

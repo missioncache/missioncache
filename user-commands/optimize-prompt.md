@@ -211,10 +211,10 @@ Skills can be invoked directly with `/skill-name` or auto-activate via keywords.
 | `/code-review` | Comprehensive code review using specialized agents |
 | `/build-and-fix` | Run pytest collection and fix all errors iteratively |
 | `/pr-review-toolkit:review-pr` | Comprehensive PR review using specialized agents |
-| `/orbit:new` | Create orbit project (plan, context, tasks) for a new feature |
-| `/orbit:go` | Resume work on an active orbit project |
-| `/orbit:done` | Mark an active orbit project as completed |
-| `/orbit:save` | Save orbit project progress before compaction or session end |
+| `/missioncache:new` | Create orbit project (plan, context, tasks) for a new feature |
+| `/missioncache:load` | Resume work on an active orbit project |
+| `/missioncache:done` | Mark an active orbit project as completed |
+| `/missioncache:save` | Save orbit project progress before compaction or session end |
 | `/sync-with-master` | Sync current branch with latest remote master |
 | `/daily-report` | Generate daily sprint log from orbit tasks |
 

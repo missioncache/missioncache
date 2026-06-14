@@ -22,7 +22,7 @@
 
 Orbit is the project layer for AI coding tools. It works in [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), and VSCode Copilot Chat - any tool that speaks MCP. Every orbit project gets a durable home: a plan, a living context file, and a task checklist. That state persists across sessions, survives context compaction, and reloads when you come back. On the Claude Code side, orbit also adds time tracking, a local analytics dashboard, autonomous execution, and a rich statusline; the other three currently get the project state and the MCP tool suite.
 
-<!-- HERO GIF: dashboard + statusline + /orbit:new flow -->
+<!-- HERO GIF: dashboard + statusline + /missioncache:new flow -->
 
 ## Contents
 
@@ -44,7 +44,7 @@ Orbit is the project layer for AI coding tools. It works in [Claude Code](https:
 
 ### Your projects keep their memory
 
-Every orbit project lives under `~/.orbit/active/<project-name>/` as three markdown files: `plan.md` (the agreed approach, locked after approval), `context.md` (your decisions, key files, gotchas, and next steps as a living document), and `tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/orbit:go <project-name>` in any new Claude Code session (or `/orbit-go` in Codex, OpenCode, or VSCode) and orbit reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
+Every orbit project lives under `~/.orbit/active/<project-name>/` as three markdown files: `plan.md` (the agreed approach, locked after approval), `context.md` (your decisions, key files, gotchas, and next steps as a living document), and `tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/missioncache:load <project-name>` in any new Claude Code session (or `/missioncache-load` in Codex, OpenCode, or VSCode) and orbit reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
 
 ### Full visibility into your Claude time
 
@@ -64,16 +64,16 @@ Orbit's MCP server and slash commands install into any of the major AI coding to
 
 | Tool | MCP server | Slash commands | Invocation | Hooks / statusline / orbit-auto |
 |------|------------|----------------|------------|---------------------------------|
-| Claude Code | yes | yes | `/orbit:go`, `/orbit:save`, ... | yes (full) |
-| Codex CLI | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
-| OpenCode | yes | yes | `/orbit-go`, `/orbit-save`, ... | not yet |
-| VSCode (Copilot Chat) | yes | yes (macOS) | `/orbit-go`, `/orbit-save`, ... | n/a (editor-level) |
+| Claude Code | yes | yes | `/missioncache:load`, `/missioncache:save`, ... | yes (full) |
+| Codex CLI | yes | yes | `/missioncache-load`, `/missioncache-save`, ... | not yet |
+| OpenCode | yes | yes | `/missioncache-load`, `/missioncache-save`, ... | not yet |
+| VSCode (Copilot Chat) | yes | yes (macOS) | `/missioncache-load`, `/missioncache-save`, ... | n/a (editor-level) |
 
-Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash-command namespaces, so orbit's commands ship as `orbit-go.md` etc. and resolve to `/orbit-go`. The behavior is identical across tools - only the invocation token differs by one character.
+Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash-command namespaces, so orbit's commands ship as `orbit-go.md` etc. and resolve to `/missioncache-load`. The behavior is identical across tools - only the invocation token differs by one character.
 
 Per-tool registration details:
 
-- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.orbit/codex-marketplace`. The `[plugins."orbit@orbit"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
+- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.orbit/codex-marketplace`. The `[plugins."missioncache@missioncache"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
 - **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
 - **VSCode** - prompt files written to `~/.orbit/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
 
@@ -116,18 +116,18 @@ In Claude Code:
 
 ```
 /plugin marketplace add tomerbr1/orbit-pm
-/plugin install orbit@orbit-pm
+/plugin install missioncache@orbit-pm
 ```
 
 Restart your Claude Code session.
 
 **Requirements:** Claude Code with `uvx` available on `PATH`. If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. The MCP server and bundled `orbit-db` are built on demand; no manual `pip install` is needed.
 
-**What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/orbit:go` resume, time heartbeat tracking in `~/.orbit/tasks.db`, and all 30+ MCP tools.
+**What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `orbit-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/missioncache:load` resume, time heartbeat tracking in `~/.orbit/tasks.db`, and all 30+ MCP tools.
 
 ### Other tools (Codex, OpenCode, VSCode)
 
-The full installer also registers orbit in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and slash commands are the same files orbit ships to Claude; only the invocation token (`/orbit:go` vs `/orbit-go`) differs.
+The full installer also registers orbit in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and slash commands are the same files orbit ships to Claude; only the invocation token (`/missioncache:load` vs `/missioncache-load`) differs.
 
 ## Upgrading
 
@@ -139,7 +139,7 @@ Re-run the installer to refresh every component to the latest published version:
 uvx orbit-install --update
 ```
 
-This pulls the latest `orbit-dashboard` and `orbit-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-orbit`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update orbit@orbit-pm` in Claude Code (or `claude plugins install orbit@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `orbit-db` is a transitive dependency of `orbit-dashboard` and `orbit-auto`, so it refreshes alongside them.
+This pulls the latest `orbit-dashboard` and `orbit-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-orbit`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update missioncache@orbit-pm` in Claude Code (or `claude plugins install missioncache@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `orbit-db` is a transitive dependency of `orbit-dashboard` and `orbit-auto`, so it refreshes alongside them.
 
 If the `uvx` cache is pinning you to an older `orbit-install` itself, clear it with `uvx cache prune` or `uvx --refresh orbit-install --update`.
 
@@ -148,21 +148,21 @@ If the `uvx` cache is pinning you to an older `orbit-install` itself, clear it w
 From Claude Code:
 
 ```
-/plugin update orbit@orbit-pm
+/plugin update missioncache@orbit-pm
 ```
 
 Restart your Claude Code session.
 
 ### Maintainer install (editable from a clone)
 
-If you are developing on orbit rather than consuming it, see [CONTRIBUTING.md](CONTRIBUTING.md) for the `uvx orbit-install --local` workflow. A `git pull` picks up changes in the editable Python packages; you still need `claude plugins install orbit@local` for plugin-cache refreshes and a service restart for dashboard server-code changes.
+If you are developing on orbit rather than consuming it, see [CONTRIBUTING.md](CONTRIBUTING.md) for the `uvx orbit-install --local` workflow. A `git pull` picks up changes in the editable Python packages; you still need `claude plugins install missioncache@local` for plugin-cache refreshes and a service restart for dashboard server-code changes.
 
 ## Your First Project
 
 ### Create it
 
 ```
-/orbit:new auth-refactor
+/missioncache:new auth-refactor
 ```
 
 Orbit drops three files under `~/.orbit/active/auth-refactor/`:
@@ -175,7 +175,7 @@ auth-refactor-tasks.md     # checklist with hierarchical subtasks
 
 Claude walks you through a clarifying conversation, proposes a plan, and asks for approval. Once approved, the plan file is locked and the context file starts tracking your real progress.
 
-<!-- SCREENSHOT: /orbit:new interactive flow with file tree -->
+<!-- SCREENSHOT: /missioncache:new interactive flow with file tree -->
 
 ### Work on it
 
@@ -184,13 +184,13 @@ Edit files, run tests, make decisions. Orbit tracks time in the background via h
 If you want to checkpoint manually at any point:
 
 ```
-/orbit:save
+/missioncache:save
 ```
 
 ### Resume it tomorrow
 
 ```
-/orbit:go auth-refactor
+/missioncache:load auth-refactor
 ```
 
 Orbit reloads the plan, context, and tasks files and shows you:
@@ -202,7 +202,7 @@ Orbit reloads the plan, context, and tasks files and shows you:
 
 You pick up without reconstructing anything.
 
-<!-- SCREENSHOT: /orbit:go output showing reload summary -->
+<!-- SCREENSHOT: /missioncache:load output showing reload summary -->
 
 ### Run it autonomously
 
@@ -224,7 +224,7 @@ Auto runs each task in a separate Claude Code invocation, respects task dependen
 ### Finish it
 
 ```
-/orbit:done auth-refactor
+/missioncache:done auth-refactor
 ```
 
 Orbit archives the project files to `~/.orbit/completed/` and records the final time and progress stats.
@@ -241,7 +241,7 @@ Every project has three markdown files: `plan`, `context`, and `tasks`. They liv
 
 ### Context preservation across compaction
 
-Orbit's `PreCompact` hook auto-saves project state before Claude Code compacts the context window. When you run `/orbit:go` in a new session, the full state reloads. You never reconstruct your mental model from scratch, and you never lose a decision you made three sessions ago.
+Orbit's `PreCompact` hook auto-saves project state before Claude Code compacts the context window. When you run `/missioncache:load` in a new session, the full state reloads. You never reconstruct your mental model from scratch, and you never lose a decision you made three sessions ago.
 
 ### Local analytics dashboard
 
@@ -265,11 +265,11 @@ An optional terminal display showing the active project with progress fraction, 
 
 ### A full MCP tool suite for Claude
 
-Orbit's MCP server exposes tools across five categories: task lifecycle, file operations, time tracking, iteration logging, and repository management. Claude uses them automatically during `/orbit:new`, `/orbit:go`, and other commands, but you can call any of them directly if you want fine-grained control.
+Orbit's MCP server exposes tools across five categories: task lifecycle, file operations, time tracking, iteration logging, and repository management. Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
 
 ### Lifecycle hooks
 
-Three Claude Code hooks tie orbit directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/orbit:save` if you edited project files without saving. All three ship with the plugin.
+Three Claude Code hooks tie orbit directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. All three ship with the plugin.
 
 ## How Orbit compares
 
@@ -283,7 +283,7 @@ For readers who know the Anthropic Productivity Plugin or [Taskmaster AI](https:
 |---|---|---|---|
 | Auto task decomposition from PRD | manual (Claude-assisted) | manual | yes (dependency-aware) |
 | Plan + context + tasks files per project | yes | partial (tasks only) | no |
-| Resume project across sessions | yes (`/orbit:go`) | yes (workplace memory) | yes (file-based JSON) |
+| Resume project across sessions | yes (`/missioncache:load`) | yes (workplace memory) | yes (file-based JSON) |
 | Time tracking per task | yes (heartbeats) | no | no |
 | Local dashboard | yes (web, analytics) | yes (HTML Kanban) | no |
 | Autonomous execution | yes (orbit-auto) | no | no |
@@ -300,7 +300,7 @@ For readers who know [claude-mem](https://github.com/thedotmack/claude-mem) or [
 | Capability | Orbit | claude-mem | MemPalace |
 |---|---|---|---|
 | Unit of organization | Projects | Sessions, entities | Wings, rooms (domains) |
-| Capture mode | On compaction + `/orbit:save` | Auto per session | Auto every 15 messages |
+| Capture mode | On compaction + `/missioncache:save` | Auto per session | Auto every 15 messages |
 | Storage | Human-editable markdown | AI-compressed, vector search | Structured memory palace |
 | Project-scoped state | yes (plan, context, tasks) | partial | partial (wings can be projects) |
 | Task checklists with progress | yes | no | no |
@@ -367,7 +367,7 @@ Orbit's load-bearing piece is the `mcp-orbit` MCP server. Around it sit four sta
 | Component | Purpose | Installs via |
 |---|---|---|
 | `mcp-orbit` | MCP server (project state, file ops, time tracking, iteration logging) | Bundled with the Claude plugin; `pipx install mcp-orbit` for other tools |
-| `orbit` Claude plugin | Slash commands as `/orbit:*`, lifecycle hooks (SessionStart, PreCompact, Stop), rules | Claude Code plugin marketplace |
+| `orbit` Claude plugin | Slash commands as `/missioncache:*`, lifecycle hooks (SessionStart, PreCompact, Stop), rules | Claude Code plugin marketplace |
 | `orbit-db` | SQLite + DuckDB layer at `~/.orbit/tasks.db` | `pip install orbit-db` |
 | `orbit-auto` | Autonomous execution CLI (Claude Code only) | `pip install orbit-auto` |
 | `orbit-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787` (Claude Code only) | Runs as a launchd/systemd service |
@@ -390,12 +390,12 @@ The MCP server plus `orbit-db` is the minimum viable install (and the only piece
 
 | Command | Description |
 |---------|-------------|
-| `/orbit:new` | Create a new project with plan, context, and task files |
-| `/orbit:go` | Resume work on an active project |
-| `/orbit:save` | Persist progress before session end or compaction |
-| `/orbit:done` | Mark a project as completed and archive |
-| `/orbit:prompts` | Regenerate optimized prompts for subtasks |
-| `/orbit:mode` | Assign workflow mode (interactive or autonomous) to tasks |
+| `/missioncache:new` | Create a new project with plan, context, and task files |
+| `/missioncache:load` | Resume work on an active project |
+| `/missioncache:save` | Persist progress before session end or compaction |
+| `/missioncache:done` | Mark a project as completed and archive |
+| `/missioncache:prompts` | Regenerate optimized prompts for subtasks |
+| `/missioncache:mode` | Assign workflow mode (interactive or autonomous) to tasks |
 
 ## Documentation
 

@@ -79,7 +79,7 @@ def main():
                 f"""
 ---
 **Orbit Reminder:** You made file edits while working on **{task.name}**.
-Consider running `/orbit:save` to save context before ending your session.
+Consider running `/missioncache:save` to save context before ending your session.
 ---
 """,
                 file=sys.stderr,

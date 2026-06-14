@@ -89,16 +89,16 @@ def test_unset_statusline_is_noop_when_absent(isolated_home: Path) -> None:
 
 def test_enable_and_disable_plugin_roundtrip(isolated_home: Path) -> None:
     """enable_plugin / disable_plugin is a clean round-trip."""
-    settings.enable_plugin("orbit@local")
+    settings.enable_plugin("missioncache@local")
 
     enabled = settings.load().get("enabledPlugins", {})
-    assert enabled.get("orbit@local") is True, \
+    assert enabled.get("missioncache@local") is True, \
         "enable_plugin should set the plugin entry to True"
 
-    settings.disable_plugin("orbit@local")
+    settings.disable_plugin("missioncache@local")
 
     enabled = settings.load().get("enabledPlugins", {})
-    assert "orbit@local" not in enabled, \
+    assert "missioncache@local" not in enabled, \
         "disable_plugin should remove the plugin entry entirely"
 
 

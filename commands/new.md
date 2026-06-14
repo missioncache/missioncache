@@ -7,7 +7,7 @@ argument-hint: "[project-name] [--jira TICKET]"
 
 Create development documentation for a new feature or project. This command creates the plan, context, and tasks files - everything you need to start working interactively.
 
-`/orbit:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `missioncache-auto`. Most interactive workflows do not need it.
+`/missioncache:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `missioncache-auto`. Most interactive workflows do not need it.
 
 ## Workflow
 
@@ -20,12 +20,12 @@ Ask the user for:
 - Initial subtasks (or generate from discussion)
 
 **Duplicate check:** Once you have a name, call
-`mcp__plugin_orbit_pm__get_task(project_name="<name>")` before going further.
+`mcp__plugin_missioncache_pm__get_task(project_name="<name>")` before going further.
 
 - If the response indicates the task is not found, the name is free - proceed.
 - If a task is returned (status `active` or `completed`), ask the user how to
   proceed and wait for their reply. Present three options:
-  1. **Resume the existing project** - run `/orbit:go <name>` instead of recreating.
+  1. **Resume the existing project** - run `/missioncache:load <name>` instead of recreating.
   2. **Use a different name** - pick a new project name and re-run the duplicate check.
   3. **Recreate from scratch (destructive)** - confirms with the user that the existing
      plan/context/tasks files will be overwritten, then in Step 4 pass `force=True`.
@@ -107,7 +107,7 @@ Merge all 4 results into a single structured `research_findings` with sections: 
 Pass the current working directory as `repo_path`. The MCP tool walks
 parents to the git root server-side, so any cwd inside a git repo
 resolves to the same registered path regardless of which subdirectory
-the user invoked `/orbit:new` from. Non-git directories pass through
+the user invoked `/missioncache:new` from. Non-git directories pass through
 unchanged - orbit projects can be started anywhere.
 
 ```bash
@@ -146,13 +146,13 @@ fi
 echo "$SESSION_ID"
 ```
 
-Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/orbit:go` once the project exists.
+Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/missioncache:load` once the project exists.
 
 Now create the orbit files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
 **Flat tasks (simple):**
 ```
-mcp__plugin_orbit_pm__create_orbit_files(
+mcp__plugin_missioncache_pm__create_orbit_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
@@ -165,7 +165,7 @@ mcp__plugin_orbit_pm__create_orbit_files(
 
 **Hierarchical tasks (with parent groupings):**
 ```
-mcp__plugin_orbit_pm__create_orbit_files(
+mcp__plugin_missioncache_pm__create_orbit_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
@@ -188,7 +188,7 @@ This generates numbered tasks:
   - [ ] 2.2. Add data fetching
 ```
 
-The response includes `session_bound: true|false`. If `session_bound` is `false` and you DID pass a session_id, the binding helper rejected it (invalid shape or DB error); the user can recover via `/orbit:go`.
+The response includes `session_bound: true|false`. If `session_bound` is `false` and you DID pass a session_id, the binding helper rejected it (invalid shape or DB error); the user can recover via `/missioncache:load`.
 
 ### Step 5: Probe Dashboard (optional)
 
@@ -229,7 +229,7 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 
 **Next step:** Start working on task 1. The plan, context, and tasks files have everything you need.
 
-**Optional - only for autonomous execution:** If you'll run this project via `missioncache-auto` (parallel workers), run `/orbit:prompts my-feature` to generate per-subtask prompts with agent/skill recommendations. Skip this step for interactive work - it generates prompt files you won't read.
+**Optional - only for autonomous execution:** If you'll run this project via `missioncache-auto` (parallel workers), run `/missioncache:prompts my-feature` to generate per-subtask prompts with agent/skill recommendations. Skip this step for interactive work - it generates prompt files you won't read.
 ```
 
 ---
@@ -256,7 +256,7 @@ Non-coding projects don't need prompts:
 
 3. Create project, passing `session_id` so the statusline binds atomically:
    ```
-   mcp__plugin_orbit_pm__create_task(
+   mcp__plugin_missioncache_pm__create_task(
      name="<project-name>",
      task_type="non-coding",
      session_id="<SESSION_ID from bash above; omit if empty>",
@@ -266,7 +266,7 @@ Non-coding projects don't need prompts:
 
 4. Explain how to track progress:
    ```
-   mcp__plugin_orbit_pm__add_task_update(task_id=<id>, note="...")
+   mcp__plugin_missioncache_pm__add_task_update(task_id=<id>, note="...")
    ```
 
 ---
@@ -275,7 +275,7 @@ Non-coding projects don't need prompts:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__create_orbit_files` | Create plan/context/tasks files (also registers task in DB) |
-| `mcp__plugin_orbit_pm__create_task` | Create project in database (non-coding) |
-| `mcp__plugin_orbit_pm__get_task` | Pre-flight duplicate check before creating |
-| `mcp__plugin_orbit_pm__add_repo` | Register repo if not already tracked |
+| `mcp__plugin_missioncache_pm__create_orbit_files` | Create plan/context/tasks files (also registers task in DB) |
+| `mcp__plugin_missioncache_pm__create_task` | Create project in database (non-coding) |
+| `mcp__plugin_missioncache_pm__get_task` | Pre-flight duplicate check before creating |
+| `mcp__plugin_missioncache_pm__add_repo` | Register repo if not already tracked |

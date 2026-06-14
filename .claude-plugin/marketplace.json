@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "orbit",
+      "name": "missioncache",
       "source": "./",
       "description": "Project management with time tracking, autonomous execution, and context preservation",
       "category": "productivity",

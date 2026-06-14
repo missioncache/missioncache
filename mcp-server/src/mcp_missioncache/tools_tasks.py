@@ -261,7 +261,7 @@ async def get_task(
             description=(
                 "Claude Code session ID. Binds the session to this project "
                 "(writes project_state + the per-session pointer) so the "
-                "statusline picks it up without relying on /orbit:go's "
+                "statusline picks it up without relying on /missioncache:load's "
                 "slash-command bash step. On Claude Code 2.1.154+ this is "
                 "resolved automatically from the CLAUDE_CODE_SESSION_ID this "
                 "MCP subprocess was spawned with, so you can omit it. Pass "
@@ -311,8 +311,8 @@ async def get_task(
         # Atomic session binding when session_id is supplied. Best-effort
         # like the create_orbit_files pattern: a DB-write failure or
         # invalid session_id silently no-ops; the user can recover by
-        # re-running /orbit:go or invoking the binding explicitly. Falls
-        # back to the CLAUDE_CODE_SESSION_ID env var so /orbit:go binds
+        # re-running /missioncache:load or invoking the binding explicitly. Falls
+        # back to the CLAUDE_CODE_SESSION_ID env var so /missioncache:load binds
         # without the caller resolving the id client-side.
         session_id = _resolve_session_id(session_id)
         if session_id:
@@ -401,7 +401,7 @@ async def create_task(
             "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
             "you can omit it. Pass explicitly for older Claude Code or "
             "non-Claude clients; if it cannot be resolved, binding is skipped "
-            "(the user can recover via /orbit:go)."
+            "(the user can recover via /missioncache:load)."
         ),
     ] = None,
 ) -> dict:
@@ -413,7 +413,7 @@ async def create_task(
 
     When ``session_id`` is provided, also writes the project_state row +
     per-session pointer that the statusline reads, atomically with task
-    creation. Eliminates the prior failure mode where /orbit:new's
+    creation. Eliminates the prior failure mode where /missioncache:new's
     non-coding branch left the statusline blank because no binding step
     existed for it.
     """
@@ -466,7 +466,7 @@ async def create_task(
         # Bind the current session to the new task so the statusline
         # picks it up immediately, atomically with task creation. None
         # or invalid session_id silently no-ops; the user can recover by
-        # running /orbit:go. Falls back to the CLAUDE_CODE_SESSION_ID env
+        # running /missioncache:load. Falls back to the CLAUDE_CODE_SESSION_ID env
         # var so the binding works without the caller resolving the id.
         session_id = _resolve_session_id(session_id)
         session_bound = _bind_session_to_project(session_id, name)

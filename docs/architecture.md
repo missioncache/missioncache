@@ -20,13 +20,13 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 | MCP server | `mcp-server/` | Exposes ~30 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
 | orbit-db | `orbit-db/` | SQLite schema, data classes, and all direct DB operations. Every other component calls into this instead of opening the DB themselves | In-process library - embedded by MCP server, hooks, orbit-auto, and dashboard |
 | Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event, all four hooks have a timeout budget between 5 and 30 seconds |
-| Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/orbit:<name>` |
+| Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/missioncache:<name>` |
 | orbit-auto | `orbit-auto/` | Standalone CLI that runs Claude in a loop over a task file, in either sequential or parallel-with-DAG mode | A long-running user-invoked process, one execution per `orbit-auto <project>` call |
 | Dashboard | `orbit-dashboard/` | FastAPI backend plus a single-file HTML frontend at `http://localhost:8787` for visualizing time, tasks, sessions, and orbit-auto runs | One persistent process, usually managed by launchd |
 | Statusline | `orbit-dashboard/orbit_dashboard/statusline.py` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `orbit-dashboard` package and exposed via the `orbit-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
 | Rules | `rules/` | Plain markdown files describing orbit conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `orbit-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
 
-Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx orbit-install`, or just the plugin core via `/plugin marketplace add tomerbr1/orbit-pm` followed by `/plugin install orbit@orbit-pm`. Maintainers run `uvx orbit-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `orbit@local` for fast iteration without pushing to GitHub.
+Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs orbit as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx orbit-install`, or just the plugin core via `/plugin marketplace add tomerbr1/orbit-pm` followed by `/plugin install missioncache@orbit-pm`. Maintainers run `uvx orbit-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `missioncache@local` for fast iteration without pushing to GitHub.
 
 ## Talking to the database through orbit-db
 
@@ -68,7 +68,7 @@ Both hooks have a 5-second budget. If no task matches the current directory or s
 
 ### 3. Claude uses MCP tools
 
-When the user (or a slash command) asks Claude to do something that touches orbit state - "mark task 3 complete", "give me the current project status", "record an iteration" - Claude calls one of the `mcp__plugin_orbit_pm__*` tools. Those tools live in the MCP server subprocess that was started by the plugin manifest.
+When the user (or a slash command) asks Claude to do something that touches orbit state - "mark task 3 complete", "give me the current project status", "record an iteration" - Claude calls one of the `mcp__plugin_missioncache_pm__*` tools. Those tools live in the MCP server subprocess that was started by the plugin manifest.
 
 The MCP server is stdio-based and very thin. `mcp-server/src/mcp_orbit/server.py` is 30 lines: it imports five tool modules, each of which registers its tools against a shared `FastMCP` instance from `app.py`. Every tool:
 
@@ -93,7 +93,7 @@ This is the load-bearing piece of orbit's memory story. Without it, the context 
 
 ### 5. Session stop
 
-`hooks/stop.py` runs when the session ends. It reads the transcript file Claude Code points it at, checks whether any `Write` or `Edit` tool calls happened during the session, and if there is an active task with orbit files, prints a stderr reminder to run `/orbit:save`. It does not touch the DB - its job is purely to nudge the user.
+`hooks/stop.py` runs when the session ends. It reads the transcript file Claude Code points it at, checks whether any `Write` or `Edit` tool calls happened during the session, and if there is an active task with orbit files, prints a stderr reminder to run `/missioncache:save`. It does not touch the DB - its job is purely to nudge the user.
 
 ### 6. Dashboard reflection
 
@@ -167,10 +167,10 @@ Projects have their own directory on disk under `~/.orbit/`:
 │           ├── task-01-prompt.md
 │           └── ...
 └── completed/
-    └── <project-name>/                  # Same layout, moved on /orbit:done
+    └── <project-name>/                  # Same layout, moved on /missioncache:done
 ```
 
-The `full_path` column in the `tasks` table stores `"active/<name>"` or `"completed/<name>"`, which is how the DB stays in sync with the on-disk status. `/orbit:done` moves the directory and updates the row in one step.
+The `full_path` column in the `tasks` table stores `"active/<name>"` or `"completed/<name>"`, which is how the DB stays in sync with the on-disk status. `/missioncache:done` moves the directory and updates the row in one step.
 
 There is also a legacy layout under `<repo>/dev/{active,completed}/` that older projects still use. Dashboard and hooks fall back to it if the centralized path does not exist. If you are touching path resolution, check both `mcp-server/src/mcp_orbit/helpers.py` (for MCP writes) and `parse_orbit_progress()` in `orbit-dashboard/orbit_dashboard/server.py` (for dashboard reads). They are independent implementations - keep them consistent.
 
@@ -180,7 +180,7 @@ There is also a legacy layout under `<repo>/dev/{active,completed}/` that older 
 
 | File | Written by | Read by | Purpose |
 |------|------------|---------|---------|
-| `projects/<session-id>.json` | `session_start.py`, `/orbit:go`, `/orbit:new` (via `get_task` / `create_orbit_files` server-side binding), `/orbit:done` (removes) | `statusline.py`, `TaskDB.find_task_for_cwd` | Which project is active for a given session. Read on both the statusline rendering path (to show the project name) and the heartbeat path (to attribute time to the right task when `cwd` does not match a known task directory) |
+| `projects/<session-id>.json` | `session_start.py`, `/missioncache:load`, `/missioncache:new` (via `get_task` / `create_orbit_files` server-side binding), `/missioncache:done` (removes) | `statusline.py`, `TaskDB.find_task_for_cwd` | Which project is active for a given session. Read on both the statusline rendering path (to show the project name) and the heartbeat path (to attribute time to the right task when `cwd` does not match a known task directory) |
 | `term-sessions/<term-id>` | `session_start.py` | `statusline.py` | Maps terminal-emulator session IDs back to Claude session IDs so mid-session lookups work from any tab |
 | `pending-project.json` | *(nothing)* | `TaskDB.find_task_for_cwd` priority-1 branch | Inverse legacy: read but never written. The priority-1 branch in `find_task_for_cwd` is effectively dead code - task resolution always falls through to the `projects/<session-id>.json` branch |
 | ~~`pending-task.json`~~ | *(removed in mcp-orbit 0.2.13)* | *(never read)* | Removed. Old files left on disk from pre-0.2.13 installs are harmless; the rename-sweep also stopped maintaining them. Safe to delete by hand |
@@ -248,17 +248,17 @@ async def my_tool(
         return {"error": True, "message": str(e)}
 ```
 
-The `@mcp.tool()` decorator registers your function against the shared `mcp` instance. As long as the containing module is imported by `server.py`, the tool will show up as `mcp__plugin_orbit_pm__my_tool` in Claude Code. If you add a new module file, add the `from . import tools_mything` line to `server.py` too.
+The `@mcp.tool()` decorator registers your function against the shared `mcp` instance. As long as the containing module is imported by `server.py`, the tool will show up as `mcp__plugin_missioncache_pm__my_tool` in Claude Code. If you add a new module file, add the `from . import tools_mything` line to `server.py` too.
 
 **Important:** MCP tool docstrings and parameter descriptions are the only thing Claude sees when picking tools. A vague docstring is a bug - the tool will never get called or will be called at the wrong time. Write the docstring like you are writing a commit title.
 
 After adding the tool, reinstall the plugin. If you are hacking on orbit locally from a clone, the fast path is the local marketplace that `uvx orbit-install --local` set up:
 
 ```bash
-claude plugins install orbit@local
+claude plugins install missioncache@local
 ```
 
-If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update orbit@orbit-pm`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
+If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update missioncache@orbit-pm`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
 
 ### 2. Add a new hook
 
@@ -302,7 +302,7 @@ argument-hint: "[optional args]"
 <instructions for Claude, written as prose>
 ```
 
-The frontmatter is parsed by Claude Code for the help menu. The body is prose instructions that Claude follows when the user types `/orbit:<name>`. You can reference MCP tools by their `mcp__plugin_orbit_pm__*` names and Claude will call them in order.
+The frontmatter is parsed by Claude Code for the help menu. The body is prose instructions that Claude follows when the user types `/missioncache:<name>`. You can reference MCP tools by their `mcp__plugin_missioncache_pm__*` names and Claude will call them in order.
 
 If your command needs to be explicit about when to call which tool, write a numbered workflow with MCP tool names inline. See `commands/go.md` for a good example of a multi-step workflow with conditional branches.
 
@@ -351,10 +351,10 @@ These are the things that will trip you up if you are new to the codebase, colle
 
 - **Never open `~/.orbit/tasks.db` outside of `orbit-db` or `analytics_db`.** The schema has triggers, the WAL settings matter, and `claude_session_cache` is implicitly required to live in that same file. Opening it from a new script almost always breaks something.
 - **`claude_session_cache` must stay in `tasks.db`, not `tasks.duckdb`.** The untracked-session anti-join is a `LEFT JOIN` against the `sessions` table. Separate databases means the join silently returns empty.
-- **`full_path` on the `tasks` row must match the actual directory location under `~/.orbit/`.** `/orbit:done` moves the directory *and* updates `full_path` *and* sets `status=completed`. If you write code that does one and not the others, you get orphan tasks that the dashboard renders in the wrong list.
+- **`full_path` on the `tasks` row must match the actual directory location under `~/.orbit/`.** `/missioncache:done` moves the directory *and* updates `full_path` *and* sets `status=completed`. If you write code that does one and not the others, you get orphan tasks that the dashboard renders in the wrong list.
 - **Hook failures must be silent.** Any exception in any hook will be swallowed by a top-level `try/except` and printed to stderr. This is intentional - a broken hook should never block Claude Code from working. If your new hook throws uncaught exceptions, Claude Code will still keep running, but you will never know the hook is broken.
 - **MCP tool docstrings are the tool description.** They are not optional. Claude reads them to decide when to call the tool.
-- **`projects/<session-id>.json` is the only path that routes automatic heartbeats to a task when `cwd` is outside `~/.orbit/active/<task>/`.** `session_start.py` is its sole writer, and it only writes it when it resolves a task at `SessionStart`. If a user loads a project mid-session via `/orbit:go` in a session that did not resolve at start, subsequent `UserPromptSubmit` heartbeats will not attribute to the new task (cwd pattern matching will not help, and this file will not exist). `/orbit:go` masks this by recording an explicit initial heartbeat, but that covers only the one call. If you add a new "load project mid-session" command, write this file yourself or accept the tracking gap.
+- **`projects/<session-id>.json` is the only path that routes automatic heartbeats to a task when `cwd` is outside `~/.orbit/active/<task>/`.** `session_start.py` is its sole writer, and it only writes it when it resolves a task at `SessionStart`. If a user loads a project mid-session via `/missioncache:load` in a session that did not resolve at start, subsequent `UserPromptSubmit` heartbeats will not attribute to the new task (cwd pattern matching will not help, and this file will not exist). `/missioncache:load` masks this by recording an explicit initial heartbeat, but that covers only the one call. If you add a new "load project mid-session" command, write this file yourself or accept the tracking gap.
 - **`process_heartbeats()` drains unprocessed heartbeats into aggregated sessions in a single pass.** Each row is aggregated exactly once and then marked `processed=1`, so calling it twice is safe (the second call is a no-op). Calling it zero times means newly accumulated time will not appear in the dashboard until `PreCompact` fires. orbit-auto and some MCP tools invoke it manually to keep the dashboard fresh.
 - **Repo ID resolution is order-dependent in `scan_repos()`.** If you call `create_orbit_files` with a brand-new repo path, the same call will register the repo and may assign the task's `repo_id` to the wrong row if there are unresolved ambiguities. This has been fixed multiple times; if you are touching that path, re-test the "brand new repo with existing tasks" case manually.
 - **The dashboard's `_get_jsonl_task_times()` joins by `cwd = repo.path`.** Multiple tasks sharing a repo all draw from the same JSONL pool, and the only disambiguator is `c.date >= DATE(t.created_at)`. Overlapping tasks on the same repo can therefore double-count - known limitation.

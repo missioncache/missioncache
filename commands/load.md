@@ -13,7 +13,7 @@ Resume work on an active project with full context loading.
 
 2. **If no project name, list active projects:**
    ```
-   mcp__plugin_orbit_pm__list_active_tasks(repo_path="<cwd>", prioritize_by_repo=True, include_time=True)
+   mcp__plugin_missioncache_pm__list_active_tasks(repo_path="<cwd>", prioritize_by_repo=True, include_time=True)
    ```
    Then display the selection table (see below) and ask user to select one.
 
@@ -51,8 +51,8 @@ If they differ, ask the user how to handle the mismatch and wait for their reply
 > This project is recorded as belonging to **<repo_name>** (`<repo_path>`), but you're currently in **<cwd_repo>**. How should I handle this?
 >
 > 1. **Continue here for this session only** - Resume the project without changing the recorded repo. The mismatch warning will fire again next time.
-> 2. **Update the project's repo to match my current location** - Rewrite the task's repo association in the database so future `/orbit:go` calls work cleanly. Use this when the project was created with the wrong repo (e.g. `/orbit:new` captured the wrong cwd) or when the project's source of truth has moved.
-> 3. **Cancel** - Abort `/orbit:go` without resuming.
+> 2. **Update the project's repo to match my current location** - Rewrite the task's repo association in the database so future `/missioncache:load` calls work cleanly. Use this when the project was created with the wrong repo (e.g. `/missioncache:new` captured the wrong cwd) or when the project's source of truth has moved.
+> 3. **Cancel** - Abort `/missioncache:load` without resuming.
 
 If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it. Otherwise present the options as prose and wait for the user to reply with a number or label.
 
@@ -60,7 +60,7 @@ If your tool supports a structured option picker (Claude Code's `AskUserQuestion
 
 Call the `set_task_repo` MCP tool with the current repo path:
 ```
-mcp__plugin_orbit_pm__set_task_repo(
+mcp__plugin_missioncache_pm__set_task_repo(
     task_id=<task_id>,
     repo_path="<cwd git root from git rev-parse --show-toplevel>"
 )
@@ -90,7 +90,7 @@ fi
 echo "SESSION_ID=$SESSION_ID"
 ```
 
-Capture the printed `SESSION_ID`. Then call `mcp__plugin_orbit_pm__get_task(project_name="<name>", session_id="<SESSION_ID>")` which returns:
+Capture the printed `SESSION_ID`. Then call `mcp__plugin_missioncache_pm__get_task(project_name="<name>", session_id="<SESSION_ID>")` which returns:
 - Project ID and status
 - Time invested (formatted)
 - Progress (completion %)
@@ -108,7 +108,7 @@ Read the key files:
 
 ### Step 3: Display Resume Summary
 
-Before rendering the summary, probe the dashboard so the output can include a deep link, and check for a sticky PreCompact error from a previous session that needs surfacing. The PreCompact hook writes `~/.claude/hooks/state/last-precompact-error.json` when its snapshot run fails (e.g. SQLite lock contention); /orbit:go is the natural place to tell the user since they are about to act on stale context.
+Before rendering the summary, probe the dashboard so the output can include a deep link, and check for a sticky PreCompact error from a previous session that needs surfacing. The PreCompact hook writes `~/.claude/hooks/state/last-precompact-error.json` when its snapshot run fails (e.g. SQLite lock contention); /missioncache:load is the natural place to tell the user since they are about to act on stale context.
 
 Replace `<project-name>` with the resumed project name, then run:
 
@@ -217,7 +217,7 @@ conn.commit()
 ' 2>/dev/null
 
   # Write per-session project pointer read by find_task_for_cwd (missioncache-db/__init__.py:1270).
-  # Without this, /orbit:save cannot find the task when cwd is the repo root (only when
+  # Without this, /missioncache:save cannot find the task when cwd is the repo root (only when
   # cwd is under ~/.orbit/active/<task>/). Format matches session_start.py's
   # write_session_project() exactly so either writer is interchangeable.
   SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
@@ -235,7 +235,7 @@ fi
 
 Then record initial heartbeat:
 ```
-mcp__plugin_orbit_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
+mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ```
 
 ### Step 5: Track the Active Checklist Task (when known)
@@ -246,7 +246,7 @@ If the user signals which orbit checklist task they want to work on
 statusline ``Task:`` field reflects the current focus.
 
 ```
-mcp__plugin_orbit_pm__set_active_orbit_tasks(
+mcp__plugin_missioncache_pm__set_active_orbit_tasks(
     project_name="<project-name>",
     task_numbers=["54a"],          # or ["56", "57"] for parallel work
     session_id="<SESSION_ID from Step 4>"
@@ -316,11 +316,11 @@ Ready to continue. What would you like to work on?
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__list_active_tasks` | List projects with repo prioritization |
-| `mcp__plugin_orbit_pm__get_task` | Get full project details |
-| `mcp__plugin_orbit_pm__get_orbit_files` | Get file paths |
-| `mcp__plugin_orbit_pm__get_orbit_progress` | Get checklist progress |
-| `mcp__plugin_orbit_pm__record_heartbeat` | Start time tracking |
-| `mcp__plugin_orbit_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
-| `mcp__plugin_orbit_pm__set_active_orbit_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
-| `mcp__plugin_orbit_pm__clear_active_orbit_tasks` | Clear the Task field when focus shifts off-task without completing |
+| `mcp__plugin_missioncache_pm__list_active_tasks` | List projects with repo prioritization |
+| `mcp__plugin_missioncache_pm__get_task` | Get full project details |
+| `mcp__plugin_missioncache_pm__get_orbit_files` | Get file paths |
+| `mcp__plugin_missioncache_pm__get_orbit_progress` | Get checklist progress |
+| `mcp__plugin_missioncache_pm__record_heartbeat` | Start time tracking |
+| `mcp__plugin_missioncache_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
+| `mcp__plugin_missioncache_pm__set_active_orbit_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
+| `mcp__plugin_missioncache_pm__clear_active_orbit_tasks` | Clear the Task field when focus shifts off-task without completing |

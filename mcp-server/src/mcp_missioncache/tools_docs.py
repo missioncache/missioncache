@@ -62,7 +62,7 @@ async def create_orbit_files(
             "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
             "you can omit it. Pass explicitly for older Claude Code or "
             "non-Claude clients; if it cannot be resolved, binding is skipped "
-            "(the user can recover via /orbit:go)."
+            "(the user can recover via /missioncache:load)."
         ),
     ] = None,
 ) -> dict:
@@ -72,7 +72,7 @@ async def create_orbit_files(
     Creates files under ~/.orbit/active/<task-name>/.
     The repo_path is used to register the repository in the DB. By default,
     repo_path is resolved to its containing git root before registration so
-    /orbit:new captures the same path regardless of which subdirectory the
+    /missioncache:new captures the same path regardless of which subdirectory the
     user invoked it from. Pass resolve_git_root=False to opt out (e.g., when
     each sub-package in a monorepo is its own orbit project).
 
@@ -80,7 +80,7 @@ async def create_orbit_files(
     per-session pointer that the statusline reads, atomically with task
     creation. Eliminates the prior failure mode where a separate
     client-side bash binding step could be silently skipped, leaving the
-    statusline blank until /orbit:go was re-run.
+    statusline blank until /missioncache:load was re-run.
 
     Returns ALREADY_EXISTS error if any of plan/context/tasks already exist
     for this name. Pass force=True to overwrite (destructive - the caller is
@@ -134,7 +134,7 @@ async def create_orbit_files(
         # Bind the current session to the new project so the statusline
         # picks it up immediately, atomically with task creation. None or
         # an invalid session_id silently no-ops; the user can recover by
-        # running /orbit:go. Falls back to the CLAUDE_CODE_SESSION_ID env
+        # running /missioncache:load. Falls back to the CLAUDE_CODE_SESSION_ID env
         # var so the binding works without the caller resolving the id.
         session_id = _resolve_session_id(session_id)
         session_bound = _bind_session_to_project(session_id, project_name)

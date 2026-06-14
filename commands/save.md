@@ -11,18 +11,18 @@ Save progress on an active project using atomic MCP calls.
 
 1. **Find active project:**
    ```
-   mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>")
+   mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>")
    ```
 
 1b. **If not found, try detecting from orbit files and register session:**
    ```
-   mcp__plugin_orbit_pm__get_orbit_files(project_name="<name>")
+   mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")
    # If found, create pending-task.json and record heartbeat
    ```
 
 2. **Update context file:**
    ```
-   mcp__plugin_orbit_pm__update_context_file(
+   mcp__plugin_missioncache_pm__update_context_file(
      context_file="<path>",
      next_steps=["...", "..."],
      recent_changes=["...", "..."]
@@ -31,7 +31,7 @@ Save progress on an active project using atomic MCP calls.
 
 3. **Update tasks file (if tasks completed):**
    ```
-   mcp__plugin_orbit_pm__update_tasks_file(
+   mcp__plugin_missioncache_pm__update_tasks_file(
      tasks_file="<path>",
      completed_tasks=["task description"],
      remaining_summary="what's left"
@@ -40,14 +40,14 @@ Save progress on an active project using atomic MCP calls.
 
 4. **Process heartbeats:**
    ```
-   mcp__plugin_orbit_pm__process_heartbeats()
+   mcp__plugin_missioncache_pm__process_heartbeats()
    ```
 
 ## Workflow
 
 ### Step 1: Find Current Project
 
-First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/orbit:go` and `/orbit:new`. Without this, the lookup can only match when cwd is under `~/.orbit/active/<task>/`, which fails from the repo root.
+First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/missioncache:load` and `/missioncache:new`. Without this, the lookup can only match when cwd is under `~/.orbit/active/<task>/`, which fails from the repo root.
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
@@ -69,20 +69,20 @@ RECENT=$(find "$DIR" -maxdepth 1 -name "*.jsonl" -mmin -10 2>/dev/null | wc -l |
 echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 ```
 
-**Ambiguity check:** If `RECENT > 1`, multiple Claude sessions have been active in this cwd within the last 10 minutes. Under concurrency the pointer or mtime may not reflect the current invocation, and `/orbit:save` could silently bind to the wrong project. **Do NOT proceed with the resolved SESSION_ID directly.** Instead:
+**Ambiguity check:** If `RECENT > 1`, multiple Claude sessions have been active in this cwd within the last 10 minutes. Under concurrency the pointer or mtime may not reflect the current invocation, and `/missioncache:save` could silently bind to the wrong project. **Do NOT proceed with the resolved SESSION_ID directly.** Instead:
 
 1. Enumerate each recent `*.jsonl` in `$DIR` and look up its `~/.claude/hooks/state/projects/<sid>.json` (if it exists) to get the `projectName`.
 2. Deduplicate by project name.
-3. For each distinct project, call `mcp__plugin_orbit_pm__get_task(project_name=...)` to confirm it's still active.
+3. For each distinct project, call `mcp__plugin_missioncache_pm__get_task(project_name=...)` to confirm it's still active.
 4. Ask the user which project they intend to save and wait for their reply. Show one option per distinct project, using `<project name>` as the label and `last-worked <ago>` as the description. If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it; otherwise present the options as a numbered prose list.
-5. Use the selected project name to drive the save directly via `mcp__plugin_orbit_pm__get_orbit_files(project_name=...)` - skip the session_id-based lookup entirely.
+5. Use the selected project name to drive the save directly via `mcp__plugin_missioncache_pm__get_orbit_files(project_name=...)` - skip the session_id-based lookup entirely.
 
-If `RECENT <= 1`, proceed normally: call `mcp__plugin_orbit_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
+If `RECENT <= 1`, proceed normally: call `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
 
 **If project not found but orbit files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
 1. Try to detect the project from `~/.orbit/active/<project-name>`
-2. Call `mcp__plugin_orbit_pm__get_orbit_files(project_name="<name>")` to confirm
+2. Call `mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")` to confirm
 3. If found, **register the session** (see Step 1b)
 
 ### Step 1b: Register Session (if not registered)
@@ -95,7 +95,7 @@ SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls 
 
 Then record initial heartbeat:
 ```
-mcp__plugin_orbit_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
+mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ```
 
 This ensures activity tracking and statusline display work for the rest of the session.
@@ -114,7 +114,7 @@ Use the MCP tools to update files in one call each (much faster than multiple Re
 
 **Context file:**
 ```
-mcp__plugin_orbit_pm__update_context_file(
+mcp__plugin_missioncache_pm__update_context_file(
   context_file="<path>",
   next_steps=["First thing to do", "Second thing"],
   recent_changes=["Added retry logic", "Fixed config parsing"],
@@ -125,7 +125,7 @@ mcp__plugin_orbit_pm__update_context_file(
 
 **Tasks file (if tasks completed):**
 ```
-mcp__plugin_orbit_pm__update_tasks_file(
+mcp__plugin_missioncache_pm__update_tasks_file(
   tasks_file="<path>",
   completed_tasks=["Add retry logic to consumer"],
   remaining_summary="Add tests, update docs"
@@ -134,7 +134,7 @@ mcp__plugin_orbit_pm__update_tasks_file(
 
 ### Step 4: Finalize Time Tracking
 
-Call `mcp__plugin_orbit_pm__process_heartbeats()` to aggregate time.
+Call `mcp__plugin_missioncache_pm__process_heartbeats()` to aggregate time.
 
 ## Example Output
 
@@ -167,8 +167,8 @@ Ready to continue or safe to compact.
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__find_task_for_directory` | Find current project |
-| `mcp__plugin_orbit_pm__get_orbit_files` | Get file paths |
-| `mcp__plugin_orbit_pm__update_context_file` | Update context atomically |
-| `mcp__plugin_orbit_pm__update_tasks_file` | Update tasks atomically |
-| `mcp__plugin_orbit_pm__process_heartbeats` | Finalize time tracking |
+| `mcp__plugin_missioncache_pm__find_task_for_directory` | Find current project |
+| `mcp__plugin_missioncache_pm__get_orbit_files` | Get file paths |
+| `mcp__plugin_missioncache_pm__update_context_file` | Update context atomically |
+| `mcp__plugin_missioncache_pm__update_tasks_file` | Update tasks atomically |
+| `mcp__plugin_missioncache_pm__process_heartbeats` | Finalize time tracking |

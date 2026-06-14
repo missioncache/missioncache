@@ -166,7 +166,7 @@ def _is_cwd_compatible_with_inherited_project(
     descendant of it (i.e. the user is sitting *inside* the project). If
     the repo lives *under* the cwd (umbrella case) or in an unrelated
     location, skip the inherit and let the new session start clean - the
-    user can run ``/orbit:go`` to bind their actual intent.
+    user can run ``/missioncache:load`` to bind their actual intent.
 
     Lookup-failure modes are treated conservatively: if missioncache_db is
     unavailable, the task lookup raises, the task was renamed/deleted, or
@@ -535,7 +535,7 @@ def _format_collision_warning(
     lines.append(
         "Recommended: work in a separate git worktree per project, or close "
         "the other session before continuing. If the statusline shows the "
-        "wrong project, run `/orbit:go <project-name>` to rebind."
+        "wrong project, run `/missioncache:load <project-name>` to rebind."
     )
     lines.append("")
     return "\n".join(lines)
@@ -655,7 +655,7 @@ def _bind_session_to_project(session_id: str, project_name: str) -> None:
     binding. Initializes the schema first via ``init_hooks_state_db_schema``
     so a fresh install (dashboard never started) can still bind. The
     per-session pointer file is also written so ``find_task_for_cwd``
-    resolves correctly without waiting for ``/orbit:go``.
+    resolves correctly without waiting for ``/missioncache:load``.
 
     Failures log to stderr (captured in the session transcript JSONL under
     ``~/.claude/projects/``) so the user has a breadcrumb when the
@@ -700,7 +700,7 @@ def write_cwd_session_pointer(session_id: str) -> None:
     """Record the current session as the owner of this cwd.
 
     Writes `~/.claude/hooks/state/cwd-session/<cwd-sanitized>.json` so slash
-    commands (/orbit:save, /orbit:go, /orbit:new, /orbit:done) can resolve the
+    commands (/missioncache:save, /missioncache:load, /missioncache:new, /missioncache:done) can resolve the
     live session id from bash without relying on transcript-mtime heuristics.
 
     Cwd sanitization matches Claude Code's own scheme for its transcript
@@ -841,7 +841,7 @@ def main():
                 # one is still alive in this cwd. The cwd-pointer cannot
                 # distinguish which session is being resumed, so any pickup
                 # could silently bind the wrong project. Better to start
-                # with no project bound and force the user to /orbit:go.
+                # with no project bound and force the user to /missioncache:load.
                 print(
                     f"<!-- orbit: skipping resume pickup ({len(parallel_sids)} "
                     f"parallel session(s) detected, ambiguous) -->",
@@ -955,20 +955,20 @@ def main():
                 if task_dir.exists():
                     output += f"**Orbit files:** `{task_dir}`\n"
                     output += """
-**Tip:** Use `/orbit:go` to load full context, or call `mcp__plugin_orbit_pm__get_task` for structured project data.
+**Tip:** Use `/missioncache:load` to load full context, or call `mcp__plugin_missioncache_pm__get_task` for structured project data.
 
 **\u26a0\ufe0f Task tracking discipline (important):**
 
 Mark items complete in the tasks file IMMEDIATELY as you finish them, using:
 
-  mcp__plugin_orbit_pm__update_tasks_file(
+  mcp__plugin_missioncache_pm__update_tasks_file(
     tasks_file="<path>",
     completed_tasks=["task description"]
   )
 
 Do NOT batch updates to session end. Do NOT rely solely on appending findings to the context file - the context file is for details, the tasks file is the source of truth for progress.
 
-Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system reminders refer to an in-conversation todo list - IGNORE them when working on an orbit project. Use `mcp__plugin_orbit_pm__update_tasks_file` instead.
+Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system reminders refer to an in-conversation todo list - IGNORE them when working on an orbit project. Use `mcp__plugin_missioncache_pm__update_tasks_file` instead.
 """
 
             # Output context (stdout goes to Claude's context)

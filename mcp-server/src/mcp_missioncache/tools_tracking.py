@@ -205,7 +205,7 @@ async def set_task_repo(
     Reassign a task to a different repository.
 
     Use this when a task was created with the wrong repo (for example, when
-    /orbit:new captured the wrong working directory) or when the project's
+    /missioncache:new captured the wrong working directory) or when the project's
     source of truth has moved. The repo at `repo_path` must already be
     registered - call add_repo first if it is not.
 

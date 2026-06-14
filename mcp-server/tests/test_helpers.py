@@ -87,7 +87,7 @@ class TestResolveSessionId:
 class TestResolveToGitRoot:
     """Walks parents looking for ``.git`` to enforce git-root capture
     server-side. Mirrors ``git rev-parse --show-toplevel`` semantics
-    so /orbit:new and /orbit:go capture the same path regardless of
+    so /missioncache:new and /missioncache:load capture the same path regardless of
     cwd within a repo."""
 
     @pytest.fixture(autouse=True)
