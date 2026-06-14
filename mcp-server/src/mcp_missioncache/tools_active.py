@@ -1,12 +1,12 @@
-"""Active orbit-task pointer MCP tools.
+"""Active MissionCache-task pointer MCP tools.
 
 Lets a caller (Claude in interactive use, or a script) declare which
-orbit checklist task numbers are currently in progress. The statusline
+MissionCache checklist task numbers are currently in progress. The statusline
 reads the resulting per-session pointer to render its ``Task:`` field.
 
 The pointer replaces the previous read of Claude Code's internal TodoList
 (``~/.claude/tasks/<sid>/*.json``) which duplicated information Claude
-already prints in chat. With these tools, the statusline shows orbit
+already prints in chat. With these tools, the statusline shows MissionCache
 checklist focus instead, generalizing to Codex and OpenCode for the
 multi-tool story since they all consume the same MCP server.
 """
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 @mcp.tool()
 async def set_active_orbit_tasks(
     project_name: Annotated[
-        str, Field(description="Orbit project name (kebab-case)")
+        str, Field(description="MissionCache project name (kebab-case)")
     ],
     task_numbers: Annotated[
         list[str],
@@ -161,7 +161,7 @@ async def clear_active_orbit_tasks(
         ),
     ] = None,
 ) -> dict:
-    """Clear the active orbit-task pointer for this session.
+    """Clear the active MissionCache-task pointer for this session.
 
     Statusline ``Task:`` field hides until ``set_active_orbit_tasks``
     is called again.

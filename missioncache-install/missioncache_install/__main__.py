@@ -11,7 +11,7 @@ Invocation patterns:
     uvx missioncache-install --uninstall codex,vscode  # uninstall a specific list
     uvx missioncache-install --local               # maintainer mode: editable installs from clone
 
-Project data and DBs at `~/.orbit/` are never touched by any uninstall flow.
+Project data and DBs at `~/.missioncache/` are never touched by any uninstall flow.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ INTERACTIVE_WIZARD = object()
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="missioncache-install",
-        description="Bootstrap installer for Orbit (project manager for Claude Code).",
+        description="Bootstrap installer for MissionCache (project manager for Claude Code).",
     )
     p.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
              "(requires TTY). Pass a comma-separated component list (e.g. "
              "`--uninstall codex,vscode`) for non-interactive removal of "
              "specific components. Combine with `--all` to remove everything "
-             "tracked. Project data at ~/.orbit/ is never touched.",
+             "tracked. Project data at ~/.missioncache/ is never touched.",
     )
 
     # Per-component opt-in flags. Any of these triggers non-interactive mode
@@ -268,7 +268,7 @@ def _run_uninstall(args: argparse.Namespace, ctx: installers.InstallContext) -> 
             ui.warn(
                 "No tracked components to uninstall. State file is empty or "
                 "missing.\n"
-                "  If you installed orbit manually outside the installer, "
+                "  If you installed missioncache manually outside the installer, "
                 "remove components by hand or restore the state file at "
                 f"{state.STATE_FILE}."
             )
@@ -358,7 +358,7 @@ def _run_uninstall(args: argparse.Namespace, ctx: installers.InstallContext) -> 
     # Mirror the positive-list path: auto-expand <tool> -> <tool>_commands
     # so picking `codex` from the wizard menu also removes its paired
     # slash-command plugin. Without this, the wizard path would leave
-    # orphaned `/orbit-*` commands pointing at a removed MCP integration.
+    # orphaned `/missioncache-*` commands pointing at a removed MCP integration.
     installed = _filter_known_state(state.installed_components())
     expanded = list(dict.fromkeys(_expand_command_pairs(components, installed)))
     added = [c for c in expanded if c not in components]

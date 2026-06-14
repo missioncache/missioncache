@@ -1,5 +1,5 @@
 ---
-description: "Create a new orbit project with plan, context, and tasks files"
+description: "Create a new MissionCache project with plan, context, and tasks files"
 argument-hint: "[project-name] [--jira TICKET]"
 ---
 
@@ -108,7 +108,7 @@ Pass the current working directory as `repo_path`. The MCP tool walks
 parents to the git root server-side, so any cwd inside a git repo
 resolves to the same registered path regardless of which subdirectory
 the user invoked `/missioncache:new` from. Non-git directories pass through
-unchanged - orbit projects can be started anywhere.
+unchanged - MissionCache projects can be started anywhere.
 
 ```bash
 pwd
@@ -117,13 +117,13 @@ pwd
 Use the output as `repo_path`. The tool's response includes the
 registered `repo_path` so you can report what was actually stored.
 
-**Monorepo opt-out:** if the user is starting an orbit project for a
+**Monorepo opt-out:** if the user is starting a MissionCache project for a
 sub-package within a monorepo (e.g., `~/repo/packages/auth-service`)
 and the sub-package itself is the project boundary, pass
 `resolve_git_root=False` so the tool registers the subdir verbatim
 rather than rebasing to the monorepo root. Default is `True`.
 
-### Step 4: Create Orbit Files
+### Step 4: Create MissionCache Files
 
 First resolve the current Claude session ID so the new project binds to this session for the statusline. Run:
 
@@ -148,7 +148,7 @@ echo "$SESSION_ID"
 
 Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/missioncache:load` once the project exists.
 
-Now create the orbit files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
+Now create the MissionCache files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
 **Flat tasks (simple):**
 ```
@@ -221,9 +221,9 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 3. Third subtask
 
 **Files created:**
-- ~/.orbit/active/my-feature/my-feature-plan.md
-- ~/.orbit/active/my-feature/my-feature-context.md
-- ~/.orbit/active/my-feature/my-feature-tasks.md
+- ~/.missioncache/active/my-feature/my-feature-plan.md
+- ~/.missioncache/active/my-feature/my-feature-context.md
+- ~/.missioncache/active/my-feature/my-feature-tasks.md
 
 **Dashboard:** http://localhost:8787/#projects?task=my-feature *(only if Step 5 emitted a line)*
 

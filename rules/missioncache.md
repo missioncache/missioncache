@@ -1,9 +1,9 @@
-<!-- orbit-plugin:managed - do not remove this line if you want the plugin to keep this file up to date. Remove it to take ownership of the file yourself. -->
-# Orbit Rules
+<!-- missioncache-plugin:managed - do not remove this line if you want the plugin to keep this file up to date. Remove it to take ownership of the file yourself. -->
+# MissionCache Rules
 
-## Orbit Skills Reference
+## MissionCache Skills Reference
 
-All orbit skills use the `orbit:` prefix:
+All MissionCache skills use the `missioncache:` prefix:
 
 | Skill | Purpose |
 |-------|---------|
@@ -14,9 +14,9 @@ All orbit skills use the `orbit:` prefix:
 | `/missioncache:done` | Mark project complete and archive |
 | `/missioncache:mode` | Assign workflow mode to tasks |
 
-## Orbit Project Updates
+## MissionCache Project Updates
 
-After finishing a coding task and updating orbit files (`~/.orbit/active/<project>/*`):
+After finishing a coding task and updating MissionCache files (`~/.missioncache/active/<project>/*`):
 
 1. **Update timestamps** in both `-tasks.md` and `-context.md`:
    - Run `date '+%Y-%m-%d %H:%M'` to get local time
@@ -27,15 +27,15 @@ After finishing a coding task and updating orbit files (`~/.orbit/active/<projec
    missioncache-db process-heartbeats 2>/dev/null
    ```
 
-   The `missioncache-db` CLI is installed by `uvx orbit-install` and put on PATH. Do NOT
+   The `missioncache-db` CLI is installed by `uvx missioncache-install` and put on PATH. Do NOT
    use `python3 -m missioncache_db` here - the system `python3` rarely has the module
    available, and `2>/dev/null` would silently swallow the import error.
 
 This ensures session time is properly recorded in the task database.
 
-## Context Preservation for Orbit Projects
+## Context Preservation for MissionCache Projects
 
-When working on a project with orbit files (`~/.orbit/active/<project-name>/`), proactively keep context updated to survive auto-compaction.
+When working on a project with MissionCache files (`~/.missioncache/active/<project-name>/`), proactively keep context updated to survive auto-compaction.
 
 ### Milestone-Based Updates
 
@@ -62,13 +62,13 @@ Run `/missioncache:save` after these milestones:
 
 Context is lost after compaction. To restore:
 
-1. **User runs**: `/missioncache:load <project-name>` to reload context from orbit files
+1. **User runs**: `/missioncache:load <project-name>` to reload context from MissionCache files
 2. **If user says "continue my project" without specifying**: Check active projects via `mcp__plugin_missioncache_pm__list_active_tasks` and ask which one
 3. **Resume from "Next Steps"**: Always check the `-context.md` file's Next Steps section first
 
 ### Multiple Concurrent Sessions
 
-Each Claude Code session is independent. The orbit files are the shared state - keep them updated so any session can pick up where another left off.
+Each Claude Code session is independent. The MissionCache files are the shared state - keep them updated so any session can pick up where another left off.
 
 ## Statusline Integration
 
@@ -76,10 +76,10 @@ The statusline displays the active project name automatically when set correctly
 
 ### Setting Project in Statusline
 
-When creating, continuing, or resuming an orbit project, resolve the current Claude session ID and set the project. Claude Code 2.1.132+ exposes the session ID directly via the `CLAUDE_CODE_SESSION_ID` env var; older versions fall back to a filesystem mtime walk that works on any terminal (including Ghostty and cmux):
+When creating, continuing, or resuming a MissionCache project, resolve the current Claude session ID and set the project. Claude Code 2.1.132+ exposes the session ID directly via the `CLAUDE_CODE_SESSION_ID` env var; older versions fall back to a filesystem mtime walk that works on any terminal (including Ghostty and cmux):
 
 ```bash
-# Caller MUST set PROJECT_NAME (orbit project name, kebab-case recommended).
+# Caller MUST set PROJECT_NAME (MissionCache project name, kebab-case recommended).
 PROJECT_NAME='<project-name>'
 
 # Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.

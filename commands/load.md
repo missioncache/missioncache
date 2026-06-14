@@ -1,5 +1,5 @@
 ---
-description: "Resume work on an active orbit project"
+description: "Resume work on an active MissionCache project"
 argument-hint: "[project-name]"
 ---
 
@@ -170,7 +170,7 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 
 ### Step 4: Register Session for Time Tracking
 
-Register the project against the current Claude session so the statusline picks it up. Resolves the session ID from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), falling back to the orbit cwd-session pointer and then a filesystem mtime walk for older versions. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
+Register the project against the current Claude session so the statusline picks it up. Resolves the session ID from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), falling back to the missioncache cwd-session pointer and then a filesystem mtime walk for older versions. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
 
 This step is defense-in-depth: Step 1's `get_task(session_id=...)` already performs the server-side binding via the MCP tool. The bash block additionally hits the dashboard API so the dashboard list view refreshes immediately (instead of waiting for the next periodic SQLite -> DuckDB sync) and writes the per-session pointer in case the MCP binding raced.
 
@@ -218,7 +218,7 @@ conn.commit()
 
   # Write per-session project pointer read by find_task_for_cwd (missioncache-db/__init__.py:1270).
   # Without this, /missioncache:save cannot find the task when cwd is the repo root (only when
-  # cwd is under ~/.orbit/active/<task>/). Format matches session_start.py's
+  # cwd is under ~/.missioncache/active/<task>/). Format matches session_start.py's
   # write_session_project() exactly so either writer is interchangeable.
   SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
 import os, json, datetime, pathlib
@@ -240,7 +240,7 @@ mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 
 ### Step 5: Track the Active Checklist Task (when known)
 
-If the user signals which orbit checklist task they want to work on
+If the user signals which MissionCache checklist task they want to work on
 (either by number like "let's do 54a" or by description that matches a
 ``[ ]`` line in tasks.md), call ``set_active_orbit_tasks`` so the
 statusline ``Task:`` field reflects the current focus.

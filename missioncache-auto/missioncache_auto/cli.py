@@ -1,5 +1,5 @@
 """
-Command-line interface for Orbit Auto.
+Command-line interface for MissionCache Auto.
 
 Provides the main entry point and argument parsing for all missioncache-auto commands.
 """
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog="missioncache-auto",
-        description="Orbit Auto - Autonomous AI Development for Orbit Projects",
+        description="MissionCache Auto - Autonomous AI Development for MissionCache Projects",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -110,7 +110,7 @@ Exit Codes:
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the run command."""
-    parser.add_argument("task_name", help="Name of task in ~/.orbit/active/")
+    parser.add_argument("task_name", help="Name of task in ~/.missioncache/active/")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(

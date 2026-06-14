@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Orbit Auto is an autonomous AI development tool that enables Claude to work continuously on programming tasks until completion. It uses iterative loops where AI reads its previous work via the file system.
+MissionCache Auto is an autonomous AI development tool that enables Claude to work continuously on programming tasks until completion. It uses iterative loops where AI reads its previous work via the file system.
 
-**This repository contains a custom implementation integrated with our orbit task management system.** The scripts here work with the `~/.orbit/active/<task-name>/` directory structure and support features like `/missioncache:load`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
+**This repository contains a custom implementation integrated with our MissionCache task management system.** The scripts here work with the `~/.missioncache/active/<task-name>/` directory structure and support features like `/missioncache:load`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
 
-**CLI Command:** `orbit-auto`
+**CLI Command:** `missioncache-auto`
 **Core Philosophy:** "Iteration beats perfection on the first attempt"
 
 ## Architecture
 
 ```
 +-------------------------------------------------------------+
-|                       ORBIT AUTO                             |
+|                   MISSIONCACHE AUTO                          |
 +-------------------------------------------------------------+
 |   PROMPT -> WORK -> CHECK -> EXIT? (YES=done, NO=repeat)    |
 +-------------------------------------------------------------+
@@ -30,10 +30,10 @@ Key principles:
 ## Repository Structure
 
 ```
-orbit-auto/
-+-- orbit_auto/                # Python package
+missioncache-auto/
++-- missioncache_auto/         # Python package
 |   +-- __init__.py
-|   +-- __main__.py            # Entry point: python -m orbit_auto
+|   +-- __main__.py            # Entry point: python -m missioncache_auto
 |   +-- cli.py                 # Argument parsing, commands
 |   +-- models.py              # Data models (Task, State, Config)
 |   +-- dag.py                 # Dependency graph builder
@@ -47,18 +47,18 @@ orbit-auto/
 |   +-- worker.py              # Worker process
 |   +-- init_task.py           # Task initialization
 |   +-- templates/             # Embedded templates
-+-- pyproject.toml             # Package configuration (name: orbit-auto)
++-- pyproject.toml             # Package configuration (name: missioncache-auto)
 +-- README.md                  # Quick reference
 +-- SKILL.md                   # PRD Builder skill documentation
 +-- CLAUDE.md                  # This file
 ```
 
-## Orbit Files Integration
+## MissionCache Files Integration
 
 ### Task Directory Structure
-When running orbit-auto, tasks are organized in the centralized orbit directory:
+When running missioncache-auto, tasks are organized in the centralized MissionCache directory:
 ```
-~/.orbit/
+~/.missioncache/
 +-- active/
 |   +-- <task-name>/
 |       +-- <task-name>-tasks.md      # Checkbox items
@@ -78,9 +78,9 @@ When running orbit-auto, tasks are organized in the centralized orbit directory:
 
 | File | What Goes Here | Written By |
 |------|----------------|------------|
-| `*-tasks.md` | Checkbox items, acceptance criteria | Human initially, orbit-auto marks `[x]` |
-| `*-context.md` | KEY learnings, blockers, decisions | Human + orbit-auto (important stuff only) |
-| `*-auto-log.md` | Detailed iteration history | Orbit-auto only (delete after completion) |
+| `*-tasks.md` | Checkbox items, acceptance criteria | Human initially, missioncache-auto marks `[x]` |
+| `*-context.md` | KEY learnings, blockers, decisions | Human + missioncache-auto (important stuff only) |
+| `*-auto-log.md` | Detailed iteration history | MissionCache Auto only (delete after completion) |
 
 **Why this works:**
 - Context file stays clean and useful for `/missioncache:load`
@@ -88,14 +88,14 @@ When running orbit-auto, tasks are organized in the centralized orbit directory:
 - Log can be deleted after task completion
 
 ### Task DB Integration
-Scripts integrate with the `orbit-db` package (lazy-imported, optional) when available:
+Scripts integrate with the `missioncache-db` package (lazy-imported, optional) when available:
 - Time tracking via heartbeat processing
 - Progress updates with `[PROGRESS] X/Y (Z%)` format
 - Task completion marking
 
 ### Dashboard Integration
 
-Orbit Auto logs execution runs to the task database for visualization in the Orbit Dashboard (`http://localhost:8787`).
+MissionCache Auto logs execution runs to the task database for visualization in the MissionCache Dashboard (`http://localhost:8787`).
 
 **What's logged:**
 - Execution start/end with status (completed, failed, cancelled)
@@ -113,9 +113,9 @@ Orbit Auto logs execution runs to the task database for visualization in the Orb
 - **Output viewer**: Browse execution logs with filtering by level, worker, and subtask
 - **SSE streaming**: Live log updates during running executions
 
-### Optimized Prompts (Orbit Feature)
+### Optimized Prompts (MissionCache Feature)
 
-The orbit plugin can generate optimized prompts for each subtask with agent/skill references. Prompts can be executed manually or via orbit-auto. This enables:
+The MissionCache plugin can generate optimized prompts for each subtask with agent/skill references. Prompts can be executed manually or via missioncache-auto. This enables:
 
 - **Parallel agent execution** - Each prompt specifies which agents to use
 - **Better task context** - Prompts include specific instructions, constraints, and validation steps
@@ -127,7 +127,7 @@ The orbit plugin can generate optimized prompts for each subtask with agent/skil
 2. **Gap Resolution** - If gaps found, suggests creating new agents/skills (user must approve)
 3. **Generation** - Uses `/optimize-prompt` to create structured prompts with XML tags
 4. **Batch Approval** - All prompts shown together for batch approval (approve once for all)
-5. **Execution** - Orbit-auto uses prompts in order, following checkboxes in tasks.md
+5. **Execution** - MissionCache Auto uses prompts in order, following checkboxes in tasks.md
 6. **Tracking** - Progress tracked via checkboxes in tasks.md (single source of truth)
 
 #### Prompt File Structure
@@ -170,7 +170,7 @@ Invoke skills directly using `/skill-name`:
 
 #### Creating Prompts
 
-Use the orbit plugin commands:
+Use the MissionCache plugin commands:
 
 1. **Create the task** (if not already done):
    ```bash
@@ -197,48 +197,48 @@ cat prompts/task-01-prompt.md  # Read the prompt
 # Then paste into a new Claude session or continue in current session
 ```
 
-**Orbit-auto execution** - autonomous batch processing:
+**MissionCache Auto execution** - autonomous batch processing:
 ```bash
-orbit-auto my-feature
+missioncache-auto my-feature
 # Output:
 # Found 5 prompt file(s) in prompts/
 # Prompts: Using optimized prompts (tracking via tasks.md)
 ```
 
-Orbit-auto determines which prompt to use by checking which tasks are still uncompleted (marked `[ ]`) in the tasks.md file. When a task is marked `[x]`, it moves to the next prompt.
+MissionCache Auto determines which prompt to use by checking which tasks are still uncompleted (marked `[ ]`) in the tasks.md file. When a task is marked `[x]`, it moves to the next prompt.
 
 ## Usage
 
 ### Installation
 
 ```bash
-# From the orbit-auto directory
+# From the missioncache-auto directory
 pip install -e .
 
 # Or run directly with Python
-python -m orbit_auto <task-name>
+python -m missioncache_auto <task-name>
 ```
 
 ### Commands
 
 ```bash
 # Initialize a new task
-orbit-auto init <task-name> "description"
+missioncache-auto init <task-name> "description"
 
 # Run in parallel mode (default, 8 workers)
-orbit-auto <task-name>
+missioncache-auto <task-name>
 
 # Run with more workers
-orbit-auto <task-name> -w 12
+missioncache-auto <task-name> -w 12
 
 # Run in sequential mode
-orbit-auto <task-name> --sequential
+missioncache-auto <task-name> --sequential
 
 # Show execution plan without running
-orbit-auto <task-name> --dry-run
+missioncache-auto <task-name> --dry-run
 
 # Check task status
-orbit-auto status <task-name>
+missioncache-auto status <task-name>
 ```
 
 ### Options
@@ -259,7 +259,7 @@ orbit-auto status <task-name>
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ORBIT_AUTO_VISIBILITY` | `verbose` | Controls tool call output during iterations |
+| `MISSIONCACHE_AUTO_VISIBILITY` | `verbose` | Controls tool call output during iterations |
 
 **Visibility Modes:**
 - `verbose` - Timestamps + full paths + command args (default)
@@ -274,8 +274,8 @@ Example output with `verbose`:
 -------------------------------------------------------------------
 
   * Working...
-  14:32:05 Read ~/.orbit/active/my-task/my-task-tasks.md
-  14:32:06 Read ~/.orbit/active/my-task/my-task-context.md
+  14:32:05 Read ~/.missioncache/active/my-task/my-task-tasks.md
+  14:32:06 Read ~/.missioncache/active/my-task/my-task-context.md
   14:32:08 Edit src/components/Button.tsx
   14:32:15 Bash npm run typecheck
   14:32:28 Done (23s, 5 tools)
@@ -287,13 +287,13 @@ Example output with `verbose`:
 Usage examples:
 ```bash
 # Default (verbose)
-orbit-auto my-task
+missioncache-auto my-task
 
 # Minimal output
-ORBIT_AUTO_VISIBILITY=minimal orbit-auto my-task
+MISSIONCACHE_AUTO_VISIBILITY=minimal missioncache-auto my-task
 
 # Disable tool visibility
-ORBIT_AUTO_VISIBILITY=none orbit-auto my-task
+MISSIONCACHE_AUTO_VISIBILITY=none missioncache-auto my-task
 ```
 
 ### Parallel Mode
@@ -408,16 +408,16 @@ Implemented complete task priority system across 5 subtasks. Main challenge was 
 
 ## Learning Tags
 
-Orbit-auto extracts learning-centric information from Claude's responses using XML tags. These tags help future iterations learn from past attempts.
+MissionCache Auto extracts learning-centric information from Claude's responses using XML tags. These tags help future iterations learn from past attempts.
 
-> **CRITICAL: Without `<what_worked>` tag, orbit-auto cannot detect task success and will retry indefinitely!**
+> **CRITICAL: Without `<what_worked>` tag, missioncache-auto cannot detect task success and will retry indefinitely!**
 >
 > Every successful task completion MUST include:
 > ```xml
 > <what_worked>Brief description of approach that succeeded</what_worked>
 > ```
 >
-> This is the ONLY way orbit-auto knows a task succeeded. The prompt template (`templates/prompt-template.md`) includes instructions for this tag.
+> This is the ONLY way missioncache-auto knows a task succeeded. The prompt template (`templates/prompt-template.md`) includes instructions for this tag.
 
 ### Required Tags (every response)
 
@@ -428,7 +428,7 @@ Orbit-auto extracts learning-centric information from Claude's responses using X
 
 ### Success Tags (REQUIRED for task completion)
 
-**CRITICAL:** Orbit-auto only marks a task complete if it sees one of:
+**CRITICAL:** MissionCache Auto only marks a task complete if it sees one of:
 1. `<promise>COMPLETE</promise>` - signals ALL tasks done
 2. `<what_worked>` tag - signals THIS task succeeded
 
@@ -517,19 +517,19 @@ Mark tasks that require human review before proceeding:
 - [ ] [WAIT] Task that needs human approval before proceeding
 ```
 
-When orbit-auto encounters `[WAIT]`:
+When missioncache-auto encounters `[WAIT]`:
 1. Outputs `<blocker>WAITING_FOR_HUMAN</blocker>`
 2. Loop exits with code 2 (blocked, not failed)
 3. Human reviews and either completes task or removes marker
-4. Rerun orbit-auto to continue
+4. Rerun missioncache-auto to continue
 
 ## Workflow
 
 ### Quick Start
-1. `orbit-auto init my-feature "Description"`
-2. Edit `~/.orbit/active/my-feature/my-feature-tasks.md` with tasks
-3. Add context to `~/.orbit/active/my-feature/my-feature-context.md`
-4. `orbit-auto my-feature`  # or `orbit-auto my-feature --sequential`
+1. `missioncache-auto init my-feature "Description"`
+2. Edit `~/.missioncache/active/my-feature/my-feature-tasks.md` with tasks
+3. Add context to `~/.missioncache/active/my-feature/my-feature-context.md`
+4. `missioncache-auto my-feature`  # or `missioncache-auto my-feature --sequential`
 
 ### Integration with /missioncache:load
 The context file is designed to survive compaction and work with `/missioncache:load`:
@@ -539,7 +539,7 @@ The context file is designed to survive compaction and work with `/missioncache:
 
 ## PRD Builder Skill
 
-The `SKILL.md` file contains a PRD Builder skill for creating Product Requirements Documents optimized for orbit-auto loops.
+The `SKILL.md` file contains a PRD Builder skill for creating Product Requirements Documents optimized for missioncache-auto loops.
 
 Key PRD rules:
 1. Each user story must fit in one context window (~10 min)
@@ -548,7 +548,7 @@ Key PRD rules:
 4. Always include "Typecheck passes" criterion
 5. UI stories must include "Verify changes work in browser"
 
-## When to Use Orbit Auto
+## When to Use MissionCache Auto
 
 **Good use cases:**
 - Large refactors with test coverage

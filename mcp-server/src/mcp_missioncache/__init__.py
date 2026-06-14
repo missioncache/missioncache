@@ -1,3 +1,3 @@
-"""MCP server for orbit project management."""
+"""MCP server for MissionCache project management."""
 
 __version__ = "1.0.0"

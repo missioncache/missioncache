@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-UserPromptSubmit hook - Detect orbit task tracking divergence.
+UserPromptSubmit hook - Detect MissionCache task tracking divergence.
 
-Runs on every user prompt and checks whether the active orbit project's
+Runs on every user prompt and checks whether the active MissionCache project's
 context file has findings recorded for tasks that are still unchecked in
 the tasks file. If divergence is detected, prints a reminder to stdout so
 Claude sees it at the moment it's about to move on to the next task.
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 # Bundled missioncache-db path for marketplace installs (no system pip install).
-# Path segment tracks the in-repo package dir; data-dir literals stay orbit-named until Task 71.
+# Path segment tracks the in-repo package dir.
 _BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
 if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
     sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
@@ -41,7 +41,7 @@ SKIP_PATTERNS = [
 ]
 
 # Tasks file pattern - capture "- [ ] N. description" with top-level
-# numbering only (matches the orbit template format).
+# numbering only (matches the MissionCache template format).
 PENDING_RE = re.compile(
     r"^\s*-\s*\[\s*\]\s+(\d+)\.\s+(.+?)\s*$", re.MULTILINE
 )
@@ -72,7 +72,7 @@ def build_reminder(
     """Format the divergence reminder for stdout injection."""
     lines = [
         "",
-        "## \u26a0\ufe0f Orbit task tracking divergence",
+        "## \u26a0\ufe0f MissionCache task tracking divergence",
         "",
         "The context file has findings recorded for tasks that are still "
         "unchecked in the tasks file:",
@@ -97,8 +97,8 @@ def build_reminder(
         "",
         "Important: the built-in TaskCreate tool and any system reminders "
         "about \"task tools\" refer to Claude Code's in-conversation todo "
-        "list, NOT the orbit tasks file. Use "
-        "`mcp__plugin_missioncache_pm__update_tasks_file` for orbit work.",
+        "list, NOT the MissionCache tasks file. Use "
+        "`mcp__plugin_missioncache_pm__update_tasks_file` for MissionCache work.",
         "",
     ]
     return "\n".join(lines)
@@ -136,11 +136,11 @@ def main() -> None:
         if not task or not task.full_path or not task.name:
             return
 
-        # Orbit files live under ~/.orbit/<full_path>/, not under the
+        # MissionCache files live under ~/.missioncache/<full_path>/, not under the
         # repo path. `task.full_path` already includes the "active/<name>"
         # segment. This matches settings.root in the MCP server
         # (mcp_missioncache/config.py:15) and the helpers in mcp_missioncache/helpers.py.
-        orbit_root = Path.home() / ".orbit"
+        orbit_root = Path.home() / ".missioncache"
         orbit_dir = orbit_root / task.full_path
 
         # Two supported filename layouts:
@@ -197,7 +197,7 @@ def main() -> None:
         pass
     except Exception as e:
         # Don't fail the prompt submission
-        print(f"<!-- orbit task_tracker: {e} -->", file=sys.stderr)
+        print(f"<!-- missioncache task_tracker: {e} -->", file=sys.stderr)
 
 
 if __name__ == "__main__":

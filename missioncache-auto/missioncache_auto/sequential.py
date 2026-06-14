@@ -1,8 +1,8 @@
 """
-Sequential execution mode for Orbit Auto.
+Sequential execution mode for MissionCache Auto.
 
 Runs tasks one at a time in order, with retry logic and
-full orbit integration including log management.
+full MissionCache integration including log management.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class SequentialRunner:
     """
     Runs missioncache-auto in sequential mode - one task at a time.
 
-    This is the main execution mode for orbit tasks, handling:
+    This is the main execution mode for MissionCache tasks, handling:
     - Task discovery and ordering
     - Prompt selection (optimized or generic)
     - Claude invocation and output parsing

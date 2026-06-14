@@ -1,14 +1,14 @@
 # Hooks
 
-This document covers the four lifecycle hooks orbit registers with Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`. Together they are what makes orbit's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside an orbit-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
+This document covers the four lifecycle hooks MissionCache registers with Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`. Together they are what makes MissionCache's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside a MissionCache-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, heartbeats, sessions, `hooks-state.db`, `full_path`, the `find_task_for_cwd` resolution order). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* orbit, you already are - hooks run automatically once the plugin is installed. The rest of this doc is for when you want to understand what they do, debug one that is misbehaving, or add your own.
+If you are just trying to *use* MissionCache, you already are - hooks run automatically once the plugin is installed. The rest of this doc is for when you want to understand what they do, debug one that is misbehaving, or add your own.
 
 ## The hook model
 
-Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The orbit plugin registers four of them via `hooks/hooks.json`:
+Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers four of them via `hooks/hooks.json`:
 
 ```json
 {
@@ -49,15 +49,15 @@ Five hooks, four events: `UserPromptSubmit` runs *two* scripts (activity_tracker
 Every hook script begins with the same 5-line bootstrap:
 
 ```python
-# Bundled orbit-db path for marketplace installs (no system pip install).
-_BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-    sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+# Bundled missioncache-db path for marketplace installs (no system pip install).
+_BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 ```
 
-This is the glue that makes orbit's hooks work under a marketplace install where there is no `pip install -e ./orbit-db` step. The plugin ships `orbit-db/` as a sibling directory to `hooks/`, and each hook inserts it into `sys.path` before the `from orbit_db import TaskDB` line so the import resolves against the bundled copy. If you have `orbit-db` pip-installed for some other reason (say, you are developing it), that install takes precedence because it got there via normal imports first - the bootstrap is additive, not destructive.
+This is the glue that makes MissionCache's hooks work under a marketplace install where there is no `pip install -e ./missioncache-db` step. The plugin ships `missioncache-db/` as a sibling directory to `hooks/`, and each hook inserts it into `sys.path` before the `from missioncache_db import TaskDB` line so the import resolves against the bundled copy. If you have `missioncache-db` pip-installed for some other reason (say, you are developing it), that install takes precedence because it got there via normal imports first - the bootstrap is additive, not destructive.
 
-This block is *inlined* in every hook rather than factored into a shared `_bootstrap.py` helper because pytest imports hooks as `hooks.session_start` (package-import mode), where relative imports from a sibling helper file do not resolve cleanly at the top of module execution. Duplicating five lines is the cost of keeping the hooks testable in the existing test harness. See the orbit project's gotcha notes for the full story.
+This block is *inlined* in every hook rather than factored into a shared `_bootstrap.py` helper because pytest imports hooks as `hooks.session_start` (package-import mode), where relative imports from a sibling helper file do not resolve cleanly at the top of module execution. Duplicating five lines is the cost of keeping the hooks testable in the existing test harness. See the MissionCache project's gotcha notes for the full story.
 
 The `activity_tracker.py` hook is the one exception to this pattern - it uses a *subprocess* path instead of an in-process import, for reasons that are covered in detail in its section below.
 
@@ -68,12 +68,12 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 **What it does:**
 
 1. **Write terminal-session mapping.** Looks up `TERM_SESSION_ID` (iTerm2) or `WT_SESSION` (Windows Terminal) from the environment and, if present, writes a row into `hooks-state.db:term_sessions` mapping the terminal tab to the Claude session ID. This is the bridge that lets the statusline find the current session when it runs, because the statusline only gets its session ID from Claude Code's statusline JSON and has no direct access to the SessionStart event.
-2. **Install bundled rules.** Runs `install_bundled_rules()`, which walks `${CLAUDE_PLUGIN_ROOT}/rules/*.md` and copies any file starting with `<!-- orbit-plugin:managed` into `~/.claude/rules/`. The ownership marker is critical: files that already exist in the destination are only overwritten if they *also* start with the marker. A user who deletes the marker takes ownership of that file and the hook stops touching it on subsequent SessionStarts. This is how marketplace installs get rule-file updates without clobbering user edits.
-3. **Detect the active task.** Tries `from orbit_db import TaskDB`, instantiates a DB, calls `db.find_task_for_cwd(cwd, session_id)`. If a task is found, it:
+2. **Install bundled rules.** Runs `install_bundled_rules()`, which walks `${CLAUDE_PLUGIN_ROOT}/rules/*.md` and copies any file starting with `<!-- missioncache-plugin:managed` into `~/.claude/rules/`. The ownership marker is critical: files that already exist in the destination are only overwritten if they *also* start with the marker. A user who deletes the marker takes ownership of that file and the hook stops touching it on subsequent SessionStarts. This is how marketplace installs get rule-file updates without clobbering user edits.
+3. **Detect the active task.** Tries `from missioncache_db import TaskDB`, instantiates a DB, calls `db.find_task_for_cwd(cwd, session_id)`. If a task is found, it:
    - Writes `projects/<session-id>.json` with the project name, for the statusline.
-   - Prints a markdown context block to stdout - this is the "Active Task Detected" banner Claude sees at the top of the session - with the task name, status, time invested, JIRA key, and the path to the orbit files.
-   - Includes a `/missioncache:load` tip and a task-tracking discipline reminder telling Claude to use `mcp__plugin_missioncache_pm__update_tasks_file` instead of the built-in TaskCreate tool for orbit tasks.
-4. **Skip silently on failure.** If `orbit_db` cannot be imported (minimal install, not set up yet, whatever), the hook bails out quietly. Nothing on stdout, nothing in stderr, Claude's session proceeds as if no hook ran. Rules installation still runs independently - it does not depend on `orbit_db` at all.
+   - Prints a markdown context block to stdout - this is the "Active Task Detected" banner Claude sees at the top of the session - with the task name, status, time invested, JIRA key, and the path to the MissionCache files.
+   - Includes a `/missioncache:load` tip and a task-tracking discipline reminder telling Claude to use `mcp__plugin_missioncache_pm__update_tasks_file` instead of the built-in TaskCreate tool for MissionCache tasks.
+4. **Skip silently on failure.** If `missioncache_db` cannot be imported (minimal install, not set up yet, whatever), the hook bails out quietly. Nothing on stdout, nothing in stderr, Claude's session proceeds as if no hook ran. Rules installation still runs independently - it does not depend on `missioncache_db` at all.
 
 **State files written:**
 
@@ -81,19 +81,19 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 - `~/.claude/hooks-state.db:term_sessions` - Same mapping in the SQLite DB. Both formats exist because different readers use different stores.
 - `~/.claude/hooks/state/projects/<session-id>.json` - `{projectName, updated, sessionId}`. The authoritative per-session project pointer. The statusline reads this, and mid-session `/missioncache:load` also writes it.
 
-**Removed in mcp-orbit 0.2.13:** the legacy `~/.claude/hooks/state/pending-task.json` file is no longer written by any hook or slash command. Old files left over from pre-0.2.13 installs are harmless and can be deleted by hand. `find_task_for_cwd` reads only `projects/<session-id>.json` and cwd-pattern matching now.
+**Removed in mcp-missioncache 0.2.13:** the legacy `~/.claude/hooks/state/pending-task.json` file is no longer written by any hook or slash command. Old files left over from pre-0.2.13 installs are harmless and can be deleted by hand. `find_task_for_cwd` reads only `projects/<session-id>.json` and cwd-pattern matching now.
 
 ## UserPromptSubmit: `activity_tracker.py`
 
 **When:** Every time the user submits a prompt. Runs *before* Claude sees the prompt - it is a pre-submit hook from the plugin's point of view.
 
-**What it does:** Records a heartbeat in `tasks.db:heartbeats` for time tracking. Exactly one heartbeat per prompt, per session, per orbit task (if one is active).
+**What it does:** Records a heartbeat in `tasks.db:heartbeats` for time tracking. Exactly one heartbeat per prompt, per session, per MissionCache task (if one is active).
 
-**The subprocess quirk:** Unlike the other hooks, `activity_tracker.py` does not `import orbit_db` directly. Instead it spawns a subprocess:
+**The subprocess quirk:** Unlike the other hooks, `activity_tracker.py` does not `import missioncache_db` directly. Instead it spawns a subprocess:
 
 ```python
 subprocess.run(
-    [sys.executable, "-m", "orbit_db", "heartbeat-auto"],
+    [sys.executable, "-m", "missioncache_db", "heartbeat-auto"],
     cwd=cwd,
     timeout=2,
     capture_output=True,
@@ -101,11 +101,11 @@ subprocess.run(
 )
 ```
 
-This is *deliberate* and was reverted to once, during an earlier refactor that tried to inline the heartbeat recording. The problem: `record_heartbeat_auto` has to acquire a SQLite write lock on `tasks.db`, and under contention (concurrent writers from other Claude sessions, orbit-auto, the dashboard's sync loop), a single heartbeat call can block for up to 5 seconds waiting on `busy_timeout=5000`. The UserPromptSubmit hook has a 5-second timeout of its own, so an in-process call could eat the entire budget and miss other hooks, or worse, delay the actual prompt submission.
+This is *deliberate* and was reverted to once, during an earlier refactor that tried to inline the heartbeat recording. The problem: `record_heartbeat_auto` has to acquire a SQLite write lock on `tasks.db`, and under contention (concurrent writers from other Claude sessions, MissionCache Auto, the dashboard's sync loop), a single heartbeat call can block for up to 5 seconds waiting on `busy_timeout=5000`. The UserPromptSubmit hook has a 5-second timeout of its own, so an in-process call could eat the entire budget and miss other hooks, or worse, delay the actual prompt submission.
 
 The subprocess form solves this by imposing a hard 2-second wall on the child process. If the SQLite lock does not resolve in 2 seconds, the subprocess is killed via `subprocess.TimeoutExpired`, the exception is swallowed, and the hook returns immediately. Worst case: one heartbeat is lost. The time budget of the parent hook is unaffected.
 
-The `PYTHONPATH` trick in the `env` dict is the subprocess's equivalent of the in-process sys.path bootstrap - it tells the child Python where to find `orbit_db` when the plugin is marketplace-installed. The subprocess runs `python -m orbit_db heartbeat-auto`, which is a command defined in `orbit-db`'s CLI that dispatches to `TaskDB.record_heartbeat_auto(cwd, session_id)`.
+The `PYTHONPATH` trick in the `env` dict is the subprocess's equivalent of the in-process sys.path bootstrap - it tells the child Python where to find `missioncache_db` when the plugin is marketplace-installed. The subprocess runs `python -m missioncache_db heartbeat-auto`, which is a command defined in `missioncache-db`'s CLI that dispatches to `TaskDB.record_heartbeat_auto(cwd, session_id)`.
 
 **Skip patterns:** Not every prompt counts as "work". The hook skips:
 
@@ -149,9 +149,9 @@ The rationale is embedded in the module docstring and worth quoting:
 
 The reminder ends with an explicit callout:
 
-> Important: the built-in TaskCreate tool and any system reminders about "task tools" refer to Claude Code's in-conversation todo list, NOT the orbit tasks file.
+> Important: the built-in TaskCreate tool and any system reminders about "task tools" refer to Claude Code's in-conversation todo list, NOT the MissionCache tasks file.
 
-This is there because Claude Code (the harness) periodically injects system reminders pointing at the internal `TaskCreate` tool, and Claude occasionally follows them instead of using the orbit MCP tool. The hook pushes back.
+This is there because Claude Code (the harness) periodically injects system reminders pointing at the internal `TaskCreate` tool, and Claude occasionally follows them instead of using the MissionCache MCP tool. The hook pushes back.
 
 **Same skip patterns as activity_tracker**, same subagent guard, same list-vs-string prompt flattening. These two hooks mirror each other in structure because they run back-to-back and share the same input shape.
 
@@ -164,7 +164,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 **What it does:**
 
 1. Find the active task via `find_task_for_cwd`. If no task, return.
-2. Find the context file under `~/.orbit/<task.full_path>/<task.name>-context.md` (or the bare `context.md` fallback for subtask layouts).
+2. Find the context file under `~/.missioncache/<task.full_path>/<task.name>-context.md` (or the bare `context.md` fallback for subtask layouts).
 3. Update the "Last Updated" timestamp line.
 4. Add an `- Auto-saved before compaction (<timestamp>)` bullet. If a `## Recent Changes` section exists, add it there; otherwise append a new section at the end.
 5. Write the file back.
@@ -182,11 +182,11 @@ The richer save path is `/missioncache:save`, which is a slash command the user 
 
 **When:** Claude has finished responding to the user's prompt and Claude Code is about to return control to the terminal (the "stop" event). Runs once per message exchange, after Claude's reply is already shown.
 
-**What it does:** Checks whether Claude made any file edits during the exchange. If yes, and there is an active orbit task with orbit files on disk, prints a reminder to stderr:
+**What it does:** Checks whether Claude made any file edits during the exchange. If yes, and there is an active MissionCache task with MissionCache files on disk, prints a reminder to stderr:
 
 ```
 ---
-**Orbit Reminder:** You made file edits while working on **<task-name>**.
+**MissionCache Reminder:** You made file edits while working on **<task-name>**.
 Consider running `/missioncache:save` to save context before ending your session.
 ---
 ```
@@ -203,8 +203,8 @@ Hooks write to a surprising number of places. Here is the complete map:
 
 | Path | Written by | Read by | Format |
 |------|-----------|---------|--------|
-| `~/.orbit/tasks.db:heartbeats` | activity_tracker (via orbit_db subprocess) | orbit_db aggregator, dashboard | SQLite row |
-| `~/.orbit/tasks.db:sessions` | orbit_db `process_heartbeats` (called by pre_compact) | dashboard, orbit MCP `get_task_time` | SQLite row |
+| `~/.missioncache/tasks.db:heartbeats` | activity_tracker (via missioncache_db subprocess) | missioncache_db aggregator, dashboard | SQLite row |
+| `~/.missioncache/tasks.db:sessions` | missioncache_db `process_heartbeats` (called by pre_compact) | dashboard, MissionCache MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
 | `~/.claude/hooks-state.db:project_state` | `/missioncache:load`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
@@ -212,32 +212,32 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
-**Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history but are no longer written or read by any current code path (`pending-task.json` removed in mcp-orbit 0.2.13; `pending-project.json` writers were already removed earlier). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
+**Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history but are no longer written or read by any current code path (`pending-task.json` removed in mcp-missioncache 0.2.13; `pending-project.json` writers were already removed earlier). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
 
 ## The HTTP hook path
 
-Beyond the plugin-registered hooks in `hooks.json`, orbit also uses a second hook-wiring mechanism: Claude Code's native `"type": "http"` hook form in `~/.claude/settings.json`. This is a *user-level* registry - not part of the plugin manifest - where Claude Code POSTs to HTTP endpoints on every hook event without going through Python at all.
+Beyond the plugin-registered hooks in `hooks.json`, MissionCache also uses a second hook-wiring mechanism: Claude Code's native `"type": "http"` hook form in `~/.claude/settings.json`. This is a *user-level* registry - not part of the plugin manifest - where Claude Code POSTs to HTTP endpoints on every hook event without going through Python at all.
 
-The orbit dashboard exposes these endpoints:
+The MissionCache Dashboard exposes these endpoints:
 
 | Endpoint | Caller | What it does |
 |----------|--------|--------------|
-| `POST /api/hooks/edit-count` | `PostToolUse` HTTP hook wired by `orbit-install` when the dashboard is installed (matcher `Edit\|Write\|NotebookEdit`) | Updates `session_state.edit_count` in `hooks-state.db` for the statusline edit counter |
-| `POST /api/hooks/task-created` | Orbit MCP server (`create_task`, `create_orbit_files`) | Triggers immediate SQLite → DuckDB sync so new projects show in the dashboard without the up-to-60s background-sync lag |
+| `POST /api/hooks/edit-count` | `PostToolUse` HTTP hook wired by `missioncache-install` when the dashboard is installed (matcher `Edit\|Write\|NotebookEdit`) | Updates `session_state.edit_count` in `hooks-state.db` for the statusline edit counter |
+| `POST /api/hooks/task-created` | MissionCache MCP server (`create_task`, `create_orbit_files`) | Triggers immediate SQLite → DuckDB sync so new projects show in the dashboard without the up-to-60s background-sync lag |
 | `POST /api/hooks/heartbeat` | Optional - power-user `UserPromptSubmit` HTTP hook wiring | Records a heartbeat. Plugin already records heartbeats via `activity_tracker.py`'s subprocess path, so wiring this on top just duplicates them |
 
-`edit-count` is wired automatically by `orbit-install` when the dashboard is installed, so full-install users get the statusline edit counter out of the box. `task-created` is called internally by the MCP server, not by a user-level HTTP hook. `heartbeat` is only of interest if you specifically want two parallel heartbeat paths.
+`edit-count` is wired automatically by `missioncache-install` when the dashboard is installed, so full-install users get the statusline edit counter out of the box. `task-created` is called internally by the MCP server, not by a user-level HTTP hook. `heartbeat` is only of interest if you specifically want two parallel heartbeat paths.
 
 **If you are auditing "which endpoints are actually used by hooks", grep `~/.claude/settings.json` in addition to the plugin source.** Claude Code's `"type": "http"` hook form is wired in settings.json and isn't visible from `hooks.json` or the plugin tree.
 
-## The `ORBIT_AUTO_MODE` signal
+## The `MISSIONCACHE_AUTO_MODE` signal
 
-When orbit-auto spawns Claude CLI subprocesses, it sets `ORBIT_AUTO_MODE=1` in the child environment. Hooks do not currently read this variable *themselves*, but it is the signal that various user-level behaviors check to differentiate autonomous runs from interactive ones. For example:
+When MissionCache Auto spawns Claude CLI subprocesses, it sets `MISSIONCACHE_AUTO_MODE=1` in the child environment. Hooks do not currently read this variable *themselves*, but it is the signal that various user-level behaviors check to differentiate autonomous runs from interactive ones. For example:
 
-- `~/.claude/hooks/permission-whitelist.sh` auto-approves `ExitPlanMode` transitions when `ORBIT_AUTO_MODE=1`, because autonomous runs should not block on plan approval.
+- `~/.claude/hooks/permission-whitelist.sh` auto-approves `ExitPlanMode` transitions when `MISSIONCACHE_AUTO_MODE=1`, because autonomous runs should not block on plan approval.
 - Slash commands and skills may skip clarification questions when the variable is set.
 
-The variable is not magic - it is a plain environment variable - but it is the contract between orbit-auto and the rest of the plugin ecosystem. If you want your own hook or skill to behave differently under autonomous execution, check `os.environ.get("ORBIT_AUTO_MODE") == "1"`. If you are writing a new orbit-auto mode, set the variable in the child environment and let downstream consumers opt in.
+The variable is not magic - it is a plain environment variable - but it is the contract between MissionCache Auto and the rest of the plugin ecosystem. If you want your own hook or skill to behave differently under autonomous execution, check `os.environ.get("MISSIONCACHE_AUTO_MODE") == "1"`. If you are writing a new MissionCache Auto mode, set the variable in the child environment and let downstream consumers opt in.
 
 ## Adding a new hook
 
@@ -253,10 +253,10 @@ If you have a new event you want to hook into, the pattern is straightforward:
    import sys
    from pathlib import Path
 
-   # Bundled orbit-db path for marketplace installs (no system pip install).
-   _BUNDLED_ORBIT_DB = Path(__file__).resolve().parent.parent / "orbit-db"
-   if _BUNDLED_ORBIT_DB.is_dir() and str(_BUNDLED_ORBIT_DB) not in sys.path:
-       sys.path.insert(0, str(_BUNDLED_ORBIT_DB))
+   # Bundled missioncache-db path for marketplace installs (no system pip install).
+   _BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncache-db"
+   if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
+       sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
    def main():
        try:
@@ -269,25 +269,25 @@ If you have a new event you want to hook into, the pattern is straightforward:
 4. **Never raise across the hook boundary.** Wrap everything in try/except with swallowing `pass` at the outermost level. A hook crash may or may not break the parent event depending on Claude Code's tolerance for non-zero exits, but in any case it is never worth failing the session over a telemetry hook.
 5. **Never block longer than the timeout.** Honor the timeout you declared in `hooks.json`. If your hook does I/O, make sure the I/O itself has a shorter timeout than the hook (e.g., `timeout=3` on a subprocess inside a 5-second hook).
 6. **Reinstall the plugin.** `claude plugins install missioncache@local` and restart Claude Code. The hook registry is re-read on plugin load.
-7. **Add a test.** `hooks/tests/` has fixtures for mocking `orbit_db` via `patch.dict('sys.modules', {'orbit_db': MagicMock()}) + importlib.reload(mod)`. Any new hook that imports `orbit_db` at the top of the module will break mocking; keep the import lazy (inside `main()`) or stick with the in-process bootstrap the existing hooks use.
+7. **Add a test.** `hooks/tests/` has fixtures for mocking `missioncache_db` via `patch.dict('sys.modules', {'missioncache_db': MagicMock()}) + importlib.reload(mod)`. Any new hook that imports `missioncache_db` at the top of the module will break mocking; keep the import lazy (inside `main()`) or stick with the in-process bootstrap the existing hooks use.
 
 ## Troubleshooting
 
 ### "SessionStart doesn't show the active task banner"
 
-**Cause:** Either `orbit_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
+**Cause:** Either `missioncache_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
 
-**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any orbit task" - check `~/.orbit/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
+**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any MissionCache task" - check `~/.missioncache/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
 
 ### "Heartbeats aren't being recorded"
 
 **Cause:** Four possibilities. In order of likelihood:
 1. The hook is timing out. `activity_tracker.py` has a 5-second budget and spawns a 2-second subprocess - if the SQLite lock is contended beyond 2s, the subprocess gets killed.
-2. `tasks.db` is locked or corrupted. Check `sqlite3 ~/.orbit/tasks.db "SELECT count(*) FROM heartbeats"`.
+2. `tasks.db` is locked or corrupted. Check `sqlite3 ~/.missioncache/tasks.db "SELECT count(*) FROM heartbeats"`.
 3. `find_task_for_cwd` returned no task, so there is nothing to attribute a heartbeat to.
 4. The prompt matched a skip pattern (slash command, shell command, one-word control).
 
-**Fix:** Run `activity_tracker.py` in isolation with a representative stdin payload and capture the output. Check the session transcript JSONL (`~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl`) for hook stderr breadcrumbs and orbit-db errors. For contention issues, the answer is almost always "wait and retry" - lock contention that exceeds the 2-second budget is rare enough to ignore.
+**Fix:** Run `activity_tracker.py` in isolation with a representative stdin payload and capture the output. Check the session transcript JSONL (`~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl`) for hook stderr breadcrumbs and missioncache-db errors. For contention issues, the answer is almost always "wait and retry" - lock contention that exceeds the 2-second budget is rare enough to ignore.
 
 ### "Task tracker reminder won't go away even after I flip the checkbox"
 
@@ -309,20 +309,20 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 ### "Rules in `~/.claude/rules/` aren't getting updated after a plugin upgrade"
 
-**Cause:** The file in `~/.claude/rules/` does not start with the `<!-- orbit-plugin:managed` marker, so `install_bundled_rules` treats it as user-owned and leaves it alone.
+**Cause:** The file in `~/.claude/rules/` does not start with the `<!-- missioncache-plugin:managed` marker, so `install_bundled_rules` treats it as user-owned and leaves it alone.
 
-**Fix:** Delete the file from `~/.claude/rules/` - the next SessionStart will reinstall it from the plugin's copy (which does have the marker). Alternatively, edit your file to start with `<!-- orbit-plugin:managed -->` as the first line - but that means your local changes will be overwritten on the next plugin update.
+**Fix:** Delete the file from `~/.claude/rules/` - the next SessionStart will reinstall it from the plugin's copy (which does have the marker). Alternatively, edit your file to start with `<!-- missioncache-plugin:managed -->` as the first line - but that means your local changes will be overwritten on the next plugin update.
 
-### "Hook test breaks because orbit_db is imported at the top of the module"
+### "Hook test breaks because missioncache_db is imported at the top of the module"
 
-**Cause:** The pytest mocking pattern in `hooks/tests/` is `patch.dict('sys.modules', {'orbit_db': MagicMock()}) + importlib.reload(mod)`. This only works if the import is lazy (inside `main()`) or if the `sys.path` bootstrap is the first thing that runs.
+**Cause:** The pytest mocking pattern in `hooks/tests/` is `patch.dict('sys.modules', {'missioncache_db': MagicMock()}) + importlib.reload(mod)`. This only works if the import is lazy (inside `main()`) or if the `sys.path` bootstrap is the first thing that runs.
 
-**Fix:** Move the `orbit_db` import inside `main()` so reload sees the mock. If you are adding a new hook, follow the lazy-import pattern used in `session_start.py`, `pre_compact.py`, `stop.py`, and `task_tracker.py`. Only `activity_tracker.py` uses a non-lazy pattern, and even that one calls `orbit_db` via subprocess rather than `import`.
+**Fix:** Move the `missioncache_db` import inside `main()` so reload sees the mock. If you are adding a new hook, follow the lazy-import pattern used in `session_start.py`, `pre_compact.py`, `stop.py`, and `task_tracker.py`. Only `activity_tracker.py` uses a non-lazy pattern, and even that one calls `missioncache_db` via subprocess rather than `import`.
 
 ## Where to go from here
 
 - [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, `tasks.db`, and how the pieces fit together.
 - [`dashboard.md`](./dashboard.md) - for the HTTP hook endpoints and how they overlap with the plugin-registered path.
-- [`orbit-auto.md`](./orbit-auto.md) - for the `ORBIT_AUTO_MODE` signal and how autonomous runs interact with hooks.
+- [`orbit-auto.md`](./orbit-auto.md) - for the `MISSIONCACHE_AUTO_MODE` signal and how autonomous runs interact with hooks.
 - `hooks/hooks.json` - the source-of-truth registry.
 - `hooks/*.py` - the scripts themselves. Each is short (under 250 lines) and standalone.

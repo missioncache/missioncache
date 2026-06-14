@@ -4,7 +4,7 @@ JSONL Parser for Claude Code Session Files.
 
 Parses JSONL files from ~/.claude/projects/ to extract activity metrics
 like message counts, tool calls, and token usage for display in the
-Orbit Dashboard.
+MissionCache Dashboard.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ class HourlyActivity:
     """Activity metrics for a single hour."""
 
     hour: int
-    task_seconds: int = 0  # From orbit sessions
+    task_seconds: int = 0  # From missioncache sessions
     claude_messages: int = 0
     claude_tool_calls: int = 0
     claude_tokens: int = 0

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-DuckDB-based Analytics Database for Orbit Dashboard.
+DuckDB-based Analytics Database for MissionCache Dashboard.
 
-Provides fast analytics queries for the orbit dashboard.
+Provides fast analytics queries for the MissionCache dashboard.
 Uses DuckDB for 10-100x faster aggregate queries compared to SQLite.
 
 This module is used by the missioncache-dashboard FastAPI server for read operations.
@@ -25,8 +25,8 @@ import duckdb
 # Configuration
 # =============================================================================
 
-DUCKDB_PATH = Path.home() / ".orbit" / "tasks.duckdb"
-SQLITE_PATH = Path.home() / ".orbit" / "tasks.db"  # Fallback
+DUCKDB_PATH = Path.home() / ".missioncache" / "tasks.duckdb"
+SQLITE_PATH = Path.home() / ".missioncache" / "tasks.db"  # Fallback
 
 
 # =============================================================================
@@ -3162,9 +3162,9 @@ class ClaudeSessionCache:
         conn.close()
 
     def get_untracked_sessions(self, date: str) -> list[dict]:
-        """Get Claude Code sessions that have no corresponding orbit session.
+        """Get Claude Code sessions that have no corresponding missioncache session.
 
-        Returns JSONL-tracked sessions that aren't covered by orbit heartbeat
+        Returns JSONL-tracked sessions that aren't covered by missioncache heartbeat
         sessions, filtering out very short sessions (< 60s).
         """
         import sqlite3
@@ -3450,7 +3450,7 @@ def merge_hourly_activity(
     """Merge task-based hourly activity with Claude Code activity.
 
     Args:
-        task_hourly: List of dicts with hour, total_seconds, session_count (from orbit)
+        task_hourly: List of dicts with hour, total_seconds, session_count (from missioncache)
         claude_hourly: List of dicts with hour, claude_messages, etc (from JSONL)
 
     Returns:
@@ -3519,7 +3519,7 @@ def get_session_cache() -> ClaudeSessionCache:
 
 
 # =============================================================================
-# Orbit Tasks.md Import Functions
+# MissionCache Tasks.md Import Functions
 # =============================================================================
 
 
@@ -3535,7 +3535,7 @@ class ParsedAgent:
 
 
 def parse_tasks_md(content: str) -> list[ParsedAgent]:
-    """Parse orbit tasks.md file into agent definitions.
+    """Parse MissionCache tasks.md file into agent definitions.
 
     Parses both completed ([x]) and uncompleted ([ ]) tasks.
     Task numbers are zero-padded to 2 digits for consistent ordering.
@@ -3652,7 +3652,7 @@ def import_tasks_md(
     use_custom_dependencies: bool = True,
     import_completed: bool = False,
 ) -> dict:
-    """Import an orbit tasks.md file as a plan with agents.
+    """Import a MissionCache tasks.md file as a plan with agents.
 
     Args:
         db: AnalyticsDB instance

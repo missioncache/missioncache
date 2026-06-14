@@ -211,12 +211,12 @@ Skills can be invoked directly with `/skill-name` or auto-activate via keywords.
 | `/code-review` | Comprehensive code review using specialized agents |
 | `/build-and-fix` | Run pytest collection and fix all errors iteratively |
 | `/pr-review-toolkit:review-pr` | Comprehensive PR review using specialized agents |
-| `/missioncache:new` | Create orbit project (plan, context, tasks) for a new feature |
-| `/missioncache:load` | Resume work on an active orbit project |
-| `/missioncache:done` | Mark an active orbit project as completed |
-| `/missioncache:save` | Save orbit project progress before compaction or session end |
+| `/missioncache:new` | Create MissionCache project (plan, context, tasks) for a new feature |
+| `/missioncache:load` | Resume work on an active MissionCache project |
+| `/missioncache:done` | Mark an active MissionCache project as completed |
+| `/missioncache:save` | Save MissionCache project progress before compaction or session end |
 | `/sync-with-master` | Sync current branch with latest remote master |
-| `/daily-report` | Generate daily sprint log from orbit tasks |
+| `/daily-report` | Generate daily sprint log from MissionCache tasks |
 
 ### Auto-Triggering Skills (include keywords in prompt)
 
@@ -234,7 +234,7 @@ Skills can be invoked directly with `/skill-name` or auto-activate via keywords.
 
 ## Making Agent Usage Prescriptive (for Task Prompts)
 
-When generating prompts for autonomous execution (e.g., Ralph, orbit tasks), agents must be **required**, not just "available". Otherwise Claude may skip agent invocation for straightforward-seeming tasks.
+When generating prompts for autonomous execution (e.g., Ralph, MissionCache tasks), agents must be **required**, not just "available". Otherwise Claude may skip agent invocation for straightforward-seeming tasks.
 
 ### Pattern for Task Prompts
 

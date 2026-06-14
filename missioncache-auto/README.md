@@ -1,4 +1,4 @@
-# Orbit Auto
+# MissionCache Auto
 
 Autonomous AI development tool for completing programming tasks iteratively.
 
@@ -7,40 +7,40 @@ Autonomous AI development tool for completing programming tasks iteratively.
 Requires Python 3.11+.
 
 ```bash
-cd orbit-auto
+cd missioncache-auto
 pip install -e .
 ```
 
 Or run directly:
 ```bash
-python -m orbit_auto <task-name>
+python -m missioncache_auto <task-name>
 ```
 
 ## Quick Start
 
 ```bash
 # Initialize a new task
-orbit-auto init my-feature "Add user authentication"
+missioncache-auto init my-feature "Add user authentication"
 
 # Run in parallel mode (default, 8 workers)
-orbit-auto my-feature
+missioncache-auto my-feature
 
 # Run in sequential mode
-orbit-auto my-feature --sequential
+missioncache-auto my-feature --sequential
 
 # Show execution plan without running
-orbit-auto my-feature --dry-run
+missioncache-auto my-feature --dry-run
 
 # Check task status
-orbit-auto status my-feature
+missioncache-auto status my-feature
 ```
 
 ## Usage
 
 ```
-orbit-auto <task-name> [options]
-orbit-auto init <task-name> "description"
-orbit-auto status <task-name>
+missioncache-auto <task-name> [options]
+missioncache-auto init <task-name> "description"
+missioncache-auto status <task-name>
 ```
 
 ### Options
@@ -60,14 +60,14 @@ orbit-auto status <task-name>
 
 | Variable | Description |
 |----------|-------------|
-| `ORBIT_AUTO_VISIBILITY` | Default visibility level (verbose, minimal, none) |
+| `MISSIONCACHE_AUTO_VISIBILITY` | Default visibility level (verbose, minimal, none) |
 
 ## Task Structure
 
-Tasks are organized in `~/.orbit/active/<task-name>/`:
+Tasks are organized in `~/.missioncache/active/<task-name>/`:
 
 ```
-~/.orbit/active/my-feature/
+~/.missioncache/active/my-feature/
 +-- my-feature-tasks.md      # Checkbox task list
 +-- my-feature-context.md    # Project context and learnings
 +-- my-feature-plan.md       # Implementation plan
@@ -124,18 +124,18 @@ pip install -e ".[dev]"
 pytest
 
 # Type checking
-mypy orbit_auto
+mypy missioncache_auto
 
 # Linting
-ruff check orbit_auto
+ruff check missioncache_auto
 ```
 
 ## Architecture
 
 ```
-orbit_auto/
+missioncache_auto/
 +-- __init__.py          # Package exports
-+-- __main__.py          # Entry point: python -m orbit_auto
++-- __main__.py          # Entry point: python -m missioncache_auto
 +-- cli.py               # Argument parsing, commands
 +-- models.py            # Data models (Task, State, Config)
 +-- dag.py               # Dependency graph builder

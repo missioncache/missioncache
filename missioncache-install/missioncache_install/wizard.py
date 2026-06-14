@@ -26,11 +26,11 @@ from . import installers, mcp_clients, prereqs, state, ui
 # Human-facing descriptions shown next to each y/N prompt.
 _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "plugin": (
-        "Orbit plugin",
+        "MissionCache plugin",
         "Slash commands (/missioncache:new, /missioncache:load, ...), MCP server, hooks.",
     ),
     "dashboard": (
-        "Orbit Dashboard",
+        "MissionCache Dashboard",
         "Local web UI at http://localhost:8787 with task tracking and analytics. "
         "Runs as a background service.",
     ),
@@ -46,7 +46,7 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "rules": (
         "Rule files",
         "Behavioral rules installed into ~/.claude/rules/ to teach Claude how "
-        "to use orbit (context preservation, session resolution, ...).",
+        "to use MissionCache (context preservation, session resolution, ...).",
     ),
     "user_commands": (
         "User-level slash commands",
@@ -59,17 +59,17 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "codex": (
         "Codex (MCP server + slash commands)",
-        "Register orbit's MCP server via `codex mcp add` and install /missioncache-load, "
-        "/missioncache-save, ... as a Codex plugin (~/.orbit/codex-marketplace/).",
+        "Register MissionCache's MCP server via `codex mcp add` and install /missioncache-load, "
+        "/missioncache-save, ... as a Codex plugin (~/.missioncache/codex-marketplace/).",
     ),
     "opencode": (
         "OpenCode (MCP server + slash commands)",
-        "Register orbit's MCP server in OpenCode's global config and install "
+        "Register MissionCache's MCP server in OpenCode's global config and install "
         "/missioncache-load, /missioncache-save, ... into ~/.config/opencode/commands/.",
     ),
     "vscode": (
         "VSCode (MCP server + slash commands)",
-        "Register orbit's MCP server in VSCode for Copilot Chat agent mode and "
+        "Register MissionCache's MCP server in VSCode for Copilot Chat agent mode and "
         "install /missioncache-load, /missioncache-save, ... as user-level prompt files "
         "(macOS only).",
     ),
@@ -89,7 +89,7 @@ _IMPLIED_CHILDREN: frozenset[str] = frozenset(COMMAND_IMPLIES.values())
 
 
 # Components whose y/N prompt should only fire when the corresponding tool is
-# installed locally. Each detector returns True iff orbit can register MCP for
+# installed locally. Each detector returns True iff MissionCache can register MCP for
 # that tool right now on this system.
 _TOOL_DETECTORS = {
     "codex": lambda: shutil.which("codex") is not None,
@@ -181,7 +181,7 @@ def run_uninstall_wizard() -> list[str] | None:
     - `all` - uninstalls everything tracked.
     - blank - cancels.
 
-    Project data and DBs (`~/.orbit/`) are never touched by the underlying
+    Project data and DBs (`~/.missioncache/`) are never touched by the underlying
     uninstallers, regardless of selection.
     """
     tracked = state.installed_components()
@@ -199,7 +199,7 @@ def run_uninstall_wizard() -> list[str] | None:
     if not installed:
         ui.fail(
             f"No prior missioncache-install tracked in {state.STATE_FILE}.\n"
-            "  If you installed orbit manually outside the installer, remove\n"
+            "  If you installed MissionCache manually outside the installer, remove\n"
             "  components by hand. Otherwise nothing to uninstall."
         )
         raise AssertionError("unreachable")  # ui.fail exits

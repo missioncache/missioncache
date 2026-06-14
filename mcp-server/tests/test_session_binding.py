@@ -35,7 +35,7 @@ def isolated_orbit(tmp_path, monkeypatch):
     HOOKS_STATE_DB_PATH so the binding writes land under tmp and don't
     contaminate the user's real ~/.claude/hooks-state.db.
     """
-    root_dir = tmp_path / ".orbit"
+    root_dir = tmp_path / ".missioncache"
     root_dir.mkdir()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -51,8 +51,10 @@ def isolated_orbit(tmp_path, monkeypatch):
     monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", root_dir)
     monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
     monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", hooks_db_path)
-    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
-    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
     monkeypatch.setattr(db_module, "_db", None)
 

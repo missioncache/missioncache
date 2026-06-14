@@ -10,7 +10,7 @@ from missioncache_dashboard.lib import config
 @pytest.fixture
 def tmp_config(tmp_path, monkeypatch):
     """Redirect CONFIG_FILE to a temp dir and clear env vars for each test."""
-    tmp_file = tmp_path / "orbit-dashboard-config.json"
+    tmp_file = tmp_path / "missioncache-dashboard-config.json"
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_file)
     monkeypatch.delenv("MISSIONCACHE_DASHBOARD_URL", raising=False)
     return tmp_file
@@ -152,5 +152,5 @@ class TestAtomicWrite:
     def test_no_leftover_tempfiles(self, tmp_config):
         config.set_jira_urls({"A-": "https://a/"})
         parent = tmp_config.parent
-        tempfiles = list(parent.glob(".orbit-dashboard-config.*.tmp"))
+        tempfiles = list(parent.glob(".missioncache-dashboard-config.*.tmp"))
         assert tempfiles == []

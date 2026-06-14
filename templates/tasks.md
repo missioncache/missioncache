@@ -7,7 +7,7 @@
 
 ---
 
-## Task Numbering Format (Orbit-Auto Compatible)
+## Task Numbering Format (MissionCache Auto Compatible)
 
 Tasks use numbered format for prompt alignment:
 - Flat: `- [ ] 1. Task description`

@@ -74,9 +74,9 @@ def _gradient_text(raw: str, start: tuple[int, int, int], end: tuple[int, int, i
 
 
 def banner() -> None:
-    """Print the install-start banner: gradient ORBIT wordmark + tagline."""
+    """Print the install-start banner: gradient MissionCache wordmark + tagline."""
     logo = _gradient_text(
-        pyfiglet.figlet_format("ORBIT", font="ansi_shadow"),
+        pyfiglet.figlet_format("MissionCache", font="ansi_shadow"),
         _LOGO_GRADIENT_START,
         _LOGO_GRADIENT_END,
     )

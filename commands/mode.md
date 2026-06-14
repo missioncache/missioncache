@@ -5,7 +5,7 @@ argument-hint: "<project> <range:mode,...>"
 
 # Set Task Mode
 
-Assign workflow modes (autonomous or interactive) to specific tasks in an orbit project.
+Assign workflow modes (autonomous or interactive) to specific tasks in a MissionCache project.
 
 ## Quick Start
 
@@ -75,7 +75,7 @@ Extract project name and mode assignments from the command arguments.
 
 ### Step 2: Read Current Tasks
 
-1. Get the project's orbit files:
+1. Get the project's MissionCache files:
    ```
    mcp__plugin_missioncache_pm__get_orbit_files(project_name="<project-name>")
    ```
@@ -183,4 +183,4 @@ This means task 7 can only run after tasks 3 and 5 are complete. Set dependencie
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_missioncache_pm__get_orbit_files` | Get paths to project's orbit files |
+| `mcp__plugin_missioncache_pm__get_orbit_files` | Get paths to project's MissionCache files |

@@ -22,7 +22,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
-        state, "STATE_FILE", tmp_path / ".claude" / "orbit-install.state.json"
+        state, "STATE_FILE", tmp_path / ".claude" / "missioncache-install.state.json"
     )
     monkeypatch.setattr(
         settings, "SETTINGS_FILE", tmp_path / ".claude" / "settings.json"
@@ -48,7 +48,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         command_clients,
         "VSCODE_PROMPTS_DIR",
-        tmp_path / ".orbit" / "vscode" / "prompts",
+        tmp_path / ".missioncache" / "vscode" / "prompts",
     )
     monkeypatch.setattr(
         command_clients,
@@ -58,7 +58,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         command_clients,
         "CODEX_MARKETPLACE_DIR",
-        tmp_path / ".orbit" / "codex-marketplace",
+        tmp_path / ".missioncache" / "codex-marketplace",
     )
     monkeypatch.setattr(
         command_clients,

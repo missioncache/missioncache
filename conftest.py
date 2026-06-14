@@ -1,6 +1,31 @@
-"""Shared fixtures for orbit project tests."""
+"""Shared fixtures for MissionCache project tests."""
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_legacy_data_paths(tmp_path, monkeypatch):
+    """Point every legacy data-path constant at a non-existent tmp location so
+    the migration guard (``check_legacy_paths``, run in ``TaskDB.__init__``)
+    never fires against a developer's real ``~/.orbit`` or ``~/.claude`` data.
+
+    The guard reads the module-level ``_LEGACY_*`` constants at call time;
+    without this, every test that constructs a ``TaskDB`` on a machine that
+    still has ``~/.orbit/tasks.db`` would raise ``MissionCacheMigrationRequired``.
+    Guard-behavior tests (test_legacy_guard.py, test_db_logger_init.py) request
+    their own fixtures that override these with controlled paths.
+    """
+    try:
+        import missioncache_db
+    except ImportError:
+        return
+    for name in (
+        "_LEGACY_CLAUDE_DB",
+        "_LEGACY_CLAUDE_ORBIT_ROOT",
+        "_LEGACY_ORBIT_DB",
+        "_LEGACY_ORBIT_ROOT",
+    ):
+        monkeypatch.setattr(missioncache_db, name, tmp_path / f"no-{name}")
 
 
 @pytest.fixture

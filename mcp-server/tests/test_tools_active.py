@@ -23,8 +23,8 @@ from mcp_missioncache import active_task, tools_active
 
 @pytest.fixture
 def project_dir(tmp_path, monkeypatch):
-    """Create a fake orbit project under a sandboxed root_dir."""
-    root_dir = tmp_path / ".orbit"
+    """Create a fake MissionCache project under a sandboxed root_dir."""
+    root_dir = tmp_path / ".missioncache"
     project = root_dir / "active" / "demo-project"
     project.mkdir(parents=True)
     (project / "demo-project-tasks.md").write_text(
@@ -44,7 +44,7 @@ def project_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(
         active_task,
         "STATE_DIR",
-        tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task",
+        tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task",
     )
     return project
 

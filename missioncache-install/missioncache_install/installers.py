@@ -56,7 +56,7 @@ class InstallContext:
 # ---------------------------------------------------------------------------
 
 def install_plugin(ctx: InstallContext) -> None:
-    """Register the orbit plugin with Claude Code.
+    """Register the MissionCache plugin with Claude Code.
 
     PyPI mode: adds the upstream marketplace and installs missioncache@orbit-pm.
     Local mode: creates ~/.claude/plugins/local-marketplace pointing at the
@@ -147,7 +147,7 @@ def _install_plugin_local(ctx: InstallContext) -> None:
 
 
 def _write_local_marketplace_json(path: Path) -> None:
-    """Create or update marketplace.json to include orbit. Idempotent."""
+    """Create or update marketplace.json to include MissionCache. Idempotent."""
     entry = {
         "name": "missioncache",
         "source": "./plugins/missioncache",
@@ -290,7 +290,7 @@ def install_statusline(ctx: InstallContext) -> bool:
     ships in the missioncache-dashboard PyPI package).
 
     Respects user consent: if an existing statusLine points at something
-    non-orbit, shows the current command and asks before overwriting. Returns
+    non-MissionCache, shows the current command and asks before overwriting. Returns
     True if the statusline was wired, False if the user declined.
     """
     ui.step("4", "Statusline")
@@ -352,7 +352,7 @@ def install_rules(ctx: InstallContext) -> None:
     Local: symlink from <repo>/rules/ so maintainer edits are live.
 
     Existing files with different content are backed up to .bak; existing
-    symlinks are replaced; existing orbit-managed files (marker: `<!-- orbit-plugin:managed -->`
+    symlinks are replaced; existing MissionCache-managed files (marker: `<!-- missioncache-plugin:managed -->`
     on line 1) are refreshed in place.
     """
     ui.step("5", "Rules")
@@ -370,10 +370,10 @@ def install_rules(ctx: InstallContext) -> None:
 
 
 def uninstall_rules(ctx: InstallContext) -> None:
-    """Remove orbit-managed rule files from ~/.claude/rules/.
+    """Remove MissionCache-managed rule files from ~/.claude/rules/.
 
     Symlinks pointing into the repo or the bundled package are removed.
-    Regular files are removed only if they carry the `<!-- orbit-plugin:managed -->`
+    Regular files are removed only if they carry the `<!-- missioncache-plugin:managed -->`
     marker on line 1; unmarked files are treated as user-owned and left alone.
     """
     dst = Path.home() / ".claude" / "rules"
@@ -395,10 +395,10 @@ def uninstall_rules(ctx: InstallContext) -> None:
             first = f.read_text(errors="replace").split("\n", 1)[0]
         except OSError:
             continue
-        if "orbit-plugin:managed" in first:
+        if "missioncache-plugin:managed" in first:
             f.unlink()
             removed += 1
-    ui.detail(f"Removed {removed} orbit-managed rule file(s)")
+    ui.detail(f"Removed {removed} MissionCache-managed rule file(s)")
     state.remove_component("rules")
 
 

@@ -1,9 +1,9 @@
 """
-Orbit Auto - Autonomous AI Development Tool
+MissionCache Auto - Autonomous AI Development Tool
 
-A Python implementation of the Orbit Auto technique for autonomous
+A Python implementation of the MissionCache Auto technique for autonomous
 AI-assisted development. Supports both sequential and parallel execution
-with orbit integration.
+with MissionCache integration.
 
 Usage:
     missioncache-auto <task-name>              # Parallel (default, 8 workers)

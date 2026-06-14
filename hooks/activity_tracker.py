@@ -6,7 +6,7 @@ Runs silently on every prompt, recording activity for the current task.
 Skips slash commands, shell commands, and empty prompts.
 
 Heartbeat writes go through a bounded subprocess so prompt submission is
-never blocked by SQLite lock contention on the orbit task database.
+never blocked by SQLite lock contention on the MissionCache task database.
 """
 
 import json

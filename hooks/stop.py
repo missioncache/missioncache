@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Stop hook - Remind about orbit updates if files were modified.
+Stop hook - Remind about MissionCache updates if files were modified.
 
 Checks if code files were edited during the session and reminds
-to update orbit files if working on an active project.
+to update MissionCache files if working on an active project.
 """
 
 import json
@@ -18,7 +18,7 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
 
 
 def main():
-    """Check if orbit update reminder is needed."""
+    """Check if MissionCache update reminder is needed."""
     try:
         # Read the hook input from stdin
         input_data = json.loads(sys.stdin.read())
@@ -56,7 +56,7 @@ def main():
         if not task:
             return
 
-        # Check if orbit files exist under centralized location
+        # Check if MissionCache files exist under centralized location
         if not task.full_path:
             return
 
@@ -78,7 +78,7 @@ def main():
             print(
                 f"""
 ---
-**Orbit Reminder:** You made file edits while working on **{task.name}**.
+**MissionCache Reminder:** You made file edits while working on **{task.name}**.
 Consider running `/missioncache:save` to save context before ending your session.
 ---
 """,

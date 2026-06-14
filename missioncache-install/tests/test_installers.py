@@ -281,11 +281,11 @@ def test_uninstall_user_commands_only_removes_known_files(
 def test_uninstall_rules_preserves_files_without_marker(
     isolated_home: Path,
 ) -> None:
-    """Rules without the `orbit-plugin:managed` marker are user-owned."""
+    """Rules without the `missioncache-plugin:managed` marker are user-owned."""
     rules_dir = isolated_home / ".claude" / "rules"
     rules_dir.mkdir(parents=True)
     (rules_dir / "managed.md").write_text(
-        "<!-- orbit-plugin:managed -->\n# orbit content\n"
+        "<!-- missioncache-plugin:managed -->\n# orbit content\n"
     )
     (rules_dir / "user-rule.md").write_text("# my own rule, no marker\n")
 
@@ -317,8 +317,8 @@ def test_uninstall_rules_removes_symlinks_pointing_at_repo(
 
 
 def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
-    """Uninstalling components must never touch ~/.orbit/ (project data)."""
-    orbit_data = isolated_home / ".orbit" / "active" / "sample"
+    """Uninstalling components must never touch ~/.missioncache/ (project data)."""
+    orbit_data = isolated_home / ".missioncache" / "active" / "sample"
     orbit_data.mkdir(parents=True)
     (orbit_data / "sample-context.md").write_text("project state")
 
@@ -328,7 +328,7 @@ def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
     installers.uninstall_statusline(ctx)
 
     assert (orbit_data / "sample-context.md").read_text() == "project state", \
-        "User project data in ~/.orbit/ must survive an uninstall"
+        "User project data in ~/.missioncache/ must survive an uninstall"
 
 
 # ---------------------------------------------------------------------------

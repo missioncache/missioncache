@@ -1,6 +1,6 @@
-# MCP Orbit Server
+# MCP MissionCache Server
 
-MCP server for orbit project management with time tracking.
+MCP server for MissionCache project management with time tracking.
 
 ## Installation
 
@@ -11,11 +11,11 @@ pip install -e .
 ## Usage
 
 ```bash
-mcp-orbit
+mcp-missioncache
 ```
 
 Or via uvx:
 
 ```bash
-uvx --from ~/.claude/plugins/local/orbit/mcp-server mcp-orbit
+uvx --from ~/.claude/plugins/local/missioncache/mcp-server mcp-missioncache
 ```

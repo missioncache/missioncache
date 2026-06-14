@@ -1,14 +1,14 @@
-# Orbit Auto
+# MissionCache Auto
 
-This document covers `orbit-auto`, the autonomous execution CLI that runs Claude Code in a loop over an orbit project's task list until every box is checked, something blocks, or the retry budget runs out. It is the component with the least amount of magic and the most amount of subprocess orchestration - once you understand the core loop, everything else is a variation on it.
+This document covers `missioncache-auto`, the autonomous execution CLI that runs Claude Code in a loop over a MissionCache project's task list until every box is checked, something blocks, or the retry budget runs out. It is the component with the least amount of magic and the most amount of subprocess orchestration - once you understand the core loop, everything else is a variation on it.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (orbit file layout, `~/.orbit/active/<project>/`, `tasks.db`, heartbeats, `auto_executions`, `auto_execution_logs`). If a term in this doc is not defined here, it is defined there.
+It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (MissionCache file layout, `~/.missioncache/active/<project>/`, `tasks.db`, heartbeats, `auto_executions`, `auto_execution_logs`). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* orbit-auto, the short version is: run `orbit-auto <project>` from inside your project's git repo, answer the confirmation prompt, and watch. The rest of this doc is for when you want to understand what it is doing, debug a run, or change how it behaves.
+If you are just trying to *use* missioncache-auto, the short version is: run `missioncache-auto <project>` from inside your project's git repo, answer the confirmation prompt, and watch. The rest of this doc is for when you want to understand what it is doing, debug a run, or change how it behaves.
 
 ## The mental model
 
-Orbit Auto's philosophy fits on one line: *iteration beats perfection on the first attempt*. Claude is good enough to complete a well-specified task in one shot most of the time, but "most of the time" is not "always", and a human sitting in front of the terminal to retry failures one at a time is a waste of a human. Orbit Auto is the retry loop, the scheduler, and the scoreboard.
+MissionCache Auto's philosophy fits on one line: *iteration beats perfection on the first attempt*. Claude is good enough to complete a well-specified task in one shot most of the time, but "most of the time" is not "always", and a human sitting in front of the terminal to retry failures one at a time is a waste of a human. MissionCache Auto is the retry loop, the scheduler, and the scoreboard.
 
 The loop itself is four steps:
 
@@ -27,21 +27,21 @@ Every piece of state that needs to survive an iteration lives on disk: the task 
 
 | Mode | Entry point | When to use |
 |------|-------------|-------------|
-| Sequential | `orbit-auto <project> --sequential` | Simple linear workflows, debugging one task at a time, or tasks that must run in strict order |
-| Parallel (default) | `orbit-auto <project>` or `orbit-auto <project> -w 12` | Multi-task projects with pre-generated prompts, where you want real concurrency and dependency-aware scheduling |
+| Sequential | `missioncache-auto <project> --sequential` | Simple linear workflows, debugging one task at a time, or tasks that must run in strict order |
+| Parallel (default) | `missioncache-auto <project>` or `missioncache-auto <project> -w 12` | Multi-task projects with pre-generated prompts, where you want real concurrency and dependency-aware scheduling |
 
 The difference is not just speed. Sequential mode walks the task list top to bottom and only cares about completion status. Parallel mode needs a `prompts/` directory, parses YAML frontmatter from each prompt file to build a dependency graph, computes execution waves, and spawns a worker pool that atomically claims tasks from shared state. The rest of this doc treats them separately because they have different invariants.
 
 ## Task layout and the file contract
 
-Every orbit-auto run operates on the same directory:
+Every missioncache-auto run operates on the same directory:
 
 ```
-~/.orbit/active/<project>/
+~/.missioncache/active/<project>/
 ├── <project>-tasks.md         # Checkbox items, parsed every iteration
 ├── <project>-context.md       # Durable learnings, decisions, gotchas
 ├── <project>-plan.md          # Implementation plan (optional, read-only)
-├── <project>-auto-log.md      # Iteration history (written by orbit-auto)
+├── <project>-auto-log.md      # Iteration history (written by missioncache-auto)
 ├── prompts/                   # Optional, required for parallel mode
 │   ├── task-01-prompt.md
 │   ├── task-02-prompt.md
@@ -54,7 +54,7 @@ Every orbit-auto run operates on the same directory:
     └── worker-<wid>-task-<tid>-<timestamp>.log
 ```
 
-The location is hard-coded in `orbit_auto/models.py:TaskPaths.from_task_name()` and is not configurable. This is deliberate: every other orbit component (dashboard, hooks, MCP tools, the `/missioncache:load` slash command) expects to find the files here, and having one canonical location means no path plumbing.
+The location is hard-coded in `missioncache_auto/models.py:TaskPaths.from_task_name()` and is not configurable. This is deliberate: every other MissionCache component (dashboard, hooks, MCP tools, the `/missioncache:load` slash command) expects to find the files here, and having one canonical location means no path plumbing.
 
 ### Task file format
 
@@ -69,31 +69,31 @@ Tasks are parsed from `<project>-tasks.md` with a strict regex:
 - [ ] 6. Depends on #4 `[auto:depends=4]`
 ```
 
-The parser (`orbit_auto/task_parser.py:parse_tasks_md`) matches `^\s*- \[([ x])\] (\[WAIT\])? (\d+)[.:] (.+)$`. A task number can be flat (`1`, `2`, `10`) or hierarchical (`1.1`, `1.2`) - hierarchical tasks get resolved as subtasks of their parent when computing sequential dependencies. The trailing mode marker in backticks (`[auto]`, `[inter]`, `[auto:depends=1,3]`) is optional and only used by `/missioncache:mode` and the runnable-task calculator.
+The parser (`missioncache_auto/task_parser.py:parse_tasks_md`) matches `^\s*- \[([ x])\] (\[WAIT\])? (\d+)[.:] (.+)$`. A task number can be flat (`1`, `2`, `10`) or hierarchical (`1.1`, `1.2`) - hierarchical tasks get resolved as subtasks of their parent when computing sequential dependencies. The trailing mode marker in backticks (`[auto]`, `[inter]`, `[auto:depends=1,3]`) is optional and only used by `/missioncache:mode` and the runnable-task calculator.
 
-A task is "completed" when its checkbox is `[x]`. Orbit-auto only writes checkboxes by calling `state.sync_to_tasks_md()` in parallel mode or `mark_task_completed()` in sequential mode, both of which use atomic file writes (temp file + `os.replace`) to avoid corruption under concurrent access. **You can edit the file while orbit-auto is running** - the loop re-parses it every iteration, so human edits are picked up within one cycle.
+A task is "completed" when its checkbox is `[x]`. missioncache-auto only writes checkboxes by calling `state.sync_to_tasks_md()` in parallel mode or `mark_task_completed()` in sequential mode, both of which use atomic file writes (temp file + `os.replace`) to avoid corruption under concurrent access. **You can edit the file while missioncache-auto is running** - the loop re-parses it every iteration, so human edits are picked up within one cycle.
 
 ### Context file and auto log
 
-`<project>-context.md` is never written by orbit-auto during a run. It is read by Claude (as part of the prompt, either embedded or referenced by path) and it is the one file you should edit manually between runs to record architectural decisions or hard-won lessons. It survives compaction and is what `/missioncache:load` reads when you come back to a project.
+`<project>-context.md` is never written by missioncache-auto during a run. It is read by Claude (as part of the prompt, either embedded or referenced by path) and it is the one file you should edit manually between runs to record architectural decisions or hard-won lessons. It survives compaction and is what `/missioncache:load` reads when you come back to a project.
 
-`<project>-auto-log.md` is the opposite: orbit-auto writes to it every iteration, and you can delete it after completion without losing anything the context file should have preserved. Its role is detailed debugging history - which attempt on which task succeeded or failed, what files were modified, what learnings Claude extracted. The sequential runner writes entries with `_write_iteration_log()`, and patterns and gotchas discovered via `<pattern_discovered>` and `<gotcha>` tags get bubbled up into a "Codebase Knowledge" section at the top of the file so they are visible to future iterations without having to scroll through the history.
+`<project>-auto-log.md` is the opposite: missioncache-auto writes to it every iteration, and you can delete it after completion without losing anything the context file should have preserved. Its role is detailed debugging history - which attempt on which task succeeded or failed, what files were modified, what learnings Claude extracted. The sequential runner writes entries with `_write_iteration_log()`, and patterns and gotchas discovered via `<pattern_discovered>` and `<gotcha>` tags get bubbled up into a "Codebase Knowledge" section at the top of the file so they are visible to future iterations without having to scroll through the history.
 
-The three-file split - tasks, context, auto log - is the invariant that makes `/missioncache:load` and orbit-auto compose. You can run `orbit-auto` for an hour, delete the auto log, and the next `/missioncache:load` still has everything it needs.
+The three-file split - tasks, context, auto log - is the invariant that makes `/missioncache:load` and missioncache-auto compose. You can run `missioncache-auto` for an hour, delete the auto log, and the next `/missioncache:load` still has everything it needs.
 
 ## Sequential mode in detail
 
-Sequential mode is the original orbit-auto execution path. It is what you want when there are no prompt files, when tasks must run in strict order, or when you are debugging a single task failure.
+Sequential mode is the original missioncache-auto execution path. It is what you want when there are no prompt files, when tasks must run in strict order, or when you are debugging a single task failure.
 
 ### The loop
 
-`orbit_auto/sequential.py:SequentialRunner.run()` is the top of the loop. Each iteration:
+`missioncache_auto/sequential.py:SequentialRunner.run()` is the top of the loop. Each iteration:
 
 1. **Read progress.** Call `get_task_progress()` to count completed vs total tasks in `<project>-tasks.md`.
 2. **Pick the next task.** Call `get_first_uncompleted_task()`, which returns the first `- [ ]` item in file order. If it returns `None`, every task is complete and the runner exits via `_handle_completion()`.
-3. **Check for `[WAIT]`.** If the next task is marked `[WAIT]`, print the blocked summary, log the block, and exit with code 2. Resuming requires a human to either complete the task by hand and remove the marker, or decide the task is unblocked and re-run orbit-auto.
+3. **Check for `[WAIT]`.** If the next task is marked `[WAIT]`, print the blocked summary, log the block, and exit with code 2. Resuming requires a human to either complete the task by hand and remove the marker, or decide the task is unblocked and re-run missioncache-auto.
 4. **Build the prompt.** If a `prompts/task-NN-prompt.md` file exists for this task number, use `extract_prompt_content()` to strip the YAML frontmatter and pass the body through. Otherwise fall back to `build_generic_prompt()`, which assembles a prompt from the task number, title, and absolute paths to the tasks and context files.
-5. **Run Claude.** Create a `ClaudeRunner(visibility=config.visibility, on_tool_use=display.tool_use)` and call `.run(prompt, project_root)`. This spawns `claude --print --output-format stream-json --verbose --exclude-dynamic-system-prompt-sections`, sets `ORBIT_AUTO_MODE=1` in the child environment (so hooks know to skip), pipes the prompt into stdin, and parses the streaming JSON output. The `stream-json` format gives one JSON object per line, so tool use events and text deltas can be processed as they arrive.
+5. **Run Claude.** Create a `ClaudeRunner(visibility=config.visibility, on_tool_use=display.tool_use)` and call `.run(prompt, project_root)`. This spawns `claude --print --output-format stream-json --verbose --exclude-dynamic-system-prompt-sections`, sets `MISSIONCACHE_AUTO_MODE=1` in the child environment (so hooks know to skip), pipes the prompt into stdin, and parses the streaming JSON output. The `stream-json` format gives one JSON object per line, so tool use events and text deltas can be processed as they arrive.
 6. **Parse the response for tags.** `_build_result()` in `claude_runner.py` pulls the accumulated text out of the stream and searches for `<learnings>`, `<what_worked>`, `<what_failed>`, `<dont_retry>`, `<try_next>`, `<pattern_discovered>`, `<gotcha>`, `<run_summary>`, `<promise>COMPLETE</promise>`, and `<blocker>WAITING_FOR_HUMAN</blocker>`. Success is defined as: `is_complete=True` OR (`what_worked is not None` AND not blocked). This is the central completion invariant - without an explicit positive signal, the task is a failure.
 7. **Handle the result.** `_handle_result()` is the big decision tree. On success, reset the retry counter, update timestamps, run `process-heartbeats` for time tracking, mark the checkbox, auto-commit changes if enabled, and loop. On failure, increment the per-task retry counter and loop without advancing. On blocked, exit with code 2. On completion (`<promise>COMPLETE</promise>`), call `_handle_completion()` and exit with code 0.
 8. **Pause.** `time.sleep(config.pause_seconds)` before the next iteration. Default is 3 seconds, configurable via `--pause`.
@@ -107,23 +107,23 @@ Sequential mode does not have a global iteration limit. The retry cap is **per t
 The things that actually make the loop stop are:
 
 - **Per-task retry exhaustion.** `current_task_attempts >= max_retries` on the current task.
-- **Explicit completion signal.** `<promise>COMPLETE</promise>` from Claude, which takes precedence over uncompleted checkboxes - if Claude says it is done and the human has written their tasks file optimistically, orbit-auto will exit 0.
+- **Explicit completion signal.** `<promise>COMPLETE</promise>` from Claude, which takes precedence over uncompleted checkboxes - if Claude says it is done and the human has written their tasks file optimistically, missioncache-auto will exit 0.
 - **`[WAIT]` marker.** Task parser returns `is_wait=True`, runner exits 2.
 - **KeyboardInterrupt.** Falls through to the `finally` block and shuts down gracefully.
 
 ### Retry context
 
-When a task fails and the loop comes back around, orbit-auto does not just retry blindly. Sequential mode passes the previous error message back to Claude via `_build_retry_prompt()`, which prepends a `<retry-context>` block explaining what went wrong last time and listing common fixes (missing tag, CLI error, specific error). This is the "learning from failure" part of the philosophy - Claude sees its own previous output summarized and can correct course. The parallel worker uses the same mechanism (`worker.py:_build_retry_prompt`) with the same format.
+When a task fails and the loop comes back around, missioncache-auto does not just retry blindly. Sequential mode passes the previous error message back to Claude via `_build_retry_prompt()`, which prepends a `<retry-context>` block explaining what went wrong last time and listing common fixes (missing tag, CLI error, specific error). This is the "learning from failure" part of the philosophy - Claude sees its own previous output summarized and can correct course. The parallel worker uses the same mechanism (`worker.py:_build_retry_prompt`) with the same format.
 
 ## Parallel mode in detail
 
-Parallel mode is what you want when you have a project with a `prompts/` directory and independent tasks that can run concurrently. It is the default (`orbit-auto <project>` is the same as `orbit-auto <project> --parallel`), and it is what ships in the screenshots and dashboard demos.
+Parallel mode is what you want when you have a project with a `prompts/` directory and independent tasks that can run concurrently. It is the default (`missioncache-auto <project>` is the same as `missioncache-auto <project> --parallel`), and it is what ships in the screenshots and dashboard demos.
 
 ### Setup requirements
 
 Parallel mode requires:
 
-1. **A prompts directory.** `~/.orbit/active/<project>/prompts/` must exist and must contain `task-NN-prompt.md` files. If it does not, `ParallelRunner.validate()` returns an error and the CLI exits with code 3.
+1. **A prompts directory.** `~/.missioncache/active/<project>/prompts/` must exist and must contain `task-NN-prompt.md` files. If it does not, `ParallelRunner.validate()` returns an error and the CLI exits with code 3.
 2. **YAML frontmatter on every prompt.** Each prompt file must start with a `---` delimited block containing at minimum `task_id: "NN"`. `task_title` is strongly recommended (used for display and commits). `dependencies: ["01", "03"]` is optional but required for anything other than strict sequential order.
 3. **Task numbers that match.** The prompt file's `task_id` must correspond to an uncompleted line in `<project>-tasks.md`. The plan validator (`plan_validator.py:validate_plan`) cross-references the two and warns about mismatches.
 
@@ -175,7 +175,7 @@ while True:
 
 `claim_task` is the atomic primitive. It acquires an exclusive `fcntl.flock` on `.orbit-parallel-state/state.lock`, reads the current state, finds the first pending task whose dependencies are satisfied, flips it to `in_progress`, writes the state atomically (temp file + `os.replace` via `_atomic_write_text`), and releases the lock. Multiple workers hitting this concurrently will serialize on the lock and only one will get any given task.
 
-Tasks that a worker claims but cannot finish (because the worker process died, or because `release_task` hit the retry cap) go through `release_orphaned_tasks()`, which runs from the parent runner's monitoring loop every 500ms. It scans for `in_progress` tasks owned by dead worker IDs and either flips them back to pending (if attempts left) or marks them failed. This is what makes orbit-auto robust to worker crashes - the orchestrator notices, recovers the claim, and lets another worker pick it up.
+Tasks that a worker claims but cannot finish (because the worker process died, or because `release_task` hit the retry cap) go through `release_orphaned_tasks()`, which runs from the parent runner's monitoring loop every 500ms. It scans for `in_progress` tasks owned by dead worker IDs and either flips them back to pending (if attempts left) or marks them failed. This is what makes missioncache-auto robust to worker crashes - the orchestrator notices, recovers the claim, and lets another worker pick it up.
 
 ### State file structure
 
@@ -224,7 +224,7 @@ The 500ms sleep is the progress-bar refresh rate. It is also how often the dashb
 
 ## Prompts and the YAML contract
 
-Prompt files are the bridge between `/missioncache:prompts` and orbit-auto. They are what makes parallel mode possible, and they are also a reproducible way to re-run a single task without the whole loop.
+Prompt files are the bridge between `/missioncache:prompts` and missioncache-auto. They are what makes parallel mode possible, and they are also a reproducible way to re-run a single task without the whole loop.
 
 ### Structure
 
@@ -285,18 +285,18 @@ Only `task_id` is strictly required by the parser (`task_parser.py:parse_prompt_
 
 - `task_title` is used in auto-commit messages and display output.
 - `dependencies` drives the DAG; without it, the task gets an implicit dep on `task_id - 1`.
-- `agents` and `skills` are metadata for `/missioncache:prompts`; they are not read by orbit-auto at runtime.
+- `agents` and `skills` are metadata for `/missioncache:prompts`; they are not read by missioncache-auto at runtime.
 - `tdd` is a per-task override for the TDD enforcement flag - `true` forces TDD wrapping on, `false` forces it off, absent means use the global `--tdd` setting.
 
 ### How prompts are picked up
 
 In parallel mode, the worker extracts `prompts/task-NN-prompt.md` for the task it claimed, strips the YAML frontmatter, and pipes the body into Claude. In sequential mode, the runner checks for a prompt file and uses it if one exists, falling back to `build_generic_prompt()` otherwise. The fallback is a minimal prompt template that references the task file and context file by path and includes the mandatory learning-tag instructions - it works fine for projects that do not bother with pre-generated prompts, at the cost of less structured guidance for Claude.
 
-Progress is tracked entirely through checkboxes in `<project>-tasks.md`. Prompts do not have their own "completed" state. When `tasks.md` has `- [x] 3.` and the corresponding `task-03-prompt.md` still exists on disk, orbit-auto skips the prompt - the checkbox is the source of truth.
+Progress is tracked entirely through checkboxes in `<project>-tasks.md`. Prompts do not have their own "completed" state. When `tasks.md` has `- [x] 3.` and the corresponding `task-03-prompt.md` still exists on disk, missioncache-auto skips the prompt - the checkbox is the source of truth.
 
 ## Learning tags: the completion contract
 
-The learning-tag system is the most subtle thing about orbit-auto, and getting it wrong produces the single most common failure mode: a task that looks like it succeeded (Claude edited files, ran tests, wrote a correct implementation) but gets retried anyway because the required tag was missing.
+The learning-tag system is the most subtle thing about missioncache-auto, and getting it wrong produces the single most common failure mode: a task that looks like it succeeded (Claude edited files, ran tests, wrote a correct implementation) but gets retried anyway because the required tag was missing.
 
 ### The rule
 
@@ -315,7 +315,7 @@ Everything else - `<learnings>`, `<what_failed>`, `<dont_retry>`, `<try_next>`, 
 
 ### Why an explicit tag
 
-An earlier version of orbit-auto inferred success from the absence of errors, and it produced a lot of false positives: Claude would crash, the CLI would rate-limit, the prompt would fail to parse, and the loop would count the empty response as "nothing went wrong, must have worked". Moving to an explicit positive signal is a forcing function. Claude has to commit to "this is done" in a way that shows up in the output, and orbit-auto simply counts tags.
+An earlier version of missioncache-auto inferred success from the absence of errors, and it produced a lot of false positives: Claude would crash, the CLI would rate-limit, the prompt would fail to parse, and the loop would count the empty response as "nothing went wrong, must have worked". Moving to an explicit positive signal is a forcing function. Claude has to commit to "this is done" in a way that shows up in the output, and missioncache-auto simply counts tags.
 
 The failure mode you will actually hit is not "Claude forgot the tag" (the prompt template is explicit about it), but "Claude crashed mid-response" or "the CLI errored before Claude saw the prompt". Both cases produce no `<what_worked>` and both are correctly counted as failures, which is exactly what you want.
 
@@ -334,11 +334,11 @@ The failure mode you will actually hit is not "Claude forgot the tag" (the promp
 | `<promise>COMPLETE</promise>` | On final task | **Exits the loop with code 0** |
 | `<blocker>WAITING_FOR_HUMAN</blocker>` | On blocked task | **Exits the loop with code 2** |
 
-Patterns and gotchas deserve special mention because they are the only tags that compound across iterations. When Claude emits `<pattern_discovered>Temp file cleanup: always use trap to clean temp files on EXIT</pattern_discovered>`, orbit-auto inserts it into the "Codebase Knowledge > Patterns Discovered" section of the auto log, which is at the top of the file and therefore visible to every subsequent iteration. Over a long run, the auto log accumulates a small local knowledge base about the codebase, and later tasks can benefit from earlier lessons without the human ever touching it.
+Patterns and gotchas deserve special mention because they are the only tags that compound across iterations. When Claude emits `<pattern_discovered>Temp file cleanup: always use trap to clean temp files on EXIT</pattern_discovered>`, missioncache-auto inserts it into the "Codebase Knowledge > Patterns Discovered" section of the auto log, which is at the top of the file and therefore visible to every subsequent iteration. Over a long run, the auto log accumulates a small local knowledge base about the codebase, and later tasks can benefit from earlier lessons without the human ever touching it.
 
 ## Execution logging and the dashboard feedback loop
 
-Everything orbit-auto does is logged to `tasks.db` so the dashboard can show you what happened. This integration has two halves: the execution record (one row in `auto_executions` per `orbit-auto` invocation) and the streaming logs (many rows in `auto_execution_logs` per execution).
+Everything missioncache-auto does is logged to `tasks.db` so the dashboard can show you what happened. This integration has two halves: the execution record (one row in `auto_executions` per `missioncache-auto` invocation) and the streaming logs (many rows in `auto_execution_logs` per execution).
 
 ### The execution record
 
@@ -378,19 +378,19 @@ The dashboard's log viewer has a per-level filter, so sprinkling `debug` liberal
 
 ### Workers that cannot log
 
-`_WorkerDBLogger` in `worker.py` is a lightweight wrapper around `TaskDB` that each worker process instantiates on startup. If `orbit_db` cannot be imported (which happens in some install configurations) or `~/.orbit/tasks.db` does not exist on a fresh install, the logger silently becomes a no-op. One exception to the silence: if the DB is missing because orbit data still lives at the legacy `~/.claude/` paths, `warn_if_migration_required` (in `db_logger.py`, shared by `ExecutionLogger` and `Worker`) prints the full migration recipe to stderr - once per process, not once per worker - so you know why the run produced no dashboard logs and how to fix it. Every `log()` call is wrapped in try/except with a bare `pass`, so logging failures never crash a worker. This is deliberate: the dashboard is a nice-to-have, not a dependency, and an orbit-auto run must succeed in minimal-install environments too.
+`_WorkerDBLogger` in `worker.py` is a lightweight wrapper around `TaskDB` that each worker process instantiates on startup. If `missioncache_db` cannot be imported (which happens in some install configurations) or `~/.missioncache/tasks.db` does not exist on a fresh install, the logger silently becomes a no-op. One exception to the silence: if the DB is missing because MissionCache data still lives at the legacy `~/.claude/` paths, `warn_if_migration_required` (in `db_logger.py`, shared by `ExecutionLogger` and `Worker`) prints the full migration recipe to stderr - once per process, not once per worker - so you know why the run produced no dashboard logs and how to fix it. Every `log()` call is wrapped in try/except with a bare `pass`, so logging failures never crash a worker. This is deliberate: the dashboard is a nice-to-have, not a dependency, and a missioncache-auto run must succeed in minimal-install environments too.
 
 ## Advanced features
 
-Parallel and sequential are the two core modes, but orbit-auto has a handful of opt-in features that layer on top. They are all off by default.
+Parallel and sequential are the two core modes, but missioncache-auto has a handful of opt-in features that layer on top. They are all off by default.
 
 ### Worktree isolation (`--worktree`)
 
-By default, every worker executes Claude in the same directory - the project root from which you ran `orbit-auto`. This is fine for tasks that touch non-overlapping files, but it breaks down when two workers edit the same file concurrently: whichever worker writes last wins, and you get lost changes.
+By default, every worker executes Claude in the same directory - the project root from which you ran `missioncache-auto`. This is fine for tasks that touch non-overlapping files, but it breaks down when two workers edit the same file concurrently: whichever worker writes last wins, and you get lost changes.
 
-`--worktree` fixes this by creating one git worktree per worker under `.claude/worktrees/orbit-auto-<project>-w<worker_id>`. Each worker runs in its own worktree with its own branch (`orbit-auto/<project>/worker-<id>`), does its work in isolation, and when the run finishes, `WorktreeManager.merge_all()` merges every worker branch back into the original branch sequentially, in worker ID order.
+`--worktree` fixes this by creating one git worktree per worker under `.claude/worktrees/missioncache-auto-<project>-w<worker_id>`. Each worker runs in its own worktree with its own branch (`missioncache-auto/<project>/worker-<id>`), does its work in isolation, and when the run finishes, `WorktreeManager.merge_all()` merges every worker branch back into the original branch sequentially, in worker ID order.
 
-Merge conflicts are reported but not auto-resolved. If a conflict happens, the worktree branch is preserved (not deleted) so you can resolve it manually with `git merge orbit-auto/<project>/worker-3` and inspect the conflict in-repo. Successful merges clean up both the worktree and the branch.
+Merge conflicts are reported but not auto-resolved. If a conflict happens, the worktree branch is preserved (not deleted) so you can resolve it manually with `git merge missioncache-auto/<project>/worker-3` and inspect the conflict in-repo. Successful merges clean up both the worktree and the branch.
 
 The worktree manager also copies `.env*` files from the project root into each worktree on creation (`_copy_env_files`), because git worktrees do not inherit gitignored files and environment variables often live in `.env.local`. If your project has other gitignored config that workers need, they will not be there automatically - you would need to add them to the copy list in `worktree.py`.
 
@@ -398,7 +398,7 @@ Worktrees are cleaned up via `cleanup_with_results()`, which respects conflict b
 
 ### Auto-commit
 
-By default, orbit-auto commits after each successful task with a message like `feat(03): Wire up the /api/users endpoint`. The title comes from the prompt's `task_title` frontmatter or, if missing, from the first markdown heading in the prompt body. `git add -A` is used, so every change in the working tree gets committed - this is fine inside a worktree, but without `--worktree` it means two workers may fight over the same commit. **If you are not using worktrees, consider `--no-commit` for parallel runs** and commit manually at the end.
+By default, missioncache-auto commits after each successful task with a message like `feat(03): Wire up the /api/users endpoint`. The title comes from the prompt's `task_title` frontmatter or, if missing, from the first markdown heading in the prompt body. `git add -A` is used, so every change in the working tree gets committed - this is fine inside a worktree, but without `--worktree` it means two workers may fight over the same commit. **If you are not using worktrees, consider `--no-commit` for parallel runs** and commit manually at the end.
 
 Sequential mode also auto-commits, but with less fighting - there is only one worker. The commit happens in `_handle_result()` after `update_timestamps()` and `_process_heartbeats()`.
 
@@ -420,7 +420,7 @@ Per-task TDD can be overridden with `tdd: true` or `tdd: false` in the prompt's 
 
 Each task has a 30-minute default timeout (`task_timeout=1800`), applied to the Claude CLI subprocess via `process.communicate(input=prompt, timeout=timeout)`. On timeout, the process is killed, pipes are drained, and the result is marked as a CLI error (`"Task timed out after 1800s"`). Set `--timeout 0` to disable entirely.
 
-The timeout is per task invocation, not per orbit-auto run. A project with 30 tasks and a 30-minute timeout per task can legitimately run for 15 hours if every task runs to the max. In practice most tasks finish in 1-3 minutes, but the default is high to avoid killing long-running refactors in the middle.
+The timeout is per task invocation, not per missioncache-auto run. A project with 30 tasks and a 30-minute timeout per task can legitimately run for 15 hours if every task runs to the max. In practice most tasks finish in 1-3 minutes, but the default is high to avoid killing long-running refactors in the middle.
 
 ### Dry run (`--dry-run`)
 
@@ -431,14 +431,14 @@ The timeout is per task invocation, not per orbit-auto run. A project with 30 ta
 ### Commands
 
 ```bash
-orbit-auto <project>                       # run (parallel, default)
-orbit-auto <project> --sequential          # run (sequential)
-orbit-auto <project> --dry-run             # show plan, do not run
-orbit-auto init <project> "description"    # create task files from templates
-orbit-auto status <project>                # show progress and blocking status
+missioncache-auto <project>                       # run (parallel, default)
+missioncache-auto <project> --sequential          # run (sequential)
+missioncache-auto <project> --dry-run             # show plan, do not run
+missioncache-auto init <project> "description"    # create task files from templates
+missioncache-auto status <project>                # show progress and blocking status
 ```
 
-`orbit-auto run` is the implicit default when the first positional argument is not a known command. `orbit-auto my-project` and `orbit-auto run my-project` are equivalent, and `orbit-auto status my-project` and `orbit-auto init my-project "..."` use their named subcommands.
+`missioncache-auto run` is the implicit default when the first positional argument is not a known command. `missioncache-auto my-project` and `missioncache-auto run my-project` are equivalent, and `missioncache-auto status my-project` and `missioncache-auto init my-project "..."` use their named subcommands.
 
 `status` is the one command that does not invoke Claude at all. It reads `<project>-tasks.md` via `parse_tasks_md()`, runs `get_runnable_tasks()` to compute blocking status, and prints a per-task list with `[ready]`, `[waiting on #3]`, `[blocked by #2]`, or `[WAIT]` annotations. It is the fastest way to see "what is actually runnable right now" without starting the worker pool.
 
@@ -466,10 +466,10 @@ orbit-auto status <project>                # show progress and blocking status
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ORBIT_AUTO_VISIBILITY` | `verbose` | Sets `-v` without a flag; useful in `.envrc` |
-| `ORBIT_AUTO_MODE` | set to `1` by orbit-auto | Set in the child Claude CLI environment so hooks and skills can detect autonomous mode and skip interactive prompts |
+| `MISSIONCACHE_AUTO_VISIBILITY` | `verbose` | Sets `-v` without a flag; useful in `.envrc` |
+| `MISSIONCACHE_AUTO_MODE` | set to `1` by missioncache-auto | Set in the child Claude CLI environment so hooks and skills can detect autonomous mode and skip interactive prompts |
 
-`ORBIT_AUTO_MODE=1` is the signal that every hook in the orbit plugin looks for. When it is set, `permission-whitelist.sh` auto-approves certain plan-exit transitions, `activity_tracker.py` tags heartbeats as autonomous, and various skills skip clarification steps. **If you are running orbit-auto on a machine where hooks check this variable, changing its value manually will produce surprising results** - leave it to the CLI.
+`MISSIONCACHE_AUTO_MODE=1` is the signal that every hook in the MissionCache plugin looks for. When it is set, `permission-whitelist.sh` auto-approves certain plan-exit transitions, `activity_tracker.py` tags heartbeats as autonomous, and various skills skip clarification steps. **If you are running missioncache-auto on a machine where hooks check this variable, changing its value manually will produce surprising results** - leave it to the CLI.
 
 ### Exit codes
 
@@ -482,11 +482,11 @@ orbit-auto status <project>                # show progress and blocking status
 
 These are documented in the CLI `--help` epilog too, so you do not need to open this doc when writing a wrapper script.
 
-## Extending orbit-auto
+## Extending missioncache-auto
 
 ### Adding a new execution mode
 
-If you want a mode that does not fit sequential or parallel - say, a "one-task-at-a-time-with-human-approval" mode or a "replay" mode that re-executes a completed task without checkpointing - create a new file alongside `sequential.py` and `parallel.py` in `orbit_auto/`. Implement a runner class that takes the same constructor arguments (`task_name`, `project_root`, `config`, `display`), exposes a `run()` method that returns an exit code, and uses the shared components: `TaskPaths` for file resolution, `ClaudeRunner` for subprocess invocation, `StateManager` if you need concurrent state, `ExecutionLogger` for dashboard integration.
+If you want a mode that does not fit sequential or parallel - say, a "one-task-at-a-time-with-human-approval" mode or a "replay" mode that re-executes a completed task without checkpointing - create a new file alongside `sequential.py` and `parallel.py` in `missioncache_auto/`. Implement a runner class that takes the same constructor arguments (`task_name`, `project_root`, `config`, `display`), exposes a `run()` method that returns an exit code, and uses the shared components: `TaskPaths` for file resolution, `ClaudeRunner` for subprocess invocation, `StateManager` if you need concurrent state, `ExecutionLogger` for dashboard integration.
 
 Wire the new mode into `cli.py:cmd_run()` by adding a flag to `_add_run_arguments()` and a branch in `cmd_run`. Make sure to validate flag conflicts in the mutex group if your mode is mutually exclusive with the existing ones.
 
@@ -517,13 +517,13 @@ Review prompts must include `<what_worked>...</what_worked>` at the end, otherwi
 
 ### Adding a new display output
 
-`display.py` is the ANSI output layer. Every user-facing string in orbit-auto goes through it: iteration headers, tool visibility, progress bars, completion summaries. It uses no third-party dependencies - just ANSI escape codes wrapped in simple print functions.
+`display.py` is the ANSI output layer. Every user-facing string in missioncache-auto goes through it: iteration headers, tool visibility, progress bars, completion summaries. It uses no third-party dependencies - just ANSI escape codes wrapped in simple print functions.
 
 If you want to add a new display method, add it to the `Display` class and call it from wherever in the runners you want. If you are adding structured output for a new CLI feature, prefer a new method over inlining `print()` statements - it keeps the runners clean and gives you a single place to add things like `--no-color` handling or alternate output formats (e.g., a hypothetical JSON mode).
 
 ## Troubleshooting
 
-### "Task completed successfully but orbit-auto retried it"
+### "Task completed successfully but missioncache-auto retried it"
 
 **Cause:** Claude's response did not contain `<what_worked>...</what_worked>`. This is the #1 issue and it happens because a prompt got out of sync with the template, or Claude was distracted by something mid-response and forgot to close the tag.
 
@@ -545,13 +545,13 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Cause:** A worker crashed before releasing its task. The parent process should catch this via `release_orphaned_tasks()` in the monitoring loop, but if the parent itself died, no cleanup happened.
 
-**Fix:** Start a fresh `orbit-auto` run. The new run's `init()` re-initializes the state file with tasks from tasks.md, and any old `in_progress` rows get discarded. If the old run left behind worktrees (`--worktree` was used), you may need to `git worktree list` and `git worktree remove` them manually - `WorktreeManager.create_worktrees()` does clean up stale worktrees for the same worker IDs, but only if you run with the same `--workers N` count.
+**Fix:** Start a fresh `missioncache-auto` run. The new run's `init()` re-initializes the state file with tasks from tasks.md, and any old `in_progress` rows get discarded. If the old run left behind worktrees (`--worktree` was used), you may need to `git worktree list` and `git worktree remove` them manually - `WorktreeManager.create_worktrees()` does clean up stale worktrees for the same worker IDs, but only if you run with the same `--workers N` count.
 
 ### "Dashboard shows 'running' forever for an execution that finished"
 
-**Cause:** The orbit-auto process was killed (SIGKILL, OS crash) before `ExecutionLogger.finish()` ran. The `auto_executions` row still has `status=running`.
+**Cause:** The missioncache-auto process was killed (SIGKILL, OS crash) before `ExecutionLogger.finish()` ran. The `auto_executions` row still has `status=running`.
 
-**Fix:** Start a new run. The next `ExecutionLogger.start()` on the same task does not touch the old row, but `_cleanup_old_executions()` will eventually delete it via the retention policy. If you want to clean it up immediately, `UPDATE auto_executions SET status='cancelled' WHERE id=<id>` via `sqlite3 ~/.orbit/tasks.db` is fine - the dashboard will refresh on its next poll.
+**Fix:** Start a new run. The next `ExecutionLogger.start()` on the same task does not touch the old row, but `_cleanup_old_executions()` will eventually delete it via the retention policy. If you want to clean it up immediately, `UPDATE auto_executions SET status='cancelled' WHERE id=<id>` via `sqlite3 ~/.missioncache/tasks.db` is fine - the dashboard will refresh on its next poll.
 
 ### "Task times out at 1800s but I want it to keep going"
 
@@ -565,15 +565,15 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Fix:** Either explicitly modify or add tests in the task (which is the point of TDD), or set `tdd: false` in the task's prompt frontmatter to opt out.
 
-### "orbit-auto command not found"
+### "missioncache-auto command not found"
 
-**Cause:** You are on the quick (marketplace) install path, which does not include the `orbit-auto` CLI - it ships only the plugin core.
+**Cause:** You are on the quick (marketplace) install path, which does not include the `missioncache-auto` CLI - it ships only the plugin core.
 
-**Fix:** Do the full install: `uvx orbit-install` (or `uvx orbit-install --orbit-auto` if you only want this component). That pip-installs `orbit-auto` from PyPI and puts `orbit-auto` on your `PATH`. From a clone you can run `uvx orbit-install --local`, or `pip install -e ./orbit-auto` by hand if you would rather skip the installer. The CLI binary lands in whatever Python environment you installed into - if `which orbit-auto` is empty after install, check that that environment's `bin/` directory is on `PATH`.
+**Fix:** Do the full install: `uvx missioncache-install` (or `uvx missioncache-install --missioncache-auto` if you only want this component). That pip-installs `missioncache-auto` from PyPI and puts `missioncache-auto` on your `PATH`. From a clone you can run `uvx missioncache-install --local`, or `pip install -e ./missioncache-auto` by hand if you would rather skip the installer. The CLI binary lands in whatever Python environment you installed into - if `which missioncache-auto` is empty after install, check that that environment's `bin/` directory is on `PATH`.
 
 ## Where to go from here
 
-- [`architecture.md`](./architecture.md) - if you need the big picture on orbit's storage model, hooks, and how the pieces fit together.
+- [`architecture.md`](./architecture.md) - if you need the big picture on MissionCache's storage model, hooks, and how the pieces fit together.
 - [`dashboard.md`](./dashboard.md) - for the other end of the pipeline: how the Auto view, the execution record, and the streaming logs actually get rendered.
-- `orbit-auto/CLAUDE.md` - the in-repo maintainer guide, which has more details on the PRD builder skill and task-writing heuristics that did not fit in this doc.
-- `orbit-auto/orbit_auto/` - the source. Start with `cli.py` to see the entry points, then `sequential.py` or `parallel.py` depending on which mode you care about. Everything else is called from one of those two.
+- `missioncache-auto/CLAUDE.md` - the in-repo maintainer guide, which has more details on the PRD builder skill and task-writing heuristics that did not fit in this doc.
+- `missioncache-auto/missioncache_auto/` - the source. Start with `cli.py` to see the entry points, then `sequential.py` or `parallel.py` depending on which mode you care about. Everything else is called from one of those two.

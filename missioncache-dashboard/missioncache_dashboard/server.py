@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Orbit Dashboard - Task & Analytics Dashboard
+MissionCache Dashboard - Task & Analytics Dashboard
 
 A FastAPI server that provides:
 1. Task APIs - Task tracking, time analytics (DuckDB)
 2. Plans APIs - Parallel execution monitoring
-3. Auto APIs - Orbit-auto execution tracking
+3. Auto APIs - missioncache-auto execution tracking
 
 Port: 8787 (override with MISSIONCACHE_DASHBOARD_PORT env var)
 """
@@ -69,7 +69,7 @@ def get_sqlite_db() -> TaskDB:
 # Configuration
 # =============================================================================
 
-MISSIONCACHE_ROOT = Path.home() / ".orbit"
+MISSIONCACHE_ROOT = Path.home() / ".missioncache"
 
 
 def _init_hooks_state_db() -> None:
@@ -99,7 +99,7 @@ def _get_hooks_state_db() -> sqlite3.Connection:
 
 
 def _resolve_orbit_path(full_path: str) -> Path:
-    """Resolve DB full_path to centralized orbit directory, stripping legacy dev/ prefix."""
+    """Resolve DB full_path to centralized MissionCache directory, stripping legacy dev/ prefix."""
     if full_path.startswith("dev/"):
         full_path = full_path[4:]
     return MISSIONCACHE_ROOT / full_path
@@ -172,7 +172,7 @@ async def lifespan(app: FastAPI):
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Orbit Dashboard", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="MissionCache Dashboard", version="2.0.0", lifespan=lifespan)
 
 # CORS for local development
 app.add_middleware(
@@ -186,8 +186,6 @@ app.add_middleware(
 # Paths
 CLAUDE_DIR = Path.home() / ".claude"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
-# Path literal stays orbit-named until Task 71.
-MISSIONCACHE_DB_SCRIPT = CLAUDE_DIR / "scripts" / "orbit_db.py"
 HOOKS_STATE_DB = HOOKS_STATE_DB_PATH
 
 # Cache TTLs
@@ -506,7 +504,7 @@ def get_loc_for_date(date: str | None = None) -> dict:
                 by_task[task_id]["commit_count"] += loc["commit_count"]
 
     # 2. Get shadow commits from SQLite (non-git repos with shadow tracking)
-    sqlite_path = Path.home() / ".orbit" / "tasks.db"
+    sqlite_path = Path.home() / ".missioncache" / "tasks.db"
     if sqlite_path.exists():
         try:
             conn = sqlite3.connect(str(sqlite_path))
@@ -600,7 +598,7 @@ def get_loc_for_date(date: str | None = None) -> dict:
 
 
 # =============================================================================
-# Orbit Files Parsing
+# MissionCache Files Parsing
 # =============================================================================
 
 
@@ -820,7 +818,7 @@ def _get_sequential_dependencies(task_id: str, all_tasks: list[dict]) -> list[st
 
 
 def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
-    """Parse orbit task file to extract progress information.
+    """Parse MissionCache task file to extract progress information.
 
     Args:
         repo_path: Absolute path to the repository
@@ -838,7 +836,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         "completed_count": 0,
         "total_count": 0,
         "last_updated": None,
-        "orbit_in_completed": False,  # True if orbit files found in completed/
+        "orbit_in_completed": False,  # True if MissionCache files found in completed/
         "target_repo": None,  # Actual working repo extracted from context/plan
         # Per-task mode fields
         "project_mode": "interactive",  # "interactive", "autonomous", or "hybrid"
@@ -859,7 +857,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         # Build list of candidate task directories to check
         candidate_dirs = []
 
-        # Centralized orbit root (primary)
+        # Centralized MissionCache root (primary)
         candidate_dirs.append(MISSIONCACHE_ROOT / "active" / task_name)
         candidate_dirs.append(MISSIONCACHE_ROOT / "completed" / task_name)
 
@@ -881,7 +879,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         if not task_dir:
             return result
 
-        # Check if orbit files are in the completed folder
+        # Check if MissionCache files are in the completed folder
         if "/completed/" in str(task_dir) and "/active/" not in str(task_dir):
             result["orbit_in_completed"] = True
 
@@ -1093,7 +1091,7 @@ def _get_jsonl_task_times(task_ids: list[int]) -> dict[int, int]:
     """
     import sqlite3
 
-    db_path = Path.home() / ".orbit" / "tasks.db"
+    db_path = Path.home() / ".missioncache" / "tasks.db"
     if not db_path.exists() or not task_ids:
         return {}
 
@@ -1123,7 +1121,7 @@ def _effective_time(task_id: int, heartbeat_times: dict, jsonl_times: dict) -> i
 
 @app.get("/api/tasks/active")
 async def api_tasks_active(repo_id: int = None):
-    """Get active tasks with hierarchy and orbit progress info."""
+    """Get active tasks with hierarchy and MissionCache progress info."""
     db = get_db()
     tasks = db.get_active_tasks(repo_id)
 
@@ -1155,7 +1153,7 @@ async def api_tasks_active(repo_id: int = None):
             task_dict["repo_name"] = repo.short_name if repo else None
             task_dict["repo_path"] = repo.path if repo else None
 
-        # Parse orbit files for progress info
+        # Parse MissionCache files for progress info
         orbit_in_completed = False
         if repo and task.full_path:
             progress = parse_orbit_progress(repo.path, task.full_path)
@@ -1185,8 +1183,8 @@ async def api_tasks_active(repo_id: int = None):
             task_dict["auto_remaining"] = 0
             task_dict["inter_remaining"] = 0
 
-        # Skip tasks whose orbit files are in dev/completed/ folder
-        # (DB status is stale, but orbit files were moved to completed)
+        # Skip tasks whose MissionCache files are in dev/completed/ folder
+        # (DB status is stale, but MissionCache files were moved to completed)
         if orbit_in_completed:
             continue
 
@@ -1288,13 +1286,13 @@ async def api_task_structure(task_id: int):
 
 @app.get("/api/tasks/completed")
 async def api_tasks_completed(days: int = 30):
-    """Get completed tasks with orbit summary info."""
+    """Get completed tasks with MissionCache summary info."""
     db = get_db()
 
     # Get tasks marked as completed in DB
     tasks = list(db.get_completed_tasks(days=days))
 
-    # Also include tasks still marked as 'active' in DB but with orbit files
+    # Also include tasks still marked as 'active' in DB but with MissionCache files
     # in dev/completed/ folder (orphan completed tasks due to DB constraint issues)
     active_tasks = db.get_active_tasks()
     repos_cache: dict[int, Any] = {}
@@ -1331,7 +1329,7 @@ async def api_tasks_completed(days: int = 30):
             repo = repos_cache[task.repo_id]
             task_dict["repo_name"] = repo.short_name if repo else None
 
-        # Parse orbit files for description and summary
+        # Parse MissionCache files for description and summary
         if repo and task.full_path:
             progress = parse_orbit_progress(repo.path, task.full_path)
             task_dict["description"] = progress.get("description", "")
@@ -1357,7 +1355,7 @@ async def api_tasks_completed(days: int = 30):
 
 @app.get("/api/task/{task_id}/files")
 async def api_task_files(task_id: int):
-    """Get orbit markdown files for a task (plan, context, tasks)."""
+    """Get MissionCache markdown files for a task (plan, context, tasks)."""
     db = get_db()
     task = db.get_task(task_id)
 
@@ -1543,7 +1541,7 @@ async def api_stats_today():
     # Merge task-based and Claude activity into unified hourly data
     hourly = merge_hourly_activity(task_hourly, claude_hourly)
 
-    # Calculate totals from SQLite data (orbit task sessions)
+    # Calculate totals from SQLite data (MissionCache task sessions)
     task_seconds = sum(s["duration_seconds"] for s in sessions)
     task_count = len(tasks_today_raw)
     session_count = len(sessions)
@@ -1568,7 +1566,7 @@ async def api_stats_today():
         # For past days, cap at 24 hours
         claude_seconds = min(claude_seconds_raw, 86400)
 
-    # Total seconds: use only Claude JSONL activity (not orbit task time)
+    # Total seconds: use only Claude JSONL activity (not MissionCache task time)
     total_seconds = claude_seconds
 
     # Get LOC stats for today
@@ -1646,7 +1644,7 @@ async def api_stats_day(
 ):
     """Get activity statistics for a specific date.
 
-    Includes both orbit task activity and Claude Code activity from JSONL files.
+    Includes both MissionCache task activity and Claude Code activity from JSONL files.
     """
     db = get_db()
 
@@ -1683,7 +1681,7 @@ async def api_stats_day(
         # For past days, cap at 24 hours
         claude_seconds = min(claude_seconds_raw, 86400)
 
-    # Total seconds: use only Claude JSONL activity (not orbit task time)
+    # Total seconds: use only Claude JSONL activity (not MissionCache task time)
     total_seconds = claude_seconds
 
     # Get LOC stats for the date
@@ -1848,7 +1846,7 @@ async def api_stats_history(days: int = 7):
     total_claude_seconds = sum(d.get("claude_seconds", 0) for d in claude_daily)
     total_claude_sessions = sum(d.get("claude_session_count", 0) for d in daily)
 
-    # Override trends time with merged total (trends query is orbit-only)
+    # Override trends time with merged total (trends query is MissionCache-only)
     if total_seconds > trends.get("time", {}).get("current", 0):
         trends["time"]["current"] = total_seconds
         trends["time"]["current_formatted"] = db.format_duration(total_seconds)
@@ -1913,12 +1911,12 @@ async def api_repos():
 
 
 # =============================================================================
-# Orbit Auto API - Task Graph Visualization
+# missioncache-auto API - Task Graph Visualization
 # =============================================================================
 
 
 def _parse_orbit_tasks(tasks_file: Path) -> list[dict]:
-    """Parse tasks from an orbit tasks.md file.
+    """Parse tasks from a MissionCache tasks.md file.
 
     Returns list of dicts with: number, title, completed, wait
     """
@@ -1949,9 +1947,9 @@ def _parse_orbit_tasks(tasks_file: Path) -> list[dict]:
 
 @app.get("/api/auto/projects")
 async def api_auto_projects():
-    """List active orbit projects with their task graphs.
+    """List active MissionCache projects with their task graphs.
 
-    Returns projects from ~/.orbit/active/ with:
+    Returns projects from ~/.missioncache/active/ with:
     - Task list with status (completed/pending/wait)
     - Dependencies parsed from prompts (if available)
     - Graph data for D3.js visualization
@@ -2581,7 +2579,7 @@ async def hook_action(body: dict):
 async def hook_project(body: dict):
     """HTTP hook: set active project for a session.
 
-    Called by orbit skills and session_start via Bash.
+    Called by MissionCache skills and session_start via Bash.
     """
     session_id = body.get("session_id", "")
     project_name = body.get("project_name", "")
@@ -2610,7 +2608,7 @@ async def hook_project(body: dict):
 async def hook_get_term_session(term_session_id: str):
     """Resolve TERM_SESSION_ID to Claude session_id.
 
-    Used by orbit skills to find the current session for project registration.
+    Used by MissionCache skills to find the current session for project registration.
     """
     try:
         db = _get_hooks_state_db()

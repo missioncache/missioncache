@@ -1,7 +1,7 @@
 [project]
 name = "mcp-missioncache"
-version = "1.0.1"
-description = "MCP server for the orbit Claude Code plugin: project management with time tracking"
+version = "1.0.2"
+description = "MCP server for the MissionCache Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Tomer Brami", email = "tomerbrami@gmail.com"}
 ]
-keywords = ["claude-code", "orbit", "mcp", "model-context-protocol", "task-tracking"]
+keywords = ["claude-code", "missioncache", "mcp", "model-context-protocol", "task-tracking"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "missioncache-db>=1.0.0",
+    "missioncache-db>=1.0.1",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

@@ -285,9 +285,9 @@ async def scan_repos(
     ] = None,
 ) -> dict:
     """
-    Scan repositories for orbit tasks and sync with database.
+    Scan repositories for MissionCache tasks and sync with database.
 
-    Discovers tasks from ~/.orbit/ directories.
+    Discovers tasks from ~/.missioncache/ directories.
     """
     db = get_db()
 

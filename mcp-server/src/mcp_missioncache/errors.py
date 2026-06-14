@@ -1,4 +1,4 @@
-"""Error codes and handling for the orbit MCP server."""
+"""Error codes and handling for the MissionCache MCP server."""
 
 from enum import Enum
 from typing import Any
@@ -19,7 +19,7 @@ class ErrorCode(str, Enum):
 
 
 class MissionCacheError(Exception):
-    """Base exception for orbit errors with structured response."""
+    """Base exception for MissionCache errors with structured response."""
 
     def __init__(
         self, code: ErrorCode, message: str, details: dict[str, Any] | None = None

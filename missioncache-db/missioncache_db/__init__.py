@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Task Database Manager for Claude Code orbit system.
+Task Database Manager for the MissionCache system on Claude Code.
 
 Provides SQLite-based cross-repo task tracking with WakaTime-style time tracking.
 
@@ -36,7 +36,7 @@ Non-Coding Task Management:
     python missioncache_db.py today-updates [task_id]                           # Get today's updates
 
 Migration:
-    python missioncache_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.orbit/
+    python missioncache_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.missioncache/
 
 Cleanup:
     python missioncache_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
@@ -64,9 +64,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-DB_PATH = Path.home() / ".orbit" / "tasks.db"
-# Path literal stays ".orbit" (or ".claude/orbit") until Task 71 migrates the data dir.
-MISSIONCACHE_ROOT = Path.home() / ".orbit"
+DB_PATH = Path.home() / ".missioncache" / "tasks.db"
+MISSIONCACHE_ROOT = Path.home() / ".missioncache"
 
 # Shared session-state database used by the dashboard, statusline, and hooks.
 # Multiple writers exist (dashboard's HTTP API, hooks at SessionStart, missioncache-db's
@@ -75,11 +74,13 @@ MISSIONCACHE_ROOT = Path.home() / ".orbit"
 # dashboard never ran.
 HOOKS_STATE_DB_PATH = Path.home() / ".claude" / "hooks-state.db"
 
-# Legacy paths for the pre-Phase-11 ~/.claude/ layout. Used by the migration
-# guard below.
-_LEGACY_DB = Path.home() / ".claude" / "tasks.db"
-# Path literal stays ".orbit" (or ".claude/orbit") until Task 71 migrates the data dir.
-_LEGACY_MISSIONCACHE_ROOT = Path.home() / ".claude" / "orbit"
+# Legacy data locations the migration guard warns about, in two tiers:
+#   - the ancient pre-Phase-11 ~/.claude/ layout
+#   - the ~/.orbit/ layout (pre-MissionCache rename, superseded by ~/.missioncache/ in Task 71)
+_LEGACY_CLAUDE_DB = Path.home() / ".claude" / "tasks.db"
+_LEGACY_CLAUDE_ORBIT_ROOT = Path.home() / ".claude" / "orbit"
+_LEGACY_ORBIT_DB = Path.home() / ".orbit" / "tasks.db"
+_LEGACY_ORBIT_ROOT = Path.home() / ".orbit"
 
 
 def atomic_write_json(path: Path, payload: object) -> None:
@@ -164,11 +165,11 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
 
 
 class MissionCacheMigrationRequired(RuntimeError):
-    """Raised when orbit data is at legacy ~/.claude/ paths but the new
-    ~/.orbit/ DB doesn't exist. Caught by CLI entry points to print a
-    user-friendly migration message; subclasses RuntimeError so existing
-    `except Exception` handlers in hooks catch it cleanly (unlike SystemExit
-    which is BaseException and would escape `except Exception`)."""
+    """Raised when MissionCache data is at a legacy path (~/.claude/orbit/ or
+    ~/.orbit/) but the new ~/.missioncache/ DB doesn't exist. Caught by CLI entry
+    points to print a user-friendly migration message; subclasses RuntimeError so
+    existing `except Exception` handlers in hooks catch it cleanly (unlike
+    SystemExit which is BaseException and would escape `except Exception`)."""
 
 
 class RenameError(ValueError):
@@ -184,11 +185,11 @@ class NameCollisionError(RenameError):
 
 
 class FilesystemCollisionError(RenameError):
-    """The target orbit directory already exists on disk."""
+    """The target MissionCache directory already exists on disk."""
 
 
 class AutoRunActiveError(RenameError):
-    """An missioncache-auto run is currently in progress on this task."""
+    """A missioncache-auto run is currently in progress on this task."""
 
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -216,23 +217,46 @@ def validate_task_name(name: str) -> None:
 
 
 def check_legacy_paths() -> None:
-    """Raise MissionCacheMigrationRequired if orbit data exists at legacy paths
-    but not at the new path. Reads module-level DB_PATH / _LEGACY_DB /
-    _LEGACY_MISSIONCACHE_ROOT at call time so tests can monkeypatch them.
+    """Raise MissionCacheMigrationRequired if MissionCache data exists at a legacy
+    path but not at the canonical ~/.missioncache/ path. Reads module-level
+    DB_PATH / _LEGACY_CLAUDE_DB / _LEGACY_CLAUDE_ORBIT_ROOT / _LEGACY_ORBIT_DB /
+    _LEGACY_ORBIT_ROOT at call time so tests can monkeypatch them.
+
+    Two legacy tiers are detected: the ancient ~/.claude/ layout and the ~/.orbit/
+    layout (superseded by ~/.missioncache/ in the MissionCache rename, Task 71).
 
     Public API: missioncache-auto calls this directly (missioncache-db>=1.0.5) to warn
     about unmigrated data without constructing a TaskDB."""
-    if not DB_PATH.exists() and (_LEGACY_DB.exists() or _LEGACY_MISSIONCACHE_ROOT.exists()):
-        raise MissionCacheMigrationRequired(
-            "Orbit data found at legacy ~/.claude/ paths but not at ~/.orbit/.\n"
-            "Migrate before starting orbit:\n"
-            "  mkdir -p ~/.orbit\n"
-            "  mv ~/.claude/orbit/active     ~/.orbit/active\n"
-            "  mv ~/.claude/orbit/completed  ~/.orbit/completed\n"
-            "  mv ~/.claude/tasks.db*        ~/.orbit/ 2>/dev/null\n"
-            "  mv ~/.claude/tasks.duckdb*    ~/.orbit/ 2>/dev/null\n"
-            "  rmdir ~/.claude/orbit"
-        )
+    if DB_PATH.exists():
+        return
+    orbit_legacy = _LEGACY_ORBIT_DB.exists() or _LEGACY_ORBIT_ROOT.exists()
+    claude_legacy = _LEGACY_CLAUDE_DB.exists() or _LEGACY_CLAUDE_ORBIT_ROOT.exists()
+    if not (orbit_legacy or claude_legacy):
+        return
+    lines = [
+        "MissionCache data found at a legacy path but not at ~/.missioncache/.",
+        "Migrate before starting missioncache:",
+        "  mkdir -p ~/.missioncache",
+    ]
+    if orbit_legacy:
+        lines += [
+            "  # data at ~/.orbit/ (pre-rename layout):",
+            "  mv ~/.orbit/active        ~/.missioncache/active     2>/dev/null",
+            "  mv ~/.orbit/completed     ~/.missioncache/completed  2>/dev/null",
+            "  mv ~/.orbit/tasks.db*     ~/.missioncache/           2>/dev/null",
+            "  mv ~/.orbit/tasks.duckdb* ~/.missioncache/           2>/dev/null",
+            "  rmdir ~/.orbit 2>/dev/null",
+        ]
+    if claude_legacy:
+        lines += [
+            "  # data at ~/.claude/orbit/ (ancient layout):",
+            "  mv ~/.claude/orbit/active     ~/.missioncache/active     2>/dev/null",
+            "  mv ~/.claude/orbit/completed  ~/.missioncache/completed  2>/dev/null",
+            "  mv ~/.claude/tasks.db*        ~/.missioncache/           2>/dev/null",
+            "  mv ~/.claude/tasks.duckdb*    ~/.missioncache/           2>/dev/null",
+            "  rmdir ~/.claude/orbit 2>/dev/null",
+        ]
+    raise MissionCacheMigrationRequired("\n".join(lines))
 
 # Non-git folder to track with shadow repo (only this folder gets shadow commits)
 SHADOW_TRACKED_FOLDER = Path(os.environ.get("MISSIONCACHE_SHADOW_FOLDER", str(Path.home() / "work")))
@@ -682,7 +706,7 @@ class Session:
 
 @dataclass
 class AutoExecution:
-    """An missioncache-auto execution run."""
+    """A missioncache-auto execution run."""
 
     id: int
     task_id: int
@@ -715,7 +739,7 @@ class AutoExecution:
 
 @dataclass
 class AutoExecutionLog:
-    """A log entry from an missioncache-auto execution."""
+    """A log entry from a missioncache-auto execution."""
 
     id: int
     execution_id: int
@@ -749,7 +773,7 @@ class TaskDB:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or DB_PATH
         self._connection: Optional[sqlite3.Connection] = None
-        # Guard against using orbit while data still lives at legacy paths.
+        # Guard against using MissionCache while data still lives at legacy paths.
         # Raises MissionCacheMigrationRequired (RuntimeError subclass) so callers
         # using `except Exception` catch it normally; CLI entry points pretty-print.
         # Note: the guard inspects module-level DB_PATH (the canonical path),
@@ -976,14 +1000,14 @@ class TaskDB:
     # =========================================================================
 
     def scan_repo(self, repo_id: int) -> List[Task]:
-        """Scan centralized orbit root for tasks and sync with database."""
+        """Scan centralized MissionCache root for tasks and sync with database."""
         repo = self.get_repo(repo_id)
         if not repo:
             return []
 
         discovered_tasks = []
 
-        # Scan active tasks from centralized orbit root
+        # Scan active tasks from centralized MissionCache root
         active_dir = MISSIONCACHE_ROOT / "active"
         if active_dir.exists():
             for task_dir in active_dir.iterdir():
@@ -1429,8 +1453,8 @@ class TaskDB:
             ValueError: invalid name (after normalization), missing task,
                 subtask, or unexpected full_path shape.
             NameCollisionError: another task in the same repo has that name.
-            FilesystemCollisionError: target orbit directory already exists.
-            AutoRunActiveError: an missioncache-auto run is currently running.
+            FilesystemCollisionError: target MissionCache directory already exists.
+            AutoRunActiveError: a missioncache-auto run is currently running.
         """
         raw_input = new_name
         new_name = new_name.strip().lower()
@@ -1804,7 +1828,7 @@ class TaskDB:
                 except (json.JSONDecodeError, IOError):
                     pass  # Fall through to other methods
 
-        # Priority 3: Check if cwd is under centralized orbit root
+        # Priority 3: Check if cwd is under centralized MissionCache root
         orbit_active = MISSIONCACHE_ROOT / "active"
         try:
             relative = cwd_path.relative_to(orbit_active)
@@ -1823,7 +1847,7 @@ class TaskDB:
                 if task:
                     return task
         except ValueError:
-            pass  # cwd is not under orbit root
+            pass  # cwd is not under MissionCache root
 
         # Legacy: check repo-local dev/active/ paths
         for repo in self.get_repos(active_only=True):
@@ -2373,7 +2397,7 @@ class TaskDB:
             except (ValueError, TypeError):
                 pass
 
-        # Get file modification time from centralized orbit root
+        # Get file modification time from centralized MissionCache root
         if task.full_path:
             task_dir = MISSIONCACHE_ROOT / task.full_path
             if task_dir.exists():
@@ -2555,7 +2579,7 @@ class TaskDB:
     def parse_orbit_progress(
         self, repo_path: str, task_full_path: str, parent_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Parse orbit task file to extract progress information.
+        """Parse MissionCache task file to extract progress information.
 
         Args:
             repo_path: Absolute path to the repository (legacy, used as fallback)
@@ -2567,7 +2591,7 @@ class TaskDB:
         """
         # Extract task name from path (last component)
         task_name = Path(task_full_path).name
-        # Resolve via centralized orbit root (strip legacy dev/ prefix)
+        # Resolve via centralized MissionCache root (strip legacy dev/ prefix)
         normalized = (
             task_full_path[4:] if task_full_path.startswith("dev/") else task_full_path
         )
@@ -3637,7 +3661,7 @@ def main():
             moved = 0
             skipped = 0
 
-            # Move files from repo-local dev/ to centralized orbit root
+            # Move files from repo-local dev/ to centralized MissionCache root
             for repo in db.get_repos():
                 repo_path = Path(repo.path)
                 for status, target_dir in [

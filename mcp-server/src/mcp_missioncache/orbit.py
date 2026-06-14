@@ -1,4 +1,4 @@
-"""Orbit file operations."""
+"""MissionCache file operations."""
 
 import contextlib
 import fcntl
@@ -130,7 +130,7 @@ def get_task_dir(task_name: str, active: bool = True) -> Path:
 
 
 def get_orbit_files(task_name: str, full_path: str | None = None) -> MissionCacheFiles:
-    """Get paths to all orbit files for a task.
+    """Get paths to all MissionCache files for a task.
 
     When ``full_path`` is given (e.g. ``active/parent/subtask`` for nested
     subtasks), it is authoritative. Otherwise, search the active directory
@@ -185,7 +185,7 @@ def create_orbit_files(
     plan_content: dict[str, str] | None = None,
     force: bool = False,
 ) -> MissionCacheFiles:
-    """Create orbit files for a task under MISSIONCACHE_ROOT.
+    """Create MissionCache files for a task under MISSIONCACHE_ROOT.
 
     Args:
         task_name: Task name (kebab-case)
@@ -225,7 +225,7 @@ def create_orbit_files(
         if existing:
             raise MissionCacheError(
                 ErrorCode.ALREADY_EXISTS,
-                f"Orbit files for '{task_name}' already exist. "
+                f"MissionCache files for '{task_name}' already exist. "
                 f"Pass force=True to overwrite, or pick a different name.",
                 {
                     "task_name": task_name,

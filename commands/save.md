@@ -14,7 +14,7 @@ Save progress on an active project using atomic MCP calls.
    mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>")
    ```
 
-1b. **If not found, try detecting from orbit files and register session:**
+1b. **If not found, try detecting from MissionCache files and register session:**
    ```
    mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")
    # If found, create pending-task.json and record heartbeat
@@ -47,7 +47,7 @@ Save progress on an active project using atomic MCP calls.
 
 ### Step 1: Find Current Project
 
-First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/missioncache:load` and `/missioncache:new`. Without this, the lookup can only match when cwd is under `~/.orbit/active/<task>/`, which fails from the repo root.
+First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/missioncache:load` and `/missioncache:new`. Without this, the lookup can only match when cwd is under `~/.missioncache/active/<task>/`, which fails from the repo root.
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
@@ -79,9 +79,9 @@ echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 
 If `RECENT <= 1`, proceed normally: call `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
 
-**If project not found but orbit files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
+**If project not found but MissionCache files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
-1. Try to detect the project from `~/.orbit/active/<project-name>`
+1. Try to detect the project from `~/.missioncache/active/<project-name>`
 2. Call `mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")` to confirm
 3. If found, **register the session** (see Step 1b)
 

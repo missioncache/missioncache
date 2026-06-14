@@ -1,5 +1,5 @@
 """
-Display utilities for Orbit Auto.
+Display utilities for MissionCache Auto.
 
 Provides colored terminal output, progress visualization,
 and formatted display of execution plans and results.
@@ -54,7 +54,7 @@ class DisplayConfig:
 
 class Display:
     """
-    Handles all terminal output for Orbit Auto.
+    Handles all terminal output for MissionCache Auto.
 
     Provides methods for displaying:
     - Execution plans with waves and dependencies
@@ -70,7 +70,7 @@ class Display:
         """Print to configured output stream."""
         print(*args, file=self.config.output, **kwargs)
 
-    def header(self, title: str = "ORBIT AUTO") -> None:
+    def header(self, title: str = "MISSIONCACHE AUTO") -> None:
         """Print the missioncache-auto header."""
         self._print()
         self._print(f"  {self.c.CYAN}{self.c.BOLD}=== {title} ==={self.c.NC}")
@@ -96,7 +96,7 @@ class Display:
         self._print()
 
     def project_info(self, project_name: str, details: dict) -> None:
-        """Display project information (top-level orbit project)."""
+        """Display project information (top-level MissionCache project)."""
         self._print(f"  {self.c.WHITE}Project:{self.c.NC} {project_name}")
         for key, value in details.items():
             self._print(f"  {self.c.GRAY}{key}:{self.c.NC} {value}")

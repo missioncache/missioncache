@@ -1,14 +1,14 @@
 # MCP Tools
 
-This document covers the orbit MCP server: the 30 tools that expose orbit's task database, orbit files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 30 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.orbit/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
+It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* orbit from a command or a script, the short version is: every tool lives under the `mcp__plugin_missioncache_pm__` prefix in Claude Code (`mcp__plugin_missioncache_pm__list_active_tasks`, `mcp__plugin_missioncache_pm__get_task`, etc.), every tool returns a JSON dictionary, and errors come back as `{"error": true, "code": "...", "message": "..."}` instead of raising. The rest of this doc is for when you want to understand exactly what a tool does, what to pass it, and what to expect back.
+If you are just trying to *use* MissionCache from a command or a script, the short version is: every tool lives under the `mcp__plugin_missioncache_pm__` prefix in Claude Code (`mcp__plugin_missioncache_pm__list_active_tasks`, `mcp__plugin_missioncache_pm__get_task`, etc.), every tool returns a JSON dictionary, and errors come back as `{"error": true, "code": "...", "message": "..."}` instead of raising. The rest of this doc is for when you want to understand exactly what a tool does, what to pass it, and what to expect back.
 
 ## What the MCP server is
 
-Orbit ships a single MCP server, registered in `plugin.json` as:
+MissionCache ships a single MCP server, registered in `plugin.json` as:
 
 ```json
 "mcpServers": {
@@ -17,14 +17,14 @@ Orbit ships a single MCP server, registered in `plugin.json` as:
     "command": "uvx",
     "args": [
       "--from", "${CLAUDE_PLUGIN_ROOT}/mcp-server",
-      "--with", "${CLAUDE_PLUGIN_ROOT}/orbit-db",
-      "mcp-orbit"
+      "--with", "${CLAUDE_PLUGIN_ROOT}/missioncache-db",
+      "mcp-missioncache"
     ]
   }
 }
 ```
 
-The server name is `pm` (for "project management"), and combined with the plugin name (`orbit`), Claude Code exposes every tool under the prefix `mcp__plugin_missioncache_pm__<tool_name>`. So the Python function `list_active_tasks` in `mcp-server/src/mcp_orbit/tools_tasks.py` is callable from Claude as `mcp__plugin_missioncache_pm__list_active_tasks`.
+The server name is `pm` (for "project management"), and combined with the plugin name (`missioncache`), Claude Code exposes every tool under the prefix `mcp__plugin_missioncache_pm__<tool_name>`. So the Python function `list_active_tasks` in `mcp-server/src/mcp_missioncache/tools_tasks.py` is callable from Claude as `mcp__plugin_missioncache_pm__list_active_tasks`.
 
 The server itself is a [FastMCP](https://github.com/modelcontextprotocol/python-sdk) application. The entry point (`server.py`) is 31 lines long and does nothing but import the tool modules to trigger their `@mcp.tool()` decorators:
 
@@ -36,34 +36,36 @@ from . import tools_docs      # noqa: F401
 from . import tools_tracking  # noqa: F401
 from . import tools_iteration # noqa: F401
 from . import tools_planning  # noqa: F401
+from . import tools_active    # noqa: F401
 
 def main():
     mcp.run(transport="stdio")
 ```
 
-All the logic lives in those five `tools_*` modules. Every tool function is an `async def` decorated with `@mcp.tool()` that takes `Annotated[...]` parameters with `Field(description=...)` for MCP schema generation and returns a `dict`. That return shape is important - tools never raise across the MCP boundary; they catch `OrbitError` and return `e.to_dict()`, and they catch everything else and return `{"error": True, "message": str(e)}`. Claude always sees a dict, never an exception.
+All the logic lives in those six `tools_*` modules. Every tool function is an `async def` decorated with `@mcp.tool()` that takes `Annotated[...]` parameters with `Field(description=...)` for MCP schema generation and returns a `dict`. That return shape is important - tools never raise across the MCP boundary; they catch `MissionCacheError` and return `e.to_dict()`, and they catch everything else and return `{"error": True, "message": str(e)}`. Claude always sees a dict, never an exception.
 
 ### Why async, why dicts
 
-The `async def` signature is required by FastMCP even though orbit's tools are pure sync code internally - none of them await anything. The handlers would work identically if they were sync, and the MCP SDK handles them either way; `async def` is the current FastMCP convention and it costs nothing to follow.
+The `async def` signature is required by FastMCP even though MissionCache's tools are pure sync code internally - none of them await anything. The handlers would work identically if they were sync, and the MCP SDK handles them either way; `async def` is the current FastMCP convention and it costs nothing to follow.
 
 The `dict` return is also a FastMCP quirk. Tools could return Pydantic models directly, and they do internally (`ListTasksResult`, `TaskDetail`, etc. in `models.py`), but then call `.model_dump()` before returning. This is the cheapest way to get a stable JSON-serializable shape without depending on FastMCP's schema inference. The models are still useful as internal contracts - you get type checking, field validation, and one place to update when the shape changes.
 
-### The five modules
+### The six modules
 
 | Module | Lines | Tools | Purpose |
 |--------|-------|-------|---------|
 | `tools_tasks.py` | 521 | 9 | Task lifecycle: list, get, create, complete, reopen, update notes |
-| `tools_docs.py` | 289 | 5 | Orbit files: create, get, update context, update tasks, get progress |
+| `tools_docs.py` | 289 | 5 | MissionCache files: create, get, update context, update tasks, get progress |
 | `tools_tracking.py` | 215 | 6 | Time tracking and repository management |
-| `tools_iteration.py` | 167 | 3 | Iteration log integration (used by orbit-auto and the iteration loop) |
+| `tools_iteration.py` | 167 | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 473 | 7 | Parallel agent execution plans |
+| `tools_active.py` | 183 | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
 
 **Total: 30 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 30 times.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
-These are the tools you reach for when you are working with tasks as first-class entities in `tasks.db`. They do not touch orbit files directly - that is what the `tools_docs` module is for.
+These are the tools you reach for when you are working with tasks as first-class entities in `tasks.db`. They do not touch MissionCache files directly - that is what the `tools_docs` module is for.
 
 ### `list_active_tasks`
 
@@ -79,7 +81,7 @@ These are the tools you reach for when you are working with tasks as first-class
 
 Each `TaskSummary` has: `id`, `name`, `status`, `task_type`, `repo_name`, `repo_path`, `jira_key`, `tags`, `time_total_seconds`, `time_formatted`, `last_worked_on`, `last_worked_ago`, `has_orbit_files`. The time fields come from a single batch query (`db.get_batch_task_times`) rather than N individual lookups, which is the reason this tool is faster than calling `get_task` in a loop.
 
-The `last_worked_ago` field is computed via `db.get_effective_last_updated(task)`, which takes the max of the DB's `updated_at` and the mtime of the project's `-tasks.md` file, so editing the task file from outside orbit still advances the "last worked" timestamp.
+The `last_worked_ago` field is computed via `db.get_effective_last_updated(task)`, which takes the max of the DB's `updated_at` and the mtime of the project's `-tasks.md` file, so editing the task file from outside MissionCache still advances the "last worked" timestamp.
 
 ### `list_completed_tasks`
 
@@ -107,11 +109,11 @@ Provide exactly one of `task_id` or `project_name`. Providing both is not an err
 
 **Returns:** A `TaskDetail` with every `TaskSummary` field plus `full_path`, `parent_id`, `branch`, `pr_url`, `created_at`, `updated_at`, `completed_at`, `progress` (a `TaskProgress` with `completion_pct`, `total_items`, `completed_items`, `remaining_summary`), `prompt` (optimized prompt config, usually null), `subtasks` (list of `TaskSummary`), and `recent_updates`.
 
-The `progress` field is parsed live from `<project>-tasks.md` via `_parse_task_progress()`, so editing the checklist outside orbit shows up on the next `get_task` call. No caching.
+The `progress` field is parsed live from `<project>-tasks.md` via `_parse_task_progress()`, so editing the checklist outside MissionCache shows up on the next `get_task` call. No caching.
 
 ### `find_task_for_directory`
 
-**When to use:** Claude (or a hook) is running in a directory and needs to know "what orbit task, if any, owns this cwd". This is what the activity tracker and session_start hook use to decide whether to record heartbeats.
+**When to use:** Claude (or a hook) is running in a directory and needs to know "what MissionCache task, if any, owns this cwd". This is what the activity tracker and session_start hook use to decide whether to record heartbeats.
 
 **Parameters:**
 - `directory: str` - Path to look up. Must exist and must not contain null bytes (validated via `_validate_path`).
@@ -119,11 +121,11 @@ The `progress` field is parsed live from `<project>-tasks.md` via `_parse_task_p
 
 **Returns:** `{"found": bool, "task": TaskDetail | None}`. When `found` is `False`, `task` is `None` and there is nothing to do. When `True`, `task` is a full `TaskDetail` with subtasks disabled.
 
-The resolution order is documented in `find_task_for_cwd`: per-session file (`projects/<session-id>.json`) first, then cwd directory match under `~/.orbit/active/`. (The legacy `pending-project.json` priority-1 branch and the now-removed `pending-task.json` artifact are documented in `architecture.md`; neither is in the live path.)
+The resolution order is documented in `find_task_for_cwd`: per-session file (`projects/<session-id>.json`) first, then cwd directory match under `~/.missioncache/active/`. (The legacy `pending-project.json` priority-1 branch and the now-removed `pending-task.json` artifact are documented in `architecture.md`; neither is in the live path.)
 
 ### `create_task`
 
-**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.orbit/active/<name>/`. Slash commands generally call `create_orbit_files` instead because it does more in one step, but `create_task` is the minimal primitive.
+**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.missioncache/active/<name>/`. Slash commands generally call `create_orbit_files` instead because it does more in one step, but `create_task` is the minimal primitive.
 
 **Parameters:**
 - `name: str` - Task name in kebab-case. Validated by `orbit.validate_task_name()`.
@@ -137,11 +139,11 @@ Non-coding tasks do not get a directory - they exist only as DB rows and use `ad
 
 ### `complete_task`
 
-**When to use:** You are done with a task and want it out of the active list. For coding tasks, this also moves the orbit files from `active/` to `completed/`.
+**When to use:** You are done with a task and want it out of the active list. For coding tasks, this also moves the MissionCache files from `active/` to `completed/`.
 
 **Parameters:**
 - `task_id: int | None = None` or `project_name: str | None = None` - Provide exactly one.
-- `move_files: bool = True` - Whether to physically move the orbit directory to `completed/`. Set to `False` if you want to keep files in `active/` while marking the DB status as completed (rare - mostly useful for recovery scenarios).
+- `move_files: bool = True` - Whether to physically move the MissionCache directory to `completed/`. Set to `False` if you want to keep files in `active/` while marking the DB status as completed (rare - mostly useful for recovery scenarios).
 
 **Returns:** `CompleteTaskResult` with `task_id`, `task_name`, `previous_status`, `new_status="completed"`, `completed_at`, `time_total_formatted`.
 
@@ -149,7 +151,7 @@ If the task is already completed, it raises `InvalidStateError` with `current_st
 
 ### `reopen_task`
 
-**When to use:** A completed task was marked done prematurely and you need it back in the active list. For coding tasks, moves the orbit directory from `completed/` back to `active/`.
+**When to use:** A completed task was marked done prematurely and you need it back in the active list. For coding tasks, moves the MissionCache directory from `completed/` back to `active/`.
 
 **Parameters:** Same as `complete_task` - `task_id` or `project_name`, plus `move_files: bool = True`.
 
@@ -179,13 +181,13 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 
 **Returns:** `{"task_id": int, "task_name": str, "updates": list[dict], "total_count": int}`. Each update has `id`, `note`, `created_at`.
 
-## Orbit file tools (`tools_docs.py`)
+## MissionCache file tools (`tools_docs.py`)
 
-These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~/.orbit/active/<project>/`. They are the bridge between the DB (which stores task metadata) and the filesystem (which stores human-readable project state).
+These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~/.missioncache/active/<project>/`. They are the bridge between the DB (which stores task metadata) and the filesystem (which stores human-readable project state).
 
 ### `create_orbit_files`
 
-**When to use:** You are starting a new project and you want the DB row, the directory, and the template files in one call. This is what `/missioncache:new` runs - it is the orbit equivalent of `git init` for a task.
+**When to use:** You are starting a new project and you want the DB row, the directory, and the template files in one call. This is what `/missioncache:new` runs - it is the MissionCache equivalent of `git init` for a task.
 
 **Parameters:**
 - `repo_path: str` - Required. Auto-registered if missing.
@@ -209,7 +211,7 @@ The reconciliation step is the load-bearing part. Without it, the task would app
 
 ### `get_orbit_files`
 
-**When to use:** You need the filesystem paths for a task's orbit files. Usually followed by a direct Read/Edit via Claude's standard file tools rather than more orbit tool calls.
+**When to use:** You need the filesystem paths for a task's MissionCache files. Usually followed by a direct Read/Edit via Claude's standard file tools rather than more orbit tool calls.
 
 **Parameters:**
 - `task_id: int | None = None` or `project_name: str | None = None` - At least one required.
@@ -223,7 +225,7 @@ If the task exists in the DB, uses `task.full_path` to resolve subtask directori
 **When to use:** You want to append entries to `<project>-context.md` without loading the whole file, editing it by hand, and writing it back. This is the main tool for `/missioncache:save` and is much faster than multiple Read/Edit calls.
 
 **Parameters:**
-- `context_file: str` - Absolute path to the context file. Validated to be under `ORBIT_ROOT` (prevents escape via `..`).
+- `context_file: str` - Absolute path to the context file. Validated to be under `MISSIONCACHE_ROOT` (prevents escape via `..`).
 - `next_steps: list[str] | None = None` - Lines to add under "Next Steps". Replaces the section if provided.
 - `recent_changes: list[str] | None = None` - Lines to add under a new "Recent Changes (timestamp)" header.
 - `key_decisions: list[str] | None = None` - Lines to add under "Key Architectural Decisions".
@@ -241,7 +243,7 @@ The underlying writer (`orbit.update_context_file`) updates the "Last Updated" t
 **When to use:** You want to mark tasks as completed, add new tasks, or update the "Remaining" summary line in `<project>-tasks.md` without editing the file directly.
 
 **Parameters:**
-- `tasks_file: str` - Path validated to be under `ORBIT_ROOT`.
+- `tasks_file: str` - Path validated to be under `MISSIONCACHE_ROOT`.
 - `completed_tasks: list[str] | None = None` - Task descriptions to mark as `[x]`. Matching is substring-based against task lines - pass enough of the title to be unambiguous.
 - `new_tasks: list[str] | None = None` - New `- [ ]` lines to append.
 - `remaining_summary: str | None = None` - The "Remaining:" metadata line summary (max 15 words convention).
@@ -255,7 +257,7 @@ The underlying writer (`orbit.update_context_file`) updates the "Last Updated" t
 
 **Parameters:**
 - `task_id: int | None = None` - Resolves the tasks file path from the DB.
-- `tasks_file: str | None = None` - Direct path (validated under `ORBIT_ROOT`).
+- `tasks_file: str | None = None` - Direct path (validated under `MISSIONCACHE_ROOT`).
 
 **Returns:** `{"task_id": int | None, "file": str, "progress": TaskProgress}`.
 
@@ -263,17 +265,17 @@ You can pass either - if both are provided, `tasks_file` wins. If neither is pro
 
 ## Time tracking and repo tools (`tools_tracking.py`)
 
-These tools drive the orbit heartbeat system and the repository registry. Most of them are called by hooks, not by Claude directly, but they are exposed as MCP tools so commands and scripts can use them too.
+These tools drive the MissionCache heartbeat system and the repository registry. Most of them are called by hooks, not by Claude directly, but they are exposed as MCP tools so commands and scripts can use them too.
 
 ### `record_heartbeat`
 
-**When to use:** You want to ping the DB to say "I am working on this task now". The orbit activity tracker hook calls this on every `UserPromptSubmit`, but you can also call it manually from a slash command (as `/missioncache:load` does after loading a project).
+**When to use:** You want to ping the DB to say "I am working on this task now". The MissionCache activity tracker hook calls this on every `UserPromptSubmit`, but you can also call it manually from a slash command (as `/missioncache:load` does after loading a project).
 
 **Parameters:**
 - `task_id: int | None = None` - Direct task ID. If provided, records under that task with no lookup.
 - `directory: str | None = None` - Auto-detect mode. If provided, runs `db.record_heartbeat_auto(directory)` which internally calls `find_task_for_cwd`.
 - `session_id: str | None = None` - Claude session ID. Optional, used to key per-session task lookups in auto-detect mode.
-- `context: dict | None = None` - Arbitrary JSON blob stored with the heartbeat. Currently unused by orbit itself but available for custom hooks.
+- `context: dict | None = None` - Arbitrary JSON blob stored with the heartbeat. Currently unused by MissionCache itself but available for custom hooks.
 
 Provide exactly one of `task_id` or `directory`.
 
@@ -283,7 +285,7 @@ Heartbeats are raw timestamps - they don't become time on a task until `process_
 
 ### `process_heartbeats`
 
-**When to use:** You want to flush accumulated heartbeats into `sessions` rows, which is what the dashboard actually reads for time totals. The orbit PreCompact and Stop hooks call this automatically, but you can call it on demand after a batch of work.
+**When to use:** You want to flush accumulated heartbeats into `sessions` rows, which is what the dashboard actually reads for time totals. The MissionCache PreCompact and Stop hooks call this automatically, but you can call it on demand after a batch of work.
 
 **Parameters:** None.
 
@@ -324,18 +326,18 @@ The `formatted` string is `"1h 23m"`-style output from `db.format_duration`. The
 
 ### `scan_repos`
 
-**When to use:** You manually created orbit files outside of orbit tools (or moved them around) and you need the DB to pick them up.
+**When to use:** You manually created MissionCache files outside of orbit tools (or moved them around) and you need the DB to pick them up.
 
 **Parameters:**
 - `repo_id: int | None = None` - Scan only one repo. If omitted, scans all tracked repos.
 
 **Returns:** `{"scanned_count": int, "tasks": list[{"id", "name", "repo_id"}]}`.
 
-Scanning walks `~/.orbit/active/` and `~/.orbit/completed/` under each repo's orbit paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
+Scanning walks `~/.missioncache/active/` and `~/.missioncache/completed/` under each repo's orbit paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
 
 ## Iteration log tools (`tools_iteration.py`)
 
-These tools are a thin wrapper around `iteration_log.py`, which writes to `<project>-auto-log.md`. They exist so orbit-auto and the sequential iteration loop can log their progress without having to duplicate file-writing logic. You will rarely call them manually.
+These tools are a thin wrapper around `iteration_log.py`, which writes to `<project>-auto-log.md`. They exist so MissionCache Auto and the sequential iteration loop can log their progress without having to duplicate file-writing logic. You will rarely call them manually.
 
 ### `log_iteration`
 
@@ -379,7 +381,7 @@ These tools are a thin wrapper around `iteration_log.py`, which writes to `<proj
 
 These are the newest set of tools and they serve a different use case than everything above: instead of tracking a single project's progress, they coordinate *parallel subagent execution* via the Claude `Task` tool. The workflow is (1) create a plan, (2) register each agent with its dependencies, (3) ask the orchestrator for ready agents, (4) spawn them in parallel, (5) each subagent reports back via `update_agent_status`, (6) mark the plan complete when done.
 
-This is orthogonal to orbit-auto's parallel mode - orbit-auto uses multiprocessing and spawns its own Claude CLI subprocesses, whereas these tools let an orchestrating Claude drive a parallel agent swarm via the existing Task tool in a single conversation. They write to the DB (the `plans`, `agent_executions`, `agent_dependencies` tables) and the dashboard can surface them, but the plan tables are considered scoped follow-up territory and some of the DB-layer code for them is still sitting dormant in `analytics_db.py` (see the `orbit-public-release` context file for the cleanup plan).
+This is orthogonal to MissionCache Auto's parallel mode - MissionCache Auto uses multiprocessing and spawns its own Claude CLI subprocesses, whereas these tools let an orchestrating Claude drive a parallel agent swarm via the existing Task tool in a single conversation. They write to the DB (the `plans`, `agent_executions`, `agent_dependencies` tables) and the dashboard can surface them, but the plan tables are considered scoped follow-up territory and some of the DB-layer code for them is still sitting dormant in `analytics_db.py` (see the `orbit-public-release` context file for the cleanup plan).
 
 If you are not building a parallel-agent orchestrator, you do not need any of these. If you are, they give you the primitives.
 
@@ -387,7 +389,7 @@ If you are not building a parallel-agent orchestrator, you do not need any of th
 
 **Parameters:**
 - `name: str` - Plan name/description.
-- `task_id: int | None = None` - Optional association with an orbit task.
+- `task_id: int | None = None` - Optional association with a MissionCache task.
 - `metadata: str | None = None` - Optional JSON string. Parsed with `json.loads`; invalid JSON returns a `VALIDATION_ERROR`.
 
 **Returns:** `{"plan_id": int, "name": str, "task_id": int | None, "status": "draft"}`.
@@ -491,7 +493,7 @@ The `code` is one of the values defined in `errors.py:ErrorCode`:
 |------|---------|
 | `TASK_NOT_FOUND` | Task ID or name does not resolve |
 | `REPO_NOT_FOUND` | Repository path is not registered |
-| `FILE_NOT_FOUND` | Orbit file (or other file) does not exist |
+| `FILE_NOT_FOUND` | MissionCache file (or other file) does not exist |
 | `VALIDATION_ERROR` | Input parameter failed validation |
 | `DB_ERROR` | SQLite operation failed |
 | `PERMISSION_ERROR` | Filesystem permission denied |
@@ -502,7 +504,7 @@ The `details` field is tool-specific and may contain things like `task_id`, `cur
 
 ### Unexpected errors
 
-If a tool hits an exception that is not an `OrbitError` subclass, it logs via `logger.exception(...)` and returns:
+If a tool hits an exception that is not an `MissionCacheError` subclass, it logs via `logger.exception(...)` and returns:
 
 ```json
 {
@@ -515,7 +517,7 @@ No `code` field, no `details`. This is the "something unexpected broke" path and
 
 ### Why no raises
 
-Tools do not raise across the MCP boundary because FastMCP would serialize the exception as a protocol error, and Claude would see a generic MCP failure instead of the structured orbit error. Returning a dict lets Claude reason about *what* went wrong (task not found vs validation error vs DB crash) and react appropriately from a slash command.
+Tools do not raise across the MCP boundary because FastMCP would serialize the exception as a protocol error, and Claude would see a generic MCP failure instead of the structured MissionCache error. Returning a dict lets Claude reason about *what* went wrong (task not found vs validation error vs DB crash) and react appropriately from a slash command.
 
 The tradeoff is that tool callers must check `"error" in result` after every call. A helper wrapper could raise on error dicts, but none exists today - the MCP contract is "dicts in, dicts out" and every call site handles the check inline.
 
@@ -543,7 +545,7 @@ Any tool that takes a filesystem path runs it through `helpers._validate_path(pa
 3. Resolves the path (`Path(path).resolve()`).
 4. If `must_be_under` is set, verifies the resolved path is inside that directory.
 
-The `must_be_under` check is what prevents `update_context_file` from writing to arbitrary files - it is always called with `must_be_under=settings.orbit_root`, so a path like `/tmp/evil.md` or `~/.orbit/../evil.md` gets rejected.
+The `must_be_under` check is what prevents `update_context_file` from writing to arbitrary files - it is always called with `must_be_under=settings.root`, so a path like `/tmp/evil.md` or `~/.missioncache/../evil.md` gets rejected.
 
 Tools that should *not* restrict paths (e.g., `record_heartbeat` with a `directory` arg pointing at a repo root) omit `must_be_under` and just get null-byte and empty-string checks.
 
@@ -570,7 +572,7 @@ Two patterns show up when fetching time:
 
 If you have a new operation that belongs in the MCP server, the pattern is:
 
-1. **Pick the right module.** Task lifecycle goes in `tools_tasks.py`, file ops in `tools_docs.py`, time/repo in `tools_tracking.py`, iteration log in `tools_iteration.py`, planning in `tools_planning.py`. If it does not fit any of these, consider whether it belongs in the server at all before creating a sixth module.
+1. **Pick the right module.** Task lifecycle goes in `tools_tasks.py`, file ops in `tools_docs.py`, time/repo in `tools_tracking.py`, iteration log in `tools_iteration.py`, planning in `tools_planning.py`, active-task pointer in `tools_active.py`. If it does not fit any of these, consider whether it belongs in the server at all before creating a new module.
 2. **Write the signature.**
    ```python
    @mcp.tool()
@@ -583,14 +585,14 @@ If you have a new operation that belongs in the MCP server, the pattern is:
        try:
            # ... do work ...
            return {"success": True, ...}
-       except OrbitError as e:
+       except MissionCacheError as e:
            return e.to_dict()
        except Exception as e:
            logger.exception("Error in my_tool")
            return {"error": True, "message": str(e)}
    ```
 3. **Use typed returns where it helps.** If your tool returns a fixed shape, add a Pydantic model in `models.py` and `.model_dump()` it at the return site. If the shape is more ad-hoc, return a plain dict.
-4. **Validate inputs early.** Call `_validate_path` for paths, return `VALIDATION_ERROR` dicts for bad enum values, raise `OrbitError` subclasses for expected failures.
+4. **Validate inputs early.** Call `_validate_path` for paths, return `VALIDATION_ERROR` dicts for bad enum values, raise `MissionCacheError` subclasses for expected failures.
 5. **No new imports in `server.py`.** The tool is registered automatically when its module is imported - `server.py` imports `tools_<module>` once, and that triggers every `@mcp.tool()` in the file. Do not reach into `server.py`.
 6. **Reload the plugin to pick it up.** `claude plugins install missioncache@local` and restart Claude Code. The MCP server restart happens on the next Claude session.
 7. **Add a test.** `mcp-server/tests/` has fixtures for DB setup and patterns for calling tools directly (bypassing MCP transport). Follow them.
@@ -607,21 +609,21 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 ### "I'm calling the tool but getting `error: true, message: <python exception>` with no code"
 
-**Cause:** An unhandled exception hit the `except Exception` fallback. This is not an `OrbitError` - it is something unexpected.
+**Cause:** An unhandled exception hit the `except Exception` fallback. This is not an `MissionCacheError` - it is something unexpected.
 
 **Fix:** Check the MCP server stderr. `uvx` pipes stderr through stdio to Claude Code, which logs it to its own files. The server uses `logger.exception` which includes a full traceback. Once you have the traceback, treat it as a normal Python bug: find the line, fix the root cause.
 
 ### "Tool returns `FILE_NOT_FOUND` but the file exists"
 
-**Cause:** Path validation is resolving to a different place than you expected. `_validate_path` calls `Path.resolve()`, which follows symlinks and normalizes `..`. If the resolved path falls outside `ORBIT_ROOT`, you get `VALIDATION_ERROR` - if it resolves inside but the file is not there, you get `FILE_NOT_FOUND`.
+**Cause:** Path validation is resolving to a different place than you expected. `_validate_path` calls `Path.resolve()`, which follows symlinks and normalizes `..`. If the resolved path falls outside `MISSIONCACHE_ROOT`, you get `VALIDATION_ERROR` - if it resolves inside but the file is not there, you get `FILE_NOT_FOUND`.
 
-**Fix:** Print the path you are passing and run it through `Path(path).resolve()` manually in a Python REPL. Compare against the expected `~/.orbit/active/<name>/...` shape.
+**Fix:** Print the path you are passing and run it through `Path(path).resolve()` manually in a Python REPL. Compare against the expected `~/.missioncache/active/<name>/...` shape.
 
 ### "Task shows up under the wrong repo after `create_orbit_files`"
 
 **Cause:** This is the bug that motivated the `find_task_by_full_path` / `update_task_repo` reconciliation in `create_orbit_files`. `scan_all_repos()` matches tasks to repos by prefix, and when two repos share a prefix, it can pick the wrong one.
 
-**Fix:** Already fixed in current code. If you see it anyway, make sure you are on a recent orbit version and that `create_orbit_files` is the tool you are calling (not a manual `create_task` + `scan_all_repos` sequence, which does not include the reconciliation step).
+**Fix:** Already fixed in current code. If you see it anyway, make sure you are on a recent MissionCache version and that `create_orbit_files` is the tool you are calling (not a manual `create_task` + `scan_all_repos` sequence, which does not include the reconciliation step).
 
 ### "`list_active_tasks` is slow for big project counts"
 
@@ -637,7 +639,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 ### "Plan agents report status but plan status doesn't update"
 
-**Cause:** `_update_plan_counters` only runs inside `update_agent_status`. If you are mutating the DB directly (e.g., via `sqlite3` or through `orbit_db` internals), the plan counter sync is skipped.
+**Cause:** `_update_plan_counters` only runs inside `update_agent_status`. If you are mutating the DB directly (e.g., via `sqlite3` or through `missioncache_db` internals), the plan counter sync is skipped.
 
 **Fix:** Always go through `update_agent_status` for status updates. If you need to bulk-update a plan, consider making a new MCP tool that takes a list of (agent_id, status) pairs and loops through `update_agent_status` - don't bypass it.
 
@@ -646,6 +648,6 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 - [`architecture.md`](./architecture.md) - if you need the big picture on `tasks.db`, the hook model, or what `full_path` means.
 - [`dashboard.md`](./dashboard.md) - if you want to see how the tools' return shapes get rendered in the UI.
 - [`orbit-auto.md`](./orbit-auto.md) - if you are specifically curious about how `log_iteration` / `get_iteration_status` fit into an autonomous run.
-- `mcp-server/src/mcp_orbit/tools_*.py` - the source. Each file is flat and independent; if you know which module owns a tool from the prefix, you can jump straight there.
-- `mcp-server/src/mcp_orbit/models.py` - the full Pydantic models for every typed return. The canonical source for "what fields does this tool give me".
-- `mcp-server/src/mcp_orbit/errors.py` - the full error code enum and exception types. Useful when writing a new tool or adding new error cases.
+- `mcp-server/src/mcp_missioncache/tools_*.py` - the source. Each file is flat and independent; if you know which module owns a tool from the prefix, you can jump straight there.
+- `mcp-server/src/mcp_missioncache/models.py` - the full Pydantic models for every typed return. The canonical source for "what fields does this tool give me".
+- `mcp-server/src/mcp_missioncache/errors.py` - the full error code enum and exception types. Useful when writing a new tool or adding new error cases.

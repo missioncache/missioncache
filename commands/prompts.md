@@ -5,7 +5,7 @@ argument-hint: "<project-name>"
 
 # Regenerate Optimized Prompts
 
-Generate per-subtask prompts for an orbit project, optimized for autonomous parallel execution via `missioncache-auto`. Each prompt bundles task context, agent recommendations, and skill hints into a self-contained input for a fresh Claude Code worker.
+Generate per-subtask prompts for a MissionCache project, optimized for autonomous parallel execution via `missioncache-auto`. Each prompt bundles task context, agent recommendations, and skill hints into a self-contained input for a fresh Claude Code worker.
 
 **This is an autonomous-workflow tool.** Most interactive workflows do not need it - the plan, context, and tasks files are sufficient when you're working directly with Claude. Run `/missioncache:prompts` only when:
 - You plan to run the project via `missioncache-auto`
@@ -14,7 +14,7 @@ Generate per-subtask prompts for an orbit project, optimized for autonomous para
 
 ## Prerequisites
 
-- Project must exist in `~/.orbit/active/<project-name>/`
+- Project must exist in `~/.missioncache/active/<project-name>/`
 - Project must have a `<project-name>-tasks.md` file with subtasks
 
 ## Workflow
@@ -176,7 +176,7 @@ After all prompts are written:
 
    ## Execution
 
-   Orbit-auto will execute prompts in order, following the checkboxes in the tasks file.
+   MissionCache Auto will execute prompts in order, following the checkboxes in the tasks file.
    A task is considered complete when its checkbox is marked `[x]` in the tasks file.
    ```
 
@@ -190,7 +190,7 @@ After all prompts are written:
 
    Execution options:
    - Manual: Read prompts/task-01-prompt.md and work through it
-   - Orbit-Auto:  missioncache-auto my-feature
+   - MissionCache Auto:  missioncache-auto my-feature
    ```
 
 ## Prompt Template Structure
@@ -290,7 +290,7 @@ Skills provide specialized guidance and patterns for specific domains.
 </on_failure>
 
 <response_format>
-## REQUIRED: Signal Task Completion to Orbit-Auto
+## REQUIRED: Signal Task Completion to MissionCache Auto
 
 When task **succeeds**, you MUST include at the end of your response:
 ```

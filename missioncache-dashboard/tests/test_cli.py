@@ -13,7 +13,7 @@ from missioncache_dashboard import cli
 class TestRenderPlist:
     def test_default_port_omits_env_block(self):
         out = cli.render_plist("/usr/local/bin/missioncache-dashboard", cli.DEFAULT_PORT)
-        assert "com.orbit.dashboard" in out
+        assert "com.missioncache.dashboard" in out
         assert "/usr/local/bin/missioncache-dashboard" in out
         assert "<string>serve</string>" in out
         assert "EnvironmentVariables" not in out

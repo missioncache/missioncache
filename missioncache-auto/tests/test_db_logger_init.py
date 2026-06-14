@@ -2,7 +2,7 @@
 
 The ``DB_PATH.exists()`` gate in both ``Worker._init_db_logger`` and
 ``ExecutionLogger._init_db`` used to short-circuit silently when the DB
-was missing, even when the cause was unmigrated orbit data at the legacy
+was missing, even when the cause was unmigrated MissionCache data at the legacy
 ``~/.claude/`` paths - the exact scenario the migration guard exists for.
 Both sites now route the missing-DB case through
 ``warn_if_migration_required``, which calls missioncache-db's public
@@ -32,20 +32,26 @@ def isolated_paths(tmp_path, monkeypatch):
     """Redirect DB_PATH and the legacy paths into tmp_path subdirs.
 
     Mirrors missioncache-db's test_legacy_guard.py fixture: check_legacy_paths
-    reads module-level DB_PATH / _LEGACY_DB / _LEGACY_MISSIONCACHE_ROOT at call
-    time, so monkeypatching the missioncache_db module attributes is enough -
-    the production init paths import them at call time too.
+    reads module-level DB_PATH / _LEGACY_CLAUDE_DB / _LEGACY_CLAUDE_ORBIT_ROOT /
+    _LEGACY_ORBIT_DB / _LEGACY_ORBIT_ROOT at call time, so monkeypatching the
+    missioncache_db module attributes is enough - the production init paths
+    import them at call time too. The ~/.orbit legacy tier is neutralized to a
+    tmp path so the real ~/.orbit on a dev machine never trips the guard here.
 
     Also resets the module-level warn-once flag so each test observes
     the first-warning behavior independently.
     """
-    new_db = tmp_path / "orbit" / "tasks.db"
+    new_db = tmp_path / "missioncache" / "tasks.db"
     legacy_db = tmp_path / "claude" / "tasks.db"
     legacy_orbit = tmp_path / "claude" / "orbit"
+    orbit_legacy_db = tmp_path / "dot-orbit" / "tasks.db"
+    orbit_legacy_root = tmp_path / "dot-orbit"
 
     monkeypatch.setattr(missioncache_db, "DB_PATH", new_db)
-    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", legacy_db)
-    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", legacy_orbit)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_DB", legacy_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_ORBIT_ROOT", legacy_orbit)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", orbit_legacy_db)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", orbit_legacy_root)
     monkeypatch.setattr(db_logger_module, "_migration_warned", False)
 
     return SimpleNamespace(

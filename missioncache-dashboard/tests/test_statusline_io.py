@@ -336,10 +336,10 @@ class TestReadTasksContent:
 
 
 class TestGetActiveTask:
-    """Reads ``~/.claude/hooks/state/active-orbit-task/<session>.json``.
+    """Reads ``~/.claude/hooks/state/active-missioncache-task/<session>.json``.
 
     The pointer is written by the ``set_active_orbit_tasks`` MCP tool and
-    holds the orbit checklist task numbers currently in progress. The
+    holds the MissionCache checklist task numbers currently in progress. The
     statusline composes ``_read_active_task_pointer`` and
     ``_format_active_task`` via ``_get_active_task``; tests cover both the
     raw pointer read and the per-shape display formatting.
@@ -359,7 +359,7 @@ class TestGetActiveTask:
     def _write_pointer(
         self, tmp_path, session_id, project_name, task_numbers
     ):
-        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task"
+        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task"
         pdir.mkdir(parents=True, exist_ok=True)
         (pdir / f"{session_id}.json").write_text(
             json.dumps(
@@ -463,7 +463,7 @@ class TestGetActiveTask:
     def test_corrupt_pointer_json_hides_field(self, tmp_path, monkeypatch):
         """Malformed pointer JSON is treated as missing, not crashed on."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task"
+        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task"
         pdir.mkdir(parents=True)
         (pdir / "sess-8.json").write_text("not valid json")
 
@@ -529,7 +529,7 @@ class TestGetProjectInfo:
 
         db_path = tmp_path / "hooks-state.db"
         monkeypatch.setattr(mod, "HOOKS_STATE_DB", db_path)
-        orbit_active = tmp_path / ".orbit" / "active"
+        orbit_active = tmp_path / ".missioncache" / "active"
         monkeypatch.setattr(mod, "MISSIONCACHE_ACTIVE", orbit_active)
 
         conn = sqlite3.connect(str(db_path))
