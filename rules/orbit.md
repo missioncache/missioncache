@@ -7,12 +7,12 @@ All orbit skills use the `orbit:` prefix:
 
 | Skill | Purpose |
 |-------|---------|
-| `/orbit:new` | Create new project with plan, context, tasks files |
-| `/orbit:prompts` | Generate optimized prompts for subtasks |
-| `/orbit:save` | Save progress before compaction or session end |
-| `/orbit:go` | Resume work on an active project |
-| `/orbit:done` | Mark project complete and archive |
-| `/orbit:mode` | Assign workflow mode to tasks |
+| `/missioncache:new` | Create new project with plan, context, tasks files |
+| `/missioncache:prompts` | Generate optimized prompts for subtasks |
+| `/missioncache:save` | Save progress before compaction or session end |
+| `/missioncache:load` | Resume work on an active project |
+| `/missioncache:done` | Mark project complete and archive |
+| `/missioncache:mode` | Assign workflow mode to tasks |
 
 ## Orbit Project Updates
 
@@ -39,7 +39,7 @@ When working on a project with orbit files (`~/.orbit/active/<project-name>/`), 
 
 ### Milestone-Based Updates
 
-Run `/orbit:save` after these milestones:
+Run `/missioncache:save` after these milestones:
 
 **Progress milestones:**
 - Completing any item from the task checklist
@@ -62,8 +62,8 @@ Run `/orbit:save` after these milestones:
 
 Context is lost after compaction. To restore:
 
-1. **User runs**: `/orbit:go <project-name>` to reload context from orbit files
-2. **If user says "continue my project" without specifying**: Check active projects via `mcp__plugin_orbit_pm__list_active_tasks` and ask which one
+1. **User runs**: `/missioncache:load <project-name>` to reload context from orbit files
+2. **If user says "continue my project" without specifying**: Check active projects via `mcp__plugin_missioncache_pm__list_active_tasks` and ask which one
 3. **Resume from "Next Steps"**: Always check the `-context.md` file's Next Steps section first
 
 ### Multiple Concurrent Sessions

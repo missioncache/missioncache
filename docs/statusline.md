@@ -123,10 +123,10 @@ A SQLite database with WAL mode enabled. Opened via `_get_hooks_db()`, which ret
 Tables the statusline reads:
 
 - `session_state` - per-session context percent, token count, edit count, last prompt timestamp. Statusline *writes* its own row here on every render (via `update_session_state`), and reads `edit_count` and `last_prompt_at` back out.
-- `term_sessions` - terminal tab → session ID mapping. Written by `session_start.py` (the hook) and by `update_term_session()` in the statusline itself. Used by mid-session `/orbit:go` to resolve the current session ID from the terminal environment variable.
-- `project_state` - per-session active project. Written by `/orbit:go` and `session_start.py` via the dashboard API. Read by the statusline to populate the Project line.
+- `term_sessions` - terminal tab → session ID mapping. Written by `session_start.py` (the hook) and by `update_term_session()` in the statusline itself. Used by mid-session `/missioncache:load` to resolve the current session ID from the terminal environment variable.
+- `project_state` - per-session active project. Written by `/missioncache:load` and `session_start.py` via the dashboard API. Read by the statusline to populate the Project line.
 
-`hooks-state.db` is the main contact point between the statusline and the rest of the plugin - it is how SessionStart tells the statusline "this session is on project X", and it is how `/orbit:go` tells the statusline "switch to project Y mid-session" without restarting Claude Code.
+`hooks-state.db` is the main contact point between the statusline and the rest of the plugin - it is how SessionStart tells the statusline "this session is on project X", and it is how `/missioncache:load` tells the statusline "switch to project Y mid-session" without restarting Claude Code.
 
 ### `~/.orbit/active/<project>/<project>-tasks.md`
 
@@ -296,7 +296,7 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 **Cause:** The `project_state` row is either missing, too old (older than `max(session_duration + 60s, 60s)`), or does not match the current `session_id`. The statusline uses the Claude Code stdin's `session_id`, not the environment variable - if `session_start.py` wrote the wrong session ID to `project_state`, you will see this.
 
-**Fix:** Run `/orbit:go <project>` to force a fresh `project_state` write keyed on the current Claude Code session. Or insert a row manually: `sqlite3 ~/.claude/hooks-state.db "INSERT OR REPLACE INTO project_state VALUES ('<session-id>', '<project>', datetime('now','localtime'))"`.
+**Fix:** Run `/missioncache:load <project>` to force a fresh `project_state` write keyed on the current Claude Code session. Or insert a row manually: `sqlite3 ~/.claude/hooks-state.db "INSERT OR REPLACE INTO project_state VALUES ('<session-id>', '<project>', datetime('now','localtime'))"`.
 
 ### "Context percentage shows 'Estimated'"
 
@@ -326,5 +326,5 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 - [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, the storage model, and where the statusline sits relative to the rest of orbit.
 - [`hooks.md`](./hooks.md) - for `session_start.py` and how it writes the state the statusline reads.
-- [`dashboard.md`](./dashboard.md) - for the `/api/hooks/project` endpoint used by `/orbit:go` and the OSC 8 link targets.
+- [`dashboard.md`](./dashboard.md) - for the `/api/hooks/project` endpoint used by `/missioncache:load` and the OSC 8 link targets.
 - `orbit-dashboard/orbit_dashboard/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump. The `orbit-statusline` entry point declared in `orbit-dashboard/pyproject.toml` resolves here.

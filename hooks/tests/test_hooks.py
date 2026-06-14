@@ -161,7 +161,7 @@ class TestSessionStartResumePickup:
 
     Resume changes Claude Code's session_id; without these helpers the previous
     session's project_state binding is orphaned and the statusline drops the
-    project field until /orbit:go is re-run. The pickup logic copies the
+    project field until /missioncache:load is re-run. The pickup logic copies the
     binding to the new sid before write_cwd_session_pointer overwrites the
     breadcrumb that points back to the old sid.
 
@@ -279,7 +279,7 @@ class TestSessionStartResumePickup:
         assert mod._pickup_previous_session_binding(cwd, "same-sid") is None
 
     def test_pickup_returns_none_when_no_project_bound_to_prev_sid(self, tmp_path, monkeypatch):
-        """Pointer present but project_state has no row - prev session never ran /orbit:go."""
+        """Pointer present but project_state has no row - prev session never ran /missioncache:load."""
         self._redirect_state(monkeypatch, tmp_path)
         cwd = tmp_path / "unbound"
         cwd.mkdir()
@@ -723,7 +723,7 @@ class TestPickupCwdCompatibilityGate:
     ):
         """Task was renamed or deleted - get_task_by_name returns None.
         Conservative fallback: inherit proceeds with whatever project_state
-        says. (The user can re-run /orbit:go to correct if wrong.)
+        says. (The user can re-run /missioncache:load to correct if wrong.)
         """
         self._redirect_state(monkeypatch, tmp_path)
         cwd = tmp_path / "anywhere"
@@ -916,7 +916,7 @@ class TestSessionStartSourceGating:
 
         # The cwd-session pointer is overwritten regardless of source. That
         # is the live "who owns this cwd right now" signal; gating it on
-        # source would break /orbit:save in a fresh session.
+        # source would break /missioncache:save in a fresh session.
         cwd_key = str(cwd).replace("/", "-")
         cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
         assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
@@ -1229,7 +1229,7 @@ class TestPreCompact:
     1. Reads JSONL transcript, captures last N user/assistant turns into
        a Pre-Compact Snapshot subsection.
     2. Wraps DB calls in retry-with-backoff for sqlite lock contention.
-    3. Writes a sticky error file on terminal failure for /orbit:go to
+    3. Writes a sticky error file on terminal failure for /missioncache:load to
        surface on next resume.
     """
 
@@ -1385,7 +1385,7 @@ class TestPreCompact:
         self, tmp_path, monkeypatch
     ):
         """A successful run removes any leftover sticky error file from a
-        previous failed compaction so /orbit:go does not surface stale warnings."""
+        previous failed compaction so /missioncache:load does not surface stale warnings."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         _task_dir, _ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
 
@@ -1764,7 +1764,7 @@ class TestTaskTracker:
 
         self._run_tracker(
             monkeypatch,
-            {"session_id": "s1", "cwd": "/tmp", "prompt": "/orbit:save"},
+            {"session_id": "s1", "cwd": "/tmp", "prompt": "/missioncache:save"},
             mock_db,
         )
 
@@ -2221,14 +2221,14 @@ class TestParallelSessionDetection:
         assert "alpha" in warning
         assert "beta" in warning
         assert "other-si" in warning  # truncated sid prefix
-        assert "/orbit:go" in warning
+        assert "/missioncache:load" in warning
 
     def test_format_warning_handles_unbound_self(self, tmp_path, monkeypatch):
         self._redirect_state(monkeypatch, tmp_path)
         mod = self._reload_module()
         warning = mod._format_collision_warning(None, {"sid-x-12345": "beta"})
         assert "beta" in warning
-        assert "/orbit:go" in warning
+        assert "/missioncache:load" in warning
 
     # ── main() integration: skip pickup under ambiguity ───────────────────
 

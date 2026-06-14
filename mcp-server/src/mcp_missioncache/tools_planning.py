@@ -396,7 +396,7 @@ async def spawn_parallel_agents(
 {agent["prompt"]}
 
 IMPORTANT: When done, call the MCP tool to report your status:
-mcp__orbit__update_agent_status(
+mcp__plugin_missioncache_pm__update_agent_status(
     plan_id={plan_id},
     agent_id="{agent["agent_id"]}",
     status="completed",  # or "failed" if you encountered errors

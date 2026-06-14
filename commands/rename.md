@@ -17,10 +17,10 @@ context, lose the misleading label.
 
 ### Step 1: Validate the argument
 
-The user invokes this as `/orbit:rename <new-name>`. If `$ARGUMENTS` is
+The user invokes this as `/missioncache:rename <new-name>`. If `$ARGUMENTS` is
 empty, stop and show:
 
-> Usage: `/orbit:rename <new-name>` - provide the new kebab-case name as
+> Usage: `/missioncache:rename <new-name>` - provide the new kebab-case name as
 > a single argument.
 
 Do not proceed without a new-name argument.
@@ -31,8 +31,8 @@ no client-side validation is needed - just pass the user's input through.
 ### Step 2: Find the current project
 
 Resolve the current Claude session id so `find_task_for_directory` can
-use the per-session project pointer written by `/orbit:go` and
-`/orbit:new`. Without this, the lookup can only match when cwd is under
+use the per-session project pointer written by `/missioncache:load` and
+`/missioncache:new`. Without this, the lookup can only match when cwd is under
 `~/.orbit/active/<task>/`, which fails from the repo root.
 
 ```bash
@@ -53,7 +53,7 @@ echo "SESSION_ID=$SESSION_ID"
 
 Then:
 ```
-mcp__plugin_orbit_pm__find_task_for_directory(
+mcp__plugin_missioncache_pm__find_task_for_directory(
     directory="<cwd>",
     session_id="<SESSION_ID>"
 )
@@ -61,7 +61,7 @@ mcp__plugin_orbit_pm__find_task_for_directory(
 
 If the lookup returns `found: false`, stop and tell the user:
 
-> No active orbit project bound to this session. Run `/orbit:go <name>`
+> No active orbit project bound to this session. Run `/missioncache:load <name>`
 > to bind one, then rename.
 
 Do not guess by cwd, do not rename by name without the binding - the
@@ -72,7 +72,7 @@ slash command operates on the CURRENT session's project, period.
 Once the project is identified, call:
 
 ```
-mcp__plugin_orbit_pm__rename_task(
+mcp__plugin_missioncache_pm__rename_task(
     task_id=<task_id from Step 2>,
     new_name="<$ARGUMENTS>"
 )
@@ -140,8 +140,8 @@ behavior on existing sessions.
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__find_task_for_directory` | Resolve the current session's project to its task_id |
-| `mcp__plugin_orbit_pm__rename_task` | Atomic rename across DB, filesystem, H1s, and session pointers |
+| `mcp__plugin_missioncache_pm__find_task_for_directory` | Resolve the current session's project to its task_id |
+| `mcp__plugin_missioncache_pm__rename_task` | Atomic rename across DB, filesystem, H1s, and session pointers |
 
 ## Notes
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Orbit Auto is an autonomous AI development tool that enables Claude to work continuously on programming tasks until completion. It uses iterative loops where AI reads its previous work via the file system.
 
-**This repository contains a custom implementation integrated with our orbit task management system.** The scripts here work with the `~/.orbit/active/<task-name>/` directory structure and support features like `/orbit:go`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
+**This repository contains a custom implementation integrated with our orbit task management system.** The scripts here work with the `~/.orbit/active/<task-name>/` directory structure and support features like `/missioncache:load`, task DB time tracking, dashboard visualization, and the hybrid 3-file approach (`*-tasks.md`, `*-context.md`, `*-auto-log.md`).
 
 **CLI Command:** `orbit-auto`
 **Core Philosophy:** "Iteration beats perfection on the first attempt"
@@ -83,7 +83,7 @@ When running orbit-auto, tasks are organized in the centralized orbit directory:
 | `*-auto-log.md` | Detailed iteration history | Orbit-auto only (delete after completion) |
 
 **Why this works:**
-- Context file stays clean and useful for `/orbit:go`
+- Context file stays clean and useful for `/missioncache:load`
 - Auto log has full debugging history if needed
 - Log can be deleted after task completion
 
@@ -123,7 +123,7 @@ The orbit plugin can generate optimized prompts for each subtask with agent/skil
 
 #### How It Works
 
-1. **Discovery** - `/orbit:prompts` analyzes subtasks, lists relevant agents/skills, identifies gaps
+1. **Discovery** - `/missioncache:prompts` analyzes subtasks, lists relevant agents/skills, identifies gaps
 2. **Gap Resolution** - If gaps found, suggests creating new agents/skills (user must approve)
 3. **Generation** - Uses `/optimize-prompt` to create structured prompts with XML tags
 4. **Batch Approval** - All prompts shown together for batch approval (approve once for all)
@@ -174,12 +174,12 @@ Use the orbit plugin commands:
 
 1. **Create the task** (if not already done):
    ```bash
-   /orbit:new my-feature
+   /missioncache:new my-feature
    ```
 
 2. **Generate optimized prompts** with agent/skill discovery:
    ```bash
-   /orbit:prompts my-feature
+   /missioncache:prompts my-feature
    ```
 
 This workflow:
@@ -531,8 +531,8 @@ When orbit-auto encounters `[WAIT]`:
 3. Add context to `~/.orbit/active/my-feature/my-feature-context.md`
 4. `orbit-auto my-feature`  # or `orbit-auto my-feature --sequential`
 
-### Integration with /orbit:go
-The context file is designed to survive compaction and work with `/orbit:go`:
+### Integration with /missioncache:load
+The context file is designed to survive compaction and work with `/missioncache:load`:
 - Keep it clean with only significant learnings
 - Next Steps section helps resume work
 - Blockers section surfaces issues

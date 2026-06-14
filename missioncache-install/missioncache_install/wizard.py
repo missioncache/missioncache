@@ -27,7 +27,7 @@ from . import installers, mcp_clients, prereqs, state, ui
 _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "plugin": (
         "Orbit plugin",
-        "Slash commands (/orbit:new, /orbit:go, ...), MCP server, hooks.",
+        "Slash commands (/missioncache:new, /missioncache:load, ...), MCP server, hooks.",
     ),
     "dashboard": (
         "Orbit Dashboard",
@@ -59,18 +59,18 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "codex": (
         "Codex (MCP server + slash commands)",
-        "Register orbit's MCP server via `codex mcp add` and install /orbit-go, "
-        "/orbit-save, ... as a Codex plugin (~/.orbit/codex-marketplace/).",
+        "Register orbit's MCP server via `codex mcp add` and install /missioncache-load, "
+        "/missioncache-save, ... as a Codex plugin (~/.orbit/codex-marketplace/).",
     ),
     "opencode": (
         "OpenCode (MCP server + slash commands)",
         "Register orbit's MCP server in OpenCode's global config and install "
-        "/orbit-go, /orbit-save, ... into ~/.config/opencode/commands/.",
+        "/missioncache-load, /missioncache-save, ... into ~/.config/opencode/commands/.",
     ),
     "vscode": (
         "VSCode (MCP server + slash commands)",
         "Register orbit's MCP server in VSCode for Copilot Chat agent mode and "
-        "install /orbit-go, /orbit-save, ... as user-level prompt files "
+        "install /missioncache-load, /missioncache-save, ... as user-level prompt files "
         "(macOS only).",
     ),
 }
@@ -261,8 +261,8 @@ def run_uninstall_wizard() -> list[str] | None:
 def _print_next_steps(selected: list[str]) -> None:
     """Show a short how-to-get-started block tailored to what was installed."""
     ui.info("Next steps:")
-    ui.detail("Create a project:  /orbit:new my-project")
-    ui.detail("Resume work:       /orbit:go")
+    ui.detail("Create a project:  /missioncache:new my-project")
+    ui.detail("Resume work:       /missioncache:load")
     if "dashboard" in selected:
         ui.detail("Dashboard:         http://localhost:8787")
     ui.detail("Docs:              https://github.com/tomerbr1/orbit-pm")

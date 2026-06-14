@@ -471,3 +471,49 @@ def test_pypi_uninstaller_passes_exact_dist_name(
         f"{installer_name} must call _pipx_uninstall exactly once with "
         f"the literal {expected_dist!r}, got {captured!r}"
     )
+
+
+def test_write_local_marketplace_json_idempotent(tmp_path: Path) -> None:
+    """Re-running the local installer must not duplicate the plugin entry. The
+    dedupe check keys on the entry `name`; if it looks for a different name than
+    the one written, every re-run appends a duplicate and marketplace.json grows
+    unbounded.
+    """
+    mp = tmp_path / ".claude-plugin" / "marketplace.json"
+    mp.parent.mkdir(parents=True)
+
+    installers._write_local_marketplace_json(mp)
+    installers._write_local_marketplace_json(mp)
+
+    names = [p["name"] for p in json.loads(mp.read_text())["plugins"]]
+    assert names.count("missioncache") == 1, f"duplicate plugin entries: {names}"
+
+
+def test_install_plugin_local_symlink_matches_marketplace_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plugin symlink directory name must equal the marketplace entry's
+    `source` basename. If they diverge, Claude resolves the entry's source to a
+    path with no symlink and the install is broken. This couples the two sides
+    that a half-applied rename pulled apart (symlink at plugins/X, source
+    ./plugins/Y).
+    """
+    mkt = tmp_path / "local-marketplace"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(installers, "MARKETPLACE_DIR", mkt)
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(installers.settings, "enable_plugin", lambda *_a, **_k: None)
+
+    installers._install_plugin_local(_make_ctx(mode="local", repo_root=repo))
+
+    entry = json.loads(
+        (mkt / ".claude-plugin" / "marketplace.json").read_text()
+    )["plugins"][0]
+    source_name = Path(entry["source"]).name
+    symlink = mkt / "plugins" / source_name
+    assert symlink.is_symlink(), (
+        f"marketplace source is ./plugins/{source_name} but no symlink exists "
+        f"there - install/marketplace plugin names diverged"
+    )
+    assert symlink.readlink() == repo

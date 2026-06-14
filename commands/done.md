@@ -11,12 +11,12 @@ Mark a project as completed and optionally move orbit files to the completed fol
 
 1. **If project name provided:**
    ```
-   mcp__plugin_orbit_pm__complete_task(project_name="<name>", move_files=true)
+   mcp__plugin_missioncache_pm__complete_task(project_name="<name>", move_files=true)
    ```
 
 2. **If no project name, list active projects:**
    ```
-   mcp__plugin_orbit_pm__list_active_tasks()
+   mcp__plugin_missioncache_pm__list_active_tasks()
    ```
    Then ask user to select one.
 
@@ -35,18 +35,18 @@ Before completing, show the user:
 
 ### Step 3: Complete
 
-Call `mcp__plugin_orbit_pm__complete_task` which:
+Call `mcp__plugin_missioncache_pm__complete_task` which:
 1. Updates project status to "completed" in database
 2. Moves files from `~/.orbit/active/<name>/` to `~/.orbit/completed/<name>/`
 3. Records completion timestamp
 
 ### Step 4: Process Time Tracking
 
-Call `mcp__plugin_orbit_pm__process_heartbeats()` to finalize time tracking.
+Call `mcp__plugin_missioncache_pm__process_heartbeats()` to finalize time tracking.
 
 ### Step 5: Clear Statusline
 
-Remove the project pointer so the statusline stops showing the completed project name. Mirrors the resolver in `/orbit:new` / `/orbit:go` (filesystem primary, term-env fallback) and uses direct SQL because the dashboard has no DELETE endpoint for project_state. Silently no-ops on quick-install setups without `hooks-state.db`.
+Remove the project pointer so the statusline stops showing the completed project name. Mirrors the resolver in `/missioncache:new` / `/missioncache:load` (filesystem primary, term-env fallback) and uses direct SQL because the dashboard has no DELETE endpoint for project_state. Silently no-ops on quick-install setups without `hooks-state.db`.
 
 ```bash
 # Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
@@ -78,8 +78,8 @@ conn.commit()
 print("Cleared project_state for session " + sid + " (rows: " + str(cur.rowcount) + ")")
 ' 2>/dev/null
 
-  # Also delete the per-session project pointer written by /orbit:go and /orbit:new.
-  # Read by find_task_for_cwd (missioncache-db); leaving it in place would make /orbit:save
+  # Also delete the per-session project pointer written by /missioncache:load and /missioncache:new.
+  # Read by find_task_for_cwd (missioncache-db); leaving it in place would make /missioncache:save
   # still find this task after completion.
   rm -f "$HOME/.claude/hooks/state/projects/${SESSION_ID}.json" 2>/dev/null
 fi
@@ -131,7 +131,7 @@ Summary:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_orbit_pm__list_active_tasks` | List projects if none specified |
-| `mcp__plugin_orbit_pm__get_task` | Get project details for summary |
-| `mcp__plugin_orbit_pm__complete_task` | Mark complete and move files |
-| `mcp__plugin_orbit_pm__process_heartbeats` | Finalize time tracking |
+| `mcp__plugin_missioncache_pm__list_active_tasks` | List projects if none specified |
+| `mcp__plugin_missioncache_pm__get_task` | Get project details for summary |
+| `mcp__plugin_missioncache_pm__complete_task` | Mark complete and move files |
+| `mcp__plugin_missioncache_pm__process_heartbeats` | Finalize time tracking |

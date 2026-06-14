@@ -134,8 +134,8 @@ def get_orbit_files(task_name: str, full_path: str | None = None) -> MissionCach
 
     When ``full_path`` is given (e.g. ``active/parent/subtask`` for nested
     subtasks), it is authoritative. Otherwise, search the active directory
-    first, then the completed directory. This lets ``/orbit:go`` and the
-    /orbit:save flow find archived projects without prompting the user to
+    first, then the completed directory. This lets ``/missioncache:load`` and the
+    /missioncache:save flow find archived projects without prompting the user to
     "create files" - which would otherwise overwrite the archived content.
     """
     if full_path:

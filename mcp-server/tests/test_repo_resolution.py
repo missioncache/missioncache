@@ -176,7 +176,7 @@ class TestCreateOrbitFilesGitRootResolution:
 
 class TestSetTaskRepoGitRootResolution:
     def test_rebind_resolves_subdir_to_git_root(self, isolated_orbit):
-        """``/orbit:go`` mismatch flow rebinding via ``set_task_repo`` must
+        """``/missioncache:load`` mismatch flow rebinding via ``set_task_repo`` must
         resolve to the git root the same way ``create_orbit_files`` does,
         otherwise the bug recurs at a different entry point.
 

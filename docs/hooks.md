@@ -42,7 +42,7 @@ Five hooks, four events: `UserPromptSubmit` runs *two* scripts (activity_tracker
 | `UserPromptSubmit` | `activity_tracker.py` | 5s | Record a heartbeat in the DB for time tracking |
 | `UserPromptSubmit` | `task_tracker.py` | 5s | Detect task-vs-context divergence and emit a reminder if Claude is forgetting to flip checkboxes |
 | `PreCompact` | `pre_compact.py` | 30s | Update context file timestamp and add an "auto-saved before compaction" note |
-| `Stop` | `stop.py` | 10s | If files were edited during the session, remind the user to run `/orbit:save` |
+| `Stop` | `stop.py` | 10s | If files were edited during the session, remind the user to run `/missioncache:save` |
 
 ### The bootstrap pattern
 
@@ -72,14 +72,14 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 3. **Detect the active task.** Tries `from orbit_db import TaskDB`, instantiates a DB, calls `db.find_task_for_cwd(cwd, session_id)`. If a task is found, it:
    - Writes `projects/<session-id>.json` with the project name, for the statusline.
    - Prints a markdown context block to stdout - this is the "Active Task Detected" banner Claude sees at the top of the session - with the task name, status, time invested, JIRA key, and the path to the orbit files.
-   - Includes a `/orbit:go` tip and a task-tracking discipline reminder telling Claude to use `mcp__plugin_orbit_pm__update_tasks_file` instead of the built-in TaskCreate tool for orbit tasks.
+   - Includes a `/missioncache:load` tip and a task-tracking discipline reminder telling Claude to use `mcp__plugin_missioncache_pm__update_tasks_file` instead of the built-in TaskCreate tool for orbit tasks.
 4. **Skip silently on failure.** If `orbit_db` cannot be imported (minimal install, not set up yet, whatever), the hook bails out quietly. Nothing on stdout, nothing in stderr, Claude's session proceeds as if no hook ran. Rules installation still runs independently - it does not depend on `orbit_db` at all.
 
 **State files written:**
 
 - `~/.claude/hooks/state/term-sessions/<TERM_SESSION_ID>` - Plain-text file containing the Claude session ID. Used by the statusline for mid-session terminal→session resolution on terminals that set `TERM_SESSION_ID`.
 - `~/.claude/hooks-state.db:term_sessions` - Same mapping in the SQLite DB. Both formats exist because different readers use different stores.
-- `~/.claude/hooks/state/projects/<session-id>.json` - `{projectName, updated, sessionId}`. The authoritative per-session project pointer. The statusline reads this, and mid-session `/orbit:go` also writes it.
+- `~/.claude/hooks/state/projects/<session-id>.json` - `{projectName, updated, sessionId}`. The authoritative per-session project pointer. The statusline reads this, and mid-session `/missioncache:load` also writes it.
 
 **Removed in mcp-orbit 0.2.13:** the legacy `~/.claude/hooks/state/pending-task.json` file is no longer written by any hook or slash command. Old files left over from pre-0.2.13 installs are harmless and can be deleted by hand. `find_task_for_cwd` reads only `projects/<session-id>.json` and cwd-pattern matching now.
 
@@ -145,7 +145,7 @@ The rationale is embedded in the module docstring and worth quoting:
 1. Parse `<project>-tasks.md` for pending `- [ ] N.` lines - these are tasks still marked as not done.
 2. Parse `<project>-context.md` for `### Task N` headings - these are tasks Claude has already written findings for.
 3. Intersect the two sets. Task numbers in both sets are "divergent" - the findings are there, but the checkbox is not flipped.
-4. If the intersection is non-empty, print a reminder listing the divergent task numbers and an exact `mcp__plugin_orbit_pm__update_tasks_file(...)` invocation Claude can paste.
+4. If the intersection is non-empty, print a reminder listing the divergent task numbers and an exact `mcp__plugin_missioncache_pm__update_tasks_file(...)` invocation Claude can paste.
 
 The reminder ends with an explicit callout:
 
@@ -170,13 +170,13 @@ This is there because Claude Code (the harness) periodically injects system remi
 5. Write the file back.
 6. Call `db.process_heartbeats()` to flush any accumulated heartbeats into the `sessions` table, so the dashboard time totals are current before compaction.
 
-The auto-save note is the signal: when you come back to the project later via `/orbit:go`, you can see in the context file exactly when it was auto-saved and how many compactions have happened in the current work session. In practice you almost never look at the auto-save line - it is there for reconstructing "what happened" in pathological cases.
+The auto-save note is the signal: when you come back to the project later via `/missioncache:load`, you can see in the context file exactly when it was auto-saved and how many compactions have happened in the current work session. In practice you almost never look at the auto-save line - it is there for reconstructing "what happened" in pathological cases.
 
 **The 30-second timeout** is generous because `process_heartbeats` can touch a lot of rows on a busy session, and the compaction itself does not block on the hook - Claude Code fires the hook, waits up to 30s, then compacts regardless. The hook should finish in well under a second in practice, but the budget is there for outliers.
 
 **Why not save more aggressively:** You might expect the PreCompact hook to write a richer snapshot - a synthesized "Next Steps" section, a learnings summary, a `Recent Changes` block populated with what actually happened. It does not, because generating that content requires talking to Claude, and PreCompact is not the right moment for that: Claude is about to compact *because it is out of context*, and there is no budget for synthesizing a summary. The hook only does mechanical things that do not require the LLM.
 
-The richer save path is `/orbit:save`, which is a slash command the user (or Claude) invokes explicitly. PreCompact is the backstop that ensures even a forgotten `/orbit:save` leaves *some* trace in the context file.
+The richer save path is `/missioncache:save`, which is a slash command the user (or Claude) invokes explicitly. PreCompact is the backstop that ensures even a forgotten `/missioncache:save` leaves *some* trace in the context file.
 
 ## Stop: `stop.py`
 
@@ -187,7 +187,7 @@ The richer save path is `/orbit:save`, which is a slash command the user (or Cla
 ```
 ---
 **Orbit Reminder:** You made file edits while working on **<task-name>**.
-Consider running `/orbit:save` to save context before ending your session.
+Consider running `/missioncache:save` to save context before ending your session.
 ---
 ```
 
@@ -207,9 +207,9 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.orbit/tasks.db:sessions` | orbit_db `process_heartbeats` (called by pre_compact) | dashboard, orbit MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
-| `~/.claude/hooks-state.db:project_state` | `/orbit:go`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
+| `~/.claude/hooks-state.db:project_state` | `/missioncache:load`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
 | `~/.claude/hooks/state/term-sessions/<term-id>` | session_start | statusline fallback path | Plain text |
-| `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/orbit:go`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
+| `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
 **Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history but are no longer written or read by any current code path (`pending-task.json` removed in mcp-orbit 0.2.13; `pending-project.json` writers were already removed earlier). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
@@ -268,7 +268,7 @@ If you have a new event you want to hook into, the pattern is straightforward:
 3. **Decide stdout vs stderr.** stdout goes back into Claude's context (for SessionStart and UserPromptSubmit - Claude sees it before or with the next prompt). stderr is shown to the human in the terminal (for Stop, mainly). Pick based on who the message is for.
 4. **Never raise across the hook boundary.** Wrap everything in try/except with swallowing `pass` at the outermost level. A hook crash may or may not break the parent event depending on Claude Code's tolerance for non-zero exits, but in any case it is never worth failing the session over a telemetry hook.
 5. **Never block longer than the timeout.** Honor the timeout you declared in `hooks.json`. If your hook does I/O, make sure the I/O itself has a shorter timeout than the hook (e.g., `timeout=3` on a subprocess inside a 5-second hook).
-6. **Reinstall the plugin.** `claude plugins install orbit@local` and restart Claude Code. The hook registry is re-read on plugin load.
+6. **Reinstall the plugin.** `claude plugins install missioncache@local` and restart Claude Code. The hook registry is re-read on plugin load.
 7. **Add a test.** `hooks/tests/` has fixtures for mocking `orbit_db` via `patch.dict('sys.modules', {'orbit_db': MagicMock()}) + importlib.reload(mod)`. Any new hook that imports `orbit_db` at the top of the module will break mocking; keep the import lazy (inside `main()`) or stick with the in-process bootstrap the existing hooks use.
 
 ## Troubleshooting
@@ -277,7 +277,7 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 **Cause:** Either `orbit_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
 
-**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any orbit task" - check `~/.orbit/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_orbit_pm__find_task_for_directory` from a live Claude session to see what it returns.
+**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any orbit task" - check `~/.orbit/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
 
 ### "Heartbeats aren't being recorded"
 
@@ -299,7 +299,7 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 **Cause:** PreCompact only fires when Claude Code *auto*-compacts. Manual compaction via `/compact` does not fire PreCompact.
 
-**Fix:** This is by design. If you want to save state on manual compaction, run `/orbit:save` explicitly before `/compact`. (There is no hook for `/compact` - it is not a plugin-observable event.)
+**Fix:** This is by design. If you want to save state on manual compaction, run `/missioncache:save` explicitly before `/compact`. (There is no hook for `/compact` - it is not a plugin-observable event.)
 
 ### "Stop reminder fires when I didn't actually edit anything"
 

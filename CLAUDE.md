@@ -5,7 +5,7 @@
 - **MCP Server**: Primary interface (`mcp-server/src/mcp_missioncache/`)
 - **Database**: `missioncache-db/` package (SQLite at `~/.orbit/tasks.db`)
 - **Hooks**: Auto-save on compaction, detect active project on start
-- **Commands**: Slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`, `/orbit:done`, `/orbit:prompts`, `/orbit:mode`)
+- **Commands**: Slash commands (`/missioncache:new`, `/missioncache:load`, `/missioncache:save`, `/missioncache:done`, `/missioncache:prompts`, `/missioncache:mode`)
 - **Orbit Auto**: Autonomous execution CLI (`missioncache-auto/`)
 - **Orbit Dashboard**: Web UI at localhost:8787 (`missioncache-dashboard/`)
 - **Statusline**: Optional terminal status display (bundled in `missioncache-dashboard/missioncache_dashboard/statusline.py`, installed via the `missioncache-statusline` pip entry point)
@@ -42,7 +42,7 @@
 
 ## MCP Server Configuration
 
-MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServers` key. Tools appear as `mcp__plugin_orbit_pm__*` in Claude Code.
+MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServers` key. Tools appear as `mcp__plugin_missioncache_pm__*` in Claude Code.
 
 ## Adding a New MCP Tool
 
@@ -77,7 +77,7 @@ MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServe
    ```
 
 2. Add instructions for Claude to follow when command is invoked
-3. Reinstall plugin (maintainer dev loop uses the local marketplace): `claude plugins install orbit@local`
+3. Reinstall plugin (maintainer dev loop uses the local marketplace): `claude plugins install missioncache@local`
 
 ## Database
 
@@ -134,7 +134,7 @@ Or manually, without `missioncache-install`:
 pip install -e ./missioncache-db
 pip install -e ./missioncache-auto
 pip install -e ./missioncache-dashboard
-claude plugins install orbit@local
+claude plugins install missioncache@local
 ```
 
 The `@local` suffix refers to the local marketplace that `missioncache-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@orbit-pm` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.

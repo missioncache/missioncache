@@ -11,7 +11,7 @@ DB calls (find_task_for_cwd, get_repo, process_heartbeats) are wrapped in
 bounded retry-with-backoff because under active MCP server load the hook
 can collide with other writers and silently fail (sqlite3 OperationalError:
 database is locked). On terminal failure the hook writes a sticky error
-file at ~/.claude/hooks/state/last-precompact-error.json that /orbit:go
+file at ~/.claude/hooks/state/last-precompact-error.json that /missioncache:load
 surfaces on next resume.
 """
 
@@ -94,7 +94,7 @@ def _retry_db(fn):
 
 
 def _write_sticky_error(reason, task_name=None):
-    """Write a sticky error file that /orbit:go surfaces on next resume."""
+    """Write a sticky error file that /missioncache:load surfaces on next resume."""
     try:
         ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
         ERROR_FILE.write_text(
@@ -126,7 +126,7 @@ def _safe_db_call(label, fn, task_name=None, sticky=True):
 
     Returns ``fn()`` on success, ``None`` if the retry budget was exhausted
     or any other exception escaped. By default the failure is recorded in the
-    sticky error file so /orbit:go can surface it; pass ``sticky=False`` for
+    sticky error file so /missioncache:load can surface it; pass ``sticky=False`` for
     benign deferrals (heartbeat aggregation, where the work just stays queued).
     """
     try:
@@ -247,7 +247,7 @@ def _make_transform(timestamp, snapshot_body):
 
     Updates **Last Updated** and prepends a ``### <timestamp>`` Pre-Compact
     Snapshot subsection under the existing ``## Recent Changes`` heading
-    (newest-first, same shape as manual /orbit:save entries). Tolerates the
+    (newest-first, same shape as manual /missioncache:save entries). Tolerates the
     legacy ``## Recent Changes (timestamp)`` heading by only matching the
     prefix.
     """

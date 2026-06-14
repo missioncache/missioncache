@@ -1,6 +1,6 @@
 """Per-tool slash command installers for non-Claude AI coding tools.
 
-Phase 11.1 ships orbit's six canonical slash commands (go, save, new, done,
+Phase 11.1 ships orbit's six canonical slash commands (load, save, new, done,
 prompts, mode) into Codex, OpenCode, and VSCode Copilot Chat alongside the
 existing Claude plugin. The MCP server is registered by mcp_clients.py; this
 module handles only the slash command surface.
@@ -8,27 +8,27 @@ module handles only the slash command surface.
 Four transformations apply to every non-Claude variant. Two are applied by
 `_render_for_non_claude`; the filename prefix is applied at the call site:
 
-1. Filename gets an `orbit-` prefix (orbit-go.md etc.). All three tools have
+1. Filename gets a `missioncache-` prefix (missioncache-load.md etc.). All three tools have
    flat slash command namespaces, so the prefix avoids clashes with other
    plugins' /go, /save, etc.
 2. The Claude-specific `argument-hint:` frontmatter line is stripped.
-3. The MCP tool prefix `mcp__plugin_orbit_pm__` is rewritten to `mcp__orbit__`.
-   Claude registers orbit as a plugin (tools surface as plugin_orbit_pm__*);
+3. The MCP tool prefix `mcp__plugin_missioncache_pm__` is rewritten to `mcp__missioncache__`.
+   Claude registers orbit as a plugin (tools surface as plugin_missioncache_pm__*);
    the other three tools register orbit as a top-level MCP server (tools
-   surface as orbit__*).
-4. Cross-references between commands are rewritten from `/orbit:<name>` to
-   `/orbit-<name>` so that "Run /orbit:prompts my-project" prose in command
+   surface as missioncache__*).
+4. Cross-references between commands are rewritten from `/missioncache:<name>` to
+   `/missioncache-<name>` so that "Run /missioncache:prompts my-project" prose in command
    bodies points at a slash command that actually exists in the target tool.
 
 Per-tool destination summary:
 
 | Tool     | Files                                               | Registration                        |
 |----------|-----------------------------------------------------|-------------------------------------|
-| OpenCode | ~/.config/opencode/commands/orbit-<name>.md         | filesystem only (filename = cmd)    |
-| VSCode   | ~/.orbit/vscode/prompts/orbit-<name>.prompt.md      | chat.promptFilesLocations in user   |
+| OpenCode | ~/.config/opencode/commands/missioncache-<name>.md         | filesystem only (filename = cmd)    |
+| VSCode   | ~/.orbit/vscode/prompts/missioncache-<name>.prompt.md      | chat.promptFilesLocations in user   |
 |          |                                                     | settings.json                       |
-| Codex    | ~/.orbit/codex-marketplace/plugins/orbit/commands/  | codex plugin marketplace add +      |
-|          | orbit-<name>.md (plus marketplace.json + plugin.json) | [plugins."orbit@orbit"] stanza in |
+| Codex    | ~/.orbit/codex-marketplace/plugins/missioncache/commands/  | codex plugin marketplace add +      |
+|          | missioncache-<name>.md (plus marketplace.json + plugin.json) | [plugins."missioncache@missioncache"] stanza in |
 |          |                                                     | ~/.codex/config.toml                |
 
 Source of truth: orbit's repo `commands/*.md`. PyPI mode reads from the
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
 # Canonical orbit commands. Order matches the existing Claude plugin layout.
 CANONICAL_COMMANDS: tuple[str, ...] = (
-    "go", "save", "new", "done", "prompts", "mode",
+    "load", "save", "new", "done", "prompts", "mode",
 )
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
@@ -74,16 +74,16 @@ CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 CODEX_PLUGIN_VERSION = "1.0.0"
 
 # Substitution regex for the MCP tool prefix. Anchored at a word boundary so
-# the rewrite only matches the full `mcp__plugin_orbit_pm__` literal and not
+# the rewrite only matches the full `mcp__plugin_missioncache_pm__` literal and not
 # any partial substring inside a longer identifier.
-_MCP_PREFIX_RE = re.compile(r"\bmcp__plugin_orbit_pm__")
+_MCP_PREFIX_RE = re.compile(r"\bmcp__plugin_missioncache_pm__")
 
 # Cross-reference rewrite. Source command files reference each other by
-# Claude-namespaced slug ("/orbit:prompts my-project"); in flat-namespace
+# Claude-namespaced slug ("/missioncache:prompts my-project"); in flat-namespace
 # tools (Codex / OpenCode / VSCode) the corresponding slash command is
-# `/orbit-prompts`. The capture restricts to lowercase a-z so we don't
+# `/missioncache-prompts`. The capture restricts to lowercase a-z so we don't
 # rewrite unrelated `:` separators (timestamps, ratios, etc.).
-_ORBIT_SLASH_REF_RE = re.compile(r"/orbit:([a-z]+)")
+_MISSIONCACHE_SLASH_REF_RE = re.compile(r"/missioncache:([a-z]+)")
 
 # Codex marketplace add: the CLI lacks an "already registered" exit code, so
 # we sniff stderr for an idempotency phrase. Restricted to the unambiguous
@@ -104,7 +104,7 @@ _CODEX_ABSENT_RE = re.compile(
 # allows leading whitespace but rejects a leading `#` (commented-out stanzas
 # do not activate the plugin and must not be treated as already-enabled).
 _CODEX_PLUGIN_STANZA_RE = re.compile(
-    r'^\s*\[plugins\."orbit@orbit"\]\s*$',
+    r'^\s*\[plugins\."missioncache@missioncache"\]\s*$',
     re.MULTILINE,
 )
 
@@ -116,7 +116,7 @@ _CODEX_PLUGIN_STANZA_RE = re.compile(
 def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
     """Gate slash command install on this-run MCP success for the same tool.
 
-    Slash commands invoke mcp__orbit__* tools at runtime, so installing them
+    Slash commands invoke mcp__missioncache__* tools at runtime, so installing them
     without the matching MCP server registration produces a successful-looking
     install with commands that fail when the user runs them. We track per-run
     outcomes in `ctx.mcp_success` (in-memory only - state.json can hold a
@@ -191,7 +191,7 @@ def _write_command_files(
         except FileNotFoundError as e:
             ui.warn(str(e))
             continue
-        out_path = dest_dir / f"orbit-{name}{suffix}"
+        out_path = dest_dir / f"missioncache-{name}{suffix}"
         out_path.write_text(_render_for_non_claude(content))
         written.append(str(out_path))
     return written
@@ -215,7 +215,7 @@ def _emit_command_install_outcome(
     """
     expected = len(CANONICAL_COMMANDS)
     invocations = ", ".join(
-        f"{invocation_prefix}{Path(p).stem.removeprefix('orbit-').removesuffix('.prompt')}"
+        f"{invocation_prefix}{Path(p).stem.removeprefix('missioncache-').removesuffix('.prompt')}"
         for p in written
     )
     if len(written) < expected:
@@ -234,9 +234,9 @@ def _render_for_non_claude(content: str) -> str:
     """Apply the three non-Claude transformations to a command's source content.
 
     1. Strip the `argument-hint: ...` frontmatter line if present.
-    2. Rewrite `mcp__plugin_orbit_pm__` -> `mcp__orbit__` everywhere.
-    3. Rewrite `/orbit:<name>` -> `/orbit-<name>` so cross-references between
-       commands ("Run /orbit:prompts ...") point at the slash command name
+    2. Rewrite `mcp__plugin_missioncache_pm__` -> `mcp__missioncache__` everywhere.
+    3. Rewrite `/missioncache:<name>` -> `/missioncache-<name>` so cross-references between
+       commands ("Run /missioncache:prompts ...") point at the slash command name
        that actually exists in the target tool.
 
     Frontmatter is the leading `---\\n...---\\n` block. If absent, the
@@ -252,8 +252,8 @@ def _render_for_non_claude(content: str) -> str:
                 if not line.lstrip().startswith("argument-hint:")
             ]
             content = "".join(head_lines) + body
-    content = _MCP_PREFIX_RE.sub("mcp__orbit__", content)
-    content = _ORBIT_SLASH_REF_RE.sub(r"/orbit-\1", content)
+    content = _MCP_PREFIX_RE.sub("mcp__missioncache__", content)
+    content = _MISSIONCACHE_SLASH_REF_RE.sub(r"/missioncache-\1", content)
     return content
 
 
@@ -262,7 +262,7 @@ def _render_for_non_claude(content: str) -> str:
 # ---------------------------------------------------------------------------
 
 def install_opencode_commands(ctx: "InstallContext") -> None:
-    """Install orbit's six slash commands as /orbit-<name> in OpenCode."""
+    """Install orbit's six slash commands as /missioncache-<name> in OpenCode."""
     ui.step("11", "OpenCode slash commands")
     if not mcp_clients._opencode_detected():
         ui.warn(
@@ -277,7 +277,7 @@ def install_opencode_commands(ctx: "InstallContext") -> None:
     state.record_component("opencode_commands", {"files": written})
     _emit_command_install_outcome(
         tool="OpenCode",
-        invocation_prefix="/orbit-",
+        invocation_prefix="/missioncache-",
         written=written,
     )
 
@@ -301,7 +301,7 @@ def uninstall_opencode_commands(ctx: "InstallContext") -> None:
 # ---------------------------------------------------------------------------
 
 def install_vscode_commands(ctx: "InstallContext") -> None:
-    """Install orbit slash commands as /orbit-<name> in VSCode Copilot Chat.
+    """Install orbit slash commands as /missioncache-<name> in VSCode Copilot Chat.
 
     Files go to an orbit-owned directory under ~/.orbit/. The directory is
     registered in VSCode user settings via `chat.promptFilesLocations`, which
@@ -356,7 +356,7 @@ def install_vscode_commands(ctx: "InstallContext") -> None:
     )
     _emit_command_install_outcome(
         tool="VSCode",
-        invocation_prefix="/orbit-",
+        invocation_prefix="/missioncache-",
         written=written,
         extra_success_clause=extra,
     )
@@ -482,7 +482,7 @@ def install_codex_commands(ctx: "InstallContext") -> None:
     Codex doesn't accept loose markdown commands - they have to be packaged as
     a plugin. We build a real plugin under ~/.orbit/codex-marketplace/, register
     it via `codex plugin marketplace add`, and activate it by writing the
-    `[plugins."orbit@orbit"]` stanza into ~/.codex/config.toml.
+    `[plugins."missioncache@missioncache"]` stanza into ~/.codex/config.toml.
     """
     ui.step("13", "Codex slash commands")
     if not shutil.which("codex"):
@@ -531,8 +531,8 @@ def install_codex_commands(ctx: "InstallContext") -> None:
         return
     ui.success(
         f"Installed Codex orbit plugin ({command_count} commands). "
-        "Restart Codex to load /orbit-go, /orbit-save, /orbit-new, /orbit-done, "
-        "/orbit-prompts, /orbit-mode."
+        "Restart Codex to load /missioncache-load, /missioncache-save, /missioncache-new, /missioncache-done, "
+        "/missioncache-prompts, /missioncache-mode."
     )
 
 
@@ -541,12 +541,12 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
 
     Layout:
       <root>/.agents/plugins/marketplace.json   - registry pointing at orbit
-      <root>/plugins/orbit/.codex-plugin/plugin.json   - plugin manifest
-      <root>/plugins/orbit/commands/orbit-<name>.md    - the six commands
+      <root>/plugins/missioncache/.codex-plugin/plugin.json   - plugin manifest
+      <root>/plugins/missioncache/commands/missioncache-<name>.md    - the six commands
 
     Returns the count of commands written.
     """
-    plugin_dir = CODEX_MARKETPLACE_DIR / "plugins" / "orbit"
+    plugin_dir = CODEX_MARKETPLACE_DIR / "plugins" / "missioncache"
     commands_dir = plugin_dir / "commands"
     codex_plugin_dir = plugin_dir / ".codex-plugin"
     registry_path = CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
@@ -556,7 +556,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     registry_path.parent.mkdir(parents=True, exist_ok=True)
 
     plugin_manifest = {
-        "name": "orbit",
+        "name": "missioncache",
         "version": CODEX_PLUGIN_VERSION,
         "description": "Orbit project management slash commands for Codex",
         "author": {"name": "Tomer Brami"},
@@ -567,8 +567,8 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
             "displayName": "Orbit",
             "shortDescription": "Project management with time tracking",
             "longDescription": (
-                "Orbit's slash commands inside Codex. Provides /orbit-go, /orbit-save, "
-                "/orbit-new, /orbit-done, /orbit-prompts, and /orbit-mode for managing "
+                "Orbit's slash commands inside Codex. Provides /missioncache-load, /missioncache-save, "
+                "/missioncache-new, /missioncache-done, /missioncache-prompts, and /missioncache-mode for managing "
                 "orbit projects. Requires the orbit MCP server to be registered "
                 "separately via `codex mcp add orbit -- mcp-missioncache`."
             ),
@@ -582,12 +582,12 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     )
 
     marketplace = {
-        "name": "orbit",
+        "name": "missioncache",
         "interface": {"displayName": "Orbit"},
         "plugins": [
             {
-                "name": "orbit",
-                "source": {"source": "local", "path": "./plugins/orbit"},
+                "name": "missioncache",
+                "source": {"source": "local", "path": "./plugins/missioncache"},
                 "policy": {"installation": "AVAILABLE", "authentication": "OFF"},
                 "category": "Productivity",
             }
@@ -602,7 +602,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
         except FileNotFoundError as e:
             ui.warn(str(e))
             continue
-        (commands_dir / f"orbit-{name}.md").write_text(_render_for_non_claude(content))
+        (commands_dir / f"missioncache-{name}.md").write_text(_render_for_non_claude(content))
         written += 1
     ui.detail(f"Built Codex marketplace at {CODEX_MARKETPLACE_DIR} ({written} commands)")
     return written
@@ -615,7 +615,7 @@ def _register_codex_marketplace() -> bool:
     registered), False on any other failure. The caller MUST gate downstream
     config writes and state recording on this return value: a marketplace
     that is not known to Codex cannot serve commands, so emitting an
-    `[plugins."orbit@orbit"]` stanza pointing at it produces a broken setup.
+    `[plugins."missioncache@missioncache"]` stanza pointing at it produces a broken setup.
 
     Idempotency uses an anchored phrase regex (see `_CODEX_ALREADY_REGISTERED_RE`)
     rather than the bare substrings "already" / "exists" - those swallow real
@@ -641,13 +641,13 @@ def _register_codex_marketplace() -> bool:
 
 
 def _enable_codex_plugin() -> None:
-    """Append `[plugins."orbit@orbit"]` to ~/.codex/config.toml.
+    """Append `[plugins."missioncache@missioncache"]` to ~/.codex/config.toml.
 
     Codex activates plugins via an empty TOML stanza in config.toml; the bare
     header is enough to enable the plugin without per-plugin overrides.
 
     Existence check uses an anchored regex (`_CODEX_PLUGIN_STANZA_RE`) so a
-    commented-out stanza (`# [plugins."orbit@orbit"]`) is correctly ignored
+    commented-out stanza (`# [plugins."missioncache@missioncache"]`) is correctly ignored
     and the active stanza gets appended. A bare substring check would have
     treated the comment as already-enabled and silently skipped activation.
 
@@ -659,7 +659,7 @@ def _enable_codex_plugin() -> None:
         CODEX_CONFIG_TOML.write_text("")
 
     text = CODEX_CONFIG_TOML.read_text()
-    stanza_header = '[plugins."orbit@orbit"]'
+    stanza_header = '[plugins."missioncache@missioncache"]'
     if _CODEX_PLUGIN_STANZA_RE.search(text):
         ui.detail("Codex plugin stanza already present in config.toml")
         return
@@ -669,7 +669,7 @@ def _enable_codex_plugin() -> None:
         text += "\n"
     text += stanza_header + "\n"
     CODEX_CONFIG_TOML.write_text(text)
-    ui.detail('Added [plugins."orbit@orbit"] stanza to ~/.codex/config.toml')
+    ui.detail('Added [plugins."missioncache@missioncache"] stanza to ~/.codex/config.toml')
 
 
 def uninstall_codex_commands(ctx: "InstallContext") -> None:
@@ -677,9 +677,9 @@ def uninstall_codex_commands(ctx: "InstallContext") -> None:
     if shutil.which("codex"):
         try:
             subprocess_utils.run(
-                ["codex", "plugin", "marketplace", "remove", "orbit"]
+                ["codex", "plugin", "marketplace", "remove", "missioncache"]
             )
-            ui.detail("Removed orbit marketplace from Codex")
+            ui.detail("Removed missioncache marketplace from Codex")
         except subprocess_utils.CommandFailed as e:
             combined = (e.stderr or "") + (e.stdout or "")
             if _CODEX_ABSENT_RE.search(combined):
@@ -695,7 +695,7 @@ def uninstall_codex_commands(ctx: "InstallContext") -> None:
         new_text = _strip_codex_plugin_stanza(text)
         if new_text != text:
             CODEX_CONFIG_TOML.write_text(new_text)
-            ui.detail('Removed [plugins."orbit@orbit"] from config.toml')
+            ui.detail('Removed [plugins."missioncache@missioncache"] from config.toml')
 
     if CODEX_MARKETPLACE_DIR.exists():
         shutil.rmtree(CODEX_MARKETPLACE_DIR)
@@ -705,20 +705,20 @@ def uninstall_codex_commands(ctx: "InstallContext") -> None:
 
 
 def _strip_codex_plugin_stanza(text: str) -> str:
-    """Remove the `[plugins."orbit@orbit"]` section (and its subsections) from TOML.
+    """Remove the `[plugins."missioncache@missioncache"]` section (and its subsections) from TOML.
 
     A TOML section runs from its `[header]` line up to the next `[section]`
     line or end-of-file. The naive "any header ends the skip" rule is wrong
-    because subsections of orbit (e.g. `[plugins."orbit@orbit".overrides]`)
+    because subsections of orbit (e.g. `[plugins."missioncache@missioncache".overrides]`)
     look like fresh sections to a substring-only check and would leak past
-    the strip. We treat subsections of `plugins."orbit@orbit"` as part of
+    the strip. We treat subsections of `plugins."missioncache@missioncache"` as part of
     orbit's own stanza tree and only end skip mode on a header that does
     NOT belong to orbit.
 
     Limitations (acceptable since orbit only writes the bare header today):
     - The stripper is line-based, not TOML-aware. A `[header]` literal that
       appears inside a multi-line string value would prematurely end skip.
-    - Array-of-tables form `[[plugins."orbit@orbit"]]` is not recognized.
+    - Array-of-tables form `[[plugins."missioncache@missioncache"]]` is not recognized.
       orbit never emits that form; if a user hand-edits to it, the stanza
       will not be stripped on uninstall and they'll need to delete it
       manually. Documented rather than handled because adding tomllib here
@@ -727,8 +727,8 @@ def _strip_codex_plugin_stanza(text: str) -> str:
     After stripping, runs of 3+ blank lines collapse to 2 so the file does
     not grow visual gaps with each install/uninstall cycle.
     """
-    target = '[plugins."orbit@orbit"]'
-    subsection_prefix = '[plugins."orbit@orbit".'
+    target = '[plugins."missioncache@missioncache"]'
+    subsection_prefix = '[plugins."missioncache@missioncache".'
     lines = text.splitlines(keepends=True)
     out: list[str] = []
     skip = False

@@ -26,8 +26,8 @@ from . import command_clients, mcp_clients, settings, state, subprocess_utils, u
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
 PLUGIN_GITHUB_SOURCE = "tomerbr1/orbit-pm"
-PLUGIN_ID_PYPI = "orbit@orbit-pm"
-PLUGIN_ID_LOCAL = "orbit@local"
+PLUGIN_ID_PYPI = "missioncache@orbit-pm"
+PLUGIN_ID_LOCAL = "missioncache@local"
 USER_COMMAND_FILES = ("whats-new.md", "optimize-prompt.md")
 
 
@@ -58,9 +58,9 @@ class InstallContext:
 def install_plugin(ctx: InstallContext) -> None:
     """Register the orbit plugin with Claude Code.
 
-    PyPI mode: adds the upstream marketplace and installs orbit@orbit-pm.
+    PyPI mode: adds the upstream marketplace and installs missioncache@orbit-pm.
     Local mode: creates ~/.claude/plugins/local-marketplace pointing at the
-    clone, then installs orbit@local. Mirrors setup.sh:152-217.
+    clone, then installs missioncache@local. Mirrors setup.sh:152-217.
     """
     ui.step("1", "Core plugin")
     if ctx.mode == "local":
@@ -75,7 +75,7 @@ def install_plugin(ctx: InstallContext) -> None:
 
 
 def _install_plugin_pypi() -> None:
-    """Add the upstream marketplace and install orbit@orbit-pm."""
+    """Add the upstream marketplace and install missioncache@orbit-pm."""
     if not shutil.which("claude"):
         ui.warn("Claude CLI not found - skipping plugin registration.")
         ui.detail("After installing Claude Code, run: missioncache-install --update")
@@ -99,14 +99,14 @@ def _install_plugin_pypi() -> None:
 
 
 def _install_plugin_local(ctx: InstallContext) -> None:
-    """Create a local marketplace symlinking the clone, install orbit@local.
+    """Create a local marketplace symlinking the clone, install missioncache@local.
 
     Ports setup.sh:152-217 to Python.
     """
     repo = _require_repo(ctx)
     plugins_dir = MARKETPLACE_DIR / "plugins"
     marketplace_json = MARKETPLACE_DIR / ".claude-plugin" / "marketplace.json"
-    plugin_link = plugins_dir / "orbit"
+    plugin_link = plugins_dir / "missioncache"
 
     plugins_dir.mkdir(parents=True, exist_ok=True)
     marketplace_json.parent.mkdir(parents=True, exist_ok=True)
@@ -121,7 +121,7 @@ def _install_plugin_local(ctx: InstallContext) -> None:
             plugin_link.symlink_to(repo)
             ui.detail(f"Updated symlink -> {repo}")
     elif plugin_link.is_dir():
-        ui.warn("Removing existing plugins/orbit directory (not a symlink)")
+        ui.warn("Removing existing plugins/missioncache directory (not a symlink)")
         shutil.rmtree(plugin_link)
         plugin_link.symlink_to(repo)
         ui.detail(f"Created symlink -> {repo}")
@@ -149,20 +149,20 @@ def _install_plugin_local(ctx: InstallContext) -> None:
 def _write_local_marketplace_json(path: Path) -> None:
     """Create or update marketplace.json to include orbit. Idempotent."""
     entry = {
-        "name": "orbit",
-        "source": "./plugins/orbit",
+        "name": "missioncache",
+        "source": "./plugins/missioncache",
         "description": "Project management with time tracking and autonomous execution",
         "category": "productivity",
     }
     if path.exists():
         data = json.loads(path.read_text())
         plugins = data.setdefault("plugins", [])
-        if any(p.get("name") == "orbit" for p in plugins):
-            ui.detail("orbit already in marketplace.json")
+        if any(p.get("name") == "missioncache" for p in plugins):
+            ui.detail("missioncache already in marketplace.json")
             return
         plugins.append(entry)
         path.write_text(json.dumps(data, indent=2))
-        ui.detail("Added orbit to existing marketplace.json")
+        ui.detail("Added missioncache to existing marketplace.json")
         return
     path.write_text(json.dumps({
         "name": "local",

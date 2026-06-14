@@ -1,10 +1,10 @@
 # MCP Tools
 
-This document covers the orbit MCP server: the 30 tools that expose orbit's task database, orbit files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/orbit:new`, `/orbit:go`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the orbit MCP server: the 30 tools that expose orbit's task database, orbit files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.orbit/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* orbit from a command or a script, the short version is: every tool lives under the `mcp__plugin_orbit_pm__` prefix in Claude Code (`mcp__plugin_orbit_pm__list_active_tasks`, `mcp__plugin_orbit_pm__get_task`, etc.), every tool returns a JSON dictionary, and errors come back as `{"error": true, "code": "...", "message": "..."}` instead of raising. The rest of this doc is for when you want to understand exactly what a tool does, what to pass it, and what to expect back.
+If you are just trying to *use* orbit from a command or a script, the short version is: every tool lives under the `mcp__plugin_missioncache_pm__` prefix in Claude Code (`mcp__plugin_missioncache_pm__list_active_tasks`, `mcp__plugin_missioncache_pm__get_task`, etc.), every tool returns a JSON dictionary, and errors come back as `{"error": true, "code": "...", "message": "..."}` instead of raising. The rest of this doc is for when you want to understand exactly what a tool does, what to pass it, and what to expect back.
 
 ## What the MCP server is
 
@@ -24,7 +24,7 @@ Orbit ships a single MCP server, registered in `plugin.json` as:
 }
 ```
 
-The server name is `pm` (for "project management"), and combined with the plugin name (`orbit`), Claude Code exposes every tool under the prefix `mcp__plugin_orbit_pm__<tool_name>`. So the Python function `list_active_tasks` in `mcp-server/src/mcp_orbit/tools_tasks.py` is callable from Claude as `mcp__plugin_orbit_pm__list_active_tasks`.
+The server name is `pm` (for "project management"), and combined with the plugin name (`orbit`), Claude Code exposes every tool under the prefix `mcp__plugin_missioncache_pm__<tool_name>`. So the Python function `list_active_tasks` in `mcp-server/src/mcp_orbit/tools_tasks.py` is callable from Claude as `mcp__plugin_missioncache_pm__list_active_tasks`.
 
 The server itself is a [FastMCP](https://github.com/modelcontextprotocol/python-sdk) application. The entry point (`server.py`) is 31 lines long and does nothing but import the tool modules to trigger their `@mcp.tool()` decorators:
 
@@ -67,7 +67,7 @@ These are the tools you reach for when you are working with tasks as first-class
 
 ### `list_active_tasks`
 
-**When to use:** You want every active task in the DB, optionally filtered or grouped by repo. This is what `/orbit:go` calls first to show the selection table.
+**When to use:** You want every active task in the DB, optionally filtered or grouped by repo. This is what `/missioncache:load` calls first to show the selection table.
 
 **Parameters:**
 - `repo_path: str | None = None` - Filter by repo path. Resolves via `db.get_repo_by_path()`, so a canonical absolute path works best.
@@ -95,7 +95,7 @@ Time is not batch-fetched here - each `TaskSummary` does its own `db.get_task_ti
 
 ### `get_task`
 
-**When to use:** You have a task ID or project name and you need everything - progress, time, subtasks, JIRA key, full path, file layout. This is the primary tool for `/orbit:go`, and it is also what the dashboard hits when you open a task modal.
+**When to use:** You have a task ID or project name and you need everything - progress, time, subtasks, JIRA key, full path, file layout. This is the primary tool for `/missioncache:load`, and it is also what the dashboard hits when you open a task modal.
 
 **Parameters:**
 - `task_id: int | None = None` - DB primary key.
@@ -185,7 +185,7 @@ These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~
 
 ### `create_orbit_files`
 
-**When to use:** You are starting a new project and you want the DB row, the directory, and the template files in one call. This is what `/orbit:new` runs - it is the orbit equivalent of `git init` for a task.
+**When to use:** You are starting a new project and you want the DB row, the directory, and the template files in one call. This is what `/missioncache:new` runs - it is the orbit equivalent of `git init` for a task.
 
 **Parameters:**
 - `repo_path: str` - Required. Auto-registered if missing.
@@ -220,7 +220,7 @@ If the task exists in the DB, uses `task.full_path` to resolve subtask directori
 
 ### `update_context_file`
 
-**When to use:** You want to append entries to `<project>-context.md` without loading the whole file, editing it by hand, and writing it back. This is the main tool for `/orbit:save` and is much faster than multiple Read/Edit calls.
+**When to use:** You want to append entries to `<project>-context.md` without loading the whole file, editing it by hand, and writing it back. This is the main tool for `/missioncache:save` and is much faster than multiple Read/Edit calls.
 
 **Parameters:**
 - `context_file: str` - Absolute path to the context file. Validated to be under `ORBIT_ROOT` (prevents escape via `..`).
@@ -267,7 +267,7 @@ These tools drive the orbit heartbeat system and the repository registry. Most o
 
 ### `record_heartbeat`
 
-**When to use:** You want to ping the DB to say "I am working on this task now". The orbit activity tracker hook calls this on every `UserPromptSubmit`, but you can also call it manually from a slash command (as `/orbit:go` does after loading a project).
+**When to use:** You want to ping the DB to say "I am working on this task now". The orbit activity tracker hook calls this on every `UserPromptSubmit`, but you can also call it manually from a slash command (as `/missioncache:load` does after loading a project).
 
 **Parameters:**
 - `task_id: int | None = None` - Direct task ID. If provided, records under that task with no lookup.
@@ -592,7 +592,7 @@ If you have a new operation that belongs in the MCP server, the pattern is:
 3. **Use typed returns where it helps.** If your tool returns a fixed shape, add a Pydantic model in `models.py` and `.model_dump()` it at the return site. If the shape is more ad-hoc, return a plain dict.
 4. **Validate inputs early.** Call `_validate_path` for paths, return `VALIDATION_ERROR` dicts for bad enum values, raise `OrbitError` subclasses for expected failures.
 5. **No new imports in `server.py`.** The tool is registered automatically when its module is imported - `server.py` imports `tools_<module>` once, and that triggers every `@mcp.tool()` in the file. Do not reach into `server.py`.
-6. **Reload the plugin to pick it up.** `claude plugins install orbit@local` and restart Claude Code. The MCP server restart happens on the next Claude session.
+6. **Reload the plugin to pick it up.** `claude plugins install missioncache@local` and restart Claude Code. The MCP server restart happens on the next Claude session.
 7. **Add a test.** `mcp-server/tests/` has fixtures for DB setup and patterns for calling tools directly (bypassing MCP transport). Follow them.
 
 The thing that makes this server pleasant to extend is that tools are flat, independent functions with no shared state beyond the DB instance. There is no plugin registry, no base class, no middleware. Adding a tool is additive - you cannot accidentally break an existing one.
@@ -603,7 +603,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 **Cause:** The plugin cache is stale. MCP tools are discovered at plugin load, and a new tool added after you installed the plugin won't show up until you reinstall.
 
-**Fix:** `claude plugins install orbit@local` (or `orbit@orbit-pm` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
+**Fix:** `claude plugins install missioncache@local` (or `missioncache@orbit-pm` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
 
 ### "I'm calling the tool but getting `error: true, message: <python exception>` with no code"
 

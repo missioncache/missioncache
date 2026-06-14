@@ -1,14 +1,14 @@
 """Integration tests for session-to-project binding in create_orbit_files / create_task.
 
 Verifies the atomic-binding behavior added to fix the "blank statusline after
-/orbit:new" bug. The slash command's prior client-side bash binding was
+/missioncache:new" bug. The slash command's prior client-side bash binding was
 skippable in practice; moving the binding into the MCP tool eliminates that
 failure mode by making it impossible to create a project without binding.
 
 The binding writes two artifacts:
   1. ``project_state`` row in ``~/.claude/hooks-state.db`` (statusline reads this)
   2. ``~/.claude/hooks/state/projects/<sid>.json`` per-session pointer
-     (``find_task_for_cwd`` reads this so /orbit:save works at repo root)
+     (``find_task_for_cwd`` reads this so /missioncache:save works at repo root)
 
 Both are best-effort: validation/IO failure logs a warning and returns
 ``session_bound=False`` in the tool response, but does NOT fail task creation.
@@ -89,7 +89,7 @@ def _read_per_session_pointer(home: pathlib.Path, session_id: str) -> dict | Non
 
 
 class TestCreateOrbitFilesBinding:
-    """The coding branch of /orbit:new - binding fires when session_id provided."""
+    """The coding branch of /missioncache:new - binding fires when session_id provided."""
 
     def test_binds_session_when_session_id_provided(self, isolated_orbit):
         """Happy path: session_id resolves to a UUID, project_state gets written.
@@ -180,7 +180,7 @@ class TestCreateOrbitFilesBinding:
         """Calling create_orbit_files for the same sid twice updates the binding.
 
         ON CONFLICT DO UPDATE in the upsert. Important when a session that
-        already had a project bound (e.g., via /orbit:go for project A)
+        already had a project bound (e.g., via /missioncache:load for project A)
         creates a NEW project B - the statusline should follow to B.
         """
         tmp_path, _root_dir, fake_home, hooks_db = isolated_orbit
@@ -263,10 +263,10 @@ class TestCreateOrbitFilesBinding:
 
 
 class TestCreateTaskBinding:
-    """The non-coding branch of /orbit:new - which had NO binding before this fix."""
+    """The non-coding branch of /missioncache:new - which had NO binding before this fix."""
 
     def test_non_coding_task_binds_session(self, isolated_orbit):
-        """Non-coding /orbit:new now binds the session, fixing the prior gap.
+        """Non-coding /missioncache:new now binds the session, fixing the prior gap.
 
         Before this fix, commands/new.md's non-coding branch had no
         binding step at all - the statusline was guaranteed blank for any
@@ -295,7 +295,7 @@ class TestCreateTaskBinding:
         """The coding branch of create_task (parallel to create_orbit_files) binds too.
 
         Defensive: create_task with task_type='coding' is reachable from
-        callers other than /orbit:new (tests, manual MCP). The binding
+        callers other than /missioncache:new (tests, manual MCP). The binding
         contract should be uniform across both task types.
         """
         tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
@@ -333,7 +333,7 @@ class TestCreateTaskBinding:
 
     def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
         """create_task resolves CLAUDE_CODE_SESSION_ID when session_id omitted,
-        so /orbit:new's non-coding branch binds without a client-side id."""
+        so /missioncache:new's non-coding branch binds without a client-side id."""
         _tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         env_sid = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
@@ -351,9 +351,9 @@ class TestCreateTaskBinding:
 
 
 class TestGetTaskBinding:
-    """get_task accepts optional ``session_id`` for /orbit:go.
+    """get_task accepts optional ``session_id`` for /missioncache:load.
 
-    Background: ``/orbit:go`` calls ``get_task`` to load project context. The
+    Background: ``/missioncache:load`` calls ``get_task`` to load project context. The
     binding (writing project_state + per-session pointer) used to live in a
     bash block inside the slash command, which Claude can silently skip if
     it streams past Step 4. Moving the binding into get_task makes it
@@ -375,13 +375,13 @@ class TestGetTaskBinding:
                 name="existing-project",
                 task_type="coding",
                 repo_path=str(repo_path),
-                # No session_id - simulates a task created outside /orbit:go.
+                # No session_id - simulates a task created outside /missioncache:load.
             )
         )
         assert create_result.get("error") is not True
         assert _read_project_state(hooks_db, sid) is None
 
-        # /orbit:go path: load it with a session_id.
+        # /missioncache:load path: load it with a session_id.
         result = asyncio.run(
             tools_tasks.get_task(
                 project_name="existing-project",
@@ -453,7 +453,7 @@ class TestGetTaskBinding:
 
         Mirrors the create_orbit_files contract: invalid session ids do not
         fail the tool, they just skip the binding step and return
-        session_bound=False so the caller can recover via /orbit:go.
+        session_bound=False so the caller can recover via /missioncache:load.
         """
         tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
@@ -482,7 +482,7 @@ class TestGetTaskBinding:
         assert _read_project_state(hooks_db, "../escape") is None
 
     def test_binds_from_env_session_id_when_omitted(self, isolated_orbit, monkeypatch):
-        """/orbit:go can omit session_id - get_task resolves it from the env
+        """/missioncache:load can omit session_id - get_task resolves it from the env
         var, so the resume binding lands without the slash-command bash step."""
         tmp_path, _root_dir, _fake_home, hooks_db = isolated_orbit
         repo_path = tmp_path / "myrepo"
@@ -499,7 +499,7 @@ class TestGetTaskBinding:
         )
         assert _read_project_state(hooks_db, env_sid) is None
 
-        # /orbit:go path: load it with no explicit session_id; the env wins.
+        # /missioncache:load path: load it with no explicit session_id; the env wins.
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
         result = asyncio.run(tools_tasks.get_task(project_name="env-go-project"))
 

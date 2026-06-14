@@ -144,7 +144,7 @@ class TestGetOrbitFiles:
     def test_finds_files_in_completed_dir(self, tmp_path):
         """When a project is archived to completed/, get_orbit_files finds it.
 
-        Reproduces MAJOR-10 from the QA report - a fresh /orbit:go on a
+        Reproduces MAJOR-10 from the QA report - a fresh /missioncache:load on a
         completed project used to report has_orbit_files=False because the
         lookup only scanned active/.
         """

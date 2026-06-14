@@ -27,7 +27,7 @@ Clicking a row opens a modal with four tabs:
 - **Tasks** - rendered markdown of `<project>-tasks.md`, with the checklist styled as aligned checkboxes.
 - **Context** - rendered markdown of `<project>-context.md`, including the "Next Steps" and "Recent Changes" sections.
 - **Plan** - rendered markdown of `<project>-plan.md` if it exists, empty otherwise.
-- **Structure** - a D3.js graph visualization of per-task modes (interactive vs auto) and their dependencies, with a zoomable viewport. Only meaningful if `/orbit:mode` has been run on the project.
+- **Structure** - a D3.js graph visualization of per-task modes (interactive vs auto) and their dependencies, with a zoomable viewport. Only meaningful if `/missioncache:mode` has been run on the project.
 
 The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the orbit files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
 
@@ -90,13 +90,13 @@ This matters most during debugging. If you look at a task, see "5h 30m" in the d
 
 ### Heartbeat time
 
-Heartbeat time is the pure orbit-native answer: how much activity did `activity_tracker.py` attribute to this task. It is computed by `TaskDB.get_batch_task_times()`, which groups the `sessions` table by `task_id` and sums `duration_seconds`. It is accurate when the user loaded the project via `/orbit:new`, `/orbit:go`, or a SessionStart hook resolution, because the `projects/<session-id>.json` pointer then routes every subsequent heartbeat to the right task.
+Heartbeat time is the pure orbit-native answer: how much activity did `activity_tracker.py` attribute to this task. It is computed by `TaskDB.get_batch_task_times()`, which groups the `sessions` table by `task_id` and sums `duration_seconds`. It is accurate when the user loaded the project via `/missioncache:new`, `/missioncache:load`, or a SessionStart hook resolution, because the `projects/<session-id>.json` pointer then routes every subsequent heartbeat to the right task.
 
 It is under-counting-prone when:
 
 - The user worked on the project from a cwd outside `~/.orbit/active/<project>/` and without loading the project at session start (covered in `architecture.md` invariants).
 - The user spent time in the repo but outside the orbit directory tree (for example, editing source files in `src/`).
-- The user used `/orbit:go` mid-session in a session that did not resolve a task at SessionStart, because mid-session loads do not write `projects/<session-id>.json`.
+- The user used `/missioncache:load` mid-session in a session that did not resolve a task at SessionStart, because mid-session loads do not write `projects/<session-id>.json`.
 
 ### JSONL time
 
@@ -234,7 +234,7 @@ The orbit-auto endpoints read from the `auto_executions` and `auto_execution_log
 
 Orbit hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three callers use these:
 
-- The orbit plugin's own slash commands (`/orbit:new`, `/orbit:go`, `/orbit:save`) POST to `/api/hooks/project` to register active projects, and resolve terminal session IDs via `/api/hooks/term-session/...`.
+- The orbit plugin's own slash commands (`/missioncache:new`, `/missioncache:load`, `/missioncache:save`) POST to `/api/hooks/project` to register active projects, and resolve terminal session IDs via `/api/hooks/term-session/...`.
 - The orbit MCP server fires `/api/hooks/task-created` internally whenever a task-creation tool runs, so the dashboard syncs immediately instead of waiting up to 60s.
 - `orbit-install` wires `/api/hooks/edit-count` into `~/.claude/settings.json` as a `PostToolUse` HTTP hook with matcher `Edit|Write|NotebookEdit` whenever the dashboard component is installed. That is what populates the statusline edit counter.
 
@@ -246,14 +246,14 @@ Orbit hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three caller
 | POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `orbit-install` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`) when the dashboard is installed. Feeds the statusline edit counter. |
 | POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the orbit MCP server after `create_task` and `create_orbit_files`. |
 | POST | `/api/hooks/action` | Record current tool action for tab title display. |
-| POST | `/api/hooks/project` | Set the active project for a session. Called by `/orbit:new`, `/orbit:go`, `/orbit:save`. |
+| POST | `/api/hooks/project` | Set the active project for a session. Called by `/missioncache:new`, `/missioncache:load`, `/missioncache:save`. |
 | POST | `/api/hooks/qa-review` | Mark QA review as suggested for a session. |
 | GET | `/api/hooks/term-session/{term_session_id}` | Resolve a terminal-emulator session ID to a Claude session ID. |
 | GET | `/api/hooks/session/{session_id}` | Read session state row (edit count, action, last prompt time, etc.). |
 
 All of these write to (or read from) `~/.claude/hooks-state.db`, a separate SQLite file from `tasks.db`. That file holds ephemeral per-session state that has a shorter lifetime than task tracking: `session_state`, `project_state`, `term_sessions`, `validation_state`, `guard_warned`. The statusline reads from it, the hooks write to it, and neither interacts with the main orbit task database.
 
-The fallback flow for writing project state is instructive: `/orbit:go` first tries to POST to `/api/hooks/project` (which handles JSON escaping correctly), and if the dashboard is down it falls back to a direct SQLite write against `hooks-state.db`. See the `orbit.md` rule file in `rules/` for the exact bash snippet. This is the only case where orbit writes to `hooks-state.db` from outside the dashboard process.
+The fallback flow for writing project state is instructive: `/missioncache:load` first tries to POST to `/api/hooks/project` (which handles JSON escaping correctly), and if the dashboard is down it falls back to a direct SQLite write against `hooks-state.db`. See the `orbit.md` rule file in `rules/` for the exact bash snippet. This is the only case where orbit writes to `hooks-state.db` from outside the dashboard process.
 
 ### Sync and health
 

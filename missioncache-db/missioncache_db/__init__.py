@@ -1756,7 +1756,7 @@ class TaskDB:
         """Find the active task that matches the current working directory.
 
         Only returns a task when explicitly working on one:
-        1. Check pending-project.json for explicitly registered project (from /orbit:orbit-project-continue)
+        1. Check pending-project.json for explicitly registered project (from /missioncache:orbit-project-continue)
         2. Check per-session project file (written by statusline after consuming pending-project.json)
         3. Check if cwd is in dev/active/<task>/<subtask> directory
 

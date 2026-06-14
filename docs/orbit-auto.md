@@ -54,7 +54,7 @@ Every orbit-auto run operates on the same directory:
     └── worker-<wid>-task-<tid>-<timestamp>.log
 ```
 
-The location is hard-coded in `orbit_auto/models.py:TaskPaths.from_task_name()` and is not configurable. This is deliberate: every other orbit component (dashboard, hooks, MCP tools, the `/orbit:go` slash command) expects to find the files here, and having one canonical location means no path plumbing.
+The location is hard-coded in `orbit_auto/models.py:TaskPaths.from_task_name()` and is not configurable. This is deliberate: every other orbit component (dashboard, hooks, MCP tools, the `/missioncache:load` slash command) expects to find the files here, and having one canonical location means no path plumbing.
 
 ### Task file format
 
@@ -69,17 +69,17 @@ Tasks are parsed from `<project>-tasks.md` with a strict regex:
 - [ ] 6. Depends on #4 `[auto:depends=4]`
 ```
 
-The parser (`orbit_auto/task_parser.py:parse_tasks_md`) matches `^\s*- \[([ x])\] (\[WAIT\])? (\d+)[.:] (.+)$`. A task number can be flat (`1`, `2`, `10`) or hierarchical (`1.1`, `1.2`) - hierarchical tasks get resolved as subtasks of their parent when computing sequential dependencies. The trailing mode marker in backticks (`[auto]`, `[inter]`, `[auto:depends=1,3]`) is optional and only used by `/orbit:mode` and the runnable-task calculator.
+The parser (`orbit_auto/task_parser.py:parse_tasks_md`) matches `^\s*- \[([ x])\] (\[WAIT\])? (\d+)[.:] (.+)$`. A task number can be flat (`1`, `2`, `10`) or hierarchical (`1.1`, `1.2`) - hierarchical tasks get resolved as subtasks of their parent when computing sequential dependencies. The trailing mode marker in backticks (`[auto]`, `[inter]`, `[auto:depends=1,3]`) is optional and only used by `/missioncache:mode` and the runnable-task calculator.
 
 A task is "completed" when its checkbox is `[x]`. Orbit-auto only writes checkboxes by calling `state.sync_to_tasks_md()` in parallel mode or `mark_task_completed()` in sequential mode, both of which use atomic file writes (temp file + `os.replace`) to avoid corruption under concurrent access. **You can edit the file while orbit-auto is running** - the loop re-parses it every iteration, so human edits are picked up within one cycle.
 
 ### Context file and auto log
 
-`<project>-context.md` is never written by orbit-auto during a run. It is read by Claude (as part of the prompt, either embedded or referenced by path) and it is the one file you should edit manually between runs to record architectural decisions or hard-won lessons. It survives compaction and is what `/orbit:go` reads when you come back to a project.
+`<project>-context.md` is never written by orbit-auto during a run. It is read by Claude (as part of the prompt, either embedded or referenced by path) and it is the one file you should edit manually between runs to record architectural decisions or hard-won lessons. It survives compaction and is what `/missioncache:load` reads when you come back to a project.
 
 `<project>-auto-log.md` is the opposite: orbit-auto writes to it every iteration, and you can delete it after completion without losing anything the context file should have preserved. Its role is detailed debugging history - which attempt on which task succeeded or failed, what files were modified, what learnings Claude extracted. The sequential runner writes entries with `_write_iteration_log()`, and patterns and gotchas discovered via `<pattern_discovered>` and `<gotcha>` tags get bubbled up into a "Codebase Knowledge" section at the top of the file so they are visible to future iterations without having to scroll through the history.
 
-The three-file split - tasks, context, auto log - is the invariant that makes `/orbit:go` and orbit-auto compose. You can run `orbit-auto` for an hour, delete the auto log, and the next `/orbit:go` still has everything it needs.
+The three-file split - tasks, context, auto log - is the invariant that makes `/missioncache:load` and orbit-auto compose. You can run `orbit-auto` for an hour, delete the auto log, and the next `/missioncache:load` still has everything it needs.
 
 ## Sequential mode in detail
 
@@ -127,7 +127,7 @@ Parallel mode requires:
 2. **YAML frontmatter on every prompt.** Each prompt file must start with a `---` delimited block containing at minimum `task_id: "NN"`. `task_title` is strongly recommended (used for display and commits). `dependencies: ["01", "03"]` is optional but required for anything other than strict sequential order.
 3. **Task numbers that match.** The prompt file's `task_id` must correspond to an uncompleted line in `<project>-tasks.md`. The plan validator (`plan_validator.py:validate_plan`) cross-references the two and warns about mismatches.
 
-You get all of this for free if you run `/orbit:prompts <project>` after `/orbit:new` - that command generates the prompt files with proper frontmatter, lists the relevant agents and skills, and shows everything in a batch-approval flow.
+You get all of this for free if you run `/missioncache:prompts <project>` after `/missioncache:new` - that command generates the prompt files with proper frontmatter, lists the relevant agents and skills, and shows everything in a batch-approval flow.
 
 ### The DAG build
 
@@ -224,7 +224,7 @@ The 500ms sleep is the progress-bar refresh rate. It is also how often the dashb
 
 ## Prompts and the YAML contract
 
-Prompt files are the bridge between `/orbit:prompts` and orbit-auto. They are what makes parallel mode possible, and they are also a reproducible way to re-run a single task without the whole loop.
+Prompt files are the bridge between `/missioncache:prompts` and orbit-auto. They are what makes parallel mode possible, and they are also a reproducible way to re-run a single task without the whole loop.
 
 ### Structure
 
@@ -285,7 +285,7 @@ Only `task_id` is strictly required by the parser (`task_parser.py:parse_prompt_
 
 - `task_title` is used in auto-commit messages and display output.
 - `dependencies` drives the DAG; without it, the task gets an implicit dep on `task_id - 1`.
-- `agents` and `skills` are metadata for `/orbit:prompts`; they are not read by orbit-auto at runtime.
+- `agents` and `skills` are metadata for `/missioncache:prompts`; they are not read by orbit-auto at runtime.
 - `tdd` is a per-task override for the TDD enforcement flag - `true` forces TDD wrapping on, `false` forces it off, absent means use the global `--tdd` setting.
 
 ### How prompts are picked up
@@ -533,7 +533,7 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Cause:** A line in `<project>-tasks.md` does not have a matching `prompts/task-NN-prompt.md` file. `plan_validator.py:validate_plan()` catches this during the pre-run check.
 
-**Fix:** Either create the missing prompt file (copy an existing one as a template, or re-run `/orbit:prompts <project>` to regenerate), or remove the unwanted task from the tasks file. Parallel mode will refuse to run until every uncompleted task in `tasks.md` has a prompt.
+**Fix:** Either create the missing prompt file (copy an existing one as a template, or re-run `/missioncache:prompts <project>` to regenerate), or remove the unwanted task from the tasks file. Parallel mode will refuse to run until every uncompleted task in `tasks.md` has a prompt.
 
 ### "Parallel mode says 'Dependency 01 does not exist'"
 

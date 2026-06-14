@@ -84,12 +84,12 @@ def build_reminder(
         "",
         "If any of these are actually complete, mark them NOW before continuing:",
         "",
-        "  mcp__plugin_orbit_pm__update_tasks_file(",
+        "  mcp__plugin_missioncache_pm__update_tasks_file(",
         f'    tasks_file="{tasks_file_path}",',
         '    completed_tasks=["task description", ...]',
         "  )",
         "",
-        "Or run /orbit:save to update both files in one step.",
+        "Or run /missioncache:save to update both files in one step.",
         "",
         "If a task is still in progress, ignore this warning and continue - "
         "it will clear once the checkbox flips or the heading is removed from "
@@ -98,7 +98,7 @@ def build_reminder(
         "Important: the built-in TaskCreate tool and any system reminders "
         "about \"task tools\" refer to Claude Code's in-conversation todo "
         "list, NOT the orbit tasks file. Use "
-        "`mcp__plugin_orbit_pm__update_tasks_file` for orbit work.",
+        "`mcp__plugin_missioncache_pm__update_tasks_file` for orbit work.",
         "",
     ]
     return "\n".join(lines)

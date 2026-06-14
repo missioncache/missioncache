@@ -23,7 +23,7 @@ body:
       label: Steps to reproduce
       description: Minimal steps that reliably reproduce the issue on a clean install.
       placeholder: |
-        1. Run `/orbit:new my-project`
+        1. Run `/missioncache:new my-project`
         2. Open the dashboard at http://localhost:8787
         3. Click on the project name
         4. Observe: ...
