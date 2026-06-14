@@ -1,5 +1,5 @@
 {
-  "description": "Orbit plugin hooks for context preservation and task detection",
+  "description": "MissionCache plugin hooks for context preservation and task detection",
   "hooks": {
     "UserPromptSubmit": [
       {

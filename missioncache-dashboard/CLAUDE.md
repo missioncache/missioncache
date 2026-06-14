@@ -1,4 +1,4 @@
-# Orbit Dashboard
+# MissionCache Dashboard
 
 Dashboard for productivity tracking and task analytics.
 
@@ -18,8 +18,8 @@ open http://localhost:8787
 
 | Database | File | Purpose |
 |----------|------|---------|
-| SQLite | `~/.orbit/tasks.db` | Source of truth for **writes** (heartbeats, sessions) |
-| DuckDB | `~/.orbit/tasks.duckdb` | Analytics database for **reads** (fast columnar queries) |
+| SQLite | `~/.missioncache/tasks.db` | Source of truth for **writes** (heartbeats, sessions) |
+| DuckDB | `~/.missioncache/tasks.duckdb` | Analytics database for **reads** (fast columnar queries) |
 
 **Data flow:** Claude Code hooks -> SQLite -> sync -> DuckDB -> Dashboard
 
@@ -39,7 +39,7 @@ open http://localhost:8787
 
 ### Deployment
 
-- **Launchd plist**: `~/Library/LaunchAgents/com.orbit.dashboard.plist`
+- **Launchd plist**: `~/Library/LaunchAgents/com.missioncache.dashboard.plist`
 - **Python**: Must use `/opt/homebrew/bin/python3.11` (not system Python)
 - **Port**: 8787
 
@@ -48,12 +48,12 @@ open http://localhost:8787
 ### Project & Activity APIs
 
 ```
-GET /api/tasks/active      # Active tasks (excludes orphans with orbit files in completed/)
-GET /api/tasks/completed   # Completed tasks + orphans (orbit files in completed/)
+GET /api/tasks/active      # Active tasks (excludes orphans with MissionCache files in completed/)
+GET /api/tasks/completed   # Completed tasks + orphans (MissionCache files in completed/)
 GET /api/stats/today       # Today's activity (tasks, LOC, sessions)
 GET /api/stats/day?date=   # Historical day stats
 GET /api/stats/history?days=N  # Aggregate with heatmap, trends
-GET /api/task/{id}/files   # Task orbit files (plan, context, tasks.md)
+GET /api/task/{id}/files   # Task MissionCache files (plan, context, tasks.md)
 ```
 
 ### Utility APIs
@@ -76,18 +76,18 @@ GET /health        # Health check
 - Hourly activity bar chart + timeline
 - Activity history with heatmap and trends
 
-## Orbit Location Detection
+## MissionCache Location Detection
 
-The `parse_orbit_progress()` function intelligently finds orbit files in the centralized location:
-- Primary path: `~/.orbit/{active,completed}/<task-name>/`
+The `parse_orbit_progress()` function intelligently finds MissionCache files in the centralized location:
+- Primary path: `~/.missioncache/{active,completed}/<task-name>/`
 - Legacy fallback: repo-local `dev/{active,completed}/` paths (for older projects)
 
 ### Search Order
 
 For a task with `full_path = "active/task-name"`:
 
-1. Centralized active: `~/.orbit/active/task-name/`
-2. Centralized completed: `~/.orbit/completed/task-name/`
+1. Centralized active: `~/.missioncache/active/task-name/`
+2. Centralized completed: `~/.missioncache/completed/task-name/`
 3. Legacy repo-local: `{repo_path}/dev/active/task-name/` (fallback)
 4. Legacy completed: `{repo_path}/dev/completed/task-name/` (fallback)
 
@@ -99,15 +99,15 @@ Within a task directory, looks for files in order:
 
 ### Orphan Task Handling
 
-Tasks can become "orphans" when orbit files are moved to `~/.orbit/completed/` but the database `status` field isn't updated.
+Tasks can become "orphans" when MissionCache files are moved to `~/.missioncache/completed/` but the database `status` field isn't updated.
 
-**Detection:** `parse_orbit_progress()` returns `orbit_in_completed: true` when orbit files are found in a completed path.
+**Detection:** `parse_orbit_progress()` returns `orbit_in_completed: true` when MissionCache files are found in a completed path.
 
 **API Behavior:**
 - `/api/tasks/active` - Filters OUT tasks where `orbit_in_completed=true`
-- `/api/tasks/completed` - Includes orphan tasks (DB status='active' but orbit files in completed)
+- `/api/tasks/completed` - Includes orphan tasks (DB status='active' but MissionCache files in completed)
 
-This ensures the dashboard shows tasks in the correct list based on actual orbit file location, not stale DB status.
+This ensures the dashboard shows tasks in the correct list based on actual MissionCache file location, not stale DB status.
 
 ## Common Issues
 
@@ -116,13 +116,13 @@ This ensures the dashboard shows tasks in the correct list based on actual orbit
 **Fix:**
 ```bash
 # Stop service
-launchctl unload ~/Library/LaunchAgents/com.orbit.dashboard.plist
+launchctl unload ~/Library/LaunchAgents/com.missioncache.dashboard.plist
 
 # Re-run migration
 /opt/homebrew/bin/python3.11 migrate_to_duckdb.py
 
 # Restart service
-launchctl load ~/Library/LaunchAgents/com.orbit.dashboard.plist
+launchctl load ~/Library/LaunchAgents/com.missioncache.dashboard.plist
 ```
 
 ### Wrong Python version in launchd
@@ -155,9 +155,9 @@ Install for Python 3.11:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.orbit/tasks.db` | SQLite source database |
-| `~/.orbit/tasks.duckdb` | DuckDB analytics database |
-| `~/Library/LaunchAgents/com.orbit.dashboard.plist` | Launchd service config |
+| `~/.missioncache/tasks.db` | SQLite source database |
+| `~/.missioncache/tasks.duckdb` | DuckDB analytics database |
+| `~/Library/LaunchAgents/com.missioncache.dashboard.plist` | Launchd service config |
 
 ## Code Style
 

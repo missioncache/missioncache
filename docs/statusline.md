@@ -1,8 +1,8 @@
 # Statusline
 
-This document covers orbit's statusline: a single-file Python script that Claude Code invokes on every turn to render the multi-line status block at the bottom of the terminal. It is the most user-visible piece of orbit - the part you stare at all day - and also the most performance-sensitive, because every millisecond it spends is a millisecond of latency added to every Claude Code message.
+This document covers MissionCache's statusline: a single-file Python script that Claude Code invokes on every turn to render the multi-line status block at the bottom of the terminal. It is the most user-visible piece of MissionCache - the part you stare at all day - and also the most performance-sensitive, because every millisecond it spends is a millisecond of latency added to every Claude Code message.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`hooks-state.db`, `session_state`, `project_state`, `term_sessions`, orbit file layout). If a term in this doc is not defined here, it is defined there.
+It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`hooks-state.db`, `session_state`, `project_state`, `term_sessions`, MissionCache file layout). If a term in this doc is not defined here, it is defined there.
 
 If you are just trying to *use* the statusline, the short version is: once installed, Claude Code runs it automatically and you do not have to do anything. Customize via environment variables in your shell profile. The rest of this doc is for when you want to understand what the lines mean, change what is shown, or debug a line that is broken.
 
@@ -12,7 +12,7 @@ The statusline is a 6- or 7-line block that renders below every Claude Code prom
 
 | Line | Icon cell | What it shows |
 |------|-----------|---------------|
-| 1 | Project | Active orbit project name + `[completed/total]` progress bracket, with OSC 8 hyperlink to the dashboard. Also shows "Last Action" time for the session. Empty if no orbit project. |
+| 1 | Project | Active MissionCache project name + `[completed/total]` progress bracket, with OSC 8 hyperlink to the dashboard. Also shows "Last Action" time for the session. Empty if no MissionCache project. |
 | 2 | Dir | Current working directory, git branch + clean/dirty indicator, worktree annotation if applicable. |
 | 3 | Time | Elapsed session time, current date/time, edit count for the session. |
 | 4 | Metrics | Model name, tokens used, context window percentage with warning colors. Shows "Fast mode activated" if Claude Code fast mode is on. |
@@ -26,7 +26,7 @@ The lines are rendered in a specific non-numeric order in the main() function - 
 
 Every line is laid out as two-column or three-column "cells" separated by a pipe character (` │ `). The first column has a dynamic width computed as `max(CELL_WIDTH=24, widest_first_column_item)`, the second column the same, and subsequent columns use the fixed `CELL_WIDTH`. This gives you vertical alignment on the first two cells of every line, which is the thing your eye tracks when scanning the status block.
 
-Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is in `orbit-dashboard/orbit_dashboard/statusline.py:227` if you need to change it.
+Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is in `missioncache-dashboard/missioncache_dashboard/statusline.py:227` if you need to change it.
 
 ## How it gets invoked
 
@@ -34,11 +34,11 @@ Claude Code runs the statusline via the `statusLine` key in `~/.claude/settings.
 
 ```json
 "statusLine": {
-  "command": "orbit-statusline"
+  "command": "missioncache-statusline"
 }
 ```
 
-`orbit-statusline` is a pip entry point shipped by the `orbit-dashboard` package. `uvx orbit-install` wires it into `settings.json` automatically during the full install; if you cloned the repo and ran `uvx orbit-install --local`, the entry point resolves to `orbit_dashboard/statusline.py` in your checkout, so edits to that file are live instantly. No reinstall is needed for statusline-source changes in `--local` mode. For end users on the PyPI path, `uvx orbit-install --update` pulls in the newest published version.
+`missioncache-statusline` is a pip entry point shipped by the `missioncache-dashboard` package. `uvx missioncache-install` wires it into `settings.json` automatically during the full install; if you cloned the repo and ran `uvx missioncache-install --local`, the entry point resolves to `missioncache_dashboard/statusline.py` in your checkout, so edits to that file are live instantly. No reinstall is needed for statusline-source changes in `--local` mode. For end users on the PyPI path, `uvx missioncache-install --update` pulls in the newest published version.
 
 Claude Code spawns the script on every turn and sends session JSON on stdin:
 
@@ -91,22 +91,22 @@ On cache hit, the future returns instantly from a file read. On cache miss, the 
 
 ## Environment variables
 
-The statusline has a small but useful set of environment-variable knobs, documented in the module docstring at the top of `orbit_dashboard/statusline.py`. Set them in your shell profile (`~/.zshrc`, `~/.bashrc`, fish config, etc.) to customize what is shown.
+The statusline has a small but useful set of environment-variable knobs, documented in the module docstring at the top of `missioncache_dashboard/statusline.py`. Set them in your shell profile (`~/.zshrc`, `~/.bashrc`, fish config, etc.) to customize what is shown.
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
 | `STATUSLINE_CODEX` | `true` | Show the Codex usage line. Set to `false` to hide it even if Codex is installed. |
 | `STATUSLINE_HEALTH_SERVICES` | `Code,Claude API` | Comma-separated list of Anthropic services to monitor. Available values: `Code`, `Claude API`, `claude.ai`, `platform.claude.com`, `Claude for Government`, `Claude Cowork`. Only incidents affecting services in this list are shown. |
-| `ORBIT_DASHBOARD_URL` | `http://localhost:8787` | Base URL used for the OSC 8 clickable hyperlinks on the project name and progress bracket. Change if your dashboard runs on a non-default port or a remote host. |
+| `MISSIONCACHE_DASHBOARD_URL` | `http://localhost:8787` | Base URL used for the OSC 8 clickable hyperlinks on the project name and progress bracket. Change if your dashboard runs on a non-default port or a remote host. |
 
-Auth-provider detection also respects Claude Code's own environment variables (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) to display the correct subscription label on the Usage line. You do not need to set these for orbit - the statusline reads them because Claude Code already uses them.
+Auth-provider detection also respects Claude Code's own environment variables (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) to display the correct subscription label on the Usage line. You do not need to set these for MissionCache - the statusline reads them because Claude Code already uses them.
 
 ## Clickable hyperlinks (OSC 8)
 
 Modern terminal emulators support OSC 8 escape sequences for clickable hyperlinks. The statusline uses them in three places:
 
-1. **Project name** - links to `{ORBIT_DASHBOARD_URL}/#projects`. Click to open the dashboard's Projects view.
-2. **Progress bracket** - links to `{ORBIT_DASHBOARD_URL}/#projects?task=<name>&tab=tasks`. Click to open the task modal directly on the Tasks tab.
+1. **Project name** - links to `{MISSIONCACHE_DASHBOARD_URL}/#projects`. Click to open the dashboard's Projects view.
+2. **Progress bracket** - links to `{MISSIONCACHE_DASHBOARD_URL}/#projects?task=<name>&tab=tasks`. Click to open the task modal directly on the Tasks tab.
 3. **Health status** - links to `https://status.claude.com`. Click to open the Anthropic status page.
 4. **Version label** - links to the Claude Code CHANGELOG on GitHub, specifically `https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md`.
 
@@ -128,18 +128,18 @@ Tables the statusline reads:
 
 `hooks-state.db` is the main contact point between the statusline and the rest of the plugin - it is how SessionStart tells the statusline "this session is on project X", and it is how `/missioncache:load` tells the statusline "switch to project Y mid-session" without restarting Claude Code.
 
-### `~/.orbit/active/<project>/<project>-tasks.md`
+### `~/.missioncache/active/<project>/<project>-tasks.md`
 
-Read for the progress bracket. Parsing is a simple regex scan for completed (`- [x]`) and pending (`- [ ]`) lines - see `_parse_task_progress()`. The format matches the MCP server's canonical parser in `mcp-server/src/mcp_orbit/orbit.py`, counting all checklist items flatly including hierarchical subtasks.
+Read for the progress bracket. Parsing is a simple regex scan for completed (`- [x]`) and pending (`- [ ]`) lines - see `_parse_task_progress()`. The format matches the MCP server's canonical parser in `mcp-server/src/mcp_missioncache/orbit.py`, counting all checklist items flatly including hierarchical subtasks.
 
 Two special cases for display:
 
 - **Empty file or no checklists at all:** shows `[TBD]` instead of `[0/0]`.
 - **Template placeholder:** a single pending item with text exactly `TBD` also shows `[TBD]`, so freshly initialized projects do not display `[0/1]` until you write real tasks.
 
-### `~/.orbit/tasks.db`
+### `~/.missioncache/tasks.db`
 
-**The statusline does not read `tasks.db` directly.** This is intentional. `tasks.db` is orbit-db's domain and reading it from the statusline would require importing `orbit_db`, which is slow and adds a fork boundary. All the time and task data the statusline needs comes through `hooks-state.db` (written by hooks and the dashboard) or directly from the filesystem (`<project>-tasks.md`).
+**The statusline does not read `tasks.db` directly.** This is intentional. `tasks.db` is missioncache-db's domain and reading it from the statusline would require importing `missioncache_db`, which is slow and adds a fork boundary. All the time and task data the statusline needs comes through `hooks-state.db` (written by hooks and the dashboard) or directly from the filesystem (`<project>-tasks.md`).
 
 This is also why the statusline cannot show total time invested on the project - that would require a query against `tasks.db:sessions`, which is out of scope for this component. Total time lives on the dashboard.
 
@@ -175,10 +175,10 @@ Here is what each line builds from, so you can trace a display issue back to its
 
 ### Line 1: Project + Last Action
 
-- **Project** - `get_project_info(session_id, duration_sec)`. Reads `project_state` from `hooks-state.db`. If the row is older than `max(duration_sec + 60, 60)` seconds, it is considered stale and ignored. Looks for the project directory under `ORBIT_ACTIVE = ~/.orbit/active/`, supports nested subtask layouts (`parent/child`), and reads the tasks file to compute the progress bracket. Wraps both the name and the bracket in OSC 8 links.
+- **Project** - `get_project_info(session_id, duration_sec)`. Reads `project_state` from `hooks-state.db`. If the row is older than `max(duration_sec + 60, 60)` seconds, it is considered stale and ignored. Looks for the project directory under `MISSIONCACHE_ACTIVE = ~/.missioncache/active/`, supports nested subtask layouts (`parent/child`), and reads the tasks file to compute the progress bracket. Wraps both the name and the bracket in OSC 8 links.
 - **Last Action** - `get_last_action_time(session_id)`. Reads `last_prompt_at` from `session_state` and formats it as "Apr 14 10:00".
 
-Empty on a session with no active orbit project.
+Empty on a session with no active MissionCache project.
 
 ### Line 2: Dir + Git
 
@@ -254,7 +254,7 @@ If you are adding a knob that controls some aspect of the display:
 3. Use it wherever needed in the rendering code.
 4. Document it in the [environment variables](#environment-variables) section of this doc.
 
-Keep the variable name consistent with the existing ones: `STATUSLINE_<FEATURE>` for orbit-owned knobs, existing Claude Code env vars (`CLAUDE_CODE_USE_*`, `ANTHROPIC_*`) for auth-provider detection.
+Keep the variable name consistent with the existing ones: `STATUSLINE_<FEATURE>` for MissionCache-owned knobs, existing Claude Code env vars (`CLAUDE_CODE_USE_*`, `ANTHROPIC_*`) for auth-provider detection.
 
 ## Performance notes
 
@@ -273,7 +273,7 @@ Things that are slow and gated by threads + timeouts:
 
 Things to avoid adding:
 - Any subprocess call that is not already cached or gated
-- Any DB query against `~/.orbit/tasks.db` (WAL lock contention with `orbit-db` writers)
+- Any DB query against `~/.missioncache/tasks.db` (WAL lock contention with `missioncache-db` writers)
 - Any synchronous HTTP call that is not cached
 
 The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) is there because subprocess stderr can corrupt the ANSI display if it leaks. Do not remove it.
@@ -282,9 +282,9 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 ### "The statusline is missing entirely"
 
-**Cause:** Either the `orbit-statusline` entry point is not on `PATH` (the `orbit-dashboard` package was never pip-installed, or it was uninstalled), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup. A common legacy variant: `settings.json.statusLine.command` still points at `python3 ~/.claude/scripts/statusline.py` from a pre-M10 install, and that symlink now points at a deleted path.
+**Cause:** Either the `missioncache-statusline` entry point is not on `PATH` (the `missioncache-dashboard` package was never pip-installed, or it was uninstalled), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup. A common legacy variant: `settings.json.statusLine.command` still points at `python3 ~/.claude/scripts/statusline.py` from a pre-M10 install, and that symlink now points at a deleted path.
 
-**Fix:** First run `which orbit-statusline` - it should print a path. If not, re-run `uvx orbit-install --dashboard --statusline` (or `--update` if orbit is already installed) to reinstall the package and wire the entry point. Then check `~/.claude/settings.json` - the `statusLine.command` value should be the bare string `orbit-statusline`, not a `python3 ~/.claude/scripts/...` invocation. Rewrite it if needed. Finally, run the script in isolation with a dummy payload: `echo '{}' | orbit-statusline`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
+**Fix:** First run `which missioncache-statusline` - it should print a path. If not, re-run `uvx missioncache-install --dashboard --statusline` (or `--update` if MissionCache is already installed) to reinstall the package and wire the entry point. Then check `~/.claude/settings.json` - the `statusLine.command` value should be the bare string `missioncache-statusline`, not a `python3 ~/.claude/scripts/...` invocation. Rewrite it if needed. Finally, run the script in isolation with a dummy payload: `echo '{}' | missioncache-statusline`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
 
 ### "The statusline renders but some lines are blank"
 
@@ -292,7 +292,7 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 **Fix:** Run the script with `-v` equivalent by printing debug info inside the future you suspect. Check `~/.claude/hooks/state/statusline-ctx-debug.log` to see what Claude Code's stdin looked like on the last render. For the Usage line specifically, check `~/.claude/scripts/usage-cache.json` - if the file is stale or corrupted, delete it and the next render will hit the API.
 
-### "Project name doesn't appear even though I'm in an orbit project"
+### "Project name doesn't appear even though I'm in a MissionCache project"
 
 **Cause:** The `project_state` row is either missing, too old (older than `max(session_duration + 60s, 60s)`), or does not match the current `session_id`. The statusline uses the Claude Code stdin's `session_id`, not the environment variable - if `session_start.py` wrote the wrong session ID to `project_state`, you will see this.
 
@@ -324,7 +324,7 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 ## Where to go from here
 
-- [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, the storage model, and where the statusline sits relative to the rest of orbit.
+- [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, the storage model, and where the statusline sits relative to the rest of MissionCache.
 - [`hooks.md`](./hooks.md) - for `session_start.py` and how it writes the state the statusline reads.
 - [`dashboard.md`](./dashboard.md) - for the `/api/hooks/project` endpoint used by `/missioncache:load` and the OSC 8 link targets.
-- `orbit-dashboard/orbit_dashboard/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump. The `orbit-statusline` entry point declared in `orbit-dashboard/pyproject.toml` resolves here.
+- `missioncache-dashboard/missioncache_dashboard/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump. The `missioncache-statusline` entry point declared in `missioncache-dashboard/pyproject.toml` resolves here.

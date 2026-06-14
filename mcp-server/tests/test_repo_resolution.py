@@ -38,7 +38,7 @@ def isolated_orbit(tmp_path, monkeypatch):
             )
         walker = walker.parent
 
-    root_dir = tmp_path / ".orbit"
+    root_dir = tmp_path / ".missioncache"
     root_dir.mkdir()
     db_path = tmp_path / "tasks.db"
 
@@ -153,7 +153,7 @@ class TestCreateOrbitFilesGitRootResolution:
         """Monorepo opt-out: caller passes a subdir of a git repo with
         ``resolve_git_root=False`` and the subdir IS the registered
         project boundary. This is the path for sub-packages within a
-        monorepo where each package is its own orbit project."""
+        monorepo where each package is its own MissionCache project."""
         repo_root = _make_git_repo(isolated_orbit / "monorepo")
         sub_package = repo_root / "packages" / "auth-service"
         sub_package.mkdir(parents=True)

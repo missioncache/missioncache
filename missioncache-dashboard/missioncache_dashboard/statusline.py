@@ -5,7 +5,7 @@ Reads JSON from stdin (Claude Code session data) and outputs
 a multi-line ANSI-colored status display.
 
 Layout:
-  Line 1: Project    - [project name + progress] [current task] (only if active orbit project)
+  Line 1: Project    - [project name + progress] [current task] (only if active MissionCache project)
   Line 2: Location   - [dir] [git branch+status]
   Line 3: Session    - [elapsed] [edits]
   Line 4: Metrics    - [model] [effort?]
@@ -16,9 +16,9 @@ Layout:
 
 Configuration:
   All visibility toggles (Codex line, Claude subscription usage/type, Claude
-  status, status service filter) are managed through the orbit dashboard
+  status, status service filter) are managed through the MissionCache dashboard
   Settings screen. The statusline reads them from
-  ~/.claude/orbit-dashboard-config.json on each invocation. Defaults apply
+  ~/.claude/missioncache-dashboard-config.json on each invocation. Defaults apply
   when the file or its `statusline` section is missing.
 """
 
@@ -191,8 +191,7 @@ STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
 HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
 SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
-# Path literal stays orbit-named until Task 71.
-MISSIONCACHE_ACTIVE = Path.home() / ".orbit" / "active"
+MISSIONCACHE_ACTIVE = Path.home() / ".missioncache" / "active"
 
 
 def _get_hooks_db() -> sqlite3.Connection | None:
@@ -219,7 +218,7 @@ _ALL_HEALTH_COMPONENTS = {
     "bpp5gb3hpjcl": "Claude Cowork",
 }
 
-_DASHBOARD_CONFIG_FILE = Path.home() / ".claude" / "orbit-dashboard-config.json"
+_DASHBOARD_CONFIG_FILE = Path.home() / ".claude" / "missioncache-dashboard-config.json"
 _DEFAULT_STATUSLINE_CONFIG = {
     "codex": True,
     "subscription_usage": True,
@@ -609,12 +608,12 @@ def _parse_task_progress(tasks_content: str) -> str:
 
 
 def _read_active_task_pointer(session_id: str) -> dict | None:
-    """Return the orbit active-task pointer for this session, or None.
+    """Return the MissionCache active-task pointer for this session, or None.
 
     The pointer is written by the ``set_active_orbit_tasks`` MCP tool when
     a caller (Claude in interactive use, or any other MCP client) declares
-    which orbit checklist task numbers are currently in progress. Lives at
-    ``~/.claude/hooks/state/active-orbit-task/<session-id>.json``.
+    which MissionCache checklist task numbers are currently in progress. Lives at
+    ``~/.claude/hooks/state/active-missioncache-task/<session-id>.json``.
 
     Replaces the previous read of Claude Code's internal TodoList
     (``~/.claude/tasks/<sid>/*.json``) which duplicated information Claude
@@ -628,7 +627,7 @@ def _read_active_task_pointer(session_id: str) -> dict | None:
         / ".claude"
         / "hooks"
         / "state"
-        / "active-orbit-task"
+        / "active-missioncache-task"
         / f"{session_id}.json"
     )
     try:
@@ -731,7 +730,7 @@ def _format_active_task(
 def _get_active_task(
     session_id: str, tasks_content: str, current_project: str
 ) -> str:
-    """Return the orbit Task field text for the statusline, or "".
+    """Return the MissionCache Task field text for the statusline, or "".
 
     Composes ``_read_active_task_pointer`` and ``_format_active_task``;
     kept as a single seam so callers (and tests) can mock either layer.
@@ -794,7 +793,7 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     project_dir = nested
                     break
 
-    # Active task is read from the orbit active-task pointer set by the
+    # Active task is read from the MissionCache active-task pointer set by the
     # set_active_orbit_tasks MCP tool. Falling back to "first pending
     # checklist item" or to Claude Code's internal TodoList both proved
     # misleading - the first lied, the second duplicated information

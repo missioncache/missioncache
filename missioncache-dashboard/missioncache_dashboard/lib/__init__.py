@@ -1,4 +1,4 @@
-"""Orbit Dashboard library modules."""
+"""MissionCache Dashboard library modules."""
 
 from .analytics_db import AnalyticsDB, get_db
 

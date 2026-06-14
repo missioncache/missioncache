@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Seed a sandboxed orbit installation with realistic fake data for screenshots.
+"""Seed a sandboxed MissionCache installation with realistic fake data for screenshots.
 
 Usage (always via HOME override - this is the safety mechanism):
 
-    HOME=/tmp/orbit-demo python3.11 missioncache-dashboard/scripts/seed_demo_data.py
+    HOME=/tmp/missioncache-demo python3.11 missioncache-dashboard/scripts/seed_demo_data.py
 
 Then run the dashboard against the same HOME on an alternate port:
 
-    HOME=/tmp/orbit-demo MISSIONCACHE_DASHBOARD_PORT=8789 \\
+    HOME=/tmp/missioncache-demo MISSIONCACHE_DASHBOARD_PORT=8789 \\
         python3.11 missioncache-dashboard/server.py
 
     open http://localhost:8789
@@ -15,11 +15,11 @@ Then run the dashboard against the same HOME on an alternate port:
 The seeder refuses to run if HOME is your real user home (safety check against
 pwd.getpwuid). It creates:
 
-    $HOME/.claude/tasks.db                  - SQLite with fixture data
-    $HOME/.claude/tasks.duckdb              - DuckDB (migrated from SQLite)
-    $HOME/.claude/orbit/active/<name>/      - plan/context/tasks files
-    $HOME/.claude/orbit/completed/<name>/   - completed project files
-    $HOME/projects/{api,docs,pipelines,data}/ - empty repo dirs referenced by tasks
+    $HOME/.missioncache/tasks.db                  - SQLite with fixture data
+    $HOME/.missioncache/tasks.duckdb              - DuckDB (migrated from SQLite)
+    $HOME/.missioncache/active/<name>/            - plan/context/tasks files
+    $HOME/.missioncache/completed/<name>/         - completed project files
+    $HOME/projects/{api,docs,pipelines,data}/     - empty repo dirs referenced by tasks
 """
 from __future__ import annotations
 
@@ -45,16 +45,16 @@ def safety_check() -> Path:
         sys.exit(
             "REFUSING to seed: $HOME resolves to your real user home "
             f"({real_home}).\nRun with an isolated HOME instead:\n"
-            "    HOME=/tmp/orbit-demo python3.11 "
+            "    HOME=/tmp/missioncache-demo python3.11 "
             "missioncache-dashboard/scripts/seed_demo_data.py"
         )
 
-    existing_db = demo_home / ".claude" / "tasks.db"
+    existing_db = demo_home / ".missioncache" / "tasks.db"
     if existing_db.exists() and existing_db.stat().st_size > 1024:
         sys.exit(
             f"REFUSING to seed: {existing_db} already exists and is >1KB.\n"
             "Delete it first if you want a fresh seed:\n"
-            f"    rm -rf {demo_home}/.claude {demo_home}/projects"
+            f"    rm -rf {demo_home}/.missioncache {demo_home}/.claude"
         )
 
     return demo_home
@@ -76,7 +76,7 @@ def iso(dt: datetime) -> str:
 
 
 # Project descriptors: each dict drives a row in tasks + heartbeats + sessions
-# + orbit files. Time patterns are rendered at seed time relative to NOW.
+# + MissionCache files. Time patterns are rendered at seed time relative to NOW.
 PROJECTS = [
     {
         "name": "api-gateway-rewrite",
@@ -251,7 +251,7 @@ PATTERNS = {
 }
 
 
-# Realistic orbit file content keyed by project name
+# Realistic MissionCache file content keyed by project name
 # Plan files - short, concrete, engineering-voiced
 PLANS: dict[str, str] = {
     "api-gateway-rewrite": """# API Gateway Rewrite - Plan
@@ -742,16 +742,16 @@ def seed_heartbeats_and_sessions(
 
 
 CLAUDE_SESSIONS = [
-    # Tracked sessions: cwd matches a repo AND session_id is linked to an
-    # orbit session, mirroring how production hooks share the Claude Code
-    # session UUID between orbit heartbeats and JSONL transcripts.
+    # Tracked sessions: cwd matches a repo AND session_id is linked to a
+    # MissionCache session, mirroring how production hooks share the Claude Code
+    # session UUID between MissionCache heartbeats and JSONL transcripts.
     {"session_id": "demo-claude-001", "repo": "api", "task": "api-gateway-rewrite",
      "day_offset": 0, "hour": 10, "duration": 2700, "messages": 21, "tools": 18},
     {"session_id": "demo-claude-002", "repo": "api", "task": "auth-refactor",
      "day_offset": -1, "hour": 13, "duration": 4500, "messages": 34, "tools": 31},
     {"session_id": "demo-claude-003", "repo": "docs", "task": "docs-site-migration",
      "day_offset": -2, "hour": 11, "duration": 2100, "messages": 14, "tools": 12},
-    # Untracked sessions: cwd has no matching repo and no linked orbit session.
+    # Untracked sessions: cwd has no matching repo and no linked MissionCache session.
     {"session_id": "demo-claude-untracked-001", "untracked_cwd": "scratch/experiments",
      "day_offset": -1, "hour": 20, "duration": 1800, "messages": 11, "tools": 6},
     {"session_id": "demo-claude-untracked-002", "untracked_cwd": "Downloads",
@@ -813,7 +813,7 @@ def _write_session_jsonl(
 def seed_claude_jsonl_files(
     conn: sqlite3.Connection, demo_home: Path, task_ids: dict[str, int]
 ) -> None:
-    """Write JSONL transcripts and link tracked entries to orbit sessions.
+    """Write JSONL transcripts and link tracked entries to MissionCache sessions.
 
     The dashboard's `refresh_claude_session_cache` will discover the JSONL
     files on first read of the activity API, parse them, and populate
@@ -821,7 +821,7 @@ def seed_claude_jsonl_files(
     because direct inserts are orphaned: the refresh loop only iterates
     files found via `get_jsonl_files_for_date`.
 
-    For tracked entries we additionally insert an orbit `sessions` row
+    For tracked entries we additionally insert a MissionCache `sessions` row
     keyed by the same session_id so the dashboard's untracked-vs-tracked
     LEFT JOIN classifies them correctly.
     """
@@ -851,7 +851,7 @@ def seed_claude_jsonl_files(
             tool_count=e["tools"],
         )
 
-        # Link tracked Claude sessions to orbit sessions so the dashboard's
+        # Link tracked Claude sessions to MissionCache sessions so the dashboard's
         # session_id LEFT JOIN classifies them as tracked, not untracked.
         if "task" in e:
             conn.execute(
@@ -914,16 +914,16 @@ def seed_auto_execution(
 
 
 # =============================================================================
-# Orbit file writers
+# MissionCache file writers
 # =============================================================================
 
 def write_orbit_files(demo_home: Path) -> None:
     """Create plan.md, context.md, tasks.md, and prompt files under
-    $HOME/.claude/orbit/<status>/<name>/.
+    $HOME/.missioncache/<status>/<name>/.
     """
     for p in PROJECTS:
         status_dir = "active" if p["status"] == "active" else "completed"
-        task_dir = demo_home / ".claude" / "orbit" / status_dir / p["name"]
+        task_dir = demo_home / ".missioncache" / status_dir / p["name"]
         task_dir.mkdir(parents=True, exist_ok=True)
 
         (task_dir / f"{p['name']}-plan.md").write_text(PLANS[p["name"]])
@@ -957,12 +957,12 @@ def write_orbit_files(demo_home: Path) -> None:
 
 def main() -> None:
     demo_home = safety_check()
-    print(f"Seeding demo orbit installation at HOME={demo_home}")
+    print(f"Seeding demo MissionCache installation at HOME={demo_home}")
 
-    claude_dir = demo_home / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = demo_home / ".missioncache"
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    db_path = claude_dir / "tasks.db"
+    db_path = data_dir / "tasks.db"
     if db_path.exists():
         db_path.unlink()
 
@@ -994,7 +994,7 @@ def main() -> None:
         conn.close()
 
     write_orbit_files(demo_home)
-    print("  wrote orbit plan/context/tasks files for 6 projects")
+    print("  wrote MissionCache plan/context/tasks files for 6 projects")
 
     # Sync SQLite -> DuckDB so the dashboard has the analytics layer ready
     # on startup without a separate migration step. Use the same code path the

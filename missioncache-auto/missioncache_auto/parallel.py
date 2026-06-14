@@ -1,5 +1,5 @@
 """
-Parallel execution mode for Orbit Auto.
+Parallel execution mode for MissionCache Auto.
 
 Orchestrates multiple workers executing tasks in parallel
 while respecting dependencies between tasks.
@@ -136,7 +136,7 @@ class ParallelRunner:
         remaining_count = self.dag.task_count - len(pre_completed)
 
         # Display header and plan
-        self.display.header("ORBIT AUTO [PARALLEL]")
+        self.display.header("MISSIONCACHE AUTO [PARALLEL]")
         info = {
             "Directory": str(self.paths.task_dir),
             "Tasks": self.dag.task_count,

@@ -1,12 +1,12 @@
 """
-Runnable task calculation for Orbit Auto.
+Runnable task calculation for MissionCache Auto.
 
 Determines which tasks can currently run based on:
 - Task mode (auto/inter)
 - Task completion status
 - Dependencies (explicit and sequential)
 
-This mirrors the logic in the orbit MCP server's get_runnable_tasks()
+This mirrors the logic in the MissionCache MCP server's get_runnable_tasks()
 to enable missioncache-auto to filter tasks without needing MCP connectivity.
 """
 

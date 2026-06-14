@@ -1,7 +1,7 @@
 [project]
 name = "missioncache-db"
-version = "1.0.0"
-description = "SQLite-based task and time tracking database for the orbit Claude Code plugin"
+version = "1.0.1"
+description = "SQLite-based task and time tracking database for the MissionCache Claude Code plugin"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Tomer Brami", email = "tomerbrami@gmail.com"}
 ]
-keywords = ["claude-code", "orbit", "task-tracking", "time-tracking", "sqlite"]
+keywords = ["claude-code", "missioncache", "task-tracking", "time-tracking", "sqlite"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",

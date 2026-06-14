@@ -1,12 +1,12 @@
 ---
-description: "Rename the current orbit project"
+description: "Rename the current MissionCache project"
 argument-hint: "[new-name]"
 ---
 
 # Rename Project
 
-Rename the orbit project bound to the current Claude session. Updates the
-DB row, moves the orbit directory, renames files inside, and rewrites the
+Rename the MissionCache project bound to the current Claude session. Updates the
+DB row, moves the MissionCache directory, renames files inside, and rewrites the
 template H1 titles. Time tracking, heartbeats, sessions, and JIRA links
 all survive because they're keyed by task_id, not by name.
 
@@ -33,7 +33,7 @@ no client-side validation is needed - just pass the user's input through.
 Resolve the current Claude session id so `find_task_for_directory` can
 use the per-session project pointer written by `/missioncache:load` and
 `/missioncache:new`. Without this, the lookup can only match when cwd is under
-`~/.orbit/active/<task>/`, which fails from the repo root.
+`~/.missioncache/active/<task>/`, which fails from the repo root.
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
@@ -61,7 +61,7 @@ mcp__plugin_missioncache_pm__find_task_for_directory(
 
 If the lookup returns `found: false`, stop and tell the user:
 
-> No active orbit project bound to this session. Run `/missioncache:load <name>`
+> No active MissionCache project bound to this session. Run `/missioncache:load <name>`
 > to bind one, then rename.
 
 Do not guess by cwd, do not rename by name without the binding - the

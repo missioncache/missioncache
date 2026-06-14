@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class TaskProgress(BaseModel):
-    """Progress information parsed from orbit files."""
+    """Progress information parsed from MissionCache files."""
 
     completion_pct: int = Field(description="Completion percentage (0-100)")
     total_items: int = Field(default=0, description="Total checklist items")
@@ -46,7 +46,7 @@ class TaskSummary(BaseModel):
         default="never", description="Relative time since last worked"
     )
     has_orbit_files: bool = Field(
-        default=False, description="Whether orbit files exist"
+        default=False, description="Whether MissionCache files exist"
     )
 
     class Config:
@@ -70,7 +70,7 @@ class TaskDetail(TaskSummary):
 
 
 class MissionCacheFiles(BaseModel):
-    """Orbit file paths for a task."""
+    """MissionCache file paths for a task."""
 
     task_dir: str
     plan_file: str | None = None

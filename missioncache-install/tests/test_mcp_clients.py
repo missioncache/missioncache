@@ -202,14 +202,14 @@ def _set_mcp_missioncache_path_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_install_opencode_creates_entry_in_fresh_file(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """First-time install writes a minimal config with mcp.orbit set."""
+    """First-time install writes a minimal config with mcp.missioncache set."""
     _set_opencode_detected(monkeypatch, True)
     _set_mcp_missioncache_path_ok(monkeypatch)
 
     mcp_clients.install_opencode(_make_ctx())
 
     data = json.loads(mcp_clients.OPENCODE_CONFIG_PATH.read_text())
-    assert data == {"mcp": {"orbit": {"type": "local", "command": ["mcp-missioncache"]}}}
+    assert data == {"mcp": {"missioncache": {"type": "local", "command": ["mcp-missioncache"]}}}
     assert state.load()["components"]["opencode"]["path"] == str(
         mcp_clients.OPENCODE_CONFIG_PATH
     )
@@ -235,7 +235,7 @@ def test_install_opencode_preserves_schema_and_other_top_level_keys(
     assert data["$schema"] == "https://opencode.ai/config.json"
     assert data["theme"] == "tokyonight"
     assert data["model"] == "claude-sonnet-4"
-    assert data["mcp"]["orbit"] == {"type": "local", "command": ["mcp-missioncache"]}
+    assert data["mcp"]["missioncache"] == {"type": "local", "command": ["mcp-missioncache"]}
 
 
 def test_install_opencode_preserves_other_mcp_servers(
@@ -258,10 +258,10 @@ def test_install_opencode_preserves_other_mcp_servers(
     data = json.loads(mcp_clients.OPENCODE_CONFIG_PATH.read_text())
     assert data["mcp"]["context7"]["url"] == "https://mcp.context7.com/mcp"
     assert data["mcp"]["tavily"]["command"] == ["tavily-mcp"]
-    assert data["mcp"]["orbit"]["command"] == ["mcp-missioncache"]
+    assert data["mcp"]["missioncache"]["command"] == ["mcp-missioncache"]
 
 
-def test_install_opencode_idempotent_when_orbit_already_set(
+def test_install_opencode_idempotent_when_missioncache_already_set(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Re-running with an already-correct entry should not rewrite the file."""
@@ -271,7 +271,7 @@ def test_install_opencode_idempotent_when_orbit_already_set(
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     correct = {
         "$schema": "https://opencode.ai/config.json",
-        "mcp": {"orbit": {"type": "local", "command": ["mcp-missioncache"]}},
+        "mcp": {"missioncache": {"type": "local", "command": ["mcp-missioncache"]}},
     }
     mcp_clients.OPENCODE_CONFIG_PATH.write_text(json.dumps(correct, indent=2))
     mtime_before = mcp_clients.OPENCODE_CONFIG_PATH.stat().st_mtime_ns
@@ -326,17 +326,17 @@ def test_install_opencode_warns_and_skips_when_not_detected(
 # OpenCode: uninstall_opencode
 # ---------------------------------------------------------------------------
 
-def test_uninstall_opencode_removes_only_orbit(
+def test_uninstall_opencode_removes_only_missioncache(
     isolated_home: Path,
 ) -> None:
-    """Uninstall must drop only mcp.orbit; other keys and other servers stay."""
+    """Uninstall must drop only mcp.missioncache; other keys and other servers stay."""
     mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
     mcp_clients.OPENCODE_CONFIG_PATH.write_text(json.dumps({
         "$schema": "https://opencode.ai/config.json",
         "theme": "tokyonight",
         "mcp": {
             "context7": {"type": "remote", "url": "https://mcp.context7.com/mcp"},
-            "orbit": {"type": "local", "command": ["mcp-missioncache"]},
+            "missioncache": {"type": "local", "command": ["mcp-missioncache"]},
         },
     }))
     state.record_component("opencode", {"path": str(mcp_clients.OPENCODE_CONFIG_PATH)})
@@ -347,14 +347,14 @@ def test_uninstall_opencode_removes_only_orbit(
     assert data["$schema"] == "https://opencode.ai/config.json"
     assert data["theme"] == "tokyonight"
     assert data["mcp"]["context7"]["url"] == "https://mcp.context7.com/mcp"
-    assert "orbit" not in data["mcp"], "orbit entry must be gone"
+    assert "missioncache" not in data["mcp"], "missioncache entry must be gone"
     assert "opencode" not in state.load().get("components", {})
 
 
 def test_uninstall_opencode_no_op_when_config_missing(
     isolated_home: Path,
 ) -> None:
-    """Missing config file is a clean no-op (don't create it just to remove orbit)."""
+    """Missing config file is a clean no-op (don't create it just to remove missioncache)."""
     state.record_component("opencode", {"path": str(mcp_clients.OPENCODE_CONFIG_PATH)})
 
     mcp_clients.uninstall_opencode(_make_ctx())
@@ -408,7 +408,7 @@ def test_install_vscode_preserves_existing_servers(
     assert data["servers"]["github"]["command"] == "mcp-github"
     assert data["servers"]["jira"]["command"] == "mcp-jira"
     assert data["servers"]["context7"]["url"] == "https://mcp.context7.com/mcp"
-    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-missioncache"}
+    assert data["servers"]["missioncache"] == {"type": "stdio", "command": "mcp-missioncache"}
     assert data["inputs"] == [{"id": "github_token", "type": "promptString"}], (
         "Top-level keys other than `servers` must be preserved verbatim"
     )
@@ -436,18 +436,18 @@ def test_install_vscode_preserves_tab_indent(
     # Round-trip parses cleanly and contains both old and new entries.
     data = json.loads(out)
     assert data["servers"]["github"]["command"] == "mcp-github"
-    assert data["servers"]["orbit"] == {"type": "stdio", "command": "mcp-missioncache"}
+    assert data["servers"]["missioncache"] == {"type": "stdio", "command": "mcp-missioncache"}
 
 
 def test_uninstall_vscode_preserves_tab_indent(
     isolated_home: Path,
 ) -> None:
-    """Tab indent survives an orbit-only uninstall (we still rewrite the file)."""
+    """Tab indent survives a missioncache-only uninstall (we still rewrite the file)."""
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(
         '{\n\t"servers": {\n\t\t"github": {\n\t\t\t"type": "stdio",\n'
         '\t\t\t"command": "mcp-github"\n\t\t},\n'
-        '\t\t"orbit": {\n\t\t\t"type": "stdio",\n\t\t\t"command": "mcp-missioncache"\n\t\t}\n'
+        '\t\t"missioncache": {\n\t\t\t"type": "stdio",\n\t\t\t"command": "mcp-missioncache"\n\t\t}\n'
         '\t}\n}'
     )
     state.record_component("vscode", {"path": str(mcp_clients.VSCODE_USER_MCP_PATH)})
@@ -456,10 +456,10 @@ def test_uninstall_vscode_preserves_tab_indent(
 
     out = mcp_clients.VSCODE_USER_MCP_PATH.read_text()
     assert "\n\t" in out
-    assert "orbit" not in json.loads(out)["servers"]
+    assert "missioncache" not in json.loads(out)["servers"]
 
 
-def test_install_vscode_idempotent_when_orbit_already_set(
+def test_install_vscode_idempotent_when_missioncache_already_set(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Re-running with the entry already correct should not touch the file."""
@@ -469,7 +469,7 @@ def test_install_vscode_idempotent_when_orbit_already_set(
 
     mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(json.dumps({
-        "servers": {"orbit": {"type": "stdio", "command": "mcp-missioncache"}}
+        "servers": {"missioncache": {"type": "stdio", "command": "mcp-missioncache"}}
     }, indent=2))
     mtime_before = mcp_clients.VSCODE_USER_MCP_PATH.stat().st_mtime_ns
 
@@ -482,7 +482,7 @@ def test_install_vscode_idempotent_when_orbit_already_set(
 # VSCode: uninstall_vscode
 # ---------------------------------------------------------------------------
 
-def test_uninstall_vscode_removes_only_orbit(
+def test_uninstall_vscode_removes_only_missioncache(
     isolated_home: Path,
 ) -> None:
     """Other servers + top-level keys must survive the uninstall."""
@@ -490,7 +490,7 @@ def test_uninstall_vscode_removes_only_orbit(
     mcp_clients.VSCODE_USER_MCP_PATH.write_text(json.dumps({
         "servers": {
             "github": {"type": "stdio", "command": "mcp-github"},
-            "orbit": {"type": "stdio", "command": "mcp-missioncache"},
+            "missioncache": {"type": "stdio", "command": "mcp-missioncache"},
         },
         "inputs": [{"id": "tok", "type": "promptString"}],
     }))
@@ -500,7 +500,7 @@ def test_uninstall_vscode_removes_only_orbit(
 
     data = json.loads(mcp_clients.VSCODE_USER_MCP_PATH.read_text())
     assert data["servers"]["github"]["command"] == "mcp-github"
-    assert "orbit" not in data["servers"]
+    assert "missioncache" not in data["servers"]
     assert data["inputs"] == [{"id": "tok", "type": "promptString"}]
     assert "vscode" not in state.load().get("components", {})
 
@@ -523,7 +523,7 @@ def test_install_codex_warns_and_skips_when_cli_missing(
 def test_install_codex_runs_mcp_add_when_not_registered(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Happy path: `codex mcp list` shows nothing -> we run `codex mcp add orbit -- mcp-missioncache`."""
+    """Happy path: `codex mcp list` shows nothing -> we run `codex mcp add missioncache -- mcp-missioncache`."""
     # Make `which("codex")` truthy so detection passes; everything else can return None.
     monkeypatch.setattr(
         mcp_clients.shutil,
@@ -537,7 +537,7 @@ def test_install_codex_runs_mcp_add_when_not_registered(
     def fake_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if cmd[:3] == ["codex", "mcp", "list"]:
-            # Empty list = orbit not registered yet.
+            # Empty list = missioncache not registered yet.
             return _proc(stdout="(no servers configured)\n")
         return _proc()
 
@@ -546,14 +546,14 @@ def test_install_codex_runs_mcp_add_when_not_registered(
     mcp_clients.install_codex(_make_ctx())
 
     assert ["codex", "mcp", "list"] in calls
-    assert ["codex", "mcp", "add", "orbit", "--", "mcp-missioncache"] in calls
+    assert ["codex", "mcp", "add", "missioncache", "--", "mcp-missioncache"] in calls
     assert state.load()["components"]["codex"]["command"] == "mcp-missioncache"
 
 
-def test_install_codex_idempotent_when_orbit_listed(
+def test_install_codex_idempotent_when_missioncache_listed(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If `codex mcp list` already shows orbit, `add` must not be called again."""
+    """If `codex mcp list` already shows missioncache, `add` must not be called again."""
     monkeypatch.setattr(
         mcp_clients.shutil,
         "which",
@@ -566,7 +566,7 @@ def test_install_codex_idempotent_when_orbit_listed(
     def fake_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if cmd[:3] == ["codex", "mcp", "list"]:
-            return _proc(stdout="orbit  mcp-missioncache  connected\nfoo  bar  connected\n")
+            return _proc(stdout="missioncache  mcp-missioncache  connected\nfoo  bar  connected\n")
         return _proc()
 
     monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run)
@@ -574,8 +574,8 @@ def test_install_codex_idempotent_when_orbit_listed(
     mcp_clients.install_codex(_make_ctx())
 
     assert ["codex", "mcp", "list"] in calls
-    assert not any(c[:4] == ["codex", "mcp", "add", "orbit"] for c in calls), (
-        "Idempotent install must not call `codex mcp add` when orbit is already listed"
+    assert not any(c[:4] == ["codex", "mcp", "add", "missioncache"] for c in calls), (
+        "Idempotent install must not call `codex mcp add` when missioncache is already listed"
     )
     assert state.load()["components"]["codex"]["command"] == "mcp-missioncache"
 
@@ -618,7 +618,7 @@ def test_install_codex_sets_mcp_success_true_on_already_registered(
     monkeypatch.setattr(
         mcp_clients.subprocess_utils,
         "run",
-        lambda cmd, **_: _proc(stdout="orbit  mcp-missioncache  connected\n"),
+        lambda cmd, **_: _proc(stdout="missioncache  mcp-missioncache  connected\n"),
     )
 
     ctx = _make_ctx()
@@ -743,7 +743,7 @@ def test_install_opencode_refuses_jsonc_and_preserves_user_file(
     assert "opencode" not in state.load().get("components", {})
     # User gets the exact snippet to add manually.
     assert any(
-        '"orbit"' in m and "manually" in m.lower() for m in warn_calls
+        '"missioncache"' in m and "manually" in m.lower() for m in warn_calls
     ), f"expected manual-add snippet warning; got {warn_calls!r}"
 
 
@@ -776,7 +776,7 @@ def test_install_vscode_refuses_jsonc_and_preserves_user_file(
     assert ctx.mcp_success.get("vscode") is False
     assert "vscode" not in state.load().get("components", {})
     assert any(
-        '"orbit"' in m and "manually" in m.lower() for m in warn_calls
+        '"missioncache"' in m and "manually" in m.lower() for m in warn_calls
     ), f"expected manual-add snippet warning; got {warn_calls!r}"
 
 
@@ -802,27 +802,27 @@ def test_install_vscode_sets_mcp_success_false_on_non_darwin(
 
 
 # ---------------------------------------------------------------------------
-# Codex helper: _codex_orbit_registered
+# Codex helper: _codex_missioncache_registered
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("stdout, expected", [
-    ("orbit  mcp-missioncache  connected\n", True),
-    ("orbit\n", True),
-    ("- orbit  mcp-missioncache  connected\n", False),  # leading bullet -> first token is `-`
-    ("orbit-extra  mcp-missioncache  connected\n", False),  # different name, must not match
+    ("missioncache  mcp-missioncache  connected\n", True),
+    ("missioncache\n", True),
+    ("- missioncache  mcp-missioncache  connected\n", False),  # leading bullet -> first token is `-`
+    ("missioncache-extra  mcp-missioncache  connected\n", False),  # different name, must not match
     ("(no servers configured)\n", False),
     ("", False),
 ])
-def test_codex_orbit_registered_matching(
+def test_codex_missioncache_registered_matching(
     monkeypatch: pytest.MonkeyPatch, stdout: str, expected: bool
 ) -> None:
-    """`_codex_orbit_registered` matches a line whose first whitespace token is exactly orbit."""
+    """`_codex_missioncache_registered` matches a line whose first whitespace token is exactly missioncache."""
     monkeypatch.setattr(
         mcp_clients.subprocess_utils,
         "run",
         lambda cmd, **_: _proc(stdout=stdout),
     )
-    assert mcp_clients._codex_orbit_registered() is expected
+    assert mcp_clients._codex_missioncache_registered() is expected
 
 
 # ---------------------------------------------------------------------------

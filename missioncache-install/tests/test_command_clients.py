@@ -232,7 +232,7 @@ def test_install_opencode_commands_skips_when_tool_missing(
     assert "opencode_commands" not in state.load().get("components", {})
 
 
-def test_uninstall_opencode_commands_removes_only_orbit_files(
+def test_uninstall_opencode_commands_removes_only_missioncache_files(
     isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
@@ -484,14 +484,14 @@ def test_install_codex_commands_preserves_existing_config_stanzas(
 
     command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
     command_clients.CODEX_CONFIG_TOML.write_text(
-        '[mcp_servers.orbit]\ncommand = "mcp-missioncache"\n\n'
+        '[mcp_servers.missioncache]\ncommand = "mcp-missioncache"\n\n'
         '[plugins."github@openai-curated"]\n'
     )
 
     command_clients.install_codex_commands(_make_ctx())
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert "[mcp_servers.orbit]" in text
+    assert "[mcp_servers.missioncache]" in text
     assert '[plugins."github@openai-curated"]' in text
     assert '[plugins."missioncache@missioncache"]' in text
 
@@ -577,23 +577,23 @@ def test_uninstall_codex_commands_round_trips(
     )
     command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
     command_clients.CODEX_CONFIG_TOML.write_text(
-        '[mcp_servers.orbit]\ncommand = "mcp-missioncache"\n'
+        '[mcp_servers.missioncache]\ncommand = "mcp-missioncache"\n'
     )
 
     command_clients.install_codex_commands(_make_ctx())
     command_clients.uninstall_codex_commands(_make_ctx())
 
     text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert "[mcp_servers.orbit]" in text
+    assert "[mcp_servers.missioncache]" in text
     assert '[plugins."missioncache@missioncache"]' not in text
     assert not command_clients.CODEX_MARKETPLACE_DIR.exists()
     assert "codex_commands" not in state.load().get("components", {})
 
 
-def test_strip_codex_plugin_stanza_removes_only_orbit() -> None:
-    """Stripping orbit's stanza must not touch other [plugins.*] sections."""
+def test_strip_codex_plugin_stanza_removes_only_missioncache() -> None:
+    """Stripping missioncache's stanza must not touch other [plugins.*] sections."""
     text = (
-        '[mcp_servers.orbit]\n'
+        '[mcp_servers.missioncache]\n'
         'command = "mcp-missioncache"\n'
         '\n'
         '[plugins."github@openai-curated"]\n'
@@ -611,7 +611,7 @@ def test_strip_codex_plugin_stanza_removes_only_orbit() -> None:
 
 
 def test_strip_codex_plugin_stanza_handles_body_lines() -> None:
-    """If the orbit stanza has body content (overrides), strip those too."""
+    """If the missioncache stanza has body content (overrides), strip those too."""
     text = (
         '[plugins."missioncache@missioncache"]\n'
         'enabled = true\n'
@@ -632,8 +632,8 @@ def test_strip_codex_plugin_stanza_handles_body_lines() -> None:
 # misleading success messages, cross-reference rewrites, errno filtering)
 # ---------------------------------------------------------------------------
 
-def test_strip_codex_plugin_stanza_strips_orbit_subsections() -> None:
-    """A user-added subsection of orbit must be stripped, not leaked.
+def test_strip_codex_plugin_stanza_strips_missioncache_subsections() -> None:
+    """A user-added subsection of missioncache must be stripped, not leaked.
 
     Bug: substring `[plugins."missioncache@missioncache".overrides]` starts with `[` and
     ends with `]`, so a naive "any header ends skip" parser would treat it

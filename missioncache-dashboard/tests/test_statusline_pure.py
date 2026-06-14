@@ -479,7 +479,7 @@ class TestJoinItemsPadLine:
         assert _pad_line(line, 20, 20) == "hello"
 
 
-# ============ _parse_task_progress (orbit project progress bracket) ============
+# ============ _parse_task_progress (MissionCache project progress bracket) ============
 
 
 class TestParseTaskProgress:

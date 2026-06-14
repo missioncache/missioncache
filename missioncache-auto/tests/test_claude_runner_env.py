@@ -104,13 +104,13 @@ class TestClaudeRunnerEnv:
             return _FakeProcess()
 
         monkeypatch.setattr(claude_runner_module.subprocess, "Popen", fake_popen)
-        monkeypatch.setenv("ORBIT_TEST_SENTINEL", "from-parent")
+        monkeypatch.setenv("MISSIONCACHE_TEST_SENTINEL", "from-parent")
 
         ClaudeRunner(visibility=Visibility.NONE).run(
             "p", tmp_path, print_output=False
         )
 
-        assert captured["env"].get("ORBIT_TEST_SENTINEL") == "from-parent"
+        assert captured["env"].get("MISSIONCACHE_TEST_SENTINEL") == "from-parent"
 
 
 class TestCliVisibilityEnvVar:

@@ -350,10 +350,10 @@ async def find_task_for_directory(
     Lookup priority (see missioncache_db.find_task_for_cwd):
     1. pending-project.json (cwd match)
     2. projects/<session_id>.json - requires session_id arg
-    3. cwd under ~/.orbit/active/<task>/
+    3. cwd under ~/.missioncache/active/<task>/
 
     Callers that invoke this from arbitrary cwds (e.g. the repo root) MUST
-    pass session_id for priority 2 to fire. The 4 orbit slash commands all
+    pass session_id for priority 2 to fire. The 4 MissionCache slash commands all
     do this; copy their pattern rather than omitting the arg.
     """
     db = get_db()
@@ -408,7 +408,7 @@ async def create_task(
     """
     Create a new task in the database.
 
-    For coding tasks, also creates the orbit/active/<name>/ directory.
+    For coding tasks, also creates the missioncache/active/<name>/ directory.
     For non-coding tasks, no directory is created.
 
     When ``session_id`` is provided, also writes the project_state row +
@@ -493,12 +493,12 @@ async def complete_task(
     project_name: Annotated[
         str | None, Field(description="Project name (alternative to ID)")
     ] = None,
-    move_files: Annotated[bool, Field(description="Move orbit files to completed/")] = True,
+    move_files: Annotated[bool, Field(description="Move MissionCache files to completed/")] = True,
 ) -> dict:
     """
     Mark a task as completed.
 
-    For coding tasks, optionally moves orbit files from active/ to completed/.
+    For coding tasks, optionally moves MissionCache files from active/ to completed/.
     """
     db = get_db()
 
@@ -564,13 +564,13 @@ async def reopen_task(
         str | None, Field(description="Project name (alternative to ID)")
     ] = None,
     move_files: Annotated[
-        bool, Field(description="Move orbit files from completed/ to active/")
+        bool, Field(description="Move MissionCache files from completed/ to active/")
     ] = True,
 ) -> dict:
     """
     Reopen a completed task.
 
-    For coding tasks, optionally moves orbit files from completed/ back to active/.
+    For coding tasks, optionally moves MissionCache files from completed/ back to active/.
     """
     db = get_db()
 
@@ -639,7 +639,7 @@ async def rename_task(
     """
     Rename a project / task.
 
-    Updates the DB row, moves the orbit directory, renames files inside,
+    Updates the DB row, moves the MissionCache directory, renames files inside,
     and rewrites template H1 titles. Time tracking, heartbeats, sessions,
     and JIRA links survive because they're keyed by task_id (integer FK),
     not by name.
@@ -655,8 +655,8 @@ async def rename_task(
 
     Refuses to rename when:
     - Another project in the same repo has the target name (ALREADY_EXISTS)
-    - The target orbit directory already exists on disk (ALREADY_EXISTS)
-    - An missioncache-auto run is in progress on the project (INVALID_STATE)
+    - The target MissionCache directory already exists on disk (ALREADY_EXISTS)
+    - A missioncache-auto run is in progress on the project (INVALID_STATE)
     - The task is a subtask (VALIDATION_ERROR; rename the parent instead)
     """
     db = get_db()

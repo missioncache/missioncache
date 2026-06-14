@@ -1,4 +1,4 @@
-"""Integration tests for orbit file create/update operations.
+"""Integration tests for MissionCache file create/update operations.
 
 Tests use tmp_path for all file I/O and monkeypatch to redirect root_dir.
 """

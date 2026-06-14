@@ -534,9 +534,9 @@ class TestPickupCwdCompatibilityGate:
     """``_pickup_previous_session_binding`` must validate the inherited project
     against the current cwd before binding.
 
-    Bug scenario: previous session at ``/Users/tbrami/work`` (umbrella dir
+    Bug scenario: previous session at ``/Users/alice/work`` (umbrella dir
     holding many repos) was bound to ``project-X`` whose actual repo path is
-    ``/Users/tbrami/work/some-repo``. When a new session resumes at the same
+    ``/Users/alice/work/some-repo``. When a new session resumes at the same
     umbrella cwd, the prior logic blindly inherited ``project-X`` even though
     the new session is sitting in a parent directory and might be intending a
     completely different project. The inherited binding then routed the new
@@ -790,7 +790,7 @@ class TestSessionStartSourceGating:
     """Inheritance must fire ONLY on resume/compact, never on startup/clear.
 
     The umbrella-cwd false positive: a fresh ``startup`` session in a cwd
-    like ``~/work`` (which has many active orbit projects under it) used to
+    like ``~/work`` (which has many active MissionCache projects under it) used to
     inherit whatever project the previous session in that cwd was working
     on. Result: the new conversation got mis-tagged, statusline showed the
     wrong project, and heartbeats were attributed to the wrong task.
@@ -985,7 +985,7 @@ class TestSessionStartSourceGating:
         # breadcrumb (e.g. printing project on a separate line from
         # source) is caught. Substring asserts on individual tokens
         # would false-pass on a poorly-ordered re-emit.
-        assert "orbit: inherited project=previous-project" in err
+        assert "missioncache: inherited project=previous-project" in err
         assert "source=resume" in err
 
     def test_main_emits_no_breadcrumb_when_gated_out(self, tmp_path, monkeypatch, capsys):
@@ -1451,7 +1451,7 @@ class TestStop:
             mod.main()
 
     def test_detects_edits_shows_reminder(self, tmp_path, monkeypatch, capsys):
-        """stop shows orbit reminder when transcript contains Write/Edit tool uses."""
+        """stop shows missioncache reminder when transcript contains Write/Edit tool uses."""
         # Create a fake transcript with edit tool uses
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
@@ -1479,7 +1479,7 @@ class TestStop:
 
         err = capsys.readouterr().err
         assert "stop-task" in err
-        assert "orbit:save" in err.lower() or "Orbit Reminder" in err
+        assert "missioncache:save" in err.lower() or "MissionCache Reminder" in err
 
     def test_no_reminder_when_no_edits(self, tmp_path, monkeypatch, capsys):
         """stop does not show reminder when transcript has no Write/Edit tool uses."""
@@ -1495,7 +1495,7 @@ class TestStop:
         )
 
         err = capsys.readouterr().err
-        assert "Orbit Reminder" not in err
+        assert "MissionCache Reminder" not in err
 
 
 # ── task_tracker ──────────────────────────────────────────────────────────
@@ -1513,15 +1513,15 @@ class TestTaskTracker:
         *,
         context_newer: bool = True,
     ) -> SimpleNamespace:
-        """Create fake orbit project files under tmp_path's fake HOME.
+        """Create fake MissionCache project files under tmp_path's fake HOME.
 
         Points Path.home() at tmp_path so the hook's orbit_root resolution
-        (~/.orbit) lands in our sandbox. Returns a fake task object
+        (~/.missioncache) lands in our sandbox. Returns a fake task object
         ready to be plugged into `mock_db.find_task_for_cwd.return_value`.
         """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        orbit_dir = tmp_path / ".orbit" / "active" / "fake-task"
+        orbit_dir = tmp_path / ".missioncache" / "active" / "fake-task"
         orbit_dir.mkdir(parents=True)
 
         tasks_file = orbit_dir / "fake-task-tasks.md"
@@ -1557,7 +1557,7 @@ class TestTaskTracker:
             mod.main()
 
     def test_no_active_project_silent(self, monkeypatch, capsys):
-        """Returns silently when there's no orbit project for the cwd."""
+        """Returns silently when there's no MissionCache project for the cwd."""
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
 
@@ -1691,7 +1691,7 @@ class TestTaskTracker:
         )
 
         out = capsys.readouterr().out
-        assert "Orbit task tracking divergence" in out
+        assert "MissionCache task tracking divergence" in out
         assert "Task 2: Framework wiring review" in out
         assert "update_tasks_file" in out
 
@@ -1837,7 +1837,7 @@ class TestTaskTracker:
 
         # Subtask dir: active/parent-task/sub-task with plain tasks.md/context.md
         subtask_dir = (
-            tmp_path / ".orbit" / "active" / "parent-task" / "sub-task"
+            tmp_path / ".missioncache" / "active" / "parent-task" / "sub-task"
         )
         subtask_dir.mkdir(parents=True)
         (subtask_dir / "tasks.md").write_text(
@@ -2364,12 +2364,12 @@ class TestParallelSessionDetection:
         mod.main()
 
         out = capsys.readouterr().out
-        assert "Parallel Orbit Session Warning" in out
+        assert "Parallel MissionCache Session Warning" in out
         # Structural assertions: "alpha" must appear as the bound-self
         # project (in the intro line), "beta" as the bullet for the other
         # session. Bare token checks would also pass if alpha/beta swapped
         # roles, which is the exact contract we want this test to enforce.
-        assert "bound to orbit project `alpha`" in out
+        assert "bound to MissionCache project `alpha`" in out
         assert "- `beta`" in out
 
     def test_main_no_warning_when_parallel_session_has_same_project(
@@ -2404,7 +2404,7 @@ class TestParallelSessionDetection:
         mod.main()
 
         out = capsys.readouterr().out
-        assert "Parallel Orbit Session Warning" not in out
+        assert "Parallel MissionCache Session Warning" not in out
 
     def test_main_no_warning_when_no_parallel_sessions(
         self, tmp_path, monkeypatch, capsys
@@ -2431,7 +2431,7 @@ class TestParallelSessionDetection:
         mod.main()
 
         out = capsys.readouterr().out
-        assert "Parallel Orbit Session Warning" not in out
+        assert "Parallel MissionCache Session Warning" not in out
 
     # ── PID liveness: no warning on a serial handoff (the reported bug) ────
 
@@ -2476,7 +2476,7 @@ class TestParallelSessionDetection:
         mod.main()
 
         out = capsys.readouterr().out
-        assert "Parallel Orbit Session Warning" not in out
+        assert "Parallel MissionCache Session Warning" not in out
 
     def test_main_still_warns_when_prior_session_alive(
         self, tmp_path, monkeypatch, capsys
@@ -2511,7 +2511,7 @@ class TestParallelSessionDetection:
         mod.main()
 
         out = capsys.readouterr().out
-        assert "Parallel Orbit Session Warning" in out
+        assert "Parallel MissionCache Session Warning" in out
         assert "- `beta`" in out
 
     # ── Codex P1: exclude resumed-from session from parallel detection ────

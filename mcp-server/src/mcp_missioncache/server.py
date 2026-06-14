@@ -1,5 +1,5 @@
 """
-Orbit MCP Server - Fast task management for Claude Code.
+MissionCache MCP Server - Fast task management for Claude Code.
 
 Slim entry point. Tool implementations live in split modules
 (tools_tasks, tools_docs, tools_tracking, tools_iteration, tools_planning).

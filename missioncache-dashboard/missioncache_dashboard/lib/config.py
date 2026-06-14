@@ -1,4 +1,4 @@
-"""Dashboard configuration loaded from ~/.claude/orbit-dashboard-config.json.
+"""Dashboard configuration loaded from ~/.claude/missioncache-dashboard-config.json.
 
 Precedence: environment variable > config file > hardcoded default.
 Read on every call. The file is tiny and sits in the OS page cache, and
@@ -31,7 +31,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-CONFIG_FILE = Path.home() / ".claude" / "orbit-dashboard-config.json"
+CONFIG_FILE = Path.home() / ".claude" / "missioncache-dashboard-config.json"
 
 _DEFAULT_STATUSLINE: dict[str, Any] = {
     "codex": True,
@@ -79,7 +79,7 @@ def _write(data: dict[str, Any]) -> None:
     with tempfile.NamedTemporaryFile(
         mode="w",
         dir=CONFIG_FILE.parent,
-        prefix=".orbit-dashboard-config.",
+        prefix=".missioncache-dashboard-config.",
         suffix=".tmp",
         delete=False,
     ) as tf:

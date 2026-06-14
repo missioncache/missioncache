@@ -1,4 +1,4 @@
-"""Orbit Dashboard CLI.
+"""MissionCache Dashboard CLI.
 
 Entry point for the `missioncache-dashboard` console script. Subcommands:
 
@@ -23,8 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-LAUNCHD_LABEL = "com.orbit.dashboard"
-SYSTEMD_UNIT = "orbit-dashboard.service"
+LAUNCHD_LABEL = "com.missioncache.dashboard"
+SYSTEMD_UNIT = "missioncache-dashboard.service"
 DEFAULT_PORT = 8787
 
 
@@ -93,7 +93,7 @@ def render_systemd_unit(binary_path: str, port: int) -> str:
     env_line = f"Environment=MISSIONCACHE_DASHBOARD_PORT={port}\n" if port != DEFAULT_PORT else ""
     return (
         "[Unit]\n"
-        "Description=Orbit Dashboard\n"
+        "Description=MissionCache Dashboard\n"
         "After=network.target\n"
         "\n"
         "[Service]\n"
@@ -312,7 +312,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="missioncache-dashboard",
-        description="Orbit Dashboard - task analytics and autonomous execution monitoring.",
+        description="MissionCache Dashboard - task analytics and autonomous execution monitoring.",
     )
     sub = parser.add_subparsers(dest="command")
 

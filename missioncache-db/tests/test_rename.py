@@ -6,7 +6,7 @@ DB+FS collision detection, active-auto guard, file rename, H1 rewrite
 
 Tests sandbox both MISSIONCACHE_ROOT (via monkeypatching the module constant)
 and ~/.claude/ (via monkeypatching Path.home) so they never touch the
-user's real orbit data.
+user's real MissionCache data.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _seed_active_project(
     name: str,
     repo_path: str = "/tmp/test-repo",
 ):
-    """Create an active coding task with the standard 3 orbit files on disk."""
+    """Create an active coding task with the standard 3 MissionCache files on disk."""
     repo_id = db.add_repo(repo_path, short_name="test-repo")
     task = db.create_task(name=name, task_type="coding", repo_id=repo_id)
 

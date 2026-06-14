@@ -1,5 +1,5 @@
 """
-Claude CLI integration for Orbit Auto.
+Claude CLI integration for MissionCache Auto.
 
 Handles invoking the Claude CLI, parsing streaming output,
 and extracting structured results from responses.
@@ -160,7 +160,7 @@ class ClaudeRunner:
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(log_file, "w") as f:
-            f.write("=== Orbit Auto Worker Log ===\n")
+            f.write("=== MissionCache Auto Worker Log ===\n")
             f.write(f"Started: {datetime.fromtimestamp(start_time).isoformat()}\n")
             f.write(f"Duration: {result.duration:.1f}s\n")
             f.write("\n")
@@ -394,7 +394,7 @@ def build_generic_prompt(
     This replicates the prompt structure used by the bash implementation.
     """
     prompt_parts = [
-        "You are working on an autonomous development task using Orbit Auto.",
+        "You are working on an autonomous development task using MissionCache Auto.",
         "",
         "## Current Task",
         f"Task {task_number}: {task_title}",

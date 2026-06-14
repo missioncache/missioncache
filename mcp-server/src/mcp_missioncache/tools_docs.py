@@ -1,4 +1,4 @@
-"""Orbit file operation MCP tools - create, get, update orbit files."""
+"""MissionCache file operation MCP tools - create, get, update MissionCache files."""
 
 import logging
 from pathlib import Path
@@ -40,7 +40,7 @@ async def create_orbit_files(
     force: Annotated[
         bool,
         Field(
-            description="Overwrite existing orbit files. Default False raises "
+            description="Overwrite existing MissionCache files. Default False raises "
             "ALREADY_EXISTS to prevent silent data loss."
         ),
     ] = False,
@@ -67,14 +67,14 @@ async def create_orbit_files(
     ] = None,
 ) -> dict:
     """
-    Create orbit files for a new task.
+    Create MissionCache files for a new task.
 
-    Creates files under ~/.orbit/active/<task-name>/.
+    Creates files under ~/.missioncache/active/<task-name>/.
     The repo_path is used to register the repository in the DB. By default,
     repo_path is resolved to its containing git root before registration so
     /missioncache:new captures the same path regardless of which subdirectory the
     user invoked it from. Pass resolve_git_root=False to opt out (e.g., when
-    each sub-package in a monorepo is its own orbit project).
+    each sub-package in a monorepo is its own MissionCache project).
 
     When ``session_id`` is provided, also writes the project_state row +
     per-session pointer that the statusline reads, atomically with task
@@ -151,7 +151,7 @@ async def create_orbit_files(
     except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
-        logger.exception("Error creating orbit files")
+        logger.exception("Error creating MissionCache files")
         return {"error": True, "message": str(e)}
 
 
@@ -161,10 +161,10 @@ async def get_orbit_files(
     project_name: Annotated[str | None, Field(description="Project name")] = None,
 ) -> dict:
     """
-    Get paths to orbit files for a task.
+    Get paths to MissionCache files for a task.
 
     Returns existing file paths (plan.md, context.md, tasks.md, prompts/).
-    Files are resolved under ~/.orbit/.
+    Files are resolved under ~/.missioncache/.
     """
     db = get_db()
 
@@ -205,7 +205,7 @@ async def get_orbit_files(
     except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
-        logger.exception("Error getting orbit files")
+        logger.exception("Error getting MissionCache files")
         return {"error": True, "message": str(e)}
 
 

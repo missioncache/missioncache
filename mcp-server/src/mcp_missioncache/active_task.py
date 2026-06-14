@@ -1,16 +1,16 @@
-"""Per-session active orbit task pointer.
+"""Per-session active MissionCache task pointer.
 
-Tracks which orbit checklist task numbers (e.g. ``"54a"``, ``"56"``) the
+Tracks which MissionCache checklist task numbers (e.g. ``"54a"``, ``"56"``) the
 caller is currently focused on. The statusline reads this to render the
 ``Task:`` field, replacing the previous read of Claude Code's internal
 TodoList (which duplicated information Claude already prints in chat).
 
-Identifier shape: orbit's DB tracks projects, not checklist items. The
+Identifier shape: MissionCache's DB tracks projects, not checklist items. The
 items the user picks from (``54a``, ``8``, ``0.1``) are markdown lines in
 ``<project>-tasks.md`` parsed by their numbering, not rows in ``tasks.db``.
 So the active-task pointer keys by ``(project_name, task_numbers)``.
 
-State file: ``~/.claude/hooks/state/active-orbit-task/<session-id>.json``::
+State file: ``~/.claude/hooks/state/active-missioncache-task/<session-id>.json``::
 
     {
       "project_name": "orbit-public-release",
@@ -30,10 +30,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-# Lives under ``~/.claude/`` (Claude Code's state dir), not ``~/.orbit/``,
+# Lives under ``~/.claude/`` (Claude Code's state dir), not ``~/.missioncache/``,
 # because session-scoped state is keyed by Claude Code session ids and
 # parallels the existing hook pointers.
-STATE_DIR = Path.home() / ".claude" / "hooks" / "state" / "active-orbit-task"
+STATE_DIR = Path.home() / ".claude" / "hooks" / "state" / "active-missioncache-task"
 
 # Conservative session-id shape: alphanumeric + ``._-`` only, bounded length.
 # Covers Claude Code's UUIDs and Codex/OpenCode-style ids; rejects path

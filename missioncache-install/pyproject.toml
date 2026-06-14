@@ -1,14 +1,14 @@
 [project]
 name = "missioncache-install"
 version = "1.0.0"
-description = "Bootstrap installer for Orbit - the project manager for Claude Code"
+description = "Bootstrap installer for MissionCache - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     {name = "Tomer Brami", email = "tomerbrami@gmail.com"},
 ]
 license = "MIT"
-keywords = ["claude", "orbit", "installer", "bootstrap", "plugin"]
+keywords = ["claude", "missioncache", "installer", "bootstrap", "plugin"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -24,7 +24,7 @@ classifiers = [
 # Runtime deps kept minimal to preserve `uvx missioncache-install` cold-start UX.
 # rich powers the install wizard's panels, tables, prompts, and styled output;
 # its own deps (markdown-it-py, mdurl, pygments) are pure-Python and small.
-# pyfiglet provides the gradient ORBIT banner.
+# pyfiglet provides the gradient MISSIONCACHE banner.
 # json5 is a pure-Python JSONC parser, lazy-imported only when strict json.loads
 # fails so the happy path stays on stdlib. Required because OpenCode and VSCode
 # both accept JSONC (comments + trailing commas) in their config files; without

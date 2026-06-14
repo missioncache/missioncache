@@ -16,7 +16,7 @@ from mcp_missioncache import active_task
 
 
 def _state_dir(tmp_path: pathlib.Path) -> pathlib.Path:
-    return tmp_path / ".claude" / "hooks" / "state" / "active-orbit-task"
+    return tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task"
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +91,7 @@ class TestSessionIdValidation:
 
     Defense-in-depth: the MCP layer already rejects empty session ids,
     but accepting any string here would mean ``session_id="../foo"``
-    writes outside ``~/.claude/hooks/state/active-orbit-task/``.
+    writes outside ``~/.claude/hooks/state/active-missioncache-task/``.
     """
 
     @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 """Integration tests for TaskDB.find_task_for_cwd.
 
-Tests use a real SQLite database and tmp_path for orbit directory structure.
+Tests use a real SQLite database and tmp_path for MissionCache directory structure.
 """
 
 import json
@@ -13,7 +13,7 @@ from missioncache_db import TaskDB, MISSIONCACHE_ROOT
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    """TaskDB with a temporary orbit root and SQLite database."""
+    """TaskDB with a temporary MissionCache root and SQLite database."""
     db_path = tmp_path / "test.db"
     orbit_root = tmp_path / "orbit"
     orbit_root.mkdir()
@@ -30,7 +30,7 @@ def db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def orbit_root(tmp_path):
-    """Return the orbit root used by the db fixture."""
+    """Return the MissionCache root used by the db fixture."""
     return tmp_path / "orbit"
 
 
@@ -55,7 +55,7 @@ def _create_orbit_task(db, orbit_root, task_name):
 
 class TestFindTaskForCwd:
     def test_exact_path_match(self, db, orbit_root):
-        """Priority 3: cwd exactly at the orbit task directory matches."""
+        """Priority 3: cwd exactly at the MissionCache task directory matches."""
         _create_orbit_task(db, orbit_root, "my-project")
         task_dir = orbit_root / "active" / "my-project"
 

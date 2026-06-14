@@ -1,13 +1,13 @@
-# Contributing to Orbit
+# Contributing to MissionCache
 
-Thanks for your interest in contributing. Orbit is a small personal project that grew into a public plugin, and outside eyes are very welcome - bug reports, feature ideas, and pull requests all help.
+Thanks for your interest in contributing. MissionCache is a small personal project that grew into a public plugin, and outside eyes are very welcome - bug reports, feature ideas, and pull requests all help.
 
-This document covers the mechanics. For the "why" behind orbit's architecture, read [`docs/architecture.md`](docs/architecture.md) first - it's the anchor for every other doc.
+This document covers the mechanics. For the "why" behind missioncache's architecture, read [`docs/architecture.md`](docs/architecture.md) first - it's the anchor for every other doc.
 
 ## Ways to contribute
 
 - **Report a bug** - open an issue with steps to reproduce, what you expected, and what happened instead.
-- **Suggest a feature** - open an issue and describe the use case. "Orbit should do X" is less useful than "when I'm doing Y I wish orbit would do X because Z."
+- **Suggest a feature** - open an issue and describe the use case. "MissionCache should do X" is less useful than "when I'm doing Y I wish missioncache would do X because Z."
 - **Improve the docs** - typos, clarifications, and new sections are welcome. The contributor docs under `docs/` are especially open to extension.
 - **Fix a bug or build a feature** - see the development workflow below.
 
@@ -16,17 +16,17 @@ This document covers the mechanics. For the "why" behind orbit's architecture, r
 ```bash
 git clone https://github.com/tomerbr1/orbit-pm.git
 cd orbit-pm
-uvx orbit-install --local
+uvx missioncache-install --local
 ```
 
-`orbit-install --local` is the maintainer workflow: it pip-installs `orbit-db`, `orbit-auto`, and `orbit-dashboard` in editable mode from the clone, wires the `orbit-statusline` entry point into `~/.claude/settings.json`, registers the plugin via a local marketplace, installs the dashboard service (launchd on macOS, systemd on Linux), and symlinks the rule files and user-level slash commands into `~/.claude/`. Edits to the clone are reflected live - no reinstall needed except for plugin-cache refreshes (see `CLAUDE.md`'s Quick Reference).
+`missioncache-install --local` is the maintainer workflow: it pip-installs `missioncache-db`, `missioncache-auto`, and `missioncache-dashboard` in editable mode from the clone, wires the `missioncache-statusline` entry point into `~/.claude/settings.json`, registers the plugin via a local marketplace, installs the dashboard service (launchd on macOS, systemd on Linux), and symlinks the rule files and user-level slash commands into `~/.claude/`. Edits to the clone are reflected live - no reinstall needed except for plugin-cache refreshes (see `CLAUDE.md`'s Quick Reference).
 
-The same tool in its default mode (`uvx orbit-install`) is what end users run - it pulls the packages from PyPI instead. Exercising both is how you validate a public-release change.
+The same tool in its default mode (`uvx missioncache-install`) is what end users run - it pulls the packages from PyPI instead. Exercising both is how you validate a public-release change.
 
 Prerequisites:
 
-- Python 3.11 or newer (orbit uses modern syntax like `str | None` and the walrus operator).
-- `uv` on your `PATH` (provides `uvx`). `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. Alternatively `pipx run orbit-install --local` works if you prefer `pipx`.
+- Python 3.11 or newer (missioncache uses modern syntax like `str | None` and the walrus operator).
+- `uv` on your `PATH` (provides `uvx`). `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. Alternatively `pipx run missioncache-install --local` works if you prefer `pipx`.
 - `git filter-repo` if you plan to work on history-rewrite tooling (optional).
 - macOS is the primary test platform. Linux should work for the plugin core; on Linux the dashboard uses systemd user units instead of launchd. Windows service registration is not yet supported - the installer prints manual instructions.
 
@@ -39,7 +39,7 @@ make test        # full suite, verbose
 make test-fast   # stop at first failure, quiet
 ```
 
-This runs the component test suites under `mcp-server`, `orbit-db`, `orbit-auto`, `orbit-dashboard`, and `hooks` (statusline tests now live under `orbit-dashboard/tests/`). The `orbit-install` suite lives in `orbit-install/tests/` and is run separately (`cd orbit-install && python3.11 -m pytest`). `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
+This runs the component test suites under `mcp-server`, `missioncache-db`, `missioncache-auto`, `missioncache-dashboard`, and `hooks` (statusline tests now live under `missioncache-dashboard/tests/`). The `missioncache-install` suite lives in `missioncache-install/tests/` and is run separately (`cd missioncache-install && python3.11 -m pytest`). `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
 
 ## Pull request standards
 
@@ -53,7 +53,7 @@ This runs the component test suites under `mcp-server`, `orbit-db`, `orbit-auto`
 ## Code style
 
 - **Python**: targeted at 3.11+. Prefer `str | None` over `Optional[str]`, `list[dict]` over `List[Dict]`. Type hints on new function signatures. Match the existing module's style rather than imposing a new one.
-- **JavaScript / HTML in the dashboard**: `orbit-dashboard/index.html` is a single-file SPA with embedded CSS and JS. No build tools, no bundler. CSS variables for theming. Keep it self-contained.
+- **JavaScript / HTML in the dashboard**: `missioncache-dashboard/index.html` is a single-file SPA with embedded CSS and JS. No build tools, no bundler. CSS variables for theming. Keep it self-contained.
 - **Bash**: `set -euo pipefail` at the top of any new script. `shellcheck` clean.
 - **Comments**: explain *why*, not *what*. If a comment only restates the code, delete it. If a comment encodes a non-obvious constraint or a past-bug lesson, keep it.
 
@@ -63,10 +63,10 @@ This runs the component test suites under `mcp-server`, `orbit-db`, `orbit-auto`
 
 ## Code of conduct
 
-Orbit follows the [Contributor Covenant](CODE_OF_CONDUCT.md). In short: treat everyone with respect, assume good faith, and keep discussions focused on the code and the project.
+MissionCache follows the [Contributor Covenant](CODE_OF_CONDUCT.md). In short: treat everyone with respect, assume good faith, and keep discussions focused on the code and the project.
 
 ## Questions?
 
-Open a GitHub issue with the `question` label. For longer discussions or design debates, the issue is usually the right place too - Orbit doesn't have a separate forum.
+Open a GitHub issue with the `question` label. For longer discussions or design debates, the issue is usually the right place too - MissionCache doesn't have a separate forum.
 
 Thanks again for being here.

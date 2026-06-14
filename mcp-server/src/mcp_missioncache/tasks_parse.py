@@ -1,6 +1,6 @@
 """Pure-function parser for tasks.md checklist items.
 
-The orbit DB tracks projects, not checklist items. Items are markdown
+The MissionCache DB tracks projects, not checklist items. Items are markdown
 lines like ``- [ ] 54a. M11.2 - VSCode statusline extension``. Parsing
 is consumed by the MCP tool layer (validating task numbers passed to
 ``set_active_orbit_tasks``) and the ``update_tasks_file`` completion

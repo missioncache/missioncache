@@ -24,7 +24,7 @@ def isolated_orbit(tmp_path, monkeypatch):
     writes to MISSIONCACHE_ROOT (missioncache-db) and reads/writes ~/.claude/hooks/state
     (session pointer sweep), so both need sandboxing.
     """
-    root_dir = tmp_path / ".orbit"
+    root_dir = tmp_path / ".missioncache"
     root_dir.mkdir()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -41,8 +41,10 @@ def isolated_orbit(tmp_path, monkeypatch):
     # Point the migration guard's legacy paths at non-existent tmp
     # locations so the user's real ~/.claude/ doesn't trigger the
     # MissionCacheMigrationRequired guard during tests.
-    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
-    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
 
     monkeypatch.setattr(db_module, "_db", None)
@@ -51,7 +53,7 @@ def isolated_orbit(tmp_path, monkeypatch):
 
 
 def _seed(root_dir: pathlib.Path, name: str, repo_path: pathlib.Path) -> int:
-    """Create an active coding task with the standard 3 orbit files on disk."""
+    """Create an active coding task with the standard 3 MissionCache files on disk."""
     db = db_module.get_db()
     repo_path.mkdir(parents=True, exist_ok=True)
     repo_id = db.add_repo(str(repo_path), short_name=repo_path.name)

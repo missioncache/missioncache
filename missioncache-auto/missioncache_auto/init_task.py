@@ -1,5 +1,5 @@
 """
-Task initialization for Orbit Auto.
+Task initialization for MissionCache Auto.
 
 Creates the directory structure and template files for a new task.
 """
@@ -19,10 +19,10 @@ def init_task(
     Initialize a new task with template files.
 
     Creates:
-    - ~/.orbit/active/<task-name>/
-    - ~/.orbit/active/<task-name>/<task-name>-tasks.md
-    - ~/.orbit/active/<task-name>/<task-name>-context.md
-    - ~/.orbit/active/<task-name>/<task-name>-plan.md
+    - ~/.missioncache/active/<task-name>/
+    - ~/.missioncache/active/<task-name>/<task-name>-tasks.md
+    - ~/.missioncache/active/<task-name>/<task-name>-context.md
+    - ~/.missioncache/active/<task-name>/<task-name>-plan.md
 
     Args:
         task_name: Name of the task (used as directory name)
@@ -35,7 +35,7 @@ def init_task(
     Raises:
         FileExistsError: If task directory already exists
     """
-    # Create in centralized orbit root
+    # Create in centralized MissionCache root
     from missioncache_db import MISSIONCACHE_ROOT
 
     orbit_active = MISSIONCACHE_ROOT / "active"

@@ -1,7 +1,7 @@
 """Tests for the dashboard rename_task_endpoint.
 
 Calls the endpoint function directly (no TestClient / lifespan boot)
-with a sandboxed missioncache-db so we don't touch the user's real ~/.orbit/.
+with a sandboxed missioncache-db so we don't touch the user's real ~/.missioncache/.
 The HTTPException raise paths are inspected directly via pytest.raises.
 
 Most rename behavior is covered in missioncache-db/tests/test_rename.py and
@@ -27,7 +27,7 @@ def sandboxed(tmp_path, monkeypatch):
     """Sandbox missioncache-db's filesystem layout and ~/.claude/ for the
     duration of the test so neither the server nor the rename primitive
     touches the user's real data."""
-    orbit_root = tmp_path / ".orbit"
+    orbit_root = tmp_path / ".missioncache"
     orbit_root.mkdir()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -35,8 +35,10 @@ def sandboxed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", orbit_root)
     monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
-    monkeypatch.setattr(missioncache_db, "_LEGACY_DB", tmp_path / "no-legacy-db")
-    monkeypatch.setattr(missioncache_db, "_LEGACY_MISSIONCACHE_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
 
     # The endpoint also calls server.get_db() to trigger a DuckDB sync.

@@ -135,7 +135,7 @@ def _safe_db_call(label, fn, task_name=None, sticky=True):
         reason = f"{label}: {e}"
         if sticky:
             _write_sticky_error(reason, task_name=task_name)
-        print(f"orbit pre_compact: {reason}", file=sys.stderr)
+        print(f"missioncache pre_compact: {reason}", file=sys.stderr)
         return None
 
 
@@ -307,7 +307,7 @@ def main():
         db = TaskDB()
     except Exception as e:
         _write_sticky_error(f"TaskDB init failed: {e}")
-        print(f"orbit pre_compact: TaskDB init failed: {e}", file=sys.stderr)
+        print(f"missioncache pre_compact: TaskDB init failed: {e}", file=sys.stderr)
         return
 
     task = _safe_db_call(
@@ -350,7 +350,7 @@ def main():
         _write_sticky_error(
             f"context.md write failed: {e}", task_name=task.name
         )
-        print(f"orbit pre_compact write error: {e}", file=sys.stderr)
+        print(f"missioncache pre_compact write error: {e}", file=sys.stderr)
         return
 
     # Aggregate heartbeats. Failure here is benign (heartbeats stay queued

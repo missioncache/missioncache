@@ -2,7 +2,7 @@
 
 Three tools are supported in Phase 11.1:
 
-- Codex (CLI: codex 0.125.0+) - registered via `codex mcp add orbit -- mcp-missioncache`.
+- Codex (CLI: codex 0.125.0+) - registered via `codex mcp add missioncache -- mcp-missioncache`.
   Codex owns the TOML round-trip, so no third-party TOML library is needed.
 - OpenCode (CLI: opencode 1.4.x+) - direct JSON merge into
   ~/.config/opencode/opencode.json. The `opencode mcp add` subcommand is
@@ -12,12 +12,12 @@ Three tools are supported in Phase 11.1:
   are deferred to a later phase.
 
 Claude Code uses the existing plugin manifest flow (see install_plugin in
-installers.py); this module is only for tools that consume the orbit MCP
+installers.py); this module is only for tools that consume the MissionCache MCP
 server via the `mcp-missioncache` binary on PATH. Each writer is idempotent and
 warn-and-skips when the tool itself is not installed on the system.
 
 Schemas verified against codex 0.125.0 and opencode 1.4.3 on 2026-04-26;
-see ~/.orbit/active/orbit-public-release/multi-tool-research.md for the
+see ~/.missioncache/active/orbit-public-release/multi-tool-research.md for the
 full discovery notes.
 """
 
@@ -88,11 +88,11 @@ def _ensure_mcp_missioncache_on_path() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Codex: codex mcp add orbit -- mcp-missioncache
+# Codex: codex mcp add missioncache -- mcp-missioncache
 # ---------------------------------------------------------------------------
 
 def install_codex(ctx: "InstallContext") -> None:
-    """Register orbit's MCP server with the Codex CLI."""
+    """Register MissionCache's MCP server with the Codex CLI."""
     ui.step("8", "Codex MCP integration")
     if not shutil.which("codex"):
         ui.warn(
@@ -105,15 +105,15 @@ def install_codex(ctx: "InstallContext") -> None:
         ui.warn("Skipping Codex registration - mcp-missioncache prereq failed")
         ctx.mcp_success["codex"] = False
         return
-    if _codex_orbit_registered():
-        ui.detail("orbit already registered with Codex")
+    if _codex_missioncache_registered():
+        ui.detail("MissionCache already registered with Codex")
         state.record_component("codex", {"command": "mcp-missioncache"})
         ui.success("Codex MCP integration confirmed")
         ctx.mcp_success["codex"] = True
         return
-    ui.detail("Running: codex mcp add orbit -- mcp-missioncache")
+    ui.detail("Running: codex mcp add missioncache -- mcp-missioncache")
     try:
-        subprocess_utils.run(["codex", "mcp", "add", "orbit", "--", "mcp-missioncache"])
+        subprocess_utils.run(["codex", "mcp", "add", "missioncache", "--", "mcp-missioncache"])
     except subprocess_utils.CommandFailed as e:
         ui.warn(
             f"codex mcp add failed: {e.stderr.strip() or e.stdout.strip() or 'unknown error'}"
@@ -126,25 +126,25 @@ def install_codex(ctx: "InstallContext") -> None:
 
 
 def uninstall_codex(ctx: "InstallContext") -> None:
-    """Remove orbit from Codex via `codex mcp remove orbit`. Silent no-op if absent."""
+    """Remove MissionCache from Codex via `codex mcp remove missioncache`. Silent no-op if absent."""
     if not shutil.which("codex"):
         ui.detail("Codex CLI not found - nothing to uninstall")
         state.remove_component("codex")
         return
-    if not _codex_orbit_registered():
-        ui.detail("orbit not registered with Codex - nothing to remove")
+    if not _codex_missioncache_registered():
+        ui.detail("MissionCache not registered with Codex - nothing to remove")
         state.remove_component("codex")
         return
     try:
-        subprocess_utils.run(["codex", "mcp", "remove", "orbit"])
-        ui.detail("Removed orbit from Codex MCP config")
+        subprocess_utils.run(["codex", "mcp", "remove", "missioncache"])
+        ui.detail("Removed MissionCache from Codex MCP config")
     except subprocess_utils.CommandFailed as e:
         ui.warn(f"codex mcp remove failed: {e.stderr.strip()}")
     state.remove_component("codex")
 
 
-def _codex_orbit_registered() -> bool:
-    """True if `codex mcp list` includes a line whose first whitespace-stripped token is `orbit`."""
+def _codex_missioncache_registered() -> bool:
+    """True if `codex mcp list` includes a line whose first whitespace-stripped token is `missioncache`."""
     try:
         result = subprocess_utils.run(["codex", "mcp", "list"])
     except subprocess_utils.CommandFailed:
@@ -152,9 +152,9 @@ def _codex_orbit_registered() -> bool:
     for line in result.stdout.splitlines():
         stripped = line.strip()
         # Codex hasn't documented the exact list output format, so be conservative:
-        # match a line whose first token is exactly `orbit`. That covers both
-        # "orbit  command  status" tabular layouts and bullet-prefixed forms.
-        if stripped == "orbit" or stripped.split(None, 1)[:1] == ["orbit"]:
+        # match a line whose first token is exactly `missioncache`. That covers both
+        # "missioncache  command  status" tabular layouts and bullet-prefixed forms.
+        if stripped == "missioncache" or stripped.split(None, 1)[:1] == ["missioncache"]:
             return True
     return False
 
@@ -164,7 +164,7 @@ def _codex_orbit_registered() -> bool:
 # ---------------------------------------------------------------------------
 
 def install_opencode(ctx: "InstallContext") -> None:
-    """Register orbit in OpenCode's global config via direct JSON merge.
+    """Register MissionCache in OpenCode's global config via direct JSON merge.
 
     Preserves all top-level keys we don't own - in particular `$schema`, which
     OpenCode auto-injects on first write - and any other servers under `mcp`.
@@ -192,15 +192,15 @@ def install_opencode(ctx: "InstallContext") -> None:
         return
 
     mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else None
-    if mcp is not None and mcp.get("orbit") == desired:
-        ui.detail(f"orbit already configured in {OPENCODE_CONFIG_PATH}")
+    if mcp is not None and mcp.get("missioncache") == desired:
+        ui.detail(f"MissionCache already configured in {OPENCODE_CONFIG_PATH}")
     elif used_jsonc:
         # File has comments or trailing commas. json.dumps would silently
         # strip them; refuse to write and tell the user exactly what to add.
         ui.warn(
             f"{OPENCODE_CONFIG_PATH} contains comments or trailing commas. "
             "Auto-merge would strip them. Add this entry manually under "
-            f'"mcp" and re-run with --update:\n  "orbit": {json.dumps(desired)}'
+            f'"mcp" and re-run with --update:\n  "missioncache": {json.dumps(desired)}'
         )
         ctx.mcp_success["opencode"] = False
         return
@@ -208,7 +208,7 @@ def install_opencode(ctx: "InstallContext") -> None:
         if mcp is None:
             mcp = {}
             data["mcp"] = mcp
-        mcp["orbit"] = desired
+        mcp["missioncache"] = desired
         OPENCODE_CONFIG_PATH.write_text(json.dumps(data, indent=indent))
 
     state.record_component("opencode", {"path": str(OPENCODE_CONFIG_PATH)})
@@ -217,7 +217,7 @@ def install_opencode(ctx: "InstallContext") -> None:
 
 
 def uninstall_opencode(ctx: "InstallContext") -> None:
-    """Remove `mcp.orbit` from OpenCode config. Preserves every other key."""
+    """Remove `mcp.missioncache` from OpenCode config. Preserves every other key."""
     if not OPENCODE_CONFIG_PATH.exists():
         ui.detail("OpenCode config not found - nothing to remove")
         state.remove_component("opencode")
@@ -229,8 +229,8 @@ def uninstall_opencode(ctx: "InstallContext") -> None:
         state.remove_component("opencode")
         return
     mcp = data.get("mcp")
-    if not isinstance(mcp, dict) or "orbit" not in mcp:
-        ui.detail("orbit not present in OpenCode config")
+    if not isinstance(mcp, dict) or "missioncache" not in mcp:
+        ui.detail("MissionCache not present in OpenCode config")
         state.remove_component("opencode")
         return
     if used_jsonc:
@@ -238,14 +238,14 @@ def uninstall_opencode(ctx: "InstallContext") -> None:
         # would strip the user's comments. Tell them what to remove instead.
         ui.warn(
             f"{OPENCODE_CONFIG_PATH} contains comments or trailing commas. "
-            'Auto-edit would strip them. Remove the "orbit" entry under '
+            'Auto-edit would strip them. Remove the "missioncache" entry under '
             '"mcp" manually.'
         )
         state.remove_component("opencode")
         return
-    mcp.pop("orbit", None)
+    mcp.pop("missioncache", None)
     OPENCODE_CONFIG_PATH.write_text(json.dumps(data, indent=indent))
-    ui.detail(f"Removed orbit from {OPENCODE_CONFIG_PATH}")
+    ui.detail(f"Removed MissionCache from {OPENCODE_CONFIG_PATH}")
     state.remove_component("opencode")
 
 
@@ -261,7 +261,7 @@ def _opencode_detected() -> bool:
 # ---------------------------------------------------------------------------
 
 def install_vscode(ctx: "InstallContext") -> None:
-    """Register orbit in VSCode's user-level mcp.json (macOS Phase 11.1 only).
+    """Register MissionCache in VSCode's user-level mcp.json (macOS Phase 11.1 only).
 
     Preserves any existing servers in the file. Copilot Chat picks up changes
     automatically on save - no extension restart needed.
@@ -293,15 +293,15 @@ def install_vscode(ctx: "InstallContext") -> None:
         return
 
     servers = data.get("servers") if isinstance(data.get("servers"), dict) else None
-    if servers is not None and servers.get("orbit") == desired:
-        ui.detail(f"orbit already configured in {VSCODE_USER_MCP_PATH}")
+    if servers is not None and servers.get("missioncache") == desired:
+        ui.detail(f"MissionCache already configured in {VSCODE_USER_MCP_PATH}")
     elif used_jsonc:
         # File has comments or trailing commas; refuse auto-merge to avoid
         # silently stripping them. mcp.json is JSONC by VSCode convention.
         ui.warn(
             f"{VSCODE_USER_MCP_PATH} contains comments or trailing commas. "
             "Auto-merge would strip them. Add this entry manually under "
-            f'"servers" and re-run with --update:\n  "orbit": {json.dumps(desired)}'
+            f'"servers" and re-run with --update:\n  "missioncache": {json.dumps(desired)}'
         )
         ctx.mcp_success["vscode"] = False
         return
@@ -309,7 +309,7 @@ def install_vscode(ctx: "InstallContext") -> None:
         if servers is None:
             servers = {}
             data["servers"] = servers
-        servers["orbit"] = desired
+        servers["missioncache"] = desired
         VSCODE_USER_MCP_PATH.write_text(json.dumps(data, indent=indent))
 
     state.record_component("vscode", {"path": str(VSCODE_USER_MCP_PATH)})
@@ -318,7 +318,7 @@ def install_vscode(ctx: "InstallContext") -> None:
 
 
 def uninstall_vscode(ctx: "InstallContext") -> None:
-    """Remove `servers.orbit` from VSCode mcp.json. Preserves every other key."""
+    """Remove `servers.missioncache` from VSCode mcp.json. Preserves every other key."""
     if not VSCODE_USER_MCP_PATH.exists():
         ui.detail("VSCode mcp.json not found - nothing to remove")
         state.remove_component("vscode")
@@ -330,21 +330,21 @@ def uninstall_vscode(ctx: "InstallContext") -> None:
         state.remove_component("vscode")
         return
     servers = data.get("servers")
-    if not isinstance(servers, dict) or "orbit" not in servers:
-        ui.detail("orbit not present in VSCode mcp.json")
+    if not isinstance(servers, dict) or "missioncache" not in servers:
+        ui.detail("MissionCache not present in VSCode mcp.json")
         state.remove_component("vscode")
         return
     if used_jsonc:
         ui.warn(
             f"{VSCODE_USER_MCP_PATH} contains comments or trailing commas. "
-            'Auto-edit would strip them. Remove the "orbit" entry under '
+            'Auto-edit would strip them. Remove the "missioncache" entry under '
             '"servers" manually.'
         )
         state.remove_component("vscode")
         return
-    servers.pop("orbit", None)
+    servers.pop("missioncache", None)
     VSCODE_USER_MCP_PATH.write_text(json.dumps(data, indent=indent))
-    ui.detail(f"Removed orbit from {VSCODE_USER_MCP_PATH}")
+    ui.detail(f"Removed MissionCache from {VSCODE_USER_MCP_PATH}")
     state.remove_component("vscode")
 
 

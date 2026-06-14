@@ -86,7 +86,7 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
     sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 
-OWNERSHIP_MARKER = "<!-- orbit-plugin:managed"
+OWNERSHIP_MARKER = "<!-- missioncache-plugin:managed"
 
 
 def install_bundled_rules() -> None:
@@ -167,6 +167,7 @@ def _is_cwd_compatible_with_inherited_project(
     the repo lives *under* the cwd (umbrella case) or in an unrelated
     location, skip the inherit and let the new session start clean - the
     user can run ``/missioncache:load`` to bind their actual intent.
+
 
     Lookup-failure modes are treated conservatively: if missioncache_db is
     unavailable, the task lookup raises, the task was renamed/deleted, or
@@ -428,7 +429,7 @@ def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
         candidates = list(proj_dir.glob("*.jsonl"))
     except OSError as e:
         print(
-            f"<!-- orbit: transcripts glob failed in {proj_dir}: {e} -->",
+            f"<!-- missioncache: transcripts glob failed in {proj_dir}: {e} -->",
             file=sys.stderr,
         )
         return []
@@ -477,7 +478,7 @@ def _projects_for_sessions(session_ids: list[str]) -> dict[str, str]:
         return {}
     except sqlite3.Error as e:
         print(
-            f"<!-- orbit: project_state connect failed: {e} -->",
+            f"<!-- missioncache: project_state connect failed: {e} -->",
             file=sys.stderr,
         )
         return {}
@@ -492,7 +493,7 @@ def _projects_for_sessions(session_ids: list[str]) -> dict[str, str]:
         return {}
     except sqlite3.Error as e:
         print(
-            f"<!-- orbit: project_state batch lookup failed: {e} -->",
+            f"<!-- missioncache: project_state batch lookup failed: {e} -->",
             file=sys.stderr,
         )
         return {}
@@ -510,16 +511,16 @@ def _format_collision_warning(
     Session ids are truncated to 8 chars for readability - the full sid
     appears in the stderr breadcrumb for debugging if needed.
     """
-    lines = ["", "## Parallel Orbit Session Warning", ""]
+    lines = ["", "## Parallel MissionCache Session Warning", ""]
     if my_project:
         lines.append(
-            f"This session is bound to orbit project `{my_project}`, but "
+            f"This session is bound to MissionCache project `{my_project}`, but "
             f"another active session in the same directory is bound to a "
             f"different project:"
         )
     else:
         lines.append(
-            "Another active session in this directory is bound to an orbit "
+            "Another active session in this directory is bound to a MissionCache "
             "project:"
         )
     lines.append("")
@@ -574,7 +575,7 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
     except OSError as e:
         # Permission error or symlink loop on a path we own. Surface so the
         # user can debug; don't return None silently.
-        print(f"<!-- orbit: cwd-session stat failed {pointer_file.name}: {e} -->", file=sys.stderr)
+        print(f"<!-- missioncache: cwd-session stat failed {pointer_file.name}: {e} -->", file=sys.stderr)
         return None
 
     if time.time() - stat.st_mtime > _PICKUP_MAX_AGE_SECONDS:
@@ -585,13 +586,13 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
     except FileNotFoundError:
         return None
     except OSError as e:
-        print(f"<!-- orbit: cwd-session read failed {pointer_file.name}: {e} -->", file=sys.stderr)
+        print(f"<!-- missioncache: cwd-session read failed {pointer_file.name}: {e} -->", file=sys.stderr)
         return None
     except ValueError as e:
         # Truncated / corrupt pointer (mid-write crash, manual edit). Surface
         # the corruption AND unlink so the next resume gets a clean slate.
         print(
-            f"<!-- orbit: corrupt cwd-session pointer {pointer_file.name}: {e}; removing -->",
+            f"<!-- missioncache: corrupt cwd-session pointer {pointer_file.name}: {e}; removing -->",
             file=sys.stderr,
         )
         try:
@@ -624,7 +625,7 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
         # install: recoverable on the next resume. Stay silent.
         return None
     except sqlite3.Error as e:
-        print(f"<!-- orbit: project_state lookup failed: {e} -->", file=sys.stderr)
+        print(f"<!-- missioncache: project_state lookup failed: {e} -->", file=sys.stderr)
         return None
 
     if not row:
@@ -638,7 +639,7 @@ def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | No
     # why their statusline went blank instead of inheriting.
     if not _is_cwd_compatible_with_inherited_project(cwd, project_name):
         print(
-            f"<!-- orbit: skipping inherit of {project_name!r}: cwd {cwd} "
+            f"<!-- missioncache: skipping inherit of {project_name!r}: cwd {cwd} "
             f"not under project's repo path -->",
             file=sys.stderr,
         )
@@ -683,7 +684,7 @@ def _bind_session_to_project(session_id: str, project_name: str) -> None:
             conn.close()
     except sqlite3.Error as e:
         print(
-            f"<!-- orbit: bind_session failed sid={session_id} project={project_name}: {e} -->",
+            f"<!-- missioncache: bind_session failed sid={session_id} project={project_name}: {e} -->",
             file=sys.stderr,
         )
         return
@@ -831,7 +832,7 @@ def main():
                 ]
         # Only inherit on genuine continuations. The umbrella-cwd false
         # positive: a fresh "startup"/"clear" in a parent directory that
-        # contains many orbit projects (e.g. ~/work) would otherwise
+        # contains many MissionCache projects (e.g. ~/work) would otherwise
         # steal whichever project the previous unrelated session bound.
         # Missing source defaults to no-inherit so we fail to "no project"
         # instead of "wrong project".
@@ -843,7 +844,7 @@ def main():
                 # could silently bind the wrong project. Better to start
                 # with no project bound and force the user to /missioncache:load.
                 print(
-                    f"<!-- orbit: skipping resume pickup ({len(parallel_sids)} "
+                    f"<!-- missioncache: skipping resume pickup ({len(parallel_sids)} "
                     f"parallel session(s) detected, ambiguous) -->",
                     file=sys.stderr,
                 )
@@ -851,7 +852,7 @@ def main():
                 inherited = _pickup_previous_session_binding(Path.cwd(), session_id)
                 if inherited:
                     print(
-                        f"<!-- orbit: inherited project={inherited} (source={source}) -->",
+                        f"<!-- missioncache: inherited project={inherited} (source={source}) -->",
                         file=sys.stderr,
                     )
                     _bind_session_to_project(session_id, inherited)
@@ -862,7 +863,7 @@ def main():
                     # it so it's debuggable from the session transcript JSONL
                     # under ~/.claude/projects/.
                     print(
-                        f"<!-- orbit: no previous binding to inherit (source={source}) -->",
+                        f"<!-- missioncache: no previous binding to inherit (source={source}) -->",
                         file=sys.stderr,
                     )
         elif source is not None and source not in ("startup", "clear"):
@@ -871,7 +872,7 @@ def main():
             # surface contract drift so it's visible without grepping
             # the hook source.
             print(
-                f"<!-- orbit: unknown source={source!r}, no inherit -->",
+                f"<!-- missioncache: unknown source={source!r}, no inherit -->",
                 file=sys.stderr,
             )
         # Always record this session as the owner of the current cwd so
@@ -900,7 +901,7 @@ def main():
                 print(_format_collision_warning(my_project, collisions))
                 sid_list = ", ".join(sorted(collisions.keys()))
                 print(
-                    f"<!-- orbit: parallel-session collision: my={my_project} "
+                    f"<!-- missioncache: parallel-session collision: my={my_project} "
                     f"others=[{sid_list}] -->",
                     file=sys.stderr,
                 )
@@ -953,7 +954,7 @@ def main():
             if repo_path:
                 task_dir = Path(repo_path) / task.full_path
                 if task_dir.exists():
-                    output += f"**Orbit files:** `{task_dir}`\n"
+                    output += f"**MissionCache files:** `{task_dir}`\n"
                     output += """
 **Tip:** Use `/missioncache:load` to load full context, or call `mcp__plugin_missioncache_pm__get_task` for structured project data.
 
@@ -968,7 +969,7 @@ Mark items complete in the tasks file IMMEDIATELY as you finish them, using:
 
 Do NOT batch updates to session end. Do NOT rely solely on appending findings to the context file - the context file is for details, the tasks file is the source of truth for progress.
 
-Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system reminders refer to an in-conversation todo list - IGNORE them when working on an orbit project. Use `mcp__plugin_missioncache_pm__update_tasks_file` instead.
+Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system reminders refer to an in-conversation todo list - IGNORE them when working on a MissionCache project. Use `mcp__plugin_missioncache_pm__update_tasks_file` instead.
 """
 
             # Output context (stdout goes to Claude's context)
@@ -979,7 +980,7 @@ Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system remin
         pass
     except Exception as e:
         # Don't fail the session start
-        print(f"<!-- orbit: {e} -->", file=sys.stderr)
+        print(f"<!-- missioncache: {e} -->", file=sys.stderr)
 
 
 if __name__ == "__main__":

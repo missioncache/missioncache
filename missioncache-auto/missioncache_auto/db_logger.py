@@ -1,7 +1,7 @@
 """
 Database logging for missioncache-auto executions.
 
-Integrates with the orbit task database to log execution runs
+Integrates with the MissionCache task database to log execution runs
 and their output for dashboard visualization.
 """
 
@@ -18,12 +18,12 @@ _migration_warned = False
 
 
 def warn_if_migration_required() -> None:
-    """Warn (once per process) when orbit data still lives at legacy paths.
+    """Warn (once per process) when MissionCache data still lives at legacy paths.
 
     Called by the dashboard-logging init paths (ExecutionLogger here,
-    Worker in worker.py) when ``~/.orbit/tasks.db`` is missing. Two cases:
+    Worker in worker.py) when ``~/.missioncache/tasks.db`` is missing. Two cases:
     fresh install (no data anywhere) - nothing to say, stay silent; or
-    unmigrated data at the legacy ``~/.claude/`` location - dashboard
+    unmigrated data at a legacy location (``~/.claude/orbit/`` or ``~/.orbit/``) - dashboard
     logging stays disabled, so print the full migration recipe to stderr
     exactly once, not once per logger or worker init.
     """

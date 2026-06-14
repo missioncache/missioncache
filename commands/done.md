@@ -5,7 +5,7 @@ argument-hint: "[project-name]"
 
 # Complete Project
 
-Mark a project as completed and optionally move orbit files to the completed folder.
+Mark a project as completed and optionally move MissionCache files to the completed folder.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ Before completing, show the user:
 
 Call `mcp__plugin_missioncache_pm__complete_task` which:
 1. Updates project status to "completed" in database
-2. Moves files from `~/.orbit/active/<name>/` to `~/.orbit/completed/<name>/`
+2. Moves files from `~/.missioncache/active/<name>/` to `~/.missioncache/completed/<name>/`
 3. Records completion timestamp
 
 ### Step 4: Process Time Tracking
@@ -111,7 +111,7 @@ If the probe succeeds, include the emitted URL as a "Dashboard" line in the comp
 **Status:** active -> completed
 
 Moving files:
-  ~/.orbit/active/kafka-consumer-fix/ -> ~/.orbit/completed/kafka-consumer-fix/
+  ~/.missioncache/active/kafka-consumer-fix/ -> ~/.missioncache/completed/kafka-consumer-fix/
 
 Project completed successfully!
 
@@ -124,7 +124,7 @@ Summary:
 
 ## Options
 
-- `move_files=true` (default): Move orbit files to completed/
+- `move_files=true` (default): Move MissionCache files to completed/
 - `move_files=false`: Keep files in active/ (useful for reference)
 
 ## MCP Tools Used

@@ -1,6 +1,6 @@
 """Per-tool slash command installers for non-Claude AI coding tools.
 
-Phase 11.1 ships orbit's six canonical slash commands (load, save, new, done,
+Phase 11.1 ships MissionCache's six canonical slash commands (load, save, new, done,
 prompts, mode) into Codex, OpenCode, and VSCode Copilot Chat alongside the
 existing Claude plugin. The MCP server is registered by mcp_clients.py; this
 module handles only the slash command surface.
@@ -13,8 +13,8 @@ Four transformations apply to every non-Claude variant. Two are applied by
    plugins' /go, /save, etc.
 2. The Claude-specific `argument-hint:` frontmatter line is stripped.
 3. The MCP tool prefix `mcp__plugin_missioncache_pm__` is rewritten to `mcp__missioncache__`.
-   Claude registers orbit as a plugin (tools surface as plugin_missioncache_pm__*);
-   the other three tools register orbit as a top-level MCP server (tools
+   Claude registers MissionCache as a plugin (tools surface as plugin_missioncache_pm__*);
+   the other three tools register MissionCache as a top-level MCP server (tools
    surface as missioncache__*).
 4. Cross-references between commands are rewritten from `/missioncache:<name>` to
    `/missioncache-<name>` so that "Run /missioncache:prompts my-project" prose in command
@@ -25,13 +25,13 @@ Per-tool destination summary:
 | Tool     | Files                                               | Registration                        |
 |----------|-----------------------------------------------------|-------------------------------------|
 | OpenCode | ~/.config/opencode/commands/missioncache-<name>.md         | filesystem only (filename = cmd)    |
-| VSCode   | ~/.orbit/vscode/prompts/missioncache-<name>.prompt.md      | chat.promptFilesLocations in user   |
+| VSCode   | ~/.missioncache/vscode/prompts/missioncache-<name>.prompt.md      | chat.promptFilesLocations in user   |
 |          |                                                     | settings.json                       |
-| Codex    | ~/.orbit/codex-marketplace/plugins/missioncache/commands/  | codex plugin marketplace add +      |
+| Codex    | ~/.missioncache/codex-marketplace/plugins/missioncache/commands/  | codex plugin marketplace add +      |
 |          | missioncache-<name>.md (plus marketplace.json + plugin.json) | [plugins."missioncache@missioncache"] stanza in |
 |          |                                                     | ~/.codex/config.toml                |
 
-Source of truth: orbit's repo `commands/*.md`. PyPI mode reads from the
+Source of truth: MissionCache's repo `commands/*.md`. PyPI mode reads from the
 bundled package (built into the wheel via force-include of ../commands).
 Local mode reads from the clone so maintainer edits are picked up.
 """
@@ -54,18 +54,18 @@ if TYPE_CHECKING:
     from .installers import InstallContext
 
 
-# Canonical orbit commands. Order matches the existing Claude plugin layout.
+# Canonical MissionCache commands. Order matches the existing Claude plugin layout.
 CANONICAL_COMMANDS: tuple[str, ...] = (
     "load", "save", "new", "done", "prompts", "mode",
 )
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
 OPENCODE_COMMANDS_DIR = Path.home() / ".config" / "opencode" / "commands"
-VSCODE_PROMPTS_DIR = Path.home() / ".orbit" / "vscode" / "prompts"
+VSCODE_PROMPTS_DIR = Path.home() / ".missioncache" / "vscode" / "prompts"
 VSCODE_USER_SETTINGS_PATH = (
     Path.home() / "Library" / "Application Support" / "Code" / "User" / "settings.json"
 )
-CODEX_MARKETPLACE_DIR = Path.home() / ".orbit" / "codex-marketplace"
+CODEX_MARKETPLACE_DIR = Path.home() / ".missioncache" / "codex-marketplace"
 CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 
 # Codex plugin manifest version. Independent of missioncache-install's version - the
@@ -156,7 +156,7 @@ def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
 
 
 def _read_canonical_command(name: str, ctx: "InstallContext") -> str:
-    """Read the source content of an orbit command by name (without `.md`).
+    """Read the source content of a MissionCache command by name (without `.md`).
 
     PyPI mode: read from bundled package data (missioncache_install.bundled.commands).
     Local mode: read from <repo>/commands/<name>.md so maintainer edits
@@ -262,7 +262,7 @@ def _render_for_non_claude(content: str) -> str:
 # ---------------------------------------------------------------------------
 
 def install_opencode_commands(ctx: "InstallContext") -> None:
-    """Install orbit's six slash commands as /missioncache-<name> in OpenCode."""
+    """Install MissionCache's six slash commands as /missioncache-<name> in OpenCode."""
     ui.step("11", "OpenCode slash commands")
     if not mcp_clients._opencode_detected():
         ui.warn(
@@ -297,13 +297,13 @@ def uninstall_opencode_commands(ctx: "InstallContext") -> None:
 
 
 # ---------------------------------------------------------------------------
-# VSCode: ~/.orbit/vscode/prompts/ + chat.promptFilesLocations registration
+# VSCode: ~/.missioncache/vscode/prompts/ + chat.promptFilesLocations registration
 # ---------------------------------------------------------------------------
 
 def install_vscode_commands(ctx: "InstallContext") -> None:
-    """Install orbit slash commands as /missioncache-<name> in VSCode Copilot Chat.
+    """Install MissionCache slash commands as /missioncache-<name> in VSCode Copilot Chat.
 
-    Files go to an orbit-owned directory under ~/.orbit/. The directory is
+    Files go to a MissionCache-owned directory under ~/.missioncache/. The directory is
     registered in VSCode user settings via `chat.promptFilesLocations`, which
     makes the prompts available across all workspaces without any per-repo
     opt-in. Mirrors the user's existing `chat.instructionsFilesLocations`
@@ -363,7 +363,7 @@ def install_vscode_commands(ctx: "InstallContext") -> None:
 
 
 def _register_vscode_prompts_location() -> str:
-    """Idempotently add the orbit prompts dir to chat.promptFilesLocations.
+    """Idempotently add the MissionCache prompts dir to chat.promptFilesLocations.
 
     Preserves all other top-level keys (chat.instructionsFilesLocations,
     user theme, etc.) and the file's existing indent style.
@@ -371,10 +371,10 @@ def _register_vscode_prompts_location() -> str:
     Return values distinguish three outcomes the caller must surface
     differently to the user:
 
-    - ``"registered"``: the file was modified to add the orbit entry.
+    - ``"registered"``: the file was modified to add the MissionCache entry.
     - ``"already-present"``: the entry was already correct; no write needed.
     - ``"failed"``: the file could not be parsed (JSONC comments, syntax
-      error). The orbit entry was NOT added; the user must intervene.
+      error). The MissionCache entry was NOT added; the user must intervene.
     """
     location_key = str(VSCODE_PROMPTS_DIR)
 
@@ -447,7 +447,7 @@ def uninstall_vscode_commands(ctx: "InstallContext") -> None:
                 else:
                     locations.pop(location_key, None)
                     VSCODE_USER_SETTINGS_PATH.write_text(json.dumps(data, indent=indent))
-                    ui.detail("Removed orbit entry from chat.promptFilesLocations")
+                    ui.detail("Removed MissionCache entry from chat.promptFilesLocations")
         except json.JSONDecodeError as e:
             ui.warn(
                 f"Cannot parse {VSCODE_USER_SETTINGS_PATH}: {e}. "
@@ -473,14 +473,14 @@ def uninstall_vscode_commands(ctx: "InstallContext") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Codex: full plugin marketplace under ~/.orbit/codex-marketplace/
+# Codex: full plugin marketplace under ~/.missioncache/codex-marketplace/
 # ---------------------------------------------------------------------------
 
 def install_codex_commands(ctx: "InstallContext") -> None:
-    """Install orbit slash commands as a Codex plugin via local marketplace.
+    """Install MissionCache slash commands as a Codex plugin via local marketplace.
 
     Codex doesn't accept loose markdown commands - they have to be packaged as
-    a plugin. We build a real plugin under ~/.orbit/codex-marketplace/, register
+    a plugin. We build a real plugin under ~/.missioncache/codex-marketplace/, register
     it via `codex plugin marketplace add`, and activate it by writing the
     `[plugins."missioncache@missioncache"]` stanza into ~/.codex/config.toml.
     """
@@ -524,23 +524,23 @@ def install_codex_commands(ctx: "InstallContext") -> None:
 
     if command_count < expected:
         ui.warn(
-            f"Installed Codex orbit plugin ({command_count}/{expected} commands). "
+            f"Installed Codex MissionCache plugin ({command_count}/{expected} commands). "
             "Restart Codex; some sources were missing - re-run --update after "
             "fixing them."
         )
         return
     ui.success(
-        f"Installed Codex orbit plugin ({command_count} commands). "
+        f"Installed Codex MissionCache plugin ({command_count} commands). "
         "Restart Codex to load /missioncache-load, /missioncache-save, /missioncache-new, /missioncache-done, "
         "/missioncache-prompts, /missioncache-mode."
     )
 
 
 def _build_codex_marketplace(ctx: "InstallContext") -> int:
-    """Generate the on-disk Codex local marketplace + orbit plugin tree.
+    """Generate the on-disk Codex local marketplace + MissionCache plugin tree.
 
     Layout:
-      <root>/.agents/plugins/marketplace.json   - registry pointing at orbit
+      <root>/.agents/plugins/marketplace.json   - registry pointing at MissionCache
       <root>/plugins/missioncache/.codex-plugin/plugin.json   - plugin manifest
       <root>/plugins/missioncache/commands/missioncache-<name>.md    - the six commands
 
@@ -558,19 +558,19 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     plugin_manifest = {
         "name": "missioncache",
         "version": CODEX_PLUGIN_VERSION,
-        "description": "Orbit project management slash commands for Codex",
+        "description": "MissionCache project management slash commands for Codex",
         "author": {"name": "Tomer Brami"},
         "homepage": "https://github.com/tomerbr1/orbit-pm",
         "license": "MIT",
-        "keywords": ["orbit", "project-management", "task-tracking", "productivity"],
+        "keywords": ["missioncache", "project-management", "task-tracking", "productivity"],
         "interface": {
-            "displayName": "Orbit",
+            "displayName": "MissionCache",
             "shortDescription": "Project management with time tracking",
             "longDescription": (
-                "Orbit's slash commands inside Codex. Provides /missioncache-load, /missioncache-save, "
+                "MissionCache's slash commands inside Codex. Provides /missioncache-load, /missioncache-save, "
                 "/missioncache-new, /missioncache-done, /missioncache-prompts, and /missioncache-mode for managing "
-                "orbit projects. Requires the orbit MCP server to be registered "
-                "separately via `codex mcp add orbit -- mcp-missioncache`."
+                "MissionCache projects. Requires the MissionCache MCP server to be registered "
+                "separately via `codex mcp add missioncache -- mcp-missioncache`."
             ),
             "developerName": "Tomer Brami",
             "category": "Productivity",
@@ -583,7 +583,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
 
     marketplace = {
         "name": "missioncache",
-        "interface": {"displayName": "Orbit"},
+        "interface": {"displayName": "MissionCache"},
         "plugins": [
             {
                 "name": "missioncache",
@@ -609,7 +609,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
 
 
 def _register_codex_marketplace() -> bool:
-    """Run `codex plugin marketplace add <path>` for the orbit local marketplace.
+    """Run `codex plugin marketplace add <path>` for the MissionCache local marketplace.
 
     Returns True when the marketplace is registered (or was already
     registered), False on any other failure. The caller MUST gate downstream
@@ -709,17 +709,17 @@ def _strip_codex_plugin_stanza(text: str) -> str:
 
     A TOML section runs from its `[header]` line up to the next `[section]`
     line or end-of-file. The naive "any header ends the skip" rule is wrong
-    because subsections of orbit (e.g. `[plugins."missioncache@missioncache".overrides]`)
+    because subsections of MissionCache (e.g. `[plugins."missioncache@missioncache".overrides]`)
     look like fresh sections to a substring-only check and would leak past
     the strip. We treat subsections of `plugins."missioncache@missioncache"` as part of
-    orbit's own stanza tree and only end skip mode on a header that does
-    NOT belong to orbit.
+    MissionCache's own stanza tree and only end skip mode on a header that does
+    NOT belong to MissionCache.
 
-    Limitations (acceptable since orbit only writes the bare header today):
+    Limitations (acceptable since MissionCache only writes the bare header today):
     - The stripper is line-based, not TOML-aware. A `[header]` literal that
       appears inside a multi-line string value would prematurely end skip.
     - Array-of-tables form `[[plugins."missioncache@missioncache"]]` is not recognized.
-      orbit never emits that form; if a user hand-edits to it, the stanza
+      MissionCache never emits that form; if a user hand-edits to it, the stanza
       will not be stripped on uninstall and they'll need to delete it
       manually. Documented rather than handled because adding tomllib here
       to cover a hypothetical hand-edit is over-engineering today.
@@ -740,8 +740,8 @@ def _strip_codex_plugin_stanza(text: str) -> str:
         if skip:
             if stripped.startswith("[") and stripped.endswith("]"):
                 if stripped.startswith(subsection_prefix):
-                    # Subsection of orbit. Stay in skip mode and drop it
-                    # along with the rest of orbit's stanza tree.
+                    # Subsection of MissionCache. Stay in skip mode and drop it
+                    # along with the rest of MissionCache's stanza tree.
                     continue
                 # Sibling section - end skip and keep this line.
                 skip = False

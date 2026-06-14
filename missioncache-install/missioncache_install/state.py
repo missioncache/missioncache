@@ -1,4 +1,4 @@
-"""State tracking via ~/.claude/orbit-install.state.json.
+"""State tracking via ~/.claude/missioncache-install.state.json.
 
 Records what the installer did so --update and --uninstall know what to
 operate on. Every write timestamps updated_at; reads tolerate corruption
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-STATE_FILE = Path.home() / ".claude" / "orbit-install.state.json"
+STATE_FILE = Path.home() / ".claude" / "missioncache-install.state.json"
 STATE_SCHEMA_VERSION = 1
 
 # Component IDs renamed during the orbit->missioncache transition. Older

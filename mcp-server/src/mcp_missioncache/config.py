@@ -1,4 +1,4 @@
-"""Configuration for the orbit MCP server."""
+"""Configuration for the MissionCache MCP server."""
 
 from pathlib import Path
 
@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     """Server configuration from environment variables."""
 
     # Path to the task database
-    db_path: Path = Path.home() / ".orbit" / "tasks.db"
+    db_path: Path = Path.home() / ".missioncache" / "tasks.db"
 
-    # Centralized orbit root directory
-    root: Path = Path.home() / ".orbit"
+    # Centralized MissionCache root directory
+    root: Path = Path.home() / ".missioncache"
 
     # Active and completed subdirectory names
     active_dir_name: str = "active"

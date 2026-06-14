@@ -1,5 +1,5 @@
 """
-Data models for the Orbit Auto.
+Data models for MissionCache Auto.
 
 Defines dataclasses for tasks, state, configuration, and execution results.
 Uses Python 3.11+ features like str | None syntax.
@@ -171,7 +171,7 @@ class TaskPaths:
 
     @classmethod
     def from_task_name(cls, task_name: str) -> "TaskPaths":
-        """Create TaskPaths from task name. Uses centralized orbit root."""
+        """Create TaskPaths from task name. Uses centralized MissionCache root."""
         from missioncache_db import MISSIONCACHE_ROOT
 
         task_dir = MISSIONCACHE_ROOT / "active" / task_name

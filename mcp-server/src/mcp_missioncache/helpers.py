@@ -278,7 +278,7 @@ def _task_to_summary(
             repo_name = repo.short_name
             repo_path = repo.path
 
-    # Check if orbit files exist
+    # Check if MissionCache files exist
     has_orbit_files = False
     if task.full_path:
         task_dir = settings.root / task.full_path
@@ -319,7 +319,7 @@ def _task_to_detail(
     # Get base summary fields
     summary = _task_to_summary(task, db)
 
-    # Parse progress from orbit files
+    # Parse progress from MissionCache files
     progress = None
     if task.full_path:
         progress = _parse_task_progress(
