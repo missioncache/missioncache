@@ -149,69 +149,6 @@ def write_term_session_mapping(session_id: str) -> None:
     mapping_file.write_text(session_id)
 
 
-def _is_cwd_compatible_with_inherited_project(
-    cwd: Path, project_name: str
-) -> bool:
-    """Validate that the inherited project's repo is reachable from ``cwd``.
-
-    Defends against the umbrella-cwd false positive: a previous session at
-    ``~/work`` was bound to ``project-x`` (whose actual repo is
-    ``~/work/repo-x``). A new session resuming at the same umbrella cwd has
-    no business inheriting ``project-x`` - the user is sitting in the parent
-    and may be intending an entirely different project under it. Inheriting
-    blindly mis-tags the new session, routes its heartbeats to the wrong
-    task, and makes the statusline lie.
-
-    The gate: inherit only when ``cwd`` is the project's repo path OR a
-    descendant of it (i.e. the user is sitting *inside* the project). If
-    the repo lives *under* the cwd (umbrella case) or in an unrelated
-    location, skip the inherit and let the new session start clean - the
-    user can run ``/missioncache:load`` to bind their actual intent.
-
-
-    Lookup-failure modes are treated conservatively: if missioncache_db is
-    unavailable, the task lookup raises, the task was renamed/deleted, or
-    the repo row was deleted, this returns ``True`` (inherit proceeds) so a
-    transient infrastructure issue does not silently blank the statusline.
-    The gate only fires on affirmative evidence that the inherit is wrong.
-
-    Non-coding tasks (``repo_id is None``) have no repo to validate against,
-    so they always inherit on the cwd-pointer match alone.
-    """
-    try:
-        from missioncache_db import TaskDB  # type: ignore[import-not-found]
-    except ImportError:
-        return True
-
-    try:
-        db = TaskDB()
-        task = db.get_task_by_name(project_name)
-    except Exception:
-        return True
-
-    if task is None:
-        return True
-
-    if task.repo_id is None:
-        # Non-coding task - no repo path to spatially validate against.
-        return True
-
-    try:
-        repo = db.get_repo(task.repo_id)
-    except Exception:
-        return True
-
-    if repo is None:
-        return True
-
-    # cwd is the repo or a descendant of the repo (working inside the project)
-    try:
-        cwd.resolve().relative_to(Path(repo.path).resolve())
-        return True
-    except ValueError:
-        return False
-
-
 def _read_cwd_pointer_sid(cwd: Path) -> str | None:
     """Return the validated sessionId from the cwd-session pointer file.
 
@@ -221,13 +158,11 @@ def _read_cwd_pointer_sid(cwd: Path) -> str | None:
     re-issues under a NEW session_id. Used by ``main()`` to exclude that
     prior session from ``_detect_parallel_sessions``'s result - without
     this exclusion, the resumed-from session's still-fresh transcript
-    would be misclassified as a "parallel" session, the resume-pickup
-    would be falsely skipped, and the statusline would blank out on every
-    normal resume within the freshness window.
+    would be misclassified as a "parallel" session and the collision
+    warning would fire spuriously on every normal resume within the
+    freshness window.
 
     Returns None when the pointer is missing, stale (>24h), or corrupt.
-    Validation mirrors ``_pickup_previous_session_binding`` so the two
-    callers agree on what counts as a usable pointer.
     """
     cwd_key = str(cwd).replace("/", "-")
     pointer_file = (
@@ -465,8 +400,6 @@ def _projects_for_sessions(session_ids: list[str]) -> dict[str, str]:
     subclasses (DB corruption, schema drift, programming errors) emit a
     stderr breadcrumb so the warning's silent degradation is debuggable
     from the session transcript JSONL under ``~/.claude/projects/``.
-    Matches the pattern at
-    ``_pickup_previous_session_binding`` (lines 347 / 358).
     """
     if not session_ids:
         return {}
@@ -540,161 +473,6 @@ def _format_collision_warning(
     )
     lines.append("")
     return "\n".join(lines)
-
-
-def _pickup_previous_session_binding(cwd: Path, new_session_id: str) -> str | None:
-    """On resume, look up the project bound to the previous session at this cwd.
-
-    Reads ``cwd-session/<sanitized>.json`` BEFORE ``write_cwd_session_pointer``
-    overwrites it, extracts the session_id that owned this cwd, and queries
-    ``project_state`` in the shared hooks-state DB for that sid. The caller
-    is expected to bind the returned project_name to ``new_session_id`` so the
-    statusline can render the project across resume.
-
-    Returns None on:
-      * Missing pointer file (fresh start at this cwd).
-      * Pointer mtime older than ``_PICKUP_MAX_AGE_SECONDS`` (stale).
-      * Pointer's session_id missing, malformed, or equal to new_session_id.
-      * Corrupt pointer JSON (also unlinks the corrupt file so the next resume
-        does not keep tripping on it).
-      * project_state has no row for that sid.
-      * The inherited project's repo lives outside ``cwd`` (umbrella-cwd
-        false-positive guard, see ``_is_cwd_compatible_with_inherited_project``).
-      * sqlite3 lock contention is silent (recoverable, dashboard writes the
-        same DB); other sqlite3 errors log to stderr for diagnosability.
-    """
-    from missioncache_db import HOOKS_STATE_DB_PATH  # type: ignore[import-not-found]
-
-    cwd_key = str(cwd).replace("/", "-")
-    pointer_file = Path.home() / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
-
-    try:
-        stat = pointer_file.stat()
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        # Permission error or symlink loop on a path we own. Surface so the
-        # user can debug; don't return None silently.
-        print(f"<!-- missioncache: cwd-session stat failed {pointer_file.name}: {e} -->", file=sys.stderr)
-        return None
-
-    if time.time() - stat.st_mtime > _PICKUP_MAX_AGE_SECONDS:
-        return None
-
-    try:
-        data = json.loads(pointer_file.read_text())
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        print(f"<!-- missioncache: cwd-session read failed {pointer_file.name}: {e} -->", file=sys.stderr)
-        return None
-    except ValueError as e:
-        # Truncated / corrupt pointer (mid-write crash, manual edit). Surface
-        # the corruption AND unlink so the next resume gets a clean slate.
-        print(
-            f"<!-- missioncache: corrupt cwd-session pointer {pointer_file.name}: {e}; removing -->",
-            file=sys.stderr,
-        )
-        try:
-            pointer_file.unlink()
-        except OSError:
-            pass
-        return None
-
-    prev_session_id = data.get("sessionId")
-    if not isinstance(prev_session_id, str):
-        return None
-    if not prev_session_id or len(prev_session_id) > _MAX_PREV_SESSION_ID_LEN:
-        return None
-    if prev_session_id == new_session_id:
-        # Defensive: SessionStart can in principle re-fire for the same sid
-        # (hook re-execution); never resurrect ourselves with stale data.
-        return None
-
-    try:
-        conn = sqlite3.connect(str(HOOKS_STATE_DB_PATH))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                (prev_session_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-    except sqlite3.OperationalError:
-        # Lock contention with the dashboard or missing table on a fresh
-        # install: recoverable on the next resume. Stay silent.
-        return None
-    except sqlite3.Error as e:
-        print(f"<!-- missioncache: project_state lookup failed: {e} -->", file=sys.stderr)
-        return None
-
-    if not row:
-        return None
-    project_name = row[0]
-
-    # Umbrella-cwd false-positive guard: if cwd has no spatial relationship
-    # to the inherited project's repo, the cwd-pointer match alone is not
-    # enough signal to inherit. Surface a stderr breadcrumb so the user can
-    # see in the session transcript (~/.claude/projects/<cwd-key>/<sid>.jsonl)
-    # why their statusline went blank instead of inheriting.
-    if not _is_cwd_compatible_with_inherited_project(cwd, project_name):
-        print(
-            f"<!-- missioncache: skipping inherit of {project_name!r}: cwd {cwd} "
-            f"not under project's repo path -->",
-            file=sys.stderr,
-        )
-        return None
-
-    return project_name
-
-
-def _bind_session_to_project(session_id: str, project_name: str) -> None:
-    """Upsert ``project_state`` and write the per-session pointer for one binding.
-
-    Direct SQL only - the dashboard may not be reachable when this hook fires
-    on startup, and any HTTP dependency would silently degrade the resume
-    binding. Initializes the schema first via ``init_hooks_state_db_schema``
-    so a fresh install (dashboard never started) can still bind. The
-    per-session pointer file is also written so ``find_task_for_cwd``
-    resolves correctly without waiting for ``/missioncache:load``.
-
-    Failures log to stderr (captured in the session transcript JSONL under
-    ``~/.claude/projects/``) so the user has a breadcrumb when the
-    statusline Project field stays blank after resume.
-    """
-    from missioncache_db import HOOKS_STATE_DB_PATH, init_hooks_state_db_schema  # type: ignore[import-not-found]
-
-    try:
-        # Ensure parent dir exists - on a fresh install ~/.claude/ may be
-        # absent and sqlite3.connect raises OperationalError otherwise.
-        HOOKS_STATE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(HOOKS_STATE_DB_PATH))
-        try:
-            init_hooks_state_db_schema(conn)
-            conn.execute(
-                "INSERT INTO project_state (session_id, project_name, updated_at) "
-                "VALUES (?, ?, datetime('now', 'localtime')) "
-                "ON CONFLICT(session_id) DO UPDATE SET "
-                "project_name = excluded.project_name, "
-                "updated_at = datetime('now', 'localtime')",
-                (session_id, project_name),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-    except sqlite3.Error as e:
-        print(
-            f"<!-- missioncache: bind_session failed sid={session_id} project={project_name}: {e} -->",
-            file=sys.stderr,
-        )
-        return
-
-    # write_session_project uses atomic_write_json, which catches OSError
-    # internally. So the per-session pointer write is non-transactional with
-    # the DB upsert (DB row may exist, file may not on full disk) but cannot
-    # raise into the caller. Recovery on the next SessionStart fire happens
-    # via find_task_for_cwd's cwd matching path.
-    write_session_project(project_name, session_id)
 
 
 def write_cwd_session_pointer(session_id: str) -> None:
@@ -800,6 +578,50 @@ def get_session_context() -> tuple[str | None, str | None]:
     return session_id, source
 
 
+def _resume_hint_for_cwd(db, cwd: str) -> str | None:
+    """Build a short nudge when a resumed/compacted session lands in a repo
+    that has active project(s) but is not itself bound to one.
+
+    This replaces the old silent auto-inherit. Rather than guessing a project
+    from "who last used this folder" (which mis-attributed time across
+    unrelated sessions sharing a repo), we name the repo's active project(s)
+    and let the user bind explicitly with ``/missioncache:load``.
+
+    Returns None when cwd is not under any tracked repo or the repo has no
+    active tasks - the caller then stays silent. DB errors propagate to the
+    single Exception handler in main() (which logs a breadcrumb); duplicating
+    that catch here would only hide it.
+    """
+    cwd_path = Path(cwd).resolve()
+    # Most-specific active repo that contains cwd (longest matching path).
+    matching = []
+    for repo in db.get_repos(active_only=True):
+        try:
+            cwd_path.relative_to(Path(repo.path).resolve())
+            matching.append(repo)
+        except ValueError:
+            continue
+    if not matching:
+        return None
+    matching.sort(key=lambda r: len(r.path), reverse=True)
+    repo = matching[0]
+
+    # active + paused tasks for this repo, ordered last_worked_on DESC.
+    tasks = db.get_active_tasks(repo.id)
+    if not tasks:
+        return None
+
+    listed = ", ".join(f"`{t.name}`" for t in tasks[:5])
+    more = "" if len(tasks) <= 5 else f" (+{len(tasks) - 5} more)"
+    repo_label = repo.short_name or repo.path
+    return (
+        "\n## MissionCache\n\n"
+        f"Resumed in **{repo_label}**, which has active project(s): "
+        f"{listed}{more}. This session is not bound to a project, so no time "
+        "is being tracked. Run `/missioncache:load <name>` to bind it.\n"
+    )
+
+
 def main():
     """Check for active task and output context."""
     # Write term-session mapping BEFORE MissionCacheDB (independent of task detection)
@@ -812,69 +634,27 @@ def main():
         # (e.g. /clear then relaunch in the same cwd).
         write_session_pid(session_id)
         # Detect other sessions whose transcripts in this cwd were touched
-        # in the last few minutes. On resume/compact, exclude the resumed-
-        # from session (its transcript is often still fresh from recent
-        # activity but it is the conversation being continued, not a
-        # parallel session). Used for two things below:
-        #   1. Skip resume-pickup when ambiguous (cwd-pointer is last-writer-
-        #      wins; with two truly-parallel sessions in the same cwd it can
-        #      name the wrong "previous" session and bind the wrong project).
-        #   2. Emit a warning to Claude's context so the user is aware of
-        #      the parallel-work risk (statusline confusion, git conflicts,
-        #      heartbeat misrouting).
+        # in the last few minutes, to warn about parallel work in the same
+        # codebase (statusline confusion, git conflicts, heartbeat
+        # misrouting). On resume/compact, exclude the resumed-from session:
+        # its transcript is often still fresh, but it is the conversation
+        # being continued, not a competing parallel session.
         parallel_sids = _detect_parallel_sessions(Path.cwd(), session_id)
-        prev_sid_from_pointer: str | None = None
         if source in ("resume", "compact"):
             prev_sid_from_pointer = _read_cwd_pointer_sid(Path.cwd())
             if prev_sid_from_pointer:
                 parallel_sids = [
                     s for s in parallel_sids if s != prev_sid_from_pointer
                 ]
-        # Only inherit on genuine continuations. The umbrella-cwd false
-        # positive: a fresh "startup"/"clear" in a parent directory that
-        # contains many MissionCache projects (e.g. ~/work) would otherwise
-        # steal whichever project the previous unrelated session bound.
-        # Missing source defaults to no-inherit so we fail to "no project"
-        # instead of "wrong project".
-        if source in ("resume", "compact"):
-            if parallel_sids:
-                # Ambiguous resume: another session beyond the resumed-from
-                # one is still alive in this cwd. The cwd-pointer cannot
-                # distinguish which session is being resumed, so any pickup
-                # could silently bind the wrong project. Better to start
-                # with no project bound and force the user to /missioncache:load.
-                print(
-                    f"<!-- missioncache: skipping resume pickup ({len(parallel_sids)} "
-                    f"parallel session(s) detected, ambiguous) -->",
-                    file=sys.stderr,
-                )
-            else:
-                inherited = _pickup_previous_session_binding(Path.cwd(), session_id)
-                if inherited:
-                    print(
-                        f"<!-- missioncache: inherited project={inherited} (source={source}) -->",
-                        file=sys.stderr,
-                    )
-                    _bind_session_to_project(session_id, inherited)
-                else:
-                    # Resume/compact requested an inherit but no previous
-                    # binding was available. This is the user-visible
-                    # "statusline went blank on resume" failure mode; surface
-                    # it so it's debuggable from the session transcript JSONL
-                    # under ~/.claude/projects/.
-                    print(
-                        f"<!-- missioncache: no previous binding to inherit (source={source}) -->",
-                        file=sys.stderr,
-                    )
-        elif source is not None and source not in ("startup", "clear"):
-            # Unknown source value - Claude Code added one we don't
-            # recognize. Failing closed is correct, but silent is bad;
-            # surface contract drift so it's visible without grepping
-            # the hook source.
-            print(
-                f"<!-- missioncache: unknown source={source!r}, no inherit -->",
-                file=sys.stderr,
-            )
+        # NOTE: this hook deliberately does NOT auto-bind the session to a
+        # project. A session is bound ONLY by an explicit action
+        # (/missioncache:load, /missioncache:new) or by sitting under
+        # ~/.missioncache/active/<task>/ (resolved by find_task_for_cwd
+        # below). The old "inherit whatever project last ran in this cwd"
+        # path was removed: a repo root is shared across unrelated work, so
+        # inheriting on cwd alone silently mis-attributed heartbeats/time to
+        # a repo-mate task and self-perpetuated across every later session in
+        # that repo. On resume we surface a one-line hint instead of guessing.
         # Always record this session as the owner of the current cwd so
         # slash commands can resolve the live session id authoritatively
         # instead of guessing by transcript mtime. Independent of project
@@ -974,6 +754,17 @@ Note: Claude Code's built-in `TaskCreate` tool and any "task tools" system remin
 
             # Output context (stdout goes to Claude's context)
             print(output)
+
+        elif source in ("resume", "compact") and session_id:
+            # Continuation (resume/compact) with no project bound. Normally a
+            # compact keeps the same session_id, so a bound session resolves
+            # above via find_task_for_cwd and never reaches here; this branch
+            # fires only when the session genuinely has no binding. We no
+            # longer guess a project from cwd - instead nudge the user to bind
+            # explicitly so time tracking + statusline resume correctly.
+            hint = _resume_hint_for_cwd(db, cwd)
+            if hint:
+                print(hint)
 
     except ImportError:
         # missioncache_db not available, skip silently

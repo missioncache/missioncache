@@ -156,30 +156,20 @@ class TestSessionStart:
         assert "1h 0m" in output
 
 
-class TestSessionStartResumePickup:
-    """Tests for ``_pickup_previous_session_binding`` and the resume-aware main flow.
+class TestSessionStartStrictBinding:
+    """A session is bound to a project ONLY by an explicit action
+    (/missioncache:load, /missioncache:new) or by sitting under
+    ~/.missioncache/active/<task>/. The old "inherit whatever project last
+    ran in this cwd" path was removed because a repo root is shared across
+    unrelated work: inheriting on cwd alone silently mis-attributed
+    heartbeats/time to a repo-mate task and self-perpetuated across sessions.
 
-    Resume changes Claude Code's session_id; without these helpers the previous
-    session's project_state binding is orphaned and the statusline drops the
-    project field until /missioncache:load is re-run. The pickup logic copies the
-    binding to the new sid before write_cwd_session_pointer overwrites the
-    breadcrumb that points back to the old sid.
-
-    Test fixtures use missioncache_db's real ``init_hooks_state_db_schema`` rather
-    than hand-rolled DDL so a future column add in production is caught here
-    instead of silently passing because the test seeded its own minimal shape.
+    These tests pin the new contract: resume does NOT auto-bind, and instead
+    surfaces a one-line hint nudging the user to /missioncache:load.
     """
 
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
-        """Redirect Path.home() and missioncache_db.HOOKS_STATE_DB_PATH onto ``home``.
-
-        ``HOOKS_STATE_DB_PATH`` is captured at missioncache_db import time using the
-        real ``Path.home()``, so monkeypatching ``pathlib.Path.home`` alone
-        leaves missioncache_db reading the user's real DB. Patch both.
-
-        Returns the redirected hooks-state.db path for assertion convenience.
-        """
         import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
@@ -189,14 +179,7 @@ class TestSessionStartResumePickup:
 
     @classmethod
     def _seed_project_state(cls, home: Path, rows: list[tuple[str, str]]) -> Path:
-        """Create the hooks-state.db schema (via the production init function)
-        and insert (sid, project) rows.
-
-        Importing the real schema function instead of hand-rolling the DDL
-        means tests catch column drift the moment production schema changes.
-        """
         import sqlite3 as _sqlite3
-
         from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
 
         db_path = home / ".claude" / "hooks-state.db"
@@ -213,18 +196,6 @@ class TestSessionStartResumePickup:
             conn.close()
         return db_path
 
-    @staticmethod
-    def _seed_pointer(home: Path, cwd: Path, session_id: str) -> Path:
-        """Write a cwd-session pointer file as if a previous session owned this cwd."""
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        pointer_file = pointer_dir / f"{cwd_key}.json"
-        pointer_file.write_text(
-            json.dumps({"sessionId": session_id, "cwd": str(cwd), "updatedAt": "ignored"})
-        )
-        return pointer_file
-
     def _reload_module(self):
         import importlib
         import hooks.session_start as mod
@@ -232,669 +203,53 @@ class TestSessionStartResumePickup:
         importlib.reload(mod)
         return mod
 
-    def test_pickup_returns_project_when_pointer_and_state_match(self, tmp_path, monkeypatch):
-        """Happy path: prev sid in pointer + project_state row -> returns project name."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "repo"
-        cwd.mkdir()
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "carried-over-project")])
+    # ── regression: resume no longer auto-inherits a repo-mate project ────
 
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "carried-over-project"
-
-    def test_pickup_returns_none_when_pointer_missing(self, tmp_path, monkeypatch):
-        """Fresh start at a cwd that never had a session - no-op."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "fresh"
-        cwd.mkdir()
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_pickup_returns_none_when_pointer_too_old(self, tmp_path, monkeypatch):
-        """Pointer mtime older than 24h is treated as fresh start."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "stale"
-        cwd.mkdir()
-        pointer_file = self._seed_pointer(tmp_path, cwd, "stale-sid")
-        self._seed_project_state(tmp_path, [("stale-sid", "abandoned-project")])
-
-        # Backdate mtime to 25h ago.
-        old_time = time.time() - (25 * 3600)
-        os.utime(pointer_file, (old_time, old_time))
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_pickup_returns_none_when_pointer_sid_matches_new_sid(self, tmp_path, monkeypatch):
-        """Defensive: same sid in pointer and incoming - never resurrect ourselves."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "self"
-        cwd.mkdir()
-        self._seed_pointer(tmp_path, cwd, "same-sid")
-        self._seed_project_state(tmp_path, [("same-sid", "my-project")])
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "same-sid") is None
-
-    def test_pickup_returns_none_when_no_project_bound_to_prev_sid(self, tmp_path, monkeypatch):
-        """Pointer present but project_state has no row - prev session never ran /missioncache:load."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "unbound"
-        cwd.mkdir()
-        self._seed_pointer(tmp_path, cwd, "unbound-sid")
-        self._seed_project_state(tmp_path, [])
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_pickup_returns_none_when_pointer_missing_session_id_key(self, tmp_path, monkeypatch):
-        """Pointer JSON valid but lacks 'sessionId' key - the not-prev_session_id branch.
-
-        A future schema change or a manually edited pointer can produce this
-        shape. Without explicit coverage, dropping the ``not isinstance(...)``
-        guard would silently query the DB with None and the bug would slip.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "no-sid-key"
-        cwd.mkdir()
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(tmp_path, [])
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_pickup_returns_none_when_pointer_session_id_too_long(self, tmp_path, monkeypatch):
-        """A corrupt pointer with a multi-MB sessionId is rejected before the SQL bind.
-
-        Defends against the trickle of garbage data into the DB and bounds the
-        memory footprint of the pickup path.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "huge-sid"
-        cwd.mkdir()
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "x" * 10000, "cwd": str(cwd)})
-        )
-        self._seed_project_state(tmp_path, [])
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_pickup_corrupt_pointer_is_unlinked(self, tmp_path, monkeypatch, capsys):
-        """Malformed JSON returns None AND deletes the corrupt file so the next
-        resume gets a clean slate. Also surfaces a stderr breadcrumb so the
-        user knows their pointer was reset."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "corrupt"
-        cwd.mkdir()
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        pointer_file = pointer_dir / f"{cwd_key}.json"
-        pointer_file.write_text("not-valid-json{{{")
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-        assert not pointer_file.exists(), "corrupt pointer should be unlinked"
-        assert "corrupt cwd-session pointer" in capsys.readouterr().err
-
-    def test_pickup_returns_none_on_sqlite_error(self, tmp_path, monkeypatch):
-        """A sqlite3.Error during the project_state lookup must not propagate.
-
-        The docstring promises silent handling; without this test, a refactor
-        that drops the except clause would be undetectable.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "db-broken"
-        cwd.mkdir()
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        # No DB created at all - sqlite3.connect will succeed but the SELECT
-        # raises OperationalError ('no such table'). That hits the
-        # OperationalError branch which is silent (no stderr) and returns None.
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-    def test_bind_works_on_fresh_install_without_table(self, tmp_path, monkeypatch):
-        """Fresh install (dashboard never ran) - bind must auto-create the schema.
-
-        Without ``init_hooks_state_db_schema``, the INSERT raises
-        ``OperationalError: no such table`` which the bare ``except sqlite3.Error``
-        swallows, and the resume binding silently no-ops. This is exactly the
-        Critical bug the review flagged.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        # No _seed_project_state call - DB and table do not exist yet.
-
-        mod = self._reload_module()
-        mod._bind_session_to_project("new-sid", "my-project")
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "my-project"
-
-    def test_bind_writes_project_state_and_per_session_pointer(self, tmp_path, monkeypatch):
-        """_bind_session_to_project upserts the DB row and writes projects/<sid>.json."""
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        self._seed_project_state(tmp_path, [])
-
-        mod = self._reload_module()
-        mod._bind_session_to_project("new-sid", "my-project")
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "my-project"
-
-        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
-        assert pointer_file.exists()
-        data = json.loads(pointer_file.read_text())
-        assert data["projectName"] == "my-project"
-        assert data["sessionId"] == "new-sid"
-
-    def test_bind_upserts_when_session_id_already_bound(self, tmp_path, monkeypatch):
-        """Calling bind twice replaces the project_name (ON CONFLICT DO UPDATE)."""
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        self._seed_project_state(tmp_path, [("dup-sid", "stale-project")])
-
-        mod = self._reload_module()
-        mod._bind_session_to_project("dup-sid", "fresh-project")
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("dup-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "fresh-project"
-
-    def test_bind_logs_to_stderr_on_db_failure_and_skips_pointer(
-        self, tmp_path, monkeypatch, capsys
+    def test_resume_does_not_inherit_previous_cwd_owner_project(
+        self, tmp_path, monkeypatch
     ):
-        """When the DB write fails, log a breadcrumb AND skip the pointer write.
-
-        Silent failure here was the load-bearing review finding: without a
-        stderr trail, the user's statusline goes blank with no diagnostic.
-        Per-session pointer must NOT be written when DB fails - that's the
-        documented invariant (DB row is the source of truth).
-        """
-        import sqlite3 as _sqlite3
-
-        self._redirect_state(monkeypatch, tmp_path)
-
-        def _broken_connect(*args, **kwargs):
-            raise _sqlite3.OperationalError("simulated DB failure")
-
-        monkeypatch.setattr(_sqlite3, "connect", _broken_connect)
-
-        mod = self._reload_module()
-        mod._bind_session_to_project("new-sid", "my-project")
-
-        # Stderr breadcrumb surfaced.
-        err = capsys.readouterr().err
-        assert "bind_session failed" in err
-        assert "new-sid" in err
-
-        # Pointer file NOT written when DB failed.
-        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
-        assert not pointer_file.exists(), "pointer must not be written when DB write fails"
-
-    def test_main_carries_project_across_resume(self, tmp_path, monkeypatch):
-        """Full main() flow: new sid inherits the project bound to the previous sid.
-
-        The hook input carries ``source="resume"`` here, which is the only
-        case (alongside ``"compact"``) that triggers inheritance under the
-        post-fix contract. Tests for the gated-out cases live in
-        :class:`TestSessionStartSourceGating` below.
+        """THE bug: a new session resuming at a repo root where a previous
+        session was bound to project X must NOT inherit X - neither in
+        project_state nor as a projects/<sid>.json pointer. This is what
+        leaked unrelated sessions' heartbeats onto a repo-mate task.
         """
         import sqlite3 as _sqlite3
 
         db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "resume" / "repo"
+        cwd = tmp_path / "repo"
         cwd.mkdir(parents=True)
         monkeypatch.chdir(cwd)
         monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        # Pipe the SessionStart payload through real stdin so
-        # ``get_session_context`` sees both ``session_id`` and ``source``.
-        # ``CLAUDE_SESSION_ID`` is intentionally NOT set so the stdin path
-        # is exercised end-to-end.
         monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "new-sid", "source": "resume"}
+        )
 
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
-
-        mod = self._reload_module()
-        # Replace TaskDB on the real missioncache_db module with a no-task mock so
-        # find_task_for_cwd returns None (we're testing the pickup path, not
-        # the existing task-detection path).
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        # Mock get_task_by_name to None so _is_cwd_compatible_with_inherited_project
-        # takes the conservative-inherit branch ("task not found in DB"). The
-        # test is about the resume-pickup path, not the cwd-validation gate -
-        # the gate has its own coverage in TestPickupCwdCompatibilityGate.
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        # New session inherited the project binding.
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "carried-over"
-
-        # Per-session pointer file written for the new sid.
-        pointer_file = tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
-        assert pointer_file.exists()
-
-        # Existing behavior preserved: cwd-session pointer is overwritten with new sid.
+        # Previous session "prev-sid" owned this cwd and was bound to "avc".
+        # Under the old inherit logic, new-sid would copy "avc".
         cwd_key = str(cwd).replace("/", "-")
-        cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
-        assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
-
-
-class TestPickupCwdCompatibilityGate:
-    """``_pickup_previous_session_binding`` must validate the inherited project
-    against the current cwd before binding.
-
-    Bug scenario: previous session at ``/Users/alice/work`` (umbrella dir
-    holding many repos) was bound to ``project-X`` whose actual repo path is
-    ``/Users/alice/work/some-repo``. When a new session resumes at the same
-    umbrella cwd, the prior logic blindly inherited ``project-X`` even though
-    the new session is sitting in a parent directory and might be intending a
-    completely different project. The inherited binding then routed the new
-    session's heartbeats to the wrong task and made the statusline lie.
-
-    The gate: only inherit when the inherited project's repo path is the
-    current cwd OR an ancestor of it (i.e. the cwd is inside the project's
-    repo). If the repo lives *under* the cwd (umbrella case) or in an
-    unrelated location, skip the inherit and let the new session start clean.
-
-    Non-coding tasks (no repo_id) and lookup failures (missioncache_db unavailable,
-    task renamed/deleted, repo deleted) are treated conservatively: inherit
-    proceeds, preserving the prior behavior. The gate only fires when we have
-    affirmative evidence the inherit is wrong.
-    """
-
-    @staticmethod
-    def _redirect_state(monkeypatch, home: Path) -> Path:
-        import missioncache_db  # type: ignore[import-not-found]
-
-        monkeypatch.setattr("pathlib.Path.home", lambda: home)
-        db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
-        return db_path
-
-    @staticmethod
-    def _seed_pointer(home: Path, cwd: Path, session_id: str) -> Path:
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        pointer_file = pointer_dir / f"{cwd_key}.json"
-        pointer_file.write_text(
-            json.dumps({"sessionId": session_id, "cwd": str(cwd), "updatedAt": "x"})
-        )
-        return pointer_file
-
-    @staticmethod
-    def _seed_project_state(home: Path, rows: list[tuple[str, str]]) -> Path:
-        import sqlite3 as _sqlite3
-
-        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
-
-        db_path = home / ".claude" / "hooks-state.db"
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            init_hooks_state_db_schema(conn)
-            if rows:
-                conn.executemany(
-                    "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
-                    rows,
-                )
-            conn.commit()
-        finally:
-            conn.close()
-        return db_path
-
-    @staticmethod
-    def _mock_taskdb(monkeypatch, *, task=None, repo=None) -> None:
-        """Replace ``missioncache_db.TaskDB`` with a mock whose ``get_task_by_name``
-        returns ``task`` and ``get_repo`` returns ``repo``.
-
-        Pass ``task=None`` to simulate "task not found" (renamed/deleted).
-        Pass ``repo=None`` with a task to simulate "task exists but repo
-        orphaned" (deleted repo row).
-        """
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.get_task_by_name.return_value = task
-        mock_db.get_repo.return_value = repo
-        mock_db.find_task_for_cwd.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-
-    def _reload_module(self):
-        import importlib
-        import hooks.session_start as mod
-
-        importlib.reload(mod)
-        return mod
-
-    def test_pickup_skips_when_repo_is_subdirectory_of_cwd_umbrella(
-        self, tmp_path, monkeypatch, capsys
-    ):
-        """REGRESSION: umbrella-cwd false positive.
-
-        Previous session at ``/work`` was on a project whose repo is
-        ``/work/repo-x``. New session at the SAME umbrella cwd ``/work``
-        must NOT inherit - the spatial signal says the user is in the
-        umbrella, not the project repo. Fails on master, passes on fix.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        umbrella = tmp_path / "work"
-        umbrella.mkdir()
-        repo_x = umbrella / "repo-x"
-        repo_x.mkdir()
-
-        self._seed_pointer(tmp_path, umbrella, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
-
-        task = SimpleNamespace(
-            id=1, name="project-x", repo_id=42, full_path="active/project-x"
-        )
-        repo = SimpleNamespace(id=42, path=str(repo_x))
-        self._mock_taskdb(monkeypatch, task=task, repo=repo)
-
-        mod = self._reload_module()
-        result = mod._pickup_previous_session_binding(umbrella, "new-sid")
-        assert result is None, (
-            "Umbrella cwd /work must not inherit project-x whose repo is at "
-            f"/work/repo-x. Got {result!r}."
-        )
-        # Surface a stderr breadcrumb so the user knows why their statusline
-        # went blank instead of inheriting.
-        assert "skipping inherit" in capsys.readouterr().err.lower()
-
-    def test_pickup_inherits_when_cwd_equals_repo_path(
-        self, tmp_path, monkeypatch
-    ):
-        """Happy path: previous session was at the repo, new session is also
-        at the repo. Inherit proceeds - this is the canonical "resume the
-        project I was working on" case.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        repo_dir = tmp_path / "repo-x"
-        repo_dir.mkdir()
-
-        self._seed_pointer(tmp_path, repo_dir, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
-
-        task = SimpleNamespace(
-            id=1, name="project-x", repo_id=42, full_path="active/project-x"
-        )
-        repo = SimpleNamespace(id=42, path=str(repo_dir))
-        self._mock_taskdb(monkeypatch, task=task, repo=repo)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(repo_dir, "new-sid") == "project-x"
-
-    def test_pickup_inherits_when_cwd_is_descendant_of_repo(
-        self, tmp_path, monkeypatch
-    ):
-        """Working inside a subdir of the repo (e.g. ``repo-x/src``) - the
-        spatial signal still ties to the repo. Inherit proceeds.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        repo_dir = tmp_path / "repo-x"
-        subdir = repo_dir / "src" / "deep"
-        subdir.mkdir(parents=True)
-
-        self._seed_pointer(tmp_path, subdir, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "project-x")])
-
-        task = SimpleNamespace(
-            id=1, name="project-x", repo_id=42, full_path="active/project-x"
-        )
-        repo = SimpleNamespace(id=42, path=str(repo_dir))
-        self._mock_taskdb(monkeypatch, task=task, repo=repo)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(subdir, "new-sid") == "project-x"
-
-    def test_pickup_inherits_when_task_has_no_repo(self, tmp_path, monkeypatch):
-        """Non-coding task (repo_id is None) - no repo to validate against.
-        Inherit proceeds; the cwd-pointer match is the only signal we have.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "anywhere"
-        cwd.mkdir()
-
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "meeting-notes")])
-
-        task = SimpleNamespace(
-            id=1, name="meeting-notes", repo_id=None, full_path="global/meeting-notes"
-        )
-        self._mock_taskdb(monkeypatch, task=task, repo=None)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "meeting-notes"
-
-    def test_pickup_inherits_when_task_lookup_returns_none(
-        self, tmp_path, monkeypatch
-    ):
-        """Task was renamed or deleted - get_task_by_name returns None.
-        Conservative fallback: inherit proceeds with whatever project_state
-        says. (The user can re-run /missioncache:load to correct if wrong.)
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "anywhere"
-        cwd.mkdir()
-
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "deleted-project")])
-
-        self._mock_taskdb(monkeypatch, task=None, repo=None)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "deleted-project"
-
-    def test_pickup_inherits_when_taskdb_raises(self, tmp_path, monkeypatch):
-        """TaskDB connection error - conservative fallback: inherit.
-
-        We don't want a transient DB issue to silently strip the inherit
-        and confuse the user with a blank statusline. The cwd-pointer match
-        is still a strong-enough signal on its own.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "anywhere"
-        cwd.mkdir()
-
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "some-project")])
-
-        import missioncache_db  # type: ignore[import-not-found]
-
-        def _raising_taskdb():
-            raise RuntimeError("simulated DB connection failure")
-
-        monkeypatch.setattr(missioncache_db, "TaskDB", _raising_taskdb)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") == "some-project"
-
-    def test_pickup_skips_when_repo_is_unrelated_to_cwd(
-        self, tmp_path, monkeypatch
-    ):
-        """Previous project's repo is in a completely unrelated path (no
-        spatial relationship to cwd in either direction). Skip the inherit.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "work"
-        cwd.mkdir()
-        unrelated_repo = tmp_path / "elsewhere" / "repo"
-        unrelated_repo.mkdir(parents=True)
-
-        self._seed_pointer(tmp_path, cwd, "prev-sid")
-        self._seed_project_state(tmp_path, [("prev-sid", "off-topic")])
-
-        task = SimpleNamespace(
-            id=1, name="off-topic", repo_id=42, full_path="active/off-topic"
-        )
-        repo = SimpleNamespace(id=42, path=str(unrelated_repo))
-        self._mock_taskdb(monkeypatch, task=task, repo=repo)
-
-        mod = self._reload_module()
-        assert mod._pickup_previous_session_binding(cwd, "new-sid") is None
-
-
-class TestSessionStartSourceGating:
-    """Inheritance must fire ONLY on resume/compact, never on startup/clear.
-
-    The umbrella-cwd false positive: a fresh ``startup`` session in a cwd
-    like ``~/work`` (which has many active MissionCache projects under it) used to
-    inherit whatever project the previous session in that cwd was working
-    on. Result: the new conversation got mis-tagged, statusline showed the
-    wrong project, and heartbeats were attributed to the wrong task.
-
-    The fix gates the inheritance on Claude Code's ``source`` field
-    (``startup`` / ``resume`` / ``clear`` / ``compact``). Only ``resume``
-    and ``compact`` count as a continuation of prior work; the other two
-    are new conversations that should start blank.
-    """
-
-    @staticmethod
-    def _redirect_state(monkeypatch, home: Path) -> Path:
-        """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
-        import missioncache_db  # type: ignore[import-not-found]
-
-        monkeypatch.setattr("pathlib.Path.home", lambda: home)
-        db_path = home / ".claude" / "hooks-state.db"
-        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
-        return db_path
-
-    @staticmethod
-    def _seed_for_inheritance(home: Path, cwd: Path) -> None:
-        """Seed the cwd-pointer + project_state row that inheritance reads."""
-        import sqlite3 as _sqlite3
-        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
-
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = home / ".claude" / "hooks" / "state" / "cwd-session"
+        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
         pointer_dir.mkdir(parents=True, exist_ok=True)
         (pointer_dir / f"{cwd_key}.json").write_text(
             json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
         )
+        self._seed_project_state(tmp_path, [("prev-sid", "avc")])
 
-        db_path = home / ".claude" / "hooks-state.db"
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            init_hooks_state_db_schema(conn)
-            conn.execute(
-                "INSERT INTO project_state (session_id, project_name) VALUES (?, ?)",
-                ("prev-sid", "previous-project"),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _wire_no_task(monkeypatch) -> None:
-        """Stub TaskDB so the existing find_task_for_cwd path is a no-op.
-
-        We are testing the gating of the pickup branch only; the task-detection
-        branch has its own coverage in :class:`TestSessionStart`. ``get_task_by_name``
-        also returns None so the cwd-compatibility gate (introduced for the
-        umbrella-cwd fix) takes the conservative-inherit branch and does not
-        spuriously skip valid pickups under test.
-        """
+        mod = self._reload_module()
         import missioncache_db  # type: ignore[import-not-found]
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_repos.return_value = []  # keep the hint path quiet here
+        # get_task_by_name=None makes the OLD inherit's cwd-compat gate fall to
+        # its conservative "inherit anyway" branch, so the old code WOULD bind
+        # avc onto new-sid. This is what makes the assertion below a real
+        # regression check: it fails against the pre-fix code, passes after.
         mock_db.get_task_by_name.return_value = None
         monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-
-    def _reload_module(self):
-        import importlib
-        import hooks.session_start as mod
-
-        importlib.reload(mod)
-        return mod
-
-    @pytest.mark.parametrize(
-        "source,should_inherit",
-        [
-            ("startup", False),
-            ("clear", False),
-            ("resume", True),
-            ("compact", True),
-        ],
-    )
-    def test_main_inherits_only_on_resume_or_compact(
-        self, source, should_inherit, tmp_path, monkeypatch
-    ):
-        """Resume/compact -> inheritance fires. Startup/clear -> no binding for new sid.
-
-        This is the load-bearing assertion: a fresh ``startup`` in an umbrella
-        cwd must not steal the previous session's project name. A regression
-        here re-introduces the original bug.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "umbrella" / "repo"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": source})
-
-        self._seed_for_inheritance(tmp_path, cwd)
-        self._wire_no_task(monkeypatch)
-
-        mod = self._reload_module()
         mod.main()
 
+        # new-sid must have NO project_state row...
         conn = _sqlite3.connect(str(db_path))
         try:
             row = conn.execute(
@@ -903,194 +258,208 @@ class TestSessionStartSourceGating:
             ).fetchone()
         finally:
             conn.close()
+        assert row is None, "resume must NOT auto-bind a repo-mate project"
 
-        if should_inherit:
-            assert row is not None and row[0] == "previous-project", (
-                f"source={source!r} should have inherited 'previous-project'"
-            )
-        else:
-            assert row is None, (
-                f"source={source!r} must NOT bind new-sid - umbrella-cwd false "
-                f"positive. Got binding {row[0]!r}."
-            )
+        # ...and NO per-session pointer (which would route heartbeats).
+        pointer = (
+            tmp_path / ".claude" / "hooks" / "state" / "projects" / "new-sid.json"
+        )
+        assert not pointer.exists(), "resume must NOT write projects/<sid>.json"
 
-        # The cwd-session pointer is overwritten regardless of source. That
-        # is the live "who owns this cwd right now" signal; gating it on
-        # source would break /missioncache:save in a fresh session.
-        cwd_key = str(cwd).replace("/", "-")
-        cwd_pointer = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
-        assert json.loads(cwd_pointer.read_text())["sessionId"] == "new-sid"
-
-    def test_main_does_not_inherit_when_source_field_missing(self, tmp_path, monkeypatch):
-        """Older Claude Code versions or direct invocations omit ``source``.
-
-        Default to no-inherit so we fail to "no project" instead of "wrong
-        project". A blank statusline is recoverable; mis-attributed task
-        history is not.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "no-source" / "repo"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        # Payload omits ``source`` entirely.
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid"})
-
-        self._seed_for_inheritance(tmp_path, cwd)
-        self._wire_no_task(monkeypatch)
-
-        mod = self._reload_module()
-        mod.main()
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is None, "missing source must not trigger inheritance"
-
-    def test_main_emits_breadcrumb_on_inherit(self, tmp_path, monkeypatch, capsys):
-        """A successful inherit logs a stderr breadcrumb naming project + source.
-
-        The breadcrumb is the user's only signal that auto-binding fired. If
-        the statusline ever shows an unexpected project, this line in the
-        session transcript JSONL under ``~/.claude/projects/`` is the first
-        place to look. Format-locking via
-        substring asserts (not a full-string match) so the wording can
-        evolve without test churn; the three invariants - the "inherited"
-        verb, the project name, and the source value - stay.
-        """
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "breadcrumb" / "repo"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        self._seed_for_inheritance(tmp_path, cwd)
-        self._wire_no_task(monkeypatch)
-
-        mod = self._reload_module()
-        mod.main()
-
-        err = capsys.readouterr().err
-        # Lock canonical phrase order so a refactor that splits the
-        # breadcrumb (e.g. printing project on a separate line from
-        # source) is caught. Substring asserts on individual tokens
-        # would false-pass on a poorly-ordered re-emit.
-        assert "missioncache: inherited project=previous-project" in err
-        assert "source=resume" in err
-
-    def test_main_emits_no_breadcrumb_when_gated_out(self, tmp_path, monkeypatch, capsys):
-        """``startup`` short-circuits before the breadcrumb. Stderr stays quiet."""
-        self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "gated" / "repo"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "startup"})
-
-        self._seed_for_inheritance(tmp_path, cwd)
-        self._wire_no_task(monkeypatch)
-
-        mod = self._reload_module()
-        mod.main()
-
-        # The "inherited" verb is the load-bearing token to keep out of
-        # stderr on a gated-out session. The new diagnostic breadcrumbs
-        # ("no previous binding", "unknown source") use different verbs,
-        # so this assert specifically protects the success-path phrase
-        # from leaking into the gated-out path.
-        assert "inherited" not in capsys.readouterr().err
-
-    def test_main_logs_breadcrumb_when_resume_has_no_previous_binding(
+    def test_resume_emits_hint_when_repo_has_active_projects(
         self, tmp_path, monkeypatch, capsys
     ):
-        """Resume + nothing to inherit emits the "no previous binding" diagnostic.
-
-        This is the user-visible failure mode the original bug fix did
-        not address: source=resume but the cwd has no pointer or the
-        previous session never bound a project. Without this breadcrumb,
-        a user whose statusline goes blank on resume has zero log signal
-        to debug from. Failing closed is correct behavior; failing
-        invisibly is not.
-        """
+        """Replacement for the inherit: on an unbound resume, nudge the user
+        to /missioncache:load instead of guessing."""
         self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "no-prev" / "repo"
+        cwd = tmp_path / "repo"
         cwd.mkdir(parents=True)
         monkeypatch.chdir(cwd)
         monkeypatch.setattr("os.getcwd", lambda: str(cwd))
         monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        # No _seed_for_inheritance: the cwd has no pointer file and the
-        # DB has no project_state row, so _pickup_previous_session_binding
-        # returns None.
-        self._wire_no_task(monkeypatch)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "new-sid", "source": "resume"}
+        )
 
         mod = self._reload_module()
+        import missioncache_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_repos.return_value = [
+            SimpleNamespace(id=7, path=str(cwd), short_name="repo")
+        ]
+        mock_db.get_active_tasks.return_value = [
+            SimpleNamespace(name="avc-in-house-testing"),
+            SimpleNamespace(name="tigen-nightly-stabilization"),
+        ]
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
-        err = capsys.readouterr().err
-        assert "no previous binding to inherit" in err
-        assert "source=resume" in err
-        # The success-path "inherited project=" phrase MUST NOT appear
-        # since nothing was inherited; this guards against a refactor
-        # that prints the success line unconditionally.
-        assert "inherited project=" not in err
+        out = capsys.readouterr().out
+        assert "avc-in-house-testing" in out
+        assert "/missioncache:load" in out
+        # It must call get_active_tasks scoped to the matched repo, not globally.
+        mock_db.get_active_tasks.assert_called_once_with(7)
 
-    def test_main_logs_breadcrumb_for_unknown_source(self, tmp_path, monkeypatch, capsys):
-        """An unrecognized source value (future Claude Code addition) is logged.
-
-        If Anthropic ships a new SessionStart source variant beyond the
-        current four (startup/resume/clear/compact), the gate fails
-        closed correctly but inheritance silently stops working. This
-        breadcrumb makes contract drift visible without users having to
-        grep the hook source. Replace ``"agent"`` with whatever the
-        actual new value turns out to be when the day comes; the test's
-        intent is "any non-allowlisted, non-known source is observable",
-        not the specific string.
-        """
+    def test_compact_emits_hint_when_unbound(self, tmp_path, monkeypatch, capsys):
+        """A compact normally keeps the same session_id, so a bound session
+        resolves via find_task_for_cwd and skips this branch. But if a
+        compacted session has no binding (e.g. never bound, or a future
+        Claude Code re-mints the id on compact), it gets the same nudge as
+        resume rather than a silent blank statusline."""
         self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "unknown-src" / "repo"
+        cwd = tmp_path / "repo"
         cwd.mkdir(parents=True)
         monkeypatch.chdir(cwd)
         monkeypatch.setattr("os.getcwd", lambda: str(cwd))
         monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "agent"})
-
-        # Seed a pointer so any accidental inherit would have data to
-        # find; if the gating is broken this test will see "inherited"
-        # in stderr instead of the unknown-source breadcrumb.
-        self._seed_for_inheritance(tmp_path, cwd)
-        self._wire_no_task(monkeypatch)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "new-sid", "source": "compact"}
+        )
 
         mod = self._reload_module()
+        import missioncache_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_repos.return_value = [
+            SimpleNamespace(id=7, path=str(cwd), short_name="repo")
+        ]
+        mock_db.get_active_tasks.return_value = [
+            SimpleNamespace(name="avc-in-house-testing")
+        ]
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
         mod.main()
 
-        err = capsys.readouterr().err
-        assert "unknown source" in err
-        assert "'agent'" in err  # the unknown value is in the breadcrumb (repr form)
-        assert "no inherit" in err
-        # Critical: must NOT have inherited despite the seeded pointer.
-        assert "inherited project=" not in err
+        out = capsys.readouterr().out
+        assert "avc-in-house-testing" in out
+        assert "/missioncache:load" in out
+
+    def test_no_hint_on_startup(self, tmp_path, monkeypatch, capsys):
+        """The hint is scoped to continuation events (resume/compact). A fresh
+        startup in a repo with active projects stays silent (no inherit, no
+        nudge)."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "new-sid", "source": "startup"}
+        )
+
+        mod = self._reload_module()
+        import missioncache_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_repos.return_value = [
+            SimpleNamespace(id=7, path=str(cwd), short_name="repo")
+        ]
+        mock_db.get_active_tasks.return_value = [SimpleNamespace(name="avc")]
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "/missioncache:load" not in out
+        mock_db.get_active_tasks.assert_not_called()
+
+    def test_no_hint_when_task_resolves(self, tmp_path, monkeypatch, capsys):
+        """When find_task_for_cwd resolves a task (explicit pointer or cwd under
+        ~/.missioncache/active/<task>/), the Active Task path runs and no hint
+        fires - the session is legitimately bound."""
+        self._redirect_state(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir(parents=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(
+            monkeypatch, {"session_id": "new-sid", "source": "resume"}
+        )
+
+        mod = self._reload_module()
+        import missioncache_db  # type: ignore[import-not-found]
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = SimpleNamespace(
+            id=1, name="bound-task", status="active", jira_key=None,
+            repo_id=None, full_path="active/bound-task",
+        )
+        mock_db.get_task_time.return_value = 0
+        mock_db.format_duration.return_value = "0m"
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
+        mod.main()
+
+        out = capsys.readouterr().out
+        assert "Active Task Detected" in out
+        assert "/missioncache:load <name>" not in out
+        mock_db.get_active_tasks.assert_not_called()
+
+    # ── _resume_hint_for_cwd unit tests ───────────────────────────────────
+
+    def test_hint_none_when_cwd_outside_all_repos(self, tmp_path):
+        mod = self._reload_module()
+        db = MagicMock()
+        db.get_repos.return_value = [
+            SimpleNamespace(id=1, path=str(tmp_path / "other"), short_name="other")
+        ]
+        assert mod._resume_hint_for_cwd(db, str(tmp_path / "elsewhere")) is None
+
+    def test_hint_none_when_repo_has_no_active_tasks(self, tmp_path):
+        mod = self._reload_module()
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        db = MagicMock()
+        db.get_repos.return_value = [
+            SimpleNamespace(id=1, path=str(cwd), short_name="repo")
+        ]
+        db.get_active_tasks.return_value = []
+        assert mod._resume_hint_for_cwd(db, str(cwd)) is None
+
+    def test_hint_picks_most_specific_repo(self, tmp_path):
+        mod = self._reload_module()
+        parent = tmp_path / "work"
+        child = parent / "repo"
+        child.mkdir(parents=True)
+        db = MagicMock()
+        db.get_repos.return_value = [
+            SimpleNamespace(id=1, path=str(parent), short_name="work"),
+            SimpleNamespace(id=2, path=str(child), short_name="repo"),
+        ]
+        db.get_active_tasks.return_value = [SimpleNamespace(name="t")]
+        result = mod._resume_hint_for_cwd(db, str(child))
+        assert result is not None
+        # most-specific repo (child, id=2) drives the active-task lookup
+        db.get_active_tasks.assert_called_once_with(2)
+        assert "repo" in result
+
+    def test_hint_caps_listed_projects(self, tmp_path):
+        mod = self._reload_module()
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        db = MagicMock()
+        db.get_repos.return_value = [
+            SimpleNamespace(id=1, path=str(cwd), short_name="repo")
+        ]
+        db.get_active_tasks.return_value = [
+            SimpleNamespace(name=f"t{i}") for i in range(8)
+        ]
+        result = mod._resume_hint_for_cwd(db, str(cwd))
+        assert result is not None
+        assert "`t0`" in result and "`t4`" in result
+        assert "`t5`" not in result
+        assert "(+3 more)" in result
 
 
 class TestGetSessionContextValidation:
     """Direct unit tests for ``get_session_context`` validation + precedence.
 
-    The ``TestSessionStartSourceGating`` class tests ``main()`` end-to-end;
-    these tests exercise ``get_session_context`` in isolation to lock
-    invariants that drive the security and precedence properties of the
-    surrounding flow.
+    These tests exercise ``get_session_context`` in isolation to lock the
+    security and precedence invariants (path-traversal rejection, env-var vs
+    stdin precedence) that the surrounding ``main()`` flow relies on.
     """
 
     def _reload_module(self):
@@ -1944,7 +1313,7 @@ class TestParallelSessionDetection:
 
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
-        """Mirror :class:`TestSessionStartResumePickup._redirect_state`."""
+        """Redirect Path.home() + HOOKS_STATE_DB_PATH into a tmp home."""
         import missioncache_db  # type: ignore[import-not-found]
 
         monkeypatch.setattr("pathlib.Path.home", lambda: home)
@@ -2232,105 +1601,6 @@ class TestParallelSessionDetection:
 
     # ── main() integration: skip pickup under ambiguity ───────────────────
 
-    def test_main_skips_resume_pickup_when_parallel_session_exists(
-        self, tmp_path, monkeypatch
-    ):
-        """The bug fix: when another session is alive in the same cwd, do NOT
-        auto-pickup the project from the cwd-pointer (it could name the
-        wrong previous session). project_state for new-sid must stay empty."""
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "resume" / "repo"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        # Seed pointer + project_state as if a previous session (prev-sid) was
-        # the last writer to this cwd. WITHOUT the parallel-session detection,
-        # main() would inherit "carried-over" onto new-sid.
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(
-            tmp_path, [("prev-sid", "carried-over"), ("other-sid", "concurrent-project")]
-        )
-        # Concurrent session "other-sid" has a fresh transcript - this triggers
-        # the parallel detection that gates the pickup.
-        self._seed_transcript(tmp_path, cwd, "other-sid")
-
-        mod = self._reload_module()
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        # new-sid did NOT inherit "carried-over" because parallel sessions
-        # made the inheritance ambiguous.
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is None, "new-sid must NOT inherit when parallel sessions exist"
-
-    def test_main_inherits_when_no_parallel_sessions(self, tmp_path, monkeypatch):
-        """Negative case for the gate: with a stale lone other transcript
-        OLDER than the threshold, pickup still works (preserves existing
-        single-session resume behavior).
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "lone-resume"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
-        # An old transcript exists but is well past the threshold - must not
-        # trigger the parallel-session gate.
-        self._seed_transcript(
-            tmp_path, cwd, "stale-sid", mtime_offset_seconds=-30 * 60
-        )
-
-        mod = self._reload_module()
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "carried-over"
 
     # ── main() integration: warning emission ──────────────────────────────
 
@@ -2516,162 +1786,9 @@ class TestParallelSessionDetection:
 
     # ── Codex P1: exclude resumed-from session from parallel detection ────
 
-    def test_main_inherits_on_resume_when_only_prev_sids_transcript_is_fresh(
-        self, tmp_path, monkeypatch
-    ):
-        """Codex P1 fix. On a normal solo-session resume, the previous
-        session's transcript is often still fresh (closed seconds ago,
-        end-of-session writes touched it). Without the cwd-pointer-based
-        exclusion in main(), ``_detect_parallel_sessions`` returns the
-        prev-sid, main() treats that as a parallel session, skips pickup,
-        and the statusline goes blank on every normal resume. This test
-        proves the fix: pickup MUST run when the only "parallel" detected
-        is the resumed-from session itself.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "normal-resume"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(tmp_path, [("prev-sid", "carried-over")])
-        # Prev session's transcript is FRESH (just touched). Without the
-        # fix this would make main() see prev-sid as a parallel session
-        # and skip pickup.
-        self._seed_transcript(tmp_path, cwd, "prev-sid")
-
-        mod = self._reload_module()
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is not None and row[0] == "carried-over"
-
-    def test_main_skips_pickup_when_third_session_parallel_to_resumed_pair(
-        self, tmp_path, monkeypatch
-    ):
-        """Codex P1 fix: only the resumed-from session is excluded, not
-        all fresh sessions. When a THIRD session is also alive in the same
-        cwd, the ambiguous-resume path still fires and pickup is skipped.
-        Without this guard the fix would over-relax the gate and
-        reintroduce the wrong-project-on-resume bug.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "three-way"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "resume"})
-
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(
-            tmp_path,
-            [("prev-sid", "carried-over"), ("third-sid", "concurrent-project")],
-        )
-        # prev-sid is the resumed-from session (excluded by the fix).
-        self._seed_transcript(tmp_path, cwd, "prev-sid")
-        # third-sid is a different live session - the gate MUST still fire.
-        self._seed_transcript(tmp_path, cwd, "third-sid")
-
-        mod = self._reload_module()
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is None, "third-sid is genuinely parallel; pickup must be skipped"
 
     # ── Compact source coverage ───────────────────────────────────────────
 
-    def test_main_skips_compact_pickup_when_parallel_session_exists(
-        self, tmp_path, monkeypatch
-    ):
-        """``source="compact"`` shares the gated-pickup path with
-        ``"resume"``. The original review flagged that compact was
-        documented as gated but never tested. This is the compact-path
-        analog of test_main_skips_resume_pickup_when_parallel_session_exists.
-        """
-        import sqlite3 as _sqlite3
-
-        db_path = self._redirect_state(monkeypatch, tmp_path)
-        cwd = tmp_path / "compact-collide"
-        cwd.mkdir(parents=True)
-        monkeypatch.chdir(cwd)
-        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
-        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
-        _patch_stdin_payload(monkeypatch, {"session_id": "new-sid", "source": "compact"})
-
-        cwd_key = str(cwd).replace("/", "-")
-        pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
-        pointer_dir.mkdir(parents=True, exist_ok=True)
-        (pointer_dir / f"{cwd_key}.json").write_text(
-            json.dumps({"sessionId": "prev-sid", "cwd": str(cwd), "updatedAt": "x"})
-        )
-        self._seed_project_state(
-            tmp_path,
-            [("prev-sid", "carried-over"), ("other-sid", "concurrent-project")],
-        )
-        self._seed_transcript(tmp_path, cwd, "other-sid")
-
-        mod = self._reload_module()
-        import missioncache_db  # type: ignore[import-not-found]
-
-        mock_db = MagicMock()
-        mock_db.find_task_for_cwd.return_value = None
-        mock_db.get_task_by_name.return_value = None
-        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
-        mod.main()
-
-        conn = _sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute(
-                "SELECT project_name FROM project_state WHERE session_id = ?",
-                ("new-sid",),
-            ).fetchone()
-        finally:
-            conn.close()
-        assert row is None, "compact path must gate pickup the same as resume"
 
     # ── _detect_parallel_sessions boundary at the freshness threshold ─────
 
