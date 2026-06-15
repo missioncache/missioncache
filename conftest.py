@@ -28,6 +28,27 @@ def _neutralize_legacy_data_paths(tmp_path, monkeypatch):
         monkeypatch.setattr(missioncache_db, name, tmp_path / f"no-{name}")
 
 
+@pytest.fixture(autouse=True)
+def _redirect_default_data_paths(tmp_path, monkeypatch):
+    """Point the live default data paths at a tmp location so a test that
+    constructs a bare ``TaskDB()`` (or runs a file operation without an explicit
+    path) writes under ``tmp_path`` instead of the developer's real
+    ``~/.missioncache`` data.
+
+    ``TaskDB.__init__`` resolves ``db_path or DB_PATH`` and the file-operation
+    methods read ``MISSIONCACHE_ROOT`` at call time, so monkeypatching the
+    module attributes is enough. A test that needs a controlled location
+    monkeypatches these itself; that later override wins and is undone at
+    teardown.
+    """
+    try:
+        import missioncache_db
+    except ImportError:
+        return
+    monkeypatch.setattr(missioncache_db, "DB_PATH", tmp_path / "tasks.db")
+    monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", tmp_path / "missioncache")
+
+
 @pytest.fixture
 def sample_tasks_md_content():
     """Standard 5-task markdown for cross-component parser tests."""
