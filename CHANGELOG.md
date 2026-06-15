@@ -4,6 +4,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - installer banner wraps mid-word on narrow terminals (missioncache-install 1.0.1)
+
+The `uvx missioncache-install` start banner rendered the `MissionCache` wordmark as a single ~76-column `ansi_shadow` line, which wrapped mid-word (`MISSIONCAC` / `HE`) on terminals narrower than 80 columns. It now renders as two stacked words (`MISSION` over `CACHE`, 52 columns) that fit comfortably.
+
 ### Removed - `pending-task.json` legacy state file (orbit-db 1.0.4, mcp-orbit 0.2.13)
 
 The shared `~/.claude/hooks/state/pending-task.json` file is no longer written or read by any code path. It had been documented as vestigial state since the per-session `projects/<session-id>.json` pointer landed; this release deletes the writers too.
