@@ -25,8 +25,8 @@ from . import command_clients, mcp_clients, settings, state, subprocess_utils, u
 
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
-PLUGIN_GITHUB_SOURCE = "tomerbr1/orbit-pm"
-PLUGIN_ID_PYPI = "missioncache@orbit-pm"
+PLUGIN_GITHUB_SOURCE = "missioncache/missioncache"
+PLUGIN_ID_PYPI = "missioncache@missioncache"
 PLUGIN_ID_LOCAL = "missioncache@local"
 USER_COMMAND_FILES = ("whats-new.md", "optimize-prompt.md")
 
@@ -58,7 +58,7 @@ class InstallContext:
 def install_plugin(ctx: InstallContext) -> None:
     """Register the MissionCache plugin with Claude Code.
 
-    PyPI mode: adds the upstream marketplace and installs missioncache@orbit-pm.
+    PyPI mode: adds the upstream marketplace and installs missioncache@missioncache.
     Local mode: creates ~/.claude/plugins/local-marketplace pointing at the
     clone, then installs missioncache@local. Mirrors setup.sh:152-217.
     """
@@ -75,7 +75,7 @@ def install_plugin(ctx: InstallContext) -> None:
 
 
 def _install_plugin_pypi() -> None:
-    """Add the upstream marketplace and install missioncache@orbit-pm."""
+    """Add the upstream marketplace and install missioncache@missioncache."""
     if not shutil.which("claude"):
         ui.warn("Claude CLI not found - skipping plugin registration.")
         ui.detail("After installing Claude Code, run: missioncache-install --update")

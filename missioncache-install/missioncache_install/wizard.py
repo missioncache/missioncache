@@ -265,7 +265,7 @@ def _print_next_steps(selected: list[str]) -> None:
     ui.detail("Resume work:       /missioncache:load")
     if "dashboard" in selected:
         ui.detail("Dashboard:         http://localhost:8787")
-    ui.detail("Docs:              https://github.com/tomerbr1/orbit-pm")
+    ui.detail("Docs:              https://github.com/missioncache/missioncache")
     print()
     ui.detail("Update later:  uvx missioncache-install --update")
     ui.detail("Uninstall:     uvx missioncache-install --uninstall")

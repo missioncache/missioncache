@@ -560,7 +560,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
         "version": CODEX_PLUGIN_VERSION,
         "description": "MissionCache project management slash commands for Codex",
         "author": {"name": "Tomer Brami"},
-        "homepage": "https://github.com/tomerbr1/orbit-pm",
+        "homepage": "https://github.com/missioncache/missioncache",
         "license": "MIT",
         "keywords": ["missioncache", "project-management", "task-tracking", "productivity"],
         "interface": {
