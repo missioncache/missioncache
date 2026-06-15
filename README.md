@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/orbit_logo_white.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/orbit_logo_black.png">
-    <img src="assets/orbit_logo_black.png" alt="MissionCache" width="300">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/missioncache_logo_white.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/missioncache_logo_black.png">
+    <img src="assets/missioncache_logo_black.png" alt="MissionCache" width="300">
   </picture>
 </p>
 
@@ -115,8 +115,8 @@ If you only want the plugin core (slash commands, MCP tools, lifecycle hooks, mi
 In Claude Code:
 
 ```
-/plugin marketplace add tomerbr1/orbit-pm
-/plugin install missioncache@orbit-pm
+/plugin marketplace add missioncache/missioncache
+/plugin install missioncache@missioncache
 ```
 
 Restart your Claude Code session.
@@ -139,7 +139,7 @@ Re-run the installer to refresh every component to the latest published version:
 uvx missioncache-install --update
 ```
 
-This pulls the latest `missioncache-dashboard` and `missioncache-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-missioncache`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update missioncache@orbit-pm` in Claude Code (or `claude plugins install missioncache@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `missioncache-db` is a transitive dependency of `missioncache-dashboard` and `missioncache-auto`, so it refreshes alongside them.
+This pulls the latest `missioncache-dashboard` and `missioncache-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-missioncache`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update missioncache@missioncache` in Claude Code (or `claude plugins install missioncache@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `missioncache-db` is a transitive dependency of `missioncache-dashboard` and `missioncache-auto`, so it refreshes alongside them.
 
 If the `uvx` cache is pinning you to an older `missioncache-install` itself, clear it with `uvx cache prune` or `uvx --refresh missioncache-install --update`.
 
@@ -148,7 +148,7 @@ If the `uvx` cache is pinning you to an older `missioncache-install` itself, cle
 From Claude Code:
 
 ```
-/plugin update missioncache@orbit-pm
+/plugin update missioncache@missioncache
 ```
 
 Restart your Claude Code session.
@@ -404,7 +404,7 @@ Deep dives for each component live in `docs/`:
 - [**Installation**](docs/installation.md) - all three install paths (`uvx missioncache-install`, marketplace, manual), verification, uninstall, troubleshooting
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
-- [**MissionCache Auto**](docs/orbit-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
+- [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
 - [**MCP Tools**](docs/mcp-tools.md) - all 30 tools by module, error handling, extension patterns
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks

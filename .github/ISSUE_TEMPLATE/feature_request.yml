@@ -1,20 +1,20 @@
 name: Feature request
-description: Suggest a new capability or improvement for orbit
+description: Suggest a new capability or improvement for MissionCache
 title: "feat: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a feature. The most useful requests start with the concrete problem you're trying to solve rather than the solution, so there's room to think about whether a simpler path exists or if orbit already has something close.
+        Thanks for suggesting a feature. The most useful requests start with the concrete problem you're trying to solve rather than the solution, so there's room to think about whether a simpler path exists or if MissionCache already has something close.
 
   - type: textarea
     id: problem
     attributes:
       label: What's the problem?
-      description: Describe the situation where you felt orbit was missing something.
+      description: Describe the situation where you felt MissionCache was missing something.
       placeholder: |
-        When I'm doing X, I wish orbit would Y because Z.
+        When I'm doing X, I wish MissionCache would Y because Z.
     validations:
       required: true
 
@@ -22,7 +22,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: How do you think orbit should solve it? Sketches, API ideas, or UI mockups welcome.
+      description: How do you think MissionCache should solve it? Sketches, API ideas, or UI mockups welcome.
     validations:
       required: false
 
@@ -42,9 +42,9 @@ body:
       options:
         - Plugin core (commands, hooks, MCP tools)
         - Dashboard
-        - Orbit Auto
+        - MissionCache Auto
         - Statusline
-        - Orbit DB
+        - MissionCache DB
         - Docs
         - Other / not sure
       default: 6

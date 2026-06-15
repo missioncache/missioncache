@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to orbit-pm are documented in this file. Dates are ISO 8601; sections are grouped by behavioral concern, not by sub-package version.
+All notable changes to MissionCache are documented in this file. Dates are ISO 8601; sections are grouped by behavioral concern, not by sub-package version. Entries dated before the 2026-06 rebrand reference the project's former name (orbit) and its old package names (orbit-db, mcp-orbit, etc.); those are left as-is as accurate historical records.
 
 ## Unreleased
 

@@ -1,6 +1,6 @@
 # missioncache-install
 
-Bootstrap installer for [MissionCache](https://github.com/tomerbr1/orbit-pm), the project manager for Claude Code.
+Bootstrap installer for [MissionCache](https://github.com/missioncache/missioncache), the project manager for Claude Code.
 
 ## Install
 
@@ -32,11 +32,11 @@ uvx missioncache-install --uninstall                # remove everything (preserv
 
 ## Maintainer mode
 
-From a clone of `orbit-pm`:
+From a clone of `missioncache`:
 
 ```bash
-git clone https://github.com/tomerbr1/orbit-pm.git
-cd orbit-pm
+git clone https://github.com/missioncache/missioncache.git
+cd missioncache
 uvx missioncache-install --local
 ```
 

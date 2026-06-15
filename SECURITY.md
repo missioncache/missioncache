@@ -4,7 +4,7 @@
 
 Please do not report security issues via public GitHub issues. Use GitHub's private vulnerability reporting channel instead:
 
-1. Go to https://github.com/tomerbr1/orbit-pm/security
+1. Go to https://github.com/missioncache/missioncache/security
 2. Click **Report a vulnerability**
 3. Describe the issue, affected component, and steps to reproduce
 

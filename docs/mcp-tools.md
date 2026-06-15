@@ -605,7 +605,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 **Cause:** The plugin cache is stale. MCP tools are discovered at plugin load, and a new tool added after you installed the plugin won't show up until you reinstall.
 
-**Fix:** `claude plugins install missioncache@local` (or `missioncache@orbit-pm` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
+**Fix:** `claude plugins install missioncache@local` (or `missioncache@missioncache` if you are on the marketplace path) and restart your Claude Code session. `/reload-plugins` does not cover MCP servers.
 
 ### "I'm calling the tool but getting `error: true, message: <python exception>` with no code"
 
@@ -647,7 +647,7 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 - [`architecture.md`](./architecture.md) - if you need the big picture on `tasks.db`, the hook model, or what `full_path` means.
 - [`dashboard.md`](./dashboard.md) - if you want to see how the tools' return shapes get rendered in the UI.
-- [`orbit-auto.md`](./orbit-auto.md) - if you are specifically curious about how `log_iteration` / `get_iteration_status` fit into an autonomous run.
+- [`missioncache-auto.md`](./missioncache-auto.md) - if you are specifically curious about how `log_iteration` / `get_iteration_status` fit into an autonomous run.
 - `mcp-server/src/mcp_missioncache/tools_*.py` - the source. Each file is flat and independent; if you know which module owns a tool from the prefix, you can jump straight there.
 - `mcp-server/src/mcp_missioncache/models.py` - the full Pydantic models for every typed return. The canonical source for "what fields does this tool give me".
 - `mcp-server/src/mcp_missioncache/errors.py` - the full error code enum and exception types. Useful when writing a new tool or adding new error cases.
