@@ -75,8 +75,11 @@ def _gradient_text(raw: str, start: tuple[int, int, int], end: tuple[int, int, i
 
 def banner() -> None:
     """Print the install-start banner: gradient MissionCache wordmark + tagline."""
+    # Stack as two words: single-line "MissionCache" is ~76 cols in ansi_shadow,
+    # which wraps mid-word on terminals narrower than 80. "Mission" / "Cache"
+    # is 52 cols wide and fits comfortably.
     logo = _gradient_text(
-        pyfiglet.figlet_format("MissionCache", font="ansi_shadow"),
+        pyfiglet.figlet_format("Mission\nCache", font="ansi_shadow"),
         _LOGO_GRADIENT_START,
         _LOGO_GRADIENT_END,
     )
