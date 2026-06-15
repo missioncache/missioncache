@@ -14,7 +14,13 @@ Usage:
     missioncache-auto status <task-name>       # Show task status
 """
 
-__version__ = "1.0.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("missioncache-auto")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.0.0+unknown"
+
 __author__ = "Tom Brami"
 
 from missioncache_auto.models import Task, State, Config, ExecutionResult
