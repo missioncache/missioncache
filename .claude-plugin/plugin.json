@@ -5,8 +5,8 @@
   "author": {
     "name": "Tomer Brami"
   },
-  "homepage": "https://github.com/tomerbr1/orbit-pm",
-  "repository": "https://github.com/tomerbr1/orbit-pm.git",
+  "homepage": "https://github.com/missioncache/missioncache",
+  "repository": "https://github.com/missioncache/missioncache.git",
   "license": "MIT",
   "keywords": ["missioncache", "task", "time-tracking", "context", "missioncache-auto"],
   "mcpServers": {

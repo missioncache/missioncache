@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tomerbr1/orbit-pm"
-Repository = "https://github.com/tomerbr1/orbit-pm"
-Issues = "https://github.com/tomerbr1/orbit-pm/issues"
+Homepage = "https://github.com/missioncache/missioncache"
+Repository = "https://github.com/missioncache/missioncache"
+Issues = "https://github.com/missioncache/missioncache/issues"
 
 [project.scripts]
 missioncache-db = "missioncache_db:main"

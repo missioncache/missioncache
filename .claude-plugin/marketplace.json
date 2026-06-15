@@ -1,10 +1,10 @@
 {
-  "name": "orbit-pm",
+  "name": "missioncache",
   "owner": {
     "name": "Tomer Brami"
   },
   "metadata": {
-    "description": "One workbench for your Claude Code projects. Plan, execute, track, and resume - without losing state."
+    "description": "One workbench for your AI coding projects. Plan, execute, track, and resume - without losing state."
   },
   "plugins": [
     {
