@@ -67,10 +67,12 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
     the "Claude skipped the binding step" failure mode where the slash
     command's client-side bash binding gets bypassed silently.
 
-    Mirrors ``hooks/session_start.py:_bind_session_to_project``. The two
-    helpers are deliberately not yet extracted to a shared library; if a
-    third caller appears, this is the right time to lift them into
-    ``missioncache_db``.
+    This is the EXPLICIT binding path, reached only via user-initiated MCP
+    tools (create_orbit_files / get_task / create_task). The SessionStart
+    hook no longer auto-binds: it used to inherit "whatever project last ran
+    in this cwd", which silently mis-attributed heartbeats/time to a repo-mate
+    task, so that path was removed. A session is now bound only here (explicit)
+    or by sitting under ``~/.missioncache/active/<task>/``.
 
     Direct SQL only - the dashboard may not be running, and degrading
     silently to HTTP would re-introduce the failure mode this binding is
