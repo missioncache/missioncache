@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in orbit isn't working the way it should
+description: Something in MissionCache isn't working the way it should
 title: "bug: "
 labels: ["bug"]
 body:
@@ -13,7 +13,7 @@ body:
     attributes:
       label: What happened?
       description: A clear description of what went wrong.
-      placeholder: When I did X, orbit did Y instead of Z.
+      placeholder: When I did X, MissionCache did Y instead of Z.
     validations:
       required: true
 
@@ -48,7 +48,7 @@ body:
         sw_vers 2>/dev/null || uname -a
         python3 --version
         claude --version 2>/dev/null || echo "claude CLI not found"
-        cd ~/.claude/plugins/orbit-pm 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo "orbit not found at standard path"
+        cd ~/.claude/plugins/missioncache 2>/dev/null && git rev-parse --short HEAD 2>/dev/null || echo "missioncache not found at standard path"
         ```
       render: shell
     validations:

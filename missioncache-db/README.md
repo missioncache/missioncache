@@ -1,7 +1,7 @@
 # missioncache-db
 
 SQLite-based task and time tracking database for the
-[MissionCache](https://github.com/tomerbr1/orbit-pm) Claude Code plugin.
+[MissionCache](https://github.com/missioncache/missioncache) Claude Code plugin.
 
 Provides cross-repo task tracking with WakaTime-style heartbeat time
 aggregation. Used as the storage layer for the MissionCache MCP server, hooks,

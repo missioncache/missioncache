@@ -124,8 +124,8 @@ pipx run missioncache-install
 
 **Maintainer install** (clone + editable pip installs + local marketplace for fast iteration):
 ```bash
-git clone https://github.com/tomerbr1/orbit-pm.git
-cd orbit-pm
+git clone https://github.com/missioncache/missioncache.git
+cd missioncache
 uvx missioncache-install --local
 ```
 
@@ -137,7 +137,7 @@ pip install -e ./missioncache-dashboard
 claude plugins install missioncache@local
 ```
 
-The `@local` suffix refers to the local marketplace that `missioncache-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@orbit-pm` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json`. They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.
+The `@local` suffix refers to the local marketplace that `missioncache-install --local` creates under `~/.claude/plugins/local-marketplace/`. The `@missioncache` suffix refers to the GitHub-hosted marketplace defined in this repo's `.claude-plugin/marketplace.json` (the marketplace `name`). They are independent and can coexist. In `--local` mode the installer always sets up the local marketplace; in default PyPI mode it never touches it. If you have both installed, use `claude plugins list` to see which is active.
 
 ## Dependencies
 

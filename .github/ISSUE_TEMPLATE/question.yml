@@ -1,5 +1,5 @@
 name: Question
-description: Ask how to do something in orbit or get help with setup
+description: Ask how to do something in MissionCache or get help with setup
 title: "question: "
 labels: ["question"]
 body:

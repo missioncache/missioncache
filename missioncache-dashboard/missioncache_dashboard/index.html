@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Dashboard</title>
+    <title>MissionCache Dashboard</title>
     <link rel="icon" type="image/png" href="/static/logo_icon.png">
     <script>(function(){var t=localStorage.getItem('orbit-theme')||'dark';if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -4485,7 +4485,7 @@
 
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
-        <div class="loading-logo"><img src="/static/logo_icon.png" alt="Orbit" style="width: 100%; height: 100%; object-fit: contain;"></div>
+        <div class="loading-logo"><img src="/static/logo_icon.png" alt="MissionCache" style="width: 100%; height: 100%; object-fit: contain;"></div>
         <div class="loading-progress">
             <div class="loading-progress-bar" id="loadingProgressBar" style="width: 0%"></div>
         </div>
@@ -4498,7 +4498,7 @@
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
             <div class="sidebar-logo">
-                <img id="sidebarLogo" src="/static/orbit_logo_white.png" alt="Orbit Dashboard" style="height: 28px; width: auto;">
+                <img id="sidebarLogo" src="/static/missioncache_logo_white.png" alt="MissionCache Dashboard" style="height: 28px; width: auto;">
             </div>
             <div class="sidebar-nav">
                 <a class="nav-item active" data-view="projects" href="#projects">
@@ -4793,7 +4793,7 @@
                 <div class="container">
                     <!-- Auto Header -->
                     <div class="auto-header">
-                        <h2>Orbit Auto</h2>
+                        <h2>MissionCache Auto</h2>
                         <p class="auto-subtitle">Task dependency graphs for autonomous execution</p>
                     </div>
 
@@ -4865,7 +4865,7 @@
                     <div class="glass-card settings-card">
                         <div class="card-header">
                             <h2>Settings</h2>
-                            <div class="card-subtitle">Stored in <code>~/.claude/orbit-dashboard-config.json</code>. Changes take effect immediately.</div>
+                            <div class="card-subtitle">Stored in <code>~/.claude/missioncache-dashboard-config.json</code>. Changes take effect immediately.</div>
                         </div>
 
                         <!-- JIRA URL mappings -->
@@ -6805,7 +6805,7 @@
                 if (currentTaskFiles.error && !currentTaskFiles.files) {
                     document.getElementById('taskModalMarkdown').innerHTML =
                         `<div style="color: var(--text-secondary); text-align: center; padding: 40px;">
-                            No orbit files found for this task.<br>
+                            No MissionCache files found for this task.<br>
                             <small style="opacity: 0.6">${currentTaskFiles.error}</small>
                         </div>`;
                 } else {
@@ -7566,8 +7566,8 @@
             const logo = document.getElementById('sidebarLogo');
             if (logo) {
                 logo.src = theme === 'light'
-                    ? '/static/orbit_logo_black.png'
-                    : '/static/orbit_logo_white.png';
+                    ? '/static/missioncache_logo_black.png'
+                    : '/static/missioncache_logo_white.png';
             }
         }
 
@@ -7665,7 +7665,7 @@
                 container.innerHTML = `
                     <div class="no-results">
                         <div class="no-results-icon">📭</div>
-                        No active orbit projects found
+                        No active MissionCache projects found
                     </div>
                 `;
                 return;

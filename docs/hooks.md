@@ -323,6 +323,6 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 - [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, `tasks.db`, and how the pieces fit together.
 - [`dashboard.md`](./dashboard.md) - for the HTTP hook endpoints and how they overlap with the plugin-registered path.
-- [`orbit-auto.md`](./orbit-auto.md) - for the `MISSIONCACHE_AUTO_MODE` signal and how autonomous runs interact with hooks.
+- [`missioncache-auto.md`](./missioncache-auto.md) - for the `MISSIONCACHE_AUTO_MODE` signal and how autonomous runs interact with hooks.
 - `hooks/hooks.json` - the source-of-truth registry.
 - `hooks/*.py` - the scripts themselves. Each is short (under 250 lines) and standalone.

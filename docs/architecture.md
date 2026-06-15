@@ -26,7 +26,7 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 | Statusline | `missioncache-dashboard/missioncache_dashboard/statusline.py` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `missioncache-dashboard` package and exposed via the `missioncache-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
 | Rules | `rules/` | Plain markdown files describing MissionCache conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `missioncache-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
 
-Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs MissionCache as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx missioncache-install`, or just the plugin core via `/plugin marketplace add tomerbr1/orbit-pm` followed by `/plugin install missioncache@orbit-pm`. Maintainers run `uvx missioncache-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `missioncache@local` for fast iteration without pushing to GitHub.
+Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs MissionCache as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx missioncache-install`, or just the plugin core via `/plugin marketplace add missioncache/missioncache` followed by `/plugin install missioncache@missioncache`. Maintainers run `uvx missioncache-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `missioncache@local` for fast iteration without pushing to GitHub.
 
 ## Talking to the database through missioncache-db
 
@@ -258,7 +258,7 @@ After adding the tool, reinstall the plugin. If you are hacking on MissionCache 
 claude plugins install missioncache@local
 ```
 
-If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update missioncache@orbit-pm`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
+If you are iterating against a marketplace-installed copy instead, push your changes to GitHub and run `claude plugins update missioncache@missioncache`. Either way, restart the Claude Code session afterwards - MCP tool registration is cached at plugin load time.
 
 ### 2. Add a new hook
 
@@ -366,7 +366,7 @@ These are the things that will trip you up if you are new to the codebase, colle
 This doc is the foundation; the other component docs assume you have read it.
 
 - [`dashboard.md`](./dashboard.md) - dashboard screens, API endpoints, sync, customization.
-- [`orbit-auto.md`](./orbit-auto.md) - sequential vs parallel, DAG resolution, learning tags, worker model.
+- [`missioncache-auto.md`](./missioncache-auto.md) - sequential vs parallel, DAG resolution, learning tags, worker model.
 - [`mcp-tools.md`](./mcp-tools.md) - full MCP tool reference with parameters and return shapes.
 - [`statusline.md`](./statusline.md) - statusline layout, configuration, icons.
 - [`hooks.md`](./hooks.md) - hook event reference, state files, adding new hooks.

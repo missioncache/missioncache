@@ -14,8 +14,8 @@ This document covers the mechanics. For the "why" behind missioncache's architec
 ## Development setup
 
 ```bash
-git clone https://github.com/tomerbr1/orbit-pm.git
-cd orbit-pm
+git clone https://github.com/missioncache/missioncache.git
+cd missioncache
 uvx missioncache-install --local
 ```
 
