@@ -1,9 +1,9 @@
-"""Pure function tests for orbit.py - no I/O, no mocking."""
+"""Pure function tests for project_files.py - no I/O, no mocking."""
 
 import pytest
 
 from mcp_missioncache.errors import ValidationError
-from mcp_missioncache.orbit import (
+from mcp_missioncache.project_files import (
     _append_to_section,
     _update_section,
     format_tasks_markdown,

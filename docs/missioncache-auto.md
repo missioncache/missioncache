@@ -46,7 +46,7 @@ Every missioncache-auto run operates on the same directory:
 │   ├── task-01-prompt.md
 │   ├── task-02-prompt.md
 │   └── ...
-├── .orbit-parallel-state/     # Parallel-mode state, only exists mid-run
+├── .missioncache-parallel-state/     # Parallel-mode state, only exists mid-run
 │   ├── state.json
 │   ├── state.lock
 │   └── adjacency.txt
@@ -173,13 +173,13 @@ while True:
         # result is "released" (retry later) or "max_retries_reached" (failed)
 ```
 
-`claim_task` is the atomic primitive. It acquires an exclusive `fcntl.flock` on `.orbit-parallel-state/state.lock`, reads the current state, finds the first pending task whose dependencies are satisfied, flips it to `in_progress`, writes the state atomically (temp file + `os.replace` via `_atomic_write_text`), and releases the lock. Multiple workers hitting this concurrently will serialize on the lock and only one will get any given task.
+`claim_task` is the atomic primitive. It acquires an exclusive `fcntl.flock` on `.missioncache-parallel-state/state.lock`, reads the current state, finds the first pending task whose dependencies are satisfied, flips it to `in_progress`, writes the state atomically (temp file + `os.replace` via `_atomic_write_text`), and releases the lock. Multiple workers hitting this concurrently will serialize on the lock and only one will get any given task.
 
 Tasks that a worker claims but cannot finish (because the worker process died, or because `release_task` hit the retry cap) go through `release_orphaned_tasks()`, which runs from the parent runner's monitoring loop every 500ms. It scans for `in_progress` tasks owned by dead worker IDs and either flips them back to pending (if attempts left) or marks them failed. This is what makes missioncache-auto robust to worker crashes - the orchestrator notices, recovers the claim, and lets another worker pick it up.
 
 ### State file structure
 
-`.orbit-parallel-state/state.json` is the shared memory for parallel mode. It looks like this:
+`.missioncache-parallel-state/state.json` is the shared memory for parallel mode. It looks like this:
 
 ```json
 {

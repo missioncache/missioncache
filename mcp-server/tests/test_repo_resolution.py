@@ -2,7 +2,7 @@
 
 The slash command guidance to resolve cwd via ``git rev-parse --show-toplevel``
 is unenforceable - models can skip the bash step, and non-Claude MCP clients
-have no equivalent. ``create_orbit_files`` and ``set_task_repo`` resolve
+have no equivalent. ``create_missioncache_files`` and ``set_task_repo`` resolve
 server-side instead, with an explicit ``resolve_git_root=False`` opt-out for
 monorepo sub-package use cases. These tests exercise the wrapper layer
 end-to-end with a temp SQLite + ``MISSIONCACHE_ROOT`` so the resolution behavior
@@ -42,11 +42,11 @@ def isolated_orbit(tmp_path, monkeypatch):
     root_dir.mkdir()
     db_path = tmp_path / "tasks.db"
 
-    from mcp_missioncache import config, orbit
+    from mcp_missioncache import config, project_files
 
     monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(config.settings, "db_path", db_path)
-    monkeypatch.setattr(orbit, "settings", config.settings)
+    monkeypatch.setattr(project_files, "settings", config.settings)
     # Force a fresh TaskDB next get_db() call.
     monkeypatch.setattr(db_module, "_db", None)
 
@@ -60,10 +60,10 @@ def _make_git_repo(repo_path: pathlib.Path) -> pathlib.Path:
     return repo_path
 
 
-# ── create_orbit_files ───────────────────────────────────────────────────
+# ── create_missioncache_files ───────────────────────────────────────────────────
 
 
-class TestCreateOrbitFilesGitRootResolution:
+class TestCreateMissionCacheFilesGitRootResolution:
     def test_subdir_of_git_repo_resolves_to_root(self, isolated_orbit):
         """Caller passes a subdir of a git repo; tool registers the repo at
         the git root, not at the subdir.
@@ -77,7 +77,7 @@ class TestCreateOrbitFilesGitRootResolution:
         subdir.mkdir(parents=True)
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(subdir),
                 project_name="my-project",
                 description="test project",
@@ -93,7 +93,7 @@ class TestCreateOrbitFilesGitRootResolution:
         repo_root = _make_git_repo(isolated_orbit / "myrepo")
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_root),
                 project_name="my-project",
                 description="test project",
@@ -111,7 +111,7 @@ class TestCreateOrbitFilesGitRootResolution:
         non_git.mkdir()
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(non_git),
                 project_name="non-git-project",
                 description="test",
@@ -128,7 +128,7 @@ class TestCreateOrbitFilesGitRootResolution:
         guard in ``_validate_path``. Validation now runs on the raw input
         before resolution so the error fires at the boundary."""
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path="",
                 project_name="empty-path-rejected",
                 description="test",
@@ -140,7 +140,7 @@ class TestCreateOrbitFilesGitRootResolution:
     def test_null_byte_repo_path_raises_with_default_resolve(self, isolated_orbit):
         """Mirror guard for null bytes in the raw input."""
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path="/tmp/path\x00evil",
                 project_name="null-byte-rejected",
                 description="test",
@@ -159,7 +159,7 @@ class TestCreateOrbitFilesGitRootResolution:
         sub_package.mkdir(parents=True)
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(sub_package),
                 project_name="auth-service-project",
                 description="test",
@@ -177,11 +177,11 @@ class TestCreateOrbitFilesGitRootResolution:
 class TestSetTaskRepoGitRootResolution:
     def test_rebind_resolves_subdir_to_git_root(self, isolated_orbit):
         """``/missioncache:load`` mismatch flow rebinding via ``set_task_repo`` must
-        resolve to the git root the same way ``create_orbit_files`` does,
+        resolve to the git root the same way ``create_missioncache_files`` does,
         otherwise the bug recurs at a different entry point.
 
         Set up directly via the DB layer to avoid the orbit-files
-        scan-by-repo-path coupling that ``create_orbit_files`` exercises;
+        scan-by-repo-path coupling that ``create_missioncache_files`` exercises;
         this test only cares about the resolution behavior of the
         ``set_task_repo`` wrapper.
         """

@@ -21,7 +21,7 @@ If invoked bare (`/missioncache:mode` with no arguments), switch to interactive 
 
 **Step 0a: Detect project.** Resolve the current Claude session and look up the active project, using the same SESSION_ID resolver pattern as `/missioncache:save` (pointer-first, mtime fallback). If no project is found, print `Usage: /missioncache:mode <project> <range:mode,...>` and stop.
 
-**Step 0b: Show tasks.** Call `mcp__plugin_missioncache_pm__get_orbit_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
+**Step 0b: Show tasks.** Call `mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
 
 ```markdown
 ## Tasks in: <project-name>
@@ -77,7 +77,7 @@ Extract project name and mode assignments from the command arguments.
 
 1. Get the project's MissionCache files:
    ```
-   mcp__plugin_missioncache_pm__get_orbit_files(project_name="<project-name>")
+   mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<project-name>")
    ```
 
 2. Read the tasks file to see current task list and any existing mode markers.
@@ -183,4 +183,4 @@ This means task 7 can only run after tasks 3 and 5 are complete. Set dependencie
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_missioncache_pm__get_orbit_files` | Get paths to project's MissionCache files |
+| `mcp__plugin_missioncache_pm__get_missioncache_files` | Get paths to project's MissionCache files |

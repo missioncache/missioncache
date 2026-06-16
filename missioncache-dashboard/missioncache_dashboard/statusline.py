@@ -584,7 +584,7 @@ def _parse_task_progress(tasks_content: str) -> str:
       "[TBD]"   - no real tasks defined yet (empty file or only template placeholder)
 
     Counts ALL checklist items flatly, including nested subtasks, matching
-    the reference implementation in mcp-server/src/mcp_missioncache/orbit.py:407.
+    the reference implementation in mcp-server/src/mcp_missioncache/project_files.py:407.
     """
     completed = len(
         re.findall(r"^\s*[-*]\s*\[x\]", tasks_content, re.MULTILINE | re.IGNORECASE)
@@ -610,7 +610,7 @@ def _parse_task_progress(tasks_content: str) -> str:
 def _read_active_task_pointer(session_id: str) -> dict | None:
     """Return the MissionCache active-task pointer for this session, or None.
 
-    The pointer is written by the ``set_active_orbit_tasks`` MCP tool when
+    The pointer is written by the ``set_active_missioncache_tasks`` MCP tool when
     a caller (Claude in interactive use, or any other MCP client) declares
     which MissionCache checklist task numbers are currently in progress. Lives at
     ``~/.claude/hooks/state/active-missioncache-task/<session-id>.json``.
@@ -794,7 +794,7 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     break
 
     # Active task is read from the MissionCache active-task pointer set by the
-    # set_active_orbit_tasks MCP tool. Falling back to "first pending
+    # set_active_missioncache_tasks MCP tool. Falling back to "first pending
     # checklist item" or to Claude Code's internal TodoList both proved
     # misleading - the first lied, the second duplicated information
     # Claude already prints in chat. Show only what we can verify;

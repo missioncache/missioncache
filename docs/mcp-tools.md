@@ -79,7 +79,7 @@ These are the tools you reach for when you are working with tasks as first-class
 
 **Returns:** A `ListTasksResult` with `tasks` (list of `TaskSummary`), `total_count`, `filter_applied` (human-readable filter description), and optional `other_tasks` (present only in prioritize-by-repo mode).
 
-Each `TaskSummary` has: `id`, `name`, `status`, `task_type`, `repo_name`, `repo_path`, `jira_key`, `tags`, `time_total_seconds`, `time_formatted`, `last_worked_on`, `last_worked_ago`, `has_orbit_files`. The time fields come from a single batch query (`db.get_batch_task_times`) rather than N individual lookups, which is the reason this tool is faster than calling `get_task` in a loop.
+Each `TaskSummary` has: `id`, `name`, `status`, `task_type`, `repo_name`, `repo_path`, `jira_key`, `tags`, `time_total_seconds`, `time_formatted`, `last_worked_on`, `last_worked_ago`, `has_missioncache_files`. The time fields come from a single batch query (`db.get_batch_task_times`) rather than N individual lookups, which is the reason this tool is faster than calling `get_task` in a loop.
 
 The `last_worked_ago` field is computed via `db.get_effective_last_updated(task)`, which takes the max of the DB's `updated_at` and the mtime of the project's `-tasks.md` file, so editing the task file from outside MissionCache still advances the "last worked" timestamp.
 
@@ -125,15 +125,15 @@ The resolution order is documented in `find_task_for_cwd`: per-session file (`pr
 
 ### `create_task`
 
-**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.missioncache/active/<name>/`. Slash commands generally call `create_orbit_files` instead because it does more in one step, but `create_task` is the minimal primitive.
+**When to use:** You want a new task in the DB and, for coding tasks, a fresh directory under `~/.missioncache/active/<name>/`. Slash commands generally call `create_missioncache_files` instead because it does more in one step, but `create_task` is the minimal primitive.
 
 **Parameters:**
-- `name: str` - Task name in kebab-case. Validated by `orbit.validate_task_name()`.
+- `name: str` - Task name in kebab-case. Validated by `project_files.validate_task_name()`.
 - `task_type: str = "coding"` - Must be `"coding"` or `"non-coding"`. Validated inline.
 - `repo_path: str | None = None` - Required for coding tasks, ignored for non-coding. Auto-registers the repo via `db.add_repo()` if it is not already tracked.
 - `jira_key: str | None = None` - Optional JIRA ticket ID for display.
 
-**Returns:** `CreateTaskResult` with `task_id`, `task_name`, `task_type`, and `orbit_path` (the directory created on disk, or `None` for non-coding tasks).
+**Returns:** `CreateTaskResult` with `task_id`, `task_name`, `task_type`, and `missioncache_path` (the directory created on disk, or `None` for non-coding tasks).
 
 Non-coding tasks do not get a directory - they exist only as DB rows and use `add_task_update` for progress notes. This is the split between "projects with files you edit" and "projects you log notes against" (meetings, reviews, investigations).
 
@@ -185,7 +185,7 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 
 These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~/.missioncache/active/<project>/`. They are the bridge between the DB (which stores task metadata) and the filesystem (which stores human-readable project state).
 
-### `create_orbit_files`
+### `create_missioncache_files`
 
 **When to use:** You are starting a new project and you want the DB row, the directory, and the template files in one call. This is what `/missioncache:new` runs - it is the MissionCache equivalent of `git init` for a task.
 
@@ -198,25 +198,25 @@ These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~
 - `tasks: list[str] | None = None` - Initial task list to seed `<project>-tasks.md` with. Each string becomes a `- [ ]` line.
 - `plan: dict | None = None` - Plan content dict with keys like `summary`, `goals`, `approach`. Structure is flexible - the template renderer picks up what it finds.
 
-**Returns:** `{"success": True, "task_id": int, "task_name": str, "files": OrbitFiles}` where `OrbitFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`.
+**Returns:** `{"success": True, "task_id": int, "task_name": str, "files": MissionCacheFiles}` where `MissionCacheFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`.
 
 Internally this is a four-step dance:
 
 1. Ensure the repo is registered (`db.add_repo` if new).
-2. Call `orbit.create_orbit_files()` to generate the files from templates.
+2. Call `project_files.create_missioncache_files()` to generate the files from templates.
 3. Call `db.scan_all_repos()` to register the task row in the DB.
 4. Reconcile the task's `repo_id` via `db.find_task_by_full_path` / `db.update_task_repo` - this is the fix for the gotcha where `scan_all_repos` can assign the task to the wrong repo when multiple repos share a prefix.
 
 The reconciliation step is the load-bearing part. Without it, the task would appear under the wrong repo in the dashboard's per-repo view.
 
-### `get_orbit_files`
+### `get_missioncache_files`
 
-**When to use:** You need the filesystem paths for a task's MissionCache files. Usually followed by a direct Read/Edit via Claude's standard file tools rather than more orbit tool calls.
+**When to use:** You need the filesystem paths for a task's MissionCache files. Usually followed by a direct Read/Edit via Claude's standard file tools rather than more MissionCache tool calls.
 
 **Parameters:**
 - `task_id: int | None = None` or `project_name: str | None = None` - At least one required.
 
-**Returns:** `{"task_id": int | None, "task_name": str, "files": OrbitFiles}`.
+**Returns:** `{"task_id": int | None, "task_name": str, "files": MissionCacheFiles}`.
 
 If the task exists in the DB, uses `task.full_path` to resolve subtask directories correctly (nested under parent). If only `project_name` is given and the task is not in the DB, falls back to the default `active/<name>/` layout.
 
@@ -236,7 +236,7 @@ If the task exists in the DB, uses `task.full_path` to resolve subtask directori
 
 All sections are optional. Passing `None` for a section means "don't touch it". Passing an empty list means "touch the section but add nothing" - surprisingly useful for forcing a timestamp update without changing content. The `sections_updated` field tells you which sections actually received non-empty input.
 
-The underlying writer (`orbit.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched.
+The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched.
 
 ### `update_tasks_file`
 
@@ -249,9 +249,9 @@ The underlying writer (`orbit.update_context_file`) updates the "Last Updated" t
 - `remaining_summary: str | None = None` - The "Remaining:" metadata line summary (max 15 words convention).
 - `notes: list[str] | None = None` - Notes to append under the "Notes" section.
 
-**Returns:** `{"success": True, ...}` plus the progress result from `orbit.update_tasks_file` (completion percentage, counts, etc.).
+**Returns:** `{"success": True, ...}` plus the progress result from `project_files.update_tasks_file` (completion percentage, counts, etc.).
 
-### `get_orbit_progress`
+### `get_missioncache_progress`
 
 **When to use:** You want the completion percentage and counts for a task without the full `TaskDetail` payload. Cheaper than `get_task` if you only care about progress.
 
@@ -316,7 +316,7 @@ The `formatted` string is `"1h 23m"`-style output from `db.format_duration`. The
 
 ### `add_repo`
 
-**When to use:** You want to register a repository explicitly. `create_task` and `create_orbit_files` both auto-register on demand, so this tool is mainly for one-off setup.
+**When to use:** You want to register a repository explicitly. `create_task` and `create_missioncache_files` both auto-register on demand, so this tool is mainly for one-off setup.
 
 **Parameters:**
 - `path: str` - Absolute path to the repo root. Validated.
@@ -326,14 +326,14 @@ The `formatted` string is `"1h 23m"`-style output from `db.format_duration`. The
 
 ### `scan_repos`
 
-**When to use:** You manually created MissionCache files outside of orbit tools (or moved them around) and you need the DB to pick them up.
+**When to use:** You manually created MissionCache files outside of MissionCache tools (or moved them around) and you need the DB to pick them up.
 
 **Parameters:**
 - `repo_id: int | None = None` - Scan only one repo. If omitted, scans all tracked repos.
 
 **Returns:** `{"scanned_count": int, "tasks": list[{"id", "name", "repo_id"}]}`.
 
-Scanning walks `~/.missioncache/active/` and `~/.missioncache/completed/` under each repo's orbit paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
+Scanning walks `~/.missioncache/active/` and `~/.missioncache/completed/` under each repo's MissionCache paths, creates missing DB rows, and updates `full_path` for existing ones. It does not delete DB rows for tasks whose files are gone - that cleanup is manual.
 
 ## Iteration log tools (`tools_iteration.py`)
 
@@ -381,7 +381,7 @@ These tools are a thin wrapper around `iteration_log.py`, which writes to `<proj
 
 These are the newest set of tools and they serve a different use case than everything above: instead of tracking a single project's progress, they coordinate *parallel subagent execution* via the Claude `Task` tool. The workflow is (1) create a plan, (2) register each agent with its dependencies, (3) ask the orchestrator for ready agents, (4) spawn them in parallel, (5) each subagent reports back via `update_agent_status`, (6) mark the plan complete when done.
 
-This is orthogonal to MissionCache Auto's parallel mode - MissionCache Auto uses multiprocessing and spawns its own Claude CLI subprocesses, whereas these tools let an orchestrating Claude drive a parallel agent swarm via the existing Task tool in a single conversation. They write to the DB (the `plans`, `agent_executions`, `agent_dependencies` tables) and the dashboard can surface them, but the plan tables are considered scoped follow-up territory and some of the DB-layer code for them is still sitting dormant in `analytics_db.py` (see the `orbit-public-release` context file for the cleanup plan).
+This is orthogonal to MissionCache Auto's parallel mode - MissionCache Auto uses multiprocessing and spawns its own Claude CLI subprocesses, whereas these tools let an orchestrating Claude drive a parallel agent swarm via the existing Task tool in a single conversation. They write to the DB (the `plans`, `agent_executions`, `agent_dependencies` tables) and the dashboard can surface them, but the plan tables are considered scoped follow-up territory and some of the DB-layer code for them is still sitting dormant in `analytics_db.py` (see the `missioncache-release` context file for the cleanup plan).
 
 If you are not building a parallel-agent orchestrator, you do not need any of these. If you are, they give you the primitives.
 
@@ -472,7 +472,7 @@ Every tool in the server follows the same error-handling pattern, which is worth
 
 ### Success shape
 
-On success, a tool returns a JSON dict. Keys vary by tool, but there is no top-level `"success": true` marker on every response - some tools include it for convenience (`create_orbit_files`, `update_context_file`, `log_iteration`), others don't (`list_active_tasks`, `get_task`). The presence of an `"error"` key is the reliable way to tell success from failure.
+On success, a tool returns a JSON dict. Keys vary by tool, but there is no top-level `"success": true` marker on every response - some tools include it for convenience (`create_missioncache_files`, `update_context_file`, `log_iteration`), others don't (`list_active_tasks`, `get_task`). The presence of an `"error"` key is the reliable way to tell success from failure.
 
 ### Error shape
 
@@ -619,11 +619,11 @@ The thing that makes this server pleasant to extend is that tools are flat, inde
 
 **Fix:** Print the path you are passing and run it through `Path(path).resolve()` manually in a Python REPL. Compare against the expected `~/.missioncache/active/<name>/...` shape.
 
-### "Task shows up under the wrong repo after `create_orbit_files`"
+### "Task shows up under the wrong repo after `create_missioncache_files`"
 
-**Cause:** This is the bug that motivated the `find_task_by_full_path` / `update_task_repo` reconciliation in `create_orbit_files`. `scan_all_repos()` matches tasks to repos by prefix, and when two repos share a prefix, it can pick the wrong one.
+**Cause:** This is the bug that motivated the `find_task_by_full_path` / `update_task_repo` reconciliation in `create_missioncache_files`. `scan_all_repos()` matches tasks to repos by prefix, and when two repos share a prefix, it can pick the wrong one.
 
-**Fix:** Already fixed in current code. If you see it anyway, make sure you are on a recent MissionCache version and that `create_orbit_files` is the tool you are calling (not a manual `create_task` + `scan_all_repos` sequence, which does not include the reconciliation step).
+**Fix:** Already fixed in current code. If you see it anyway, make sure you are on a recent MissionCache version and that `create_missioncache_files` is the tool you are calling (not a manual `create_task` + `scan_all_repos` sequence, which does not include the reconciliation step).
 
 ### "`list_active_tasks` is slow for big project counts"
 

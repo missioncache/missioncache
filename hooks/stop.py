@@ -63,7 +63,7 @@ def main():
         from missioncache_db import MISSIONCACHE_ROOT
 
         task_dir = MISSIONCACHE_ROOT / task.full_path
-        has_orbit_files = task_dir.exists() and any(
+        has_missioncache_files = task_dir.exists() and any(
             (task_dir / f).exists()
             for f in [
                 f"{task.name}-context.md",
@@ -73,7 +73,7 @@ def main():
             ]
         )
 
-        if has_orbit_files:
+        if has_missioncache_files:
             # Output reminder (stderr shows to user)
             print(
                 f"""

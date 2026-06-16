@@ -188,7 +188,7 @@ def _resolve_mode_and_repo(args: argparse.Namespace) -> tuple[str, Path | None]:
     if args.local:
         if not marker.exists():
             ui.fail(
-                f"--local requires running from a orbit-pm clone "
+                f"--local requires running from a missioncache clone "
                 f"(expected {marker} to exist)."
             )
         return "local", cwd

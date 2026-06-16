@@ -3,7 +3,7 @@
 The MissionCache DB tracks projects, not checklist items. Items are markdown
 lines like ``- [ ] 54a. M11.2 - VSCode statusline extension``. Parsing
 is consumed by the MCP tool layer (validating task numbers passed to
-``set_active_orbit_tasks``) and the ``update_tasks_file`` completion
+``set_active_missioncache_tasks``) and the ``update_tasks_file`` completion
 diff. The statusline has its own duplicate of the regex to keep
 missioncache-dashboard free of any mcp_missioncache dependency.
 """

@@ -140,8 +140,8 @@ def main() -> None:
         # repo path. `task.full_path` already includes the "active/<name>"
         # segment. This matches settings.root in the MCP server
         # (mcp_missioncache/config.py:15) and the helpers in mcp_missioncache/helpers.py.
-        orbit_root = Path.home() / ".missioncache"
-        orbit_dir = orbit_root / task.full_path
+        missioncache_root = Path.home() / ".missioncache"
+        missioncache_dir = missioncache_root / task.full_path
 
         # Two supported filename layouts:
         # - Top-level tasks: `{task.name}-tasks.md` / `{task.name}-context.md`
@@ -152,8 +152,8 @@ def main() -> None:
             (
                 f
                 for f in (
-                    orbit_dir / f"{task.name}-tasks.md",
-                    orbit_dir / "tasks.md",
+                    missioncache_dir / f"{task.name}-tasks.md",
+                    missioncache_dir / "tasks.md",
                 )
                 if f.exists()
             ),
@@ -163,8 +163,8 @@ def main() -> None:
             (
                 f
                 for f in (
-                    orbit_dir / f"{task.name}-context.md",
-                    orbit_dir / "context.md",
+                    missioncache_dir / f"{task.name}-context.md",
+                    missioncache_dir / "context.md",
                 )
                 if f.exists()
             ),

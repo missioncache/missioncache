@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MissionCache Dashboard</title>
     <link rel="icon" type="image/png" href="/static/logo_icon.png">
-    <script>(function(){var t=localStorage.getItem('orbit-theme')||'dark';if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
+    <script>(function(){var t=localStorage.getItem('missioncache-theme')||'dark';if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -5989,7 +5989,7 @@
             const ctx = document.getElementById('hourlyChart');
             if (!ctx) return;
 
-            // Prepare data for 24 hours (use max of orbit-tracked and Claude JSONL seconds)
+            // Prepare data for 24 hours (use max of missioncache-tracked and Claude JSONL seconds)
             const hours = Array.from({ length: 24 }, (_, i) => i);
             const values = hours.map(h => {
                 const entry = hourlyData.find(e => e.hour === h);
@@ -7223,7 +7223,7 @@
 
         // =============================================================================
         // Shared DAG layout: deterministic horizontal layered layout.
-        // Used by both the Orbit Auto tab graph and the Projects Structure modal.
+        // Used by both the MissionCache Auto tab graph and the Projects Structure modal.
         // =============================================================================
         function renderLayeredDAG(svgSelector, graphData, options = {}) {
             const { enableHighlight = false, minHeight = 300 } = options;
@@ -7244,7 +7244,7 @@
 
             // Longest-path layering with visited-set cycle guard. On a detected
             // cycle we return depth 0 for the backedge to break recursion.
-            // Orbit task DAGs are acyclic by construction; the guard exists to
+            // MissionCache task DAGs are acyclic by construction; the guard exists to
             // prevent infinite recursion on malformed input.
             const layer = new Map();
             const visiting = new Set();
@@ -7384,7 +7384,7 @@
             marked.setOptions({ gfm: true, breaks: true });
             let html = marked.parse(content);
             // Post-process bare JIRA keys (e.g. PROJ-123) into clickable links.
-            // The mapping comes from ~/.claude/orbit-dashboard-config.json via
+            // The mapping comes from ~/.claude/missioncache-dashboard-config.json via
             // the Settings view; see cachedJiraUrls. If the cache hasn't been
             // warmed yet (happens on the very first render before init finishes)
             // we return the plain HTML and the next render will have links.
@@ -7554,7 +7554,7 @@
         // Theme Toggle
         // =============================================================================
         function getTheme() {
-            return localStorage.getItem('orbit-theme') || 'dark';
+            return localStorage.getItem('missioncache-theme') || 'dark';
         }
 
         function applyTheme(theme) {
@@ -7573,7 +7573,7 @@
 
         function toggleTheme() {
             const next = getTheme() === 'dark' ? 'light' : 'dark';
-            localStorage.setItem('orbit-theme', next);
+            localStorage.setItem('missioncache-theme', next);
             applyTheme(next);
         }
 
@@ -7635,7 +7635,7 @@
         }
 
         // =============================================================================
-        // Orbit Auto Functions
+        // MissionCache Auto Functions
         // =============================================================================
         let autoDataLoaded = false;
         let autoProjects = [];

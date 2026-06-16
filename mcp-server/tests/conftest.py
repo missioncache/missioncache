@@ -1,4 +1,4 @@
-"""Shared fixtures for orbit MCP server tests."""
+"""Shared fixtures for MissionCache MCP server tests."""
 
 import pytest
 

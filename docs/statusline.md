@@ -130,7 +130,7 @@ Tables the statusline reads:
 
 ### `~/.missioncache/active/<project>/<project>-tasks.md`
 
-Read for the progress bracket. Parsing is a simple regex scan for completed (`- [x]`) and pending (`- [ ]`) lines - see `_parse_task_progress()`. The format matches the MCP server's canonical parser in `mcp-server/src/mcp_missioncache/orbit.py`, counting all checklist items flatly including hierarchical subtasks.
+Read for the progress bracket. Parsing is a simple regex scan for completed (`- [x]`) and pending (`- [ ]`) lines - see `_parse_task_progress()`. The format matches the MCP server's canonical parser in `mcp-server/src/mcp_missioncache/project_files.py`, counting all checklist items flatly including hierarchical subtasks.
 
 Two special cases for display:
 

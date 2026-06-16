@@ -917,7 +917,7 @@ def seed_auto_execution(
 # MissionCache file writers
 # =============================================================================
 
-def write_orbit_files(demo_home: Path) -> None:
+def write_missioncache_files(demo_home: Path) -> None:
     """Create plan.md, context.md, tasks.md, and prompt files under
     $HOME/.missioncache/<status>/<name>/.
     """
@@ -929,7 +929,7 @@ def write_orbit_files(demo_home: Path) -> None:
         (task_dir / f"{p['name']}-plan.md").write_text(PLANS[p["name"]])
 
         # Inject a `## Description` section after the H1 title so the dashboard's
-        # parse_orbit_progress can populate the Active Projects description column.
+        # parse_missioncache_progress can populate the Active Projects description column.
         ctx_lines = CONTEXTS[p["name"]].splitlines()
         ctx = "\n".join(
             ctx_lines[:2] + ["## Description", "", p["description"], ""] + ctx_lines[2:]
@@ -993,7 +993,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    write_orbit_files(demo_home)
+    write_missioncache_files(demo_home)
     print("  wrote MissionCache plan/context/tasks files for 6 projects")
 
     # Sync SQLite -> DuckDB so the dashboard has the analytics layer ready

@@ -129,7 +129,7 @@ def get_task_dir(task_name: str, active: bool = True) -> Path:
     return settings.root / subdir / task_name
 
 
-def get_orbit_files(task_name: str, full_path: str | None = None) -> MissionCacheFiles:
+def get_missioncache_files(task_name: str, full_path: str | None = None) -> MissionCacheFiles:
     """Get paths to all MissionCache files for a task.
 
     When ``full_path`` is given (e.g. ``active/parent/subtask`` for nested
@@ -176,7 +176,7 @@ def get_orbit_files(task_name: str, full_path: str | None = None) -> MissionCach
     )
 
 
-def create_orbit_files(
+def create_missioncache_files(
     task_name: str,
     description: str = "TBD",
     jira_key: str | None = None,
@@ -206,7 +206,7 @@ def create_orbit_files(
     task_dir = get_task_dir(task_name)
 
     if not force:
-        # Include both prefixed AND legacy unprefixed filenames - get_orbit_files
+        # Include both prefixed AND legacy unprefixed filenames - get_missioncache_files
         # accepts both, so the guard must too. Otherwise creating a task whose
         # dir already has only legacy files would write fresh prefixed files,
         # and the legacy content would be hidden by the read-time precedence.

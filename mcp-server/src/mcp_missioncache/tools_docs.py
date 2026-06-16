@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import active_task, orbit
+from . import active_task, project_files
 from .app import mcp
 from .config import settings
 from .db import get_db
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def create_orbit_files(
+async def create_missioncache_files(
     repo_path: Annotated[str, Field(description="Repository path")],
     project_name: Annotated[str, Field(description="Project name (kebab-case)")],
     description: Annotated[
@@ -109,7 +109,7 @@ async def create_orbit_files(
             repo_id = repo.id
 
         # Create the files under MISSIONCACHE_ROOT
-        files = orbit.create_orbit_files(
+        files = project_files.create_missioncache_files(
             task_name=project_name,
             description=description,
             jira_key=jira_key,
@@ -156,7 +156,7 @@ async def create_orbit_files(
 
 
 @mcp.tool()
-async def get_orbit_files(
+async def get_missioncache_files(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
     project_name: Annotated[str | None, Field(description="Project name")] = None,
 ) -> dict:
@@ -189,12 +189,12 @@ async def get_orbit_files(
         # Pass full_path only for subtasks (nested under parent directories).
         # For top-level tasks, full_path can be stale because complete_task
         # moves the directory to completed/<name> without updating the column.
-        # Letting get_orbit_files do its standard active+completed search
+        # Letting get_missioncache_files do its standard active+completed search
         # avoids returning null files for archived projects.
         full_path = (
             task.full_path if (task and task.parent_id is not None) else None
         )
-        files = orbit.get_orbit_files(name, full_path=full_path)
+        files = project_files.get_missioncache_files(name, full_path=full_path)
 
         return {
             "task_id": task.id if task else None,
@@ -235,7 +235,7 @@ async def update_context_file(
     """
     try:
         _validate_path(context_file, "context_file", must_be_under=settings.root)
-        content = orbit.update_context_file(
+        content = project_files.update_context_file(
             context_file=context_file,
             next_steps=next_steps,
             recent_changes=recent_changes,
@@ -247,7 +247,7 @@ async def update_context_file(
         return {
             "success": True,
             "file": context_file,
-            "timestamp": orbit.get_timestamp(),
+            "timestamp": project_files.get_timestamp(),
             "sections_updated": [
                 s
                 for s, v in [
@@ -298,7 +298,7 @@ async def update_tasks_file(
     """
     try:
         _validate_path(tasks_file, "tasks_file", must_be_under=settings.root)
-        result = orbit.update_tasks_file(
+        result = project_files.update_tasks_file(
             tasks_file=tasks_file,
             completed_tasks=completed_tasks,
             new_tasks=new_tasks,
@@ -340,7 +340,7 @@ async def update_tasks_file(
 
 
 @mcp.tool()
-async def get_orbit_progress(
+async def get_missioncache_progress(
     task_id: Annotated[int | None, Field(description="Task ID")] = None,
     tasks_file: Annotated[
         str | None, Field(description="Direct path to tasks.md")
@@ -360,7 +360,7 @@ async def get_orbit_progress(
             task = db.get_task(task_id)
             if not task:
                 raise TaskNotFoundError(task_id)
-            files = orbit.get_orbit_files(task.name, full_path=task.full_path)
+            files = project_files.get_missioncache_files(task.name, full_path=task.full_path)
             file_path = files.tasks_file
 
         if not file_path:
@@ -378,7 +378,7 @@ async def get_orbit_progress(
             raise MissionCacheFileNotFoundError(file_path)
 
         content = path.read_text()
-        progress = orbit.parse_task_progress(content)
+        progress = project_files.parse_task_progress(content)
 
         return {
             "task_id": task_id,

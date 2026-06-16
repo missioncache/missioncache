@@ -17,7 +17,7 @@
 |------|---------|
 | `mcp-server/src/mcp_missioncache/server.py` | MCP entry point, registers all tools |
 | `mcp-server/src/mcp_missioncache/db.py` | missioncache_db wrapper |
-| `mcp-server/src/mcp_missioncache/orbit.py` | File operations (create, update, parse) |
+| `mcp-server/src/mcp_missioncache/project_files.py` | File operations (create, update, parse) |
 | `mcp-server/src/mcp_missioncache/iteration_log.py` | Autonomous loop logging |
 | `mcp-server/src/mcp_missioncache/models.py` | Pydantic response models |
 | `mcp-server/src/mcp_missioncache/errors.py` | MissionCacheError, MissionCacheFileNotFoundError |

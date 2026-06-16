@@ -223,7 +223,7 @@ The MissionCache Dashboard exposes these endpoints:
 | Endpoint | Caller | What it does |
 |----------|--------|--------------|
 | `POST /api/hooks/edit-count` | `PostToolUse` HTTP hook wired by `missioncache-install` when the dashboard is installed (matcher `Edit\|Write\|NotebookEdit`) | Updates `session_state.edit_count` in `hooks-state.db` for the statusline edit counter |
-| `POST /api/hooks/task-created` | MissionCache MCP server (`create_task`, `create_orbit_files`) | Triggers immediate SQLite → DuckDB sync so new projects show in the dashboard without the up-to-60s background-sync lag |
+| `POST /api/hooks/task-created` | MissionCache MCP server (`create_task`, `create_missioncache_files`) | Triggers immediate SQLite → DuckDB sync so new projects show in the dashboard without the up-to-60s background-sync lag |
 | `POST /api/hooks/heartbeat` | Optional - power-user `UserPromptSubmit` HTTP hook wiring | Records a heartbeat. Plugin already records heartbeats via `activity_tracker.py`'s subprocess path, so wiring this on top just duplicates them |
 
 `edit-count` is wired automatically by `missioncache-install` when the dashboard is installed, so full-install users get the statusline edit counter out of the box. `task-created` is called internally by the MCP server, not by a user-level HTTP hook. `heartbeat` is only of interest if you specifically want two parallel heartbeat paths.

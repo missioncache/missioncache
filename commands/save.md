@@ -16,7 +16,7 @@ Save progress on an active project using atomic MCP calls.
 
 1b. **If not found, try detecting from MissionCache files and register session:**
    ```
-   mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")
+   mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<name>")
    # If found, create pending-task.json and record heartbeat
    ```
 
@@ -75,19 +75,19 @@ echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 2. Deduplicate by project name.
 3. For each distinct project, call `mcp__plugin_missioncache_pm__get_task(project_name=...)` to confirm it's still active.
 4. Ask the user which project they intend to save and wait for their reply. Show one option per distinct project, using `<project name>` as the label and `last-worked <ago>` as the description. If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it; otherwise present the options as a numbered prose list.
-5. Use the selected project name to drive the save directly via `mcp__plugin_missioncache_pm__get_orbit_files(project_name=...)` - skip the session_id-based lookup entirely.
+5. Use the selected project name to drive the save directly via `mcp__plugin_missioncache_pm__get_missioncache_files(project_name=...)` - skip the session_id-based lookup entirely.
 
 If `RECENT <= 1`, proceed normally: call `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
 
 **If project not found but MissionCache files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
 1. Try to detect the project from `~/.missioncache/active/<project-name>`
-2. Call `mcp__plugin_missioncache_pm__get_orbit_files(project_name="<name>")` to confirm
+2. Call `mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<name>")` to confirm
 3. If found, **register the session** (see Step 1b)
 
 ### Step 1b: Register Session (if not registered)
 
-If `find_task_for_directory` returned `found: false` but `get_orbit_files` found the project:
+If `find_task_for_directory` returned `found: false` but `get_missioncache_files` found the project:
 
 ```bash
 SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1; echo "done"
@@ -168,7 +168,7 @@ Ready to continue or safe to compact.
 | Tool | Purpose |
 |------|---------|
 | `mcp__plugin_missioncache_pm__find_task_for_directory` | Find current project |
-| `mcp__plugin_missioncache_pm__get_orbit_files` | Get file paths |
+| `mcp__plugin_missioncache_pm__get_missioncache_files` | Get file paths |
 | `mcp__plugin_missioncache_pm__update_context_file` | Update context atomically |
 | `mcp__plugin_missioncache_pm__update_tasks_file` | Update tasks atomically |
 | `mcp__plugin_missioncache_pm__process_heartbeats` | Finalize time tracking |

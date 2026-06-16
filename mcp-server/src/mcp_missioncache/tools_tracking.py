@@ -195,7 +195,7 @@ async def set_task_repo(
         bool,
         Field(
             description="Walk parents of repo_path to the containing git root "
-            "before rebinding. Default True mirrors create_orbit_files. Pass "
+            "before rebinding. Default True mirrors create_missioncache_files. Pass "
             "False when a sub-package within a monorepo is the actual project "
             "boundary."
         ),
@@ -210,7 +210,7 @@ async def set_task_repo(
     registered - call add_repo first if it is not.
 
     By default, repo_path is resolved to its containing git root before
-    looking up the registered repo, mirroring create_orbit_files. Pass
+    looking up the registered repo, mirroring create_missioncache_files. Pass
     resolve_git_root=False to opt out.
 
     Provide either task_id OR task_name.

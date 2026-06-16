@@ -12,7 +12,7 @@ from missioncache_db import (
     NameCollisionError,
 )
 
-from . import orbit
+from . import project_files
 from .app import mcp
 from .config import settings
 from .db import get_db
@@ -309,7 +309,7 @@ async def get_task(
         result = detail.model_dump()
 
         # Atomic session binding when session_id is supplied. Best-effort
-        # like the create_orbit_files pattern: a DB-write failure or
+        # like the create_missioncache_files pattern: a DB-write failure or
         # invalid session_id silently no-ops; the user can recover by
         # re-running /missioncache:load or invoking the binding explicitly. Falls
         # back to the CLAUDE_CODE_SESSION_ID env var so /missioncache:load binds
@@ -421,7 +421,7 @@ async def create_task(
 
     try:
         # Validate inputs
-        orbit.validate_task_name(name)
+        project_files.validate_task_name(name)
         if task_type not in ("coding", "non-coding"):
             return {
                 "error": True,
@@ -430,7 +430,7 @@ async def create_task(
             }
 
         repo_id = None
-        orbit_path = None
+        missioncache_path = None
 
         if task_type == "coding":
             if not repo_path:
@@ -451,7 +451,7 @@ async def create_task(
             # Create active/<name>/ directory under MISSIONCACHE_ROOT
             task_dir = settings.root / settings.active_dir_name / name
             task_dir.mkdir(parents=True, exist_ok=True)
-            orbit_path = str(task_dir)
+            missioncache_path = str(task_dir)
 
         # Create task in DB
         task = db.create_task(
@@ -475,7 +475,7 @@ async def create_task(
             task_id=task.id,
             task_name=task.name,
             task_type=task.task_type,
-            orbit_path=orbit_path,
+            missioncache_path=missioncache_path,
         ).model_dump()
         result["session_bound"] = session_bound
         return result

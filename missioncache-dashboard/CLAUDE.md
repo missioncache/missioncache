@@ -78,7 +78,7 @@ GET /health        # Health check
 
 ## MissionCache Location Detection
 
-The `parse_orbit_progress()` function intelligently finds MissionCache files in the centralized location:
+The `parse_missioncache_progress()` function intelligently finds MissionCache files in the centralized location:
 - Primary path: `~/.missioncache/{active,completed}/<task-name>/`
 - Legacy fallback: repo-local `dev/{active,completed}/` paths (for older projects)
 
@@ -101,10 +101,10 @@ Within a task directory, looks for files in order:
 
 Tasks can become "orphans" when MissionCache files are moved to `~/.missioncache/completed/` but the database `status` field isn't updated.
 
-**Detection:** `parse_orbit_progress()` returns `orbit_in_completed: true` when MissionCache files are found in a completed path.
+**Detection:** `parse_missioncache_progress()` returns `missioncache_in_completed: true` when MissionCache files are found in a completed path.
 
 **API Behavior:**
-- `/api/tasks/active` - Filters OUT tasks where `orbit_in_completed=true`
+- `/api/tasks/active` - Filters OUT tasks where `missioncache_in_completed=true`
 - `/api/tasks/completed` - Includes orphan tasks (DB status='active' but MissionCache files in completed)
 
 This ensures the dashboard shows tasks in the correct list based on actual MissionCache file location, not stale DB status.

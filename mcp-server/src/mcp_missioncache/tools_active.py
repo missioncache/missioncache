@@ -19,7 +19,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import active_task, orbit
+from . import active_task, project_files
 from .app import mcp
 from .errors import ErrorCode, MissionCacheError, ValidationError
 from .helpers import _resolve_session_id
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def set_active_orbit_tasks(
+async def set_active_missioncache_tasks(
     project_name: Annotated[
         str, Field(description="MissionCache project name (kebab-case)")
     ],
@@ -65,7 +65,7 @@ async def set_active_orbit_tasks(
       - 2-3 numbers without shared parent: ``Tasks: 54a, 56, 57``
       - 4+ numbers: first 3 + ``(+N)``
 
-    Call ``clear_active_orbit_tasks`` to clear focus, or pass an empty
+    Call ``clear_active_missioncache_tasks`` to clear focus, or pass an empty
     list (this same tool returns success with no pointer written).
     """
     try:
@@ -79,10 +79,10 @@ async def set_active_orbit_tasks(
         if not project_name:
             raise ValidationError("project_name is required", field="project_name")
         # Reject path-traversal-shaped names early. The kebab-case promise in
-        # the docstring is enforced by the same validator that ``create_orbit_files``
+        # the docstring is enforced by the same validator that ``create_missioncache_files``
         # uses; rejecting here keeps the pointer write below safe even if a
         # downstream caller skips its own checks.
-        orbit.validate_task_name(project_name)
+        project_files.validate_task_name(project_name)
 
         # Empty list is a no-op clear (don't write pointer; remove if present).
         if not task_numbers:
@@ -94,7 +94,7 @@ async def set_active_orbit_tasks(
                 "cleared": removed,
             }
 
-        files = orbit.get_orbit_files(project_name)
+        files = project_files.get_missioncache_files(project_name)
         if not files.tasks_file:
             raise MissionCacheError(
                 ErrorCode.FILE_NOT_FOUND,
@@ -146,12 +146,12 @@ async def set_active_orbit_tasks(
     except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
-        logger.exception("Error in set_active_orbit_tasks")
+        logger.exception("Error in set_active_missioncache_tasks")
         return {"error": True, "message": str(e)}
 
 
 @mcp.tool()
-async def clear_active_orbit_tasks(
+async def clear_active_missioncache_tasks(
     session_id: Annotated[
         str | None,
         Field(
@@ -163,7 +163,7 @@ async def clear_active_orbit_tasks(
 ) -> dict:
     """Clear the active MissionCache-task pointer for this session.
 
-    Statusline ``Task:`` field hides until ``set_active_orbit_tasks``
+    Statusline ``Task:`` field hides until ``set_active_missioncache_tasks``
     is called again.
     """
     try:
@@ -179,5 +179,5 @@ async def clear_active_orbit_tasks(
     except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
-        logger.exception("Error in clear_active_orbit_tasks")
+        logger.exception("Error in clear_active_missioncache_tasks")
         return {"error": True, "message": str(e)}

@@ -1,7 +1,7 @@
 """Tests for the tasks.md checklist parser.
 
 Pure-function tests on string inputs. The parser is consumed by both
-the MCP tools (validating set_active_orbit_tasks input) and the
+the MCP tools (validating set_active_missioncache_tasks input) and the
 update_tasks_file completed-numbers diff.
 """
 
