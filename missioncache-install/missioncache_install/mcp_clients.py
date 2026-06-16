@@ -17,7 +17,7 @@ server via the `mcp-missioncache` binary on PATH. Each writer is idempotent and
 warn-and-skips when the tool itself is not installed on the system.
 
 Schemas verified against codex 0.125.0 and opencode 1.4.3 on 2026-04-26;
-see ~/.missioncache/active/orbit-public-release/multi-tool-research.md for the
+see ~/.missioncache/active/missioncache-release/multi-tool-research.md for the
 full discovery notes.
 """
 

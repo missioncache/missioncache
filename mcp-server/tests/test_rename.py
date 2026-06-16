@@ -31,11 +31,11 @@ def isolated_orbit(tmp_path, monkeypatch):
     db_path = tmp_path / "tasks.db"
 
     import missioncache_db
-    from mcp_missioncache import config, orbit
+    from mcp_missioncache import config, project_files
 
     monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(config.settings, "db_path", db_path)
-    monkeypatch.setattr(orbit, "settings", config.settings)
+    monkeypatch.setattr(project_files, "settings", config.settings)
     monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", root_dir)
     monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
     # Point the migration guard's legacy paths at non-existent tmp

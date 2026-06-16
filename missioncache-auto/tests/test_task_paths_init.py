@@ -46,7 +46,7 @@ class TestTaskPathsFromTaskName:
         assert paths.context_file == expected_task_dir / "sample-task-context.md"
         assert paths.auto_log == expected_task_dir / "sample-task-auto-log.md"
         assert paths.prompts_dir == expected_task_dir / "prompts"
-        assert paths.state_dir == expected_task_dir / ".orbit-parallel-state"
+        assert paths.state_dir == expected_task_dir / ".missioncache-parallel-state"
         assert paths.logs_dir == expected_task_dir / "logs"
 
     def test_no_disk_side_effects(self, tmp_path, monkeypatch):

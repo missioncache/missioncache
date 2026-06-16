@@ -29,12 +29,12 @@ def _isolate_home(tmp_path, monkeypatch):
 
 class TestWriteAndReadPointer:
     def test_round_trip(self, tmp_path):
-        path = active_task.write_pointer("sess-1", "orbit-public-release", ["54a"])
+        path = active_task.write_pointer("sess-1", "missioncache-release", ["54a"])
         assert path == _state_dir(tmp_path) / "sess-1.json"
 
         data = active_task.read_pointer("sess-1")
         assert data is not None
-        assert data["project_name"] == "orbit-public-release"
+        assert data["project_name"] == "missioncache-release"
         assert data["task_numbers"] == ["54a"]
         assert "updated" in data
 

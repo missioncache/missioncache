@@ -13,7 +13,7 @@ So the active-task pointer keys by ``(project_name, task_numbers)``.
 State file: ``~/.claude/hooks/state/active-missioncache-task/<session-id>.json``::
 
     {
-      "project_name": "orbit-public-release",
+      "project_name": "missioncache-release",
       "task_numbers": ["54a"],
       "updated": "2026-04-28T12:34:56+03:00"
     }

@@ -198,7 +198,7 @@ _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 def validate_task_name(name: str) -> None:
     """Validate a project / task name for filesystem and DB safety.
 
-    Mirrors ``mcp_missioncache.orbit.validate_task_name`` exactly so the same
+    Mirrors ``mcp_missioncache.project_files.validate_task_name`` exactly so the same
     inputs are accepted/rejected on every surface (CLI, MCP, dashboard).
     The check is split into three branches so each failure mode gets a
     specific user-facing message.
@@ -2576,7 +2576,7 @@ class TaskDB:
             return match.group(1).strip()
         return ""
 
-    def parse_orbit_progress(
+    def parse_missioncache_progress(
         self, repo_path: str, task_full_path: str, parent_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Parse MissionCache task file to extract progress information.

@@ -76,7 +76,7 @@ If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo
 
 ### Step 1: Get Project Details
 
-First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_orbit_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
+First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_missioncache_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
 
 ```bash
 CWD_KEY=$(pwd | sed 's|/|-|g')
@@ -242,11 +242,11 @@ mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 
 If the user signals which MissionCache checklist task they want to work on
 (either by number like "let's do 54a" or by description that matches a
-``[ ]`` line in tasks.md), call ``set_active_orbit_tasks`` so the
+``[ ]`` line in tasks.md), call ``set_active_missioncache_tasks`` so the
 statusline ``Task:`` field reflects the current focus.
 
 ```
-mcp__plugin_missioncache_pm__set_active_orbit_tasks(
+mcp__plugin_missioncache_pm__set_active_missioncache_tasks(
     project_name="<project-name>",
     task_numbers=["54a"],          # or ["56", "57"] for parallel work
     session_id="<SESSION_ID from Step 4>"
@@ -257,7 +257,7 @@ Pass MULTIPLE numbers when the user is genuinely working on multiple
 items in parallel (e.g. ``["54a", "54b"]``). The statusline collapses
 sibling subtasks under their parent automatically. Pointer auto-clears
 on ``update_tasks_file`` when items get marked ``[x]``; call
-``clear_active_orbit_tasks`` explicitly when focus shifts off-task
+``clear_active_missioncache_tasks`` explicitly when focus shifts off-task
 without completing anything.
 
 If the user resumes without naming a specific task, skip this step -
@@ -318,9 +318,9 @@ Ready to continue. What would you like to work on?
 |------|---------|
 | `mcp__plugin_missioncache_pm__list_active_tasks` | List projects with repo prioritization |
 | `mcp__plugin_missioncache_pm__get_task` | Get full project details |
-| `mcp__plugin_missioncache_pm__get_orbit_files` | Get file paths |
-| `mcp__plugin_missioncache_pm__get_orbit_progress` | Get checklist progress |
+| `mcp__plugin_missioncache_pm__get_missioncache_files` | Get file paths |
+| `mcp__plugin_missioncache_pm__get_missioncache_progress` | Get checklist progress |
 | `mcp__plugin_missioncache_pm__record_heartbeat` | Start time tracking |
 | `mcp__plugin_missioncache_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
-| `mcp__plugin_missioncache_pm__set_active_orbit_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
-| `mcp__plugin_missioncache_pm__clear_active_orbit_tasks` | Clear the Task field when focus shifts off-task without completing |
+| `mcp__plugin_missioncache_pm__set_active_missioncache_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
+| `mcp__plugin_missioncache_pm__clear_active_missioncache_tasks` | Clear the Task field when focus shifts off-task without completing |

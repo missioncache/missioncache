@@ -31,7 +31,7 @@ Clicking a row opens a modal with four tabs:
 
 The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the MissionCache files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
 
-The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_orbit_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `orbit_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
+The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 ### Activity view
 
@@ -152,7 +152,7 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/tasks/active` | Active tasks with orbit progress, effective time, and subtasks. Filters out orphans. |
+| GET | `/api/tasks/active` | Active tasks with task progress, effective time, and subtasks. Filters out orphans. |
 | GET | `/api/tasks/completed` | Completed tasks plus orphans. Accepts `days` query param (default 30). |
 | GET | `/api/task/{id}/files` | Parsed markdown content of `-plan.md`, `-context.md`, `-tasks.md`. |
 | GET | `/api/task/{id}/structure` | Per-task mode assignments (interactive/auto) + dependency adjacency for the Structure tab graph. |
@@ -167,15 +167,15 @@ The `/api/tasks/active` response shape is the largest; the relevant fields are:
   "tasks": [
     {
       "id": 1,
-      "name": "orbit-public-release",
+      "name": "missioncache-release",
       "status": "active",
-      "repo_name": "orbit-pm",
-      "repo_path": "/Users/alice/projects/orbit-pm",
+      "repo_name": "missioncache",
+      "repo_path": "/Users/alice/projects/missioncache",
       "jira_key": null,
       "time_spent_seconds": 480,
       "time_spent_formatted": "8m",
       "last_worked_ago": "1m ago",
-      "description": "Prepare orbit for public open-source release",
+      "description": "Prepare MissionCache for public open-source release",
       "remaining_summary": "...",
       "completion_pct": 48,
       "completed_count": 19,
@@ -244,7 +244,7 @@ MissionCache hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three
 |--------|------|---------|
 | POST | `/api/hooks/heartbeat` | Record an activity heartbeat. Optional - power-user `UserPromptSubmit` HTTP hook wiring only; the plugin already records heartbeats via its subprocess hook. |
 | POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `missioncache-install` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`) when the dashboard is installed. Feeds the statusline edit counter. |
-| POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the MissionCache MCP server after `create_task` and `create_orbit_files`. |
+| POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the MissionCache MCP server after `create_task` and `create_missioncache_files`. |
 | POST | `/api/hooks/action` | Record current tool action for tab title display. |
 | POST | `/api/hooks/project` | Set the active project for a session. Called by `/missioncache:new`, `/missioncache:load`, `/missioncache:save`. |
 | POST | `/api/hooks/qa-review` | Mark QA review as suggested for a session. |
@@ -274,7 +274,7 @@ Sync runs in four places:
 1. **On startup** - `lifespan()` at `missioncache-dashboard/missioncache_dashboard/server.py:158` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
 2. **Every 60 seconds** - the `background_sync()` async task runs on a `SYNC_INTERVAL_SECONDS=60` loop. This is why the dashboard always lags heartbeats by at most a minute.
 3. **On demand via `POST /api/sync`** - useful for the "I just committed, show me the latest" case where you do not want to wait for the background loop.
-4. **After task creation** - the MissionCache MCP server POSTs to `/api/hooks/task-created` after `create_task` and `create_orbit_files` so a newly created task shows up in the active table right away instead of waiting up to 60s for the next background sync.
+4. **After task creation** - the MissionCache MCP server POSTs to `/api/hooks/task-created` after `create_task` and `create_missioncache_files` so a newly created task shows up in the active table right away instead of waiting up to 60s for the next background sync.
 
 The `migrate_to_duckdb.py` script is a standalone version of the same logic; you run it manually after a DuckDB corruption or when you want to rebuild the analytics DB from scratch.
 
@@ -301,7 +301,7 @@ The dashboard supports hash-based deep links so external tools (the statusline, 
 
 The routing is handled by `handleHashChange()` at `missioncache-dashboard/missioncache_dashboard/index.html:5292`. Deep links resolve against both `/api/tasks/active` and `/api/tasks/completed?days=90`, so you can link to completed projects too. After opening the modal, the query string is stripped from the hash so that a page refresh does not re-open the modal unexpectedly.
 
-The statusline uses this for its clickable project name and progress fraction. When missioncache-statusline renders a line like `Project: orbit-public-release (19/39)`, the project name is wrapped in an OSC 8 hyperlink to `#{MISSIONCACHE_DASHBOARD_URL}/#projects` and the progress fraction is wrapped in a link to `#{MISSIONCACHE_DASHBOARD_URL}/#projects?task=orbit-public-release&tab=tasks`. Terminals that support OSC 8 (iTerm2, Ghostty, cmux, modern Windows Terminal) render these as clickable; terminals that do not, just see plain text with the same content.
+The statusline uses this for its clickable project name and progress fraction. When missioncache-statusline renders a line like `Project: missioncache-release (19/39)`, the project name is wrapped in an OSC 8 hyperlink to `#{MISSIONCACHE_DASHBOARD_URL}/#projects` and the progress fraction is wrapped in a link to `#{MISSIONCACHE_DASHBOARD_URL}/#projects?task=missioncache-release&tab=tasks`. Terminals that support OSC 8 (iTerm2, Ghostty, cmux, modern Windows Terminal) render these as clickable; terminals that do not, just see plain text with the same content.
 
 The `MISSIONCACHE_DASHBOARD_URL` environment variable is read at `missioncache-dashboard/missioncache_dashboard/statusline.py:1041` and defaults to `http://localhost:8787`. If you move the dashboard to a different host or port, set this in your shell init so the statusline builds the right links.
 
@@ -407,7 +407,7 @@ For anything more complex than a table or a bar chart, you may want to pull in D
 
 ### Touching path resolution
 
-If you are changing how MissionCache files are located on disk, you need to update two places: `parse_orbit_progress()` in `missioncache-dashboard/missioncache_dashboard/server.py:833` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
+If you are changing how MissionCache files are located on disk, you need to update two places: `parse_missioncache_progress()` in `missioncache-dashboard/missioncache_dashboard/server.py:833` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
 
 ## Troubleshooting
 

@@ -41,7 +41,7 @@ RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 0.4  # exponential backoff between retries
 
 
-# ── Atomic write helpers (duplicated from mcp_missioncache.orbit; keeping the hook
+# ── Atomic write helpers (duplicated from mcp_missioncache.project_files; keeping the hook
 #    self-contained avoids dragging the full mcp_missioncache transitive imports
 #    into the PreCompact hot path) ────────────────────────────────────────
 

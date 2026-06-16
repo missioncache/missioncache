@@ -181,7 +181,7 @@ class TaskPaths:
             context_file=task_dir / f"{task_name}-context.md",
             auto_log=task_dir / f"{task_name}-auto-log.md",
             prompts_dir=task_dir / "prompts",
-            state_dir=task_dir / ".orbit-parallel-state",
+            state_dir=task_dir / ".missioncache-parallel-state",
             logs_dir=task_dir / "logs",
         )
 

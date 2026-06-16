@@ -98,7 +98,7 @@ def _get_hooks_state_db() -> sqlite3.Connection:
     return db
 
 
-def _resolve_orbit_path(full_path: str) -> Path:
+def _resolve_missioncache_path(full_path: str) -> Path:
     """Resolve DB full_path to centralized MissionCache directory, stripping legacy dev/ prefix."""
     if full_path.startswith("dev/"):
         full_path = full_path[4:]
@@ -817,7 +817,7 @@ def _get_sequential_dependencies(task_id: str, all_tasks: list[dict]) -> list[st
     return []
 
 
-def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
+def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
     """Parse MissionCache task file to extract progress information.
 
     Args:
@@ -836,7 +836,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
         "completed_count": 0,
         "total_count": 0,
         "last_updated": None,
-        "orbit_in_completed": False,  # True if MissionCache files found in completed/
+        "missioncache_in_completed": False,  # True if MissionCache files found in completed/
         "target_repo": None,  # Actual working repo extracted from context/plan
         # Per-task mode fields
         "project_mode": "interactive",  # "interactive", "autonomous", or "hybrid"
@@ -881,7 +881,7 @@ def parse_orbit_progress(repo_path: str, task_full_path: str) -> dict[str, Any]:
 
         # Check if MissionCache files are in the completed folder
         if "/completed/" in str(task_dir) and "/active/" not in str(task_dir):
-            result["orbit_in_completed"] = True
+            result["missioncache_in_completed"] = True
 
         # Extract task name from the resolved path
         task_name = task_dir.name
@@ -1154,15 +1154,15 @@ async def api_tasks_active(repo_id: int = None):
             task_dict["repo_path"] = repo.path if repo else None
 
         # Parse MissionCache files for progress info
-        orbit_in_completed = False
+        missioncache_in_completed = False
         if repo and task.full_path:
-            progress = parse_orbit_progress(repo.path, task.full_path)
+            progress = parse_missioncache_progress(repo.path, task.full_path)
             task_dict["description"] = progress.get("description", "")
             task_dict["remaining_summary"] = progress.get("remaining_summary", "")
             task_dict["completion_pct"] = progress.get("completion_pct", 0)
             task_dict["completed_count"] = progress.get("completed_count", 0)
             task_dict["total_count"] = progress.get("total_count", 0)
-            orbit_in_completed = progress.get("orbit_in_completed", False)
+            missioncache_in_completed = progress.get("missioncache_in_completed", False)
             # Per-task mode fields
             task_dict["project_mode"] = progress.get("project_mode", "interactive")
             task_dict["task_modes"] = progress.get("task_modes", [])
@@ -1185,7 +1185,7 @@ async def api_tasks_active(repo_id: int = None):
 
         # Skip tasks whose MissionCache files are in dev/completed/ folder
         # (DB status is stale, but MissionCache files were moved to completed)
-        if orbit_in_completed:
+        if missioncache_in_completed:
             continue
 
         if task.parent_id:
@@ -1236,7 +1236,7 @@ async def api_task_structure(task_id: int):
             return {"error": True, "message": "Repository not found"}
 
         # Get progress info which includes task modes
-        progress = parse_orbit_progress(repo.path, task.full_path)
+        progress = parse_missioncache_progress(repo.path, task.full_path)
 
         # Check for prompts directory
         task_dir = Path(repo.path) / task.full_path
@@ -1304,8 +1304,8 @@ async def api_tasks_completed(days: int = 30):
                 repos_cache[task.repo_id] = db.get_repo(task.repo_id)
             repo = repos_cache[task.repo_id]
             if repo and task.full_path:
-                progress = parse_orbit_progress(repo.path, task.full_path)
-                if progress.get("orbit_in_completed", False):
+                progress = parse_missioncache_progress(repo.path, task.full_path)
+                if progress.get("missioncache_in_completed", False):
                     orphan_completed.append(task)
 
     tasks.extend(orphan_completed)
@@ -1331,7 +1331,7 @@ async def api_tasks_completed(days: int = 30):
 
         # Parse MissionCache files for description and summary
         if repo and task.full_path:
-            progress = parse_orbit_progress(repo.path, task.full_path)
+            progress = parse_missioncache_progress(repo.path, task.full_path)
             task_dict["description"] = progress.get("description", "")
             task_dict["summary"] = progress.get("summary", "")
             # Override repo_name with target_repo if available
@@ -1376,13 +1376,13 @@ async def api_task_files(task_id: int):
         return {"error": "Repository not found", **result}
 
     repo_path = Path(repo.path)
-    task_dir = _resolve_orbit_path(task.full_path)
+    task_dir = _resolve_missioncache_path(task.full_path)
 
     # Handle subtasks - check parent directory structure
     if task.parent_id:
         parent = db.get_task(task.parent_id)
         if parent and parent.full_path:
-            task_dir = _resolve_orbit_path(parent.full_path) / task.name
+            task_dir = _resolve_missioncache_path(parent.full_path) / task.name
 
     if not task_dir.exists():
         # Try alternate paths
@@ -1915,7 +1915,7 @@ async def api_repos():
 # =============================================================================
 
 
-def _parse_orbit_tasks(tasks_file: Path) -> list[dict]:
+def _parse_missioncache_tasks(tasks_file: Path) -> list[dict]:
     """Parse tasks from a MissionCache tasks.md file.
 
     Returns list of dicts with: number, title, completed, wait
@@ -1972,7 +1972,7 @@ async def api_auto_projects():
                 continue
 
             # Parse tasks
-            tasks = _parse_orbit_tasks(tasks_file)
+            tasks = _parse_missioncache_tasks(tasks_file)
             if not tasks:
                 continue
 

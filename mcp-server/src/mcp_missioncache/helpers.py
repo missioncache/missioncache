@@ -11,7 +11,7 @@ from pathlib import Path
 
 import missioncache_db  # type: ignore[import-not-found]
 
-from . import orbit
+from . import project_files
 from .config import settings
 from .db import Task, get_db
 from .errors import TaskNotFoundError, ValidationError
@@ -68,7 +68,7 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
     command's client-side bash binding gets bypassed silently.
 
     This is the EXPLICIT binding path, reached only via user-initiated MCP
-    tools (create_orbit_files / get_task / create_task). The SessionStart
+    tools (create_missioncache_files / get_task / create_task). The SessionStart
     hook no longer auto-binds: it used to inherit "whatever project last ran
     in this cwd", which silently mis-attributed heartbeats/time to a repo-mate
     task, so that path was removed. A session is now bound only here (explicit)
@@ -170,7 +170,7 @@ def _resolve_to_git_root(path: str) -> str:
     before the filesystem root, so non-git project locations stay
     supported.
 
-    Used at the MCP-tool boundary (``create_orbit_files``,
+    Used at the MCP-tool boundary (``create_missioncache_files``,
     ``set_task_repo``) to enforce git-root resolution server-side
     instead of trusting callers to do it. Slash command guidance
     can be skipped silently by the model; tool-level enforcement
@@ -281,10 +281,10 @@ def _task_to_summary(
             repo_path = repo.path
 
     # Check if MissionCache files exist
-    has_orbit_files = False
+    has_missioncache_files = False
     if task.full_path:
         task_dir = settings.root / task.full_path
-        has_orbit_files = task_dir.exists() and any(
+        has_missioncache_files = task_dir.exists() and any(
             (task_dir / f).exists()
             for f in [
                 f"{task.name}-context.md",
@@ -308,7 +308,7 @@ def _task_to_summary(
         time_formatted=time_formatted,
         last_worked_on=effective_last,
         last_worked_ago=last_worked_ago,
-        has_orbit_files=has_orbit_files,
+        has_missioncache_files=has_missioncache_files,
     )
 
 
@@ -371,7 +371,7 @@ def _parse_task_progress(task_dir: Path, task_name: str) -> TaskProgress | None:
         if tasks_file.exists():
             try:
                 content = tasks_file.read_text()
-                return orbit.parse_task_progress(content)
+                return project_files.parse_task_progress(content)
             except Exception as e:
                 logger.warning(f"Failed to parse {tasks_file}: {e}")
                 continue

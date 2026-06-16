@@ -45,7 +45,7 @@ class TaskSummary(BaseModel):
     last_worked_ago: str = Field(
         default="never", description="Relative time since last worked"
     )
-    has_orbit_files: bool = Field(
+    has_missioncache_files: bool = Field(
         default=False, description="Whether MissionCache files exist"
     )
 
@@ -99,7 +99,7 @@ class CreateTaskResult(BaseModel):
     task_id: int
     task_name: str
     task_type: str
-    orbit_path: str | None = None
+    missioncache_path: str | None = None
 
 
 class CompleteTaskResult(BaseModel):

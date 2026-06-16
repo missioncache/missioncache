@@ -38,11 +38,11 @@ def init_task(
     # Create in centralized MissionCache root
     from missioncache_db import MISSIONCACHE_ROOT
 
-    orbit_active = MISSIONCACHE_ROOT / "active"
-    orbit_active.mkdir(parents=True, exist_ok=True)
+    missioncache_active = MISSIONCACHE_ROOT / "active"
+    missioncache_active.mkdir(parents=True, exist_ok=True)
 
     # Create task directory
-    task_dir = orbit_active / task_name
+    task_dir = missioncache_active / task_name
     if task_dir.exists():
         raise FileExistsError(f"Task directory already exists: {task_dir}")
 

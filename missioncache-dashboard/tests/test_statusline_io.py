@@ -338,14 +338,14 @@ class TestReadTasksContent:
 class TestGetActiveTask:
     """Reads ``~/.claude/hooks/state/active-missioncache-task/<session>.json``.
 
-    The pointer is written by the ``set_active_orbit_tasks`` MCP tool and
+    The pointer is written by the ``set_active_missioncache_tasks`` MCP tool and
     holds the MissionCache checklist task numbers currently in progress. The
     statusline composes ``_read_active_task_pointer`` and
     ``_format_active_task`` via ``_get_active_task``; tests cover both the
     raw pointer read and the per-shape display formatting.
     """
 
-    PROJECT = "orbit-public-release"
+    PROJECT = "missioncache-release"
     TASKS_MD = (
         "- [ ] 8. Draft Show HN post\n"
         "- [ ] 54. M11.2 - Per-tool hooks tracker\n"
@@ -385,7 +385,7 @@ class TestGetActiveTask:
 
         Defensive: if tasks.md was edited and the pointer wasn't refreshed, we
         still surface SOMETHING rather than hide the field. Caller can fix
-        the pointer via ``set_active_orbit_tasks`` or ``clear_active_orbit_tasks``.
+        the pointer via ``set_active_missioncache_tasks`` or ``clear_active_missioncache_tasks``.
         """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         self._write_pointer(tmp_path, "sess-2", self.PROJECT, ["999"])

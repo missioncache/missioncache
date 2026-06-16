@@ -1,6 +1,6 @@
-"""Tests for the active orbit-task MCP tools.
+"""Tests for the active MissionCache-task MCP tools.
 
-Covers ``set_active_orbit_tasks`` and ``clear_active_orbit_tasks``: input
+Covers ``set_active_missioncache_tasks`` and ``clear_active_missioncache_tasks``: input
 validation, tasks.md presence/absence, unknown vs already-completed
 numbers, idempotent replace, and end-to-end pointer round-trip.
 
@@ -36,7 +36,7 @@ def project_dir(tmp_path, monkeypatch):
         "- [x] 9. Already done\n"
     )
 
-    # Re-bind MISSIONCACHE_ROOT-like settings used by orbit.get_orbit_files.
+    # Re-bind MISSIONCACHE_ROOT-like settings used by project_files.get_missioncache_files.
     from mcp_missioncache import config
 
     monkeypatch.setattr(config.settings, "root", root_dir)
@@ -49,13 +49,13 @@ def project_dir(tmp_path, monkeypatch):
     return project
 
 
-# ── set_active_orbit_tasks ───────────────────────────────────────────────
+# ── set_active_missioncache_tasks ───────────────────────────────────────────────
 
 
 class TestSetActiveOrbitTasks:
     def test_writes_pointer_for_valid_single_task(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="sess-1",
@@ -70,7 +70,7 @@ class TestSetActiveOrbitTasks:
 
     def test_writes_pointer_for_multiple_valid_tasks(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["8", "54a", "54b"],
                 session_id="sess-1",
@@ -83,14 +83,14 @@ class TestSetActiveOrbitTasks:
 
     def test_replaces_existing_pointer(self, project_dir):
         asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="sess-1",
             )
         )
         asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54b"],
                 session_id="sess-1",
@@ -101,14 +101,14 @@ class TestSetActiveOrbitTasks:
 
     def test_empty_list_is_a_clear(self, project_dir):
         asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="sess-1",
             )
         )
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=[],
                 session_id="sess-1",
@@ -120,7 +120,7 @@ class TestSetActiveOrbitTasks:
 
     def test_unknown_number_returns_validation_error(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["999"],
                 session_id="sess-1",
@@ -134,7 +134,7 @@ class TestSetActiveOrbitTasks:
 
     def test_already_completed_number_returns_validation_error(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["9"],  # marked [x] in fixture
                 session_id="sess-1",
@@ -147,7 +147,7 @@ class TestSetActiveOrbitTasks:
 
     def test_mix_of_unknown_and_completed_reports_both(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["999", "9", "54a"],
                 session_id="sess-1",
@@ -161,7 +161,7 @@ class TestSetActiveOrbitTasks:
 
     def test_missing_session_id_rejected(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="",
@@ -172,7 +172,7 @@ class TestSetActiveOrbitTasks:
 
     def test_missing_project_returns_file_not_found(self, project_dir):
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="no-such-project",
                 task_numbers=["54a"],
                 session_id="sess-1",
@@ -182,10 +182,10 @@ class TestSetActiveOrbitTasks:
         assert result["code"] == "FILE_NOT_FOUND"
 
     def test_path_traversal_project_name_rejected(self, project_dir):
-        """``project_name`` flows into ``orbit.get_orbit_files`` which builds a
+        """``project_name`` flows into ``project_files.get_missioncache_files`` which builds a
         path under MISSIONCACHE_ROOT. Reject traversal-shaped names at the boundary."""
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="../../etc",
                 task_numbers=["54a"],
                 session_id="sess-1",
@@ -196,14 +196,14 @@ class TestSetActiveOrbitTasks:
         assert active_task.read_pointer("sess-1") is None
 
 
-# ── clear_active_orbit_tasks ─────────────────────────────────────────────
+# ── clear_active_missioncache_tasks ─────────────────────────────────────────────
 
 
 class TestClearActiveOrbitTasks:
     def test_clears_existing_pointer(self, project_dir):
         active_task.write_pointer("sess-1", "demo-project", ["54a"])
         result = asyncio.run(
-            tools_active.clear_active_orbit_tasks(session_id="sess-1")
+            tools_active.clear_active_missioncache_tasks(session_id="sess-1")
         )
         assert result["success"] is True
         assert result["cleared"] is True
@@ -211,13 +211,13 @@ class TestClearActiveOrbitTasks:
 
     def test_returns_cleared_false_when_nothing_to_clear(self, project_dir):
         result = asyncio.run(
-            tools_active.clear_active_orbit_tasks(session_id="never-set")
+            tools_active.clear_active_missioncache_tasks(session_id="never-set")
         )
         assert result["success"] is True
         assert result["cleared"] is False
 
     def test_missing_session_id_rejected(self, project_dir):
-        result = asyncio.run(tools_active.clear_active_orbit_tasks(session_id=""))
+        result = asyncio.run(tools_active.clear_active_missioncache_tasks(session_id=""))
         assert result["error"] is True
         assert result["code"] == "VALIDATION_ERROR"
 
@@ -233,7 +233,7 @@ class TestSessionIdEnvFallback:
     def test_set_active_resolves_session_from_env(self, project_dir, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-1")
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
             )
@@ -244,7 +244,7 @@ class TestSessionIdEnvFallback:
     def test_set_active_explicit_wins_over_env(self, project_dir, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-1")
         asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="explicit-sess",
@@ -258,7 +258,7 @@ class TestSessionIdEnvFallback:
         """Omitted param with no env var still errors (unchanged for older
         Claude Code / non-Claude clients)."""
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
             )
@@ -269,7 +269,7 @@ class TestSessionIdEnvFallback:
     def test_clear_active_resolves_session_from_env(self, project_dir, monkeypatch):
         active_task.write_pointer("env-sess-2", "demo-project", ["54a"])
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-2")
-        result = asyncio.run(tools_active.clear_active_orbit_tasks())
+        result = asyncio.run(tools_active.clear_active_missioncache_tasks())
         assert result["success"] is True
         assert result["cleared"] is True
         assert active_task.read_pointer("env-sess-2") is None
@@ -281,7 +281,7 @@ class TestSessionIdEnvFallback:
         """
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env-sess-3")
         result = asyncio.run(
-            tools_active.set_active_orbit_tasks(
+            tools_active.set_active_missioncache_tasks(
                 project_name="demo-project",
                 task_numbers=["54a"],
                 session_id="",
@@ -300,7 +300,7 @@ class TestUpdateTasksFileAutoClear:
     When a checklist item transitions from [ ] to [x], any session pointer
     listing that number should drop it (and the pointer file is deleted
     when the set drains to empty). Driven by the diff-based
-    ``completed_numbers`` returned from ``orbit.update_tasks_file``.
+    ``completed_numbers`` returned from ``project_files.update_tasks_file``.
     """
 
     def test_auto_clear_removes_completed_number_from_pointer(self, project_dir):

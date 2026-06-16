@@ -1,4 +1,4 @@
-"""Integration tests for session-to-project binding in create_orbit_files / create_task.
+"""Integration tests for session-to-project binding in create_missioncache_files / create_task.
 
 Verifies the atomic-binding behavior added to fix the "blank statusline after
 /missioncache:new" bug. The slash command's prior client-side bash binding was
@@ -43,11 +43,11 @@ def isolated_orbit(tmp_path, monkeypatch):
     hooks_db_path = fake_home / ".claude" / "hooks-state.db"
 
     import missioncache_db
-    from mcp_missioncache import config, orbit
+    from mcp_missioncache import config, project_files
 
     monkeypatch.setattr(config.settings, "root", root_dir)
     monkeypatch.setattr(config.settings, "db_path", db_path)
-    monkeypatch.setattr(orbit, "settings", config.settings)
+    monkeypatch.setattr(project_files, "settings", config.settings)
     monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", root_dir)
     monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
     monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", hooks_db_path)
@@ -87,10 +87,10 @@ def _read_per_session_pointer(home: pathlib.Path, session_id: str) -> dict | Non
     return json.loads(pointer.read_text())
 
 
-# ── create_orbit_files binding ────────────────────────────────────────────
+# ── create_missioncache_files binding ────────────────────────────────────────────
 
 
-class TestCreateOrbitFilesBinding:
+class TestCreateMissionCacheFilesBinding:
     """The coding branch of /missioncache:new - binding fires when session_id provided."""
 
     def test_binds_session_when_session_id_provided(self, isolated_orbit):
@@ -106,7 +106,7 @@ class TestCreateOrbitFilesBinding:
         sid = "00000000-0000-0000-0000-000000000000"
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="my-project",
                 session_id=sid,
@@ -135,7 +135,7 @@ class TestCreateOrbitFilesBinding:
         repo_path.mkdir()
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="no-bind-project",
                 resolve_git_root=False,
@@ -159,7 +159,7 @@ class TestCreateOrbitFilesBinding:
         repo_path.mkdir()
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="hostile-sid-project",
                 session_id="../../../tmp/pwn",
@@ -179,7 +179,7 @@ class TestCreateOrbitFilesBinding:
         )
 
     def test_binding_overwrites_prior_session_binding(self, isolated_orbit):
-        """Calling create_orbit_files for the same sid twice updates the binding.
+        """Calling create_missioncache_files for the same sid twice updates the binding.
 
         ON CONFLICT DO UPDATE in the upsert. Important when a session that
         already had a project bound (e.g., via /missioncache:load for project A)
@@ -192,7 +192,7 @@ class TestCreateOrbitFilesBinding:
 
         # Create first project
         asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="first-project",
                 session_id=sid,
@@ -203,7 +203,7 @@ class TestCreateOrbitFilesBinding:
 
         # Create second project with same sid
         asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="second-project",
                 session_id=sid,
@@ -224,7 +224,7 @@ class TestCreateOrbitFilesBinding:
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="env-bound",
                 resolve_git_root=False,
@@ -247,7 +247,7 @@ class TestCreateOrbitFilesBinding:
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", env_sid)
 
         result = asyncio.run(
-            tools_docs.create_orbit_files(
+            tools_docs.create_missioncache_files(
                 repo_path=str(repo_path),
                 project_name="explicit-wins",
                 session_id=explicit,
@@ -294,7 +294,7 @@ class TestCreateTaskBinding:
         assert pointer is not None and pointer["projectName"] == "ops-followup"
 
     def test_coding_task_via_create_task_also_binds(self, isolated_orbit):
-        """The coding branch of create_task (parallel to create_orbit_files) binds too.
+        """The coding branch of create_task (parallel to create_missioncache_files) binds too.
 
         Defensive: create_task with task_type='coding' is reachable from
         callers other than /missioncache:new (tests, manual MCP). The binding
@@ -349,7 +349,7 @@ class TestCreateTaskBinding:
         assert _read_project_state(hooks_db, env_sid) == "env-task"
 
 
-# ── get_task binding (mirrors create_orbit_files / create_task) ───────────
+# ── get_task binding (mirrors create_missioncache_files / create_task) ───────────
 
 
 class TestGetTaskBinding:
@@ -360,7 +360,7 @@ class TestGetTaskBinding:
     bash block inside the slash command, which Claude can silently skip if
     it streams past Step 4. Moving the binding into get_task makes it
     impossible to call get_task with a session_id without binding - same
-    pattern as create_orbit_files (commit 9babe14).
+    pattern as create_missioncache_files (commit 9babe14).
     """
 
     def test_binds_session_when_session_id_provided(self, isolated_orbit):
@@ -453,7 +453,7 @@ class TestGetTaskBinding:
     def test_invalid_session_id_silently_skips_binding(self, isolated_orbit):
         """Malformed session_id (path traversal, oversized) -> session_bound=False.
 
-        Mirrors the create_orbit_files contract: invalid session ids do not
+        Mirrors the create_missioncache_files contract: invalid session ids do not
         fail the tool, they just skip the binding step and return
         session_bound=False so the caller can recover via /missioncache:load.
         """

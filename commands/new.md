@@ -146,13 +146,13 @@ fi
 echo "$SESSION_ID"
 ```
 
-Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_orbit_files` without the `session_id` argument and tell the user the statusline can be populated by running `/missioncache:load` once the project exists.
+Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_missioncache_files` without the `session_id` argument and tell the user the statusline can be populated by running `/missioncache:load` once the project exists.
 
 Now create the MissionCache files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
 **Flat tasks (simple):**
 ```
-mcp__plugin_missioncache_pm__create_orbit_files(
+mcp__plugin_missioncache_pm__create_missioncache_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
@@ -165,7 +165,7 @@ mcp__plugin_missioncache_pm__create_orbit_files(
 
 **Hierarchical tasks (with parent groupings):**
 ```
-mcp__plugin_missioncache_pm__create_orbit_files(
+mcp__plugin_missioncache_pm__create_missioncache_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
@@ -275,7 +275,7 @@ Non-coding projects don't need prompts:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_missioncache_pm__create_orbit_files` | Create plan/context/tasks files (also registers task in DB) |
+| `mcp__plugin_missioncache_pm__create_missioncache_files` | Create plan/context/tasks files (also registers task in DB) |
 | `mcp__plugin_missioncache_pm__create_task` | Create project in database (non-coding) |
 | `mcp__plugin_missioncache_pm__get_task` | Pre-flight duplicate check before creating |
 | `mcp__plugin_missioncache_pm__add_repo` | Register repo if not already tracked |
