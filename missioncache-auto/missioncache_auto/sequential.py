@@ -8,6 +8,7 @@ full MissionCache integration including log management.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import time
 from datetime import datetime
@@ -60,9 +61,12 @@ class SequentialRunner:
         self.total_iterations = 0
         self.start_time = time.time()
 
-        # Task DB integration
-        self.missioncache_db_script = Path.home() / ".claude" / "scripts" / "orbit_db.py"
-        self.missioncache_db_enabled = self.missioncache_db_script.exists()
+        # Task DB integration via the missioncache-db CLI on PATH (installed by
+        # missioncache-install). The old ~/.claude/scripts/orbit_db.py symlink
+        # died when the project was renamed, silently disabling DB updates in
+        # sequential mode; resolving the console entry point restores them.
+        self.missioncache_db_cli = shutil.which("missioncache-db")
+        self.missioncache_db_enabled = self.missioncache_db_cli is not None
 
         # Database logging for dashboard
         self.logger = create_logger(task_name, config, mode="sequential")
@@ -539,7 +543,7 @@ class SequentialRunner:
             return
         try:
             subprocess.run(
-                ["python3", str(self.missioncache_db_script), "process-heartbeats"],
+                [self.missioncache_db_cli, "process-heartbeats"],
                 capture_output=True,
                 check=False,
             )
@@ -557,8 +561,7 @@ class SequentialRunner:
         try:
             subprocess.run(
                 [
-                    "python3",
-                    str(self.missioncache_db_script),
+                    self.missioncache_db_cli,
                     "add-update",
                     self.task_name,
                     f"[PROGRESS] {completed}/{total} ({percent}%)",
@@ -575,7 +578,7 @@ class SequentialRunner:
             return
         try:
             subprocess.run(
-                ["python3", str(self.missioncache_db_script), "complete-task", self.task_name],
+                [self.missioncache_db_cli, "complete-task", self.task_name],
                 capture_output=True,
                 check=False,
             )
