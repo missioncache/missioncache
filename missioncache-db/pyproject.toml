@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-db"
-version = "1.0.2"
+version = "1.0.3"
 description = "SQLite-based task and time tracking database for the MissionCache Claude Code plugin"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,7 @@ Issues = "https://github.com/missioncache/missioncache/issues"
 
 [project.scripts]
 missioncache-db = "missioncache_db:main"
+mc-db = "missioncache_db:main"
 
 [build-system]
 requires = ["hatchling"]
