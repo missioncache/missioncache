@@ -2385,6 +2385,7 @@ class StatuslinePayload(BaseModel):
     subscription_type: bool
     claude_status: bool
     claude_status_services: list[str]
+    model_suspensions: bool
 
 
 @app.get("/api/settings")

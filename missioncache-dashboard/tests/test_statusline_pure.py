@@ -11,14 +11,17 @@ import time
 
 import pytest
 
+import missioncache_dashboard.statusline as statusline
 from missioncache_dashboard.statusline import (
     COLORS,
     ICONS,
     RESET,
+    _apply_health_filters,
     _detect_subscription,
     _format_reset_time,
     _format_unix_reset,
     _health_link,
+    _is_model_notice,
     _item,
     _load_statusline_config,
     _osc8_link,
@@ -394,6 +397,7 @@ class TestLoadStatuslineConfig:
             "subscription_type": True,
             "claude_status": True,
             "claude_status_services": ["Code", "Claude API"],
+            "model_suspensions": False,
         }
 
     def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
@@ -418,6 +422,74 @@ class TestLoadStatuslineConfig:
         monkeypatch.setattr('missioncache_dashboard.statusline._DASHBOARD_CONFIG_FILE', f)
         cfg = _load_statusline_config()
         assert cfg["codex"] is True
+
+
+# ============ _is_model_notice (model suspension classifier) ============
+
+
+class TestIsModelNotice:
+    def test_real_fable_suspension_name_is_a_notice(self):
+        # The live status.claude.com incident the toggle exists to hide.
+        name = "We've suspended access to Claude Mythos 5 and Claude Fable 5"
+        assert _is_model_notice(name) is True
+
+    def test_operational_outage_is_not_a_notice(self):
+        # Genuine outages use "elevated errors" phrasing and must keep showing.
+        assert _is_model_notice("Elevated errors on Claude API") is False
+        assert _is_model_notice("Service disruption on Claude services") is False
+
+    @pytest.mark.parametrize("name", [
+        "Claude Fable 5 deprecated",
+        "Sonnet 3.5 sunset on Dec 1",
+        "Opus 3 retired from the API",
+        "Model X is no longer available",
+    ])
+    def test_deprecation_wording_is_a_notice(self, name):
+        assert _is_model_notice(name) is True
+
+    def test_match_is_case_insensitive(self):
+        assert _is_model_notice("WE HAVE SUSPENDED ACCESS") is True
+
+    def test_keyword_only_in_body_still_matches(self):
+        assert _is_model_notice("Status update", "this model is now deprecated") is True
+
+    def test_no_keyword_is_not_a_notice(self):
+        assert _is_model_notice("Increased latency on Code", "investigating") is False
+
+
+# ============ _apply_health_filters (toggle + OK fallback) ============
+
+
+class TestApplyHealthFilters:
+    def test_notice_hidden_when_toggle_off(self, monkeypatch):
+        monkeypatch.setitem(statusline.STATUSLINE_CONFIG, "model_suspensions", False)
+        incidents = [
+            {"service": "Code", "name": "outage", "is_model_notice": False},
+            {"service": "Both", "name": "suspended", "is_model_notice": True},
+        ]
+        result = _apply_health_filters(incidents)
+        assert result == [{"service": "Code", "name": "outage", "is_model_notice": False}]
+
+    def test_notice_shown_when_toggle_on(self, monkeypatch):
+        monkeypatch.setitem(statusline.STATUSLINE_CONFIG, "model_suspensions", True)
+        incidents = [{"service": "Both", "name": "suspended", "is_model_notice": True}]
+        assert _apply_health_filters(incidents) == incidents
+
+    def test_hiding_only_incident_falls_back_to_ok(self, monkeypatch):
+        monkeypatch.setitem(statusline.STATUSLINE_CONFIG, "model_suspensions", False)
+        incidents = [{"service": "Both", "name": "suspended", "is_model_notice": True}]
+        assert _apply_health_filters(incidents) == [{"service": "OK"}]
+
+    def test_empty_input_is_ok(self, monkeypatch):
+        monkeypatch.setitem(statusline.STATUSLINE_CONFIG, "model_suspensions", False)
+        assert _apply_health_filters([]) == [{"service": "OK"}]
+
+    def test_untagged_incident_is_kept(self, monkeypatch):
+        # A cache written by an older version has no is_model_notice key; such
+        # incidents must be treated as real and kept, never silently dropped.
+        monkeypatch.setitem(statusline.STATUSLINE_CONFIG, "model_suspensions", False)
+        incidents = [{"service": "Code", "name": "outage"}]
+        assert _apply_health_filters(incidents) == incidents
 
 
 # ============ _health_link (1 test) ============

@@ -154,6 +154,31 @@ class TestGetHealthStatusCache:
         # Should NOT contain the stale incident
         assert result == [{"service": "OK"}]
 
+    def test_cached_model_notice_filtered_when_toggle_off(self, tmp_path, monkeypatch):
+        """A fresh cache holding a model-suspension incident is filtered on
+        read when the toggle is off - no need to wait for the cache to expire."""
+        cache_file = tmp_path / "health-cache.json"
+        cache_file.write_text(json.dumps({
+            "timestamp": time.time(),  # fresh
+            "incidents": [
+                {"service": "Both", "name": "suspended access", "is_model_notice": True},
+            ],
+        }))
+        monkeypatch.setattr(mod, "HEALTH_CACHE", cache_file)
+        monkeypatch.setitem(mod.STATUSLINE_CONFIG, "model_suspensions", False)
+
+        assert mod.get_health_status() == [{"service": "OK"}]
+
+    def test_cached_model_notice_shown_when_toggle_on(self, tmp_path, monkeypatch):
+        """With the toggle on, the same cached notice is returned as-is."""
+        cache_file = tmp_path / "health-cache.json"
+        incidents = [{"service": "Both", "name": "suspended access", "is_model_notice": True}]
+        cache_file.write_text(json.dumps({"timestamp": time.time(), "incidents": incidents}))
+        monkeypatch.setattr(mod, "HEALTH_CACHE", cache_file)
+        monkeypatch.setitem(mod.STATUSLINE_CONFIG, "model_suspensions", True)
+
+        assert mod.get_health_status() == incidents
+
 
 # ── _atomic_write_json ────────────────────────────────────────────────────
 
@@ -330,179 +355,6 @@ class TestReadTasksContent:
         (project_dir / "weird-tasks.md").mkdir()  # collision
 
         assert mod._read_tasks_content(project_dir, "weird") == ""
-
-
-# ── _get_active_task (reads orbit active-task pointer) ────
-
-
-class TestGetActiveTask:
-    """Reads ``~/.claude/hooks/state/active-missioncache-task/<session>.json``.
-
-    The pointer is written by the ``set_active_missioncache_tasks`` MCP tool and
-    holds the MissionCache checklist task numbers currently in progress. The
-    statusline composes ``_read_active_task_pointer`` and
-    ``_format_active_task`` via ``_get_active_task``; tests cover both the
-    raw pointer read and the per-shape display formatting.
-    """
-
-    PROJECT = "missioncache-release"
-    TASKS_MD = (
-        "- [ ] 8. Draft Show HN post\n"
-        "- [ ] 54. M11.2 - Per-tool hooks tracker\n"
-        "  - [ ] 54a. M11.2 - VSCode statusline extension\n"
-        "  - [ ] 54b. M11.2 - OpenCode TS plugin\n"
-        "  - [ ] 54c. M11.2 - Codex hooks\n"
-        "- [ ] 56. Verify data-preservation contract\n"
-        "- [ ] 57. macOS dashboard-as-app opt-in\n"
-    )
-
-    def _write_pointer(
-        self, tmp_path, session_id, project_name, task_numbers
-    ):
-        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task"
-        pdir.mkdir(parents=True, exist_ok=True)
-        (pdir / f"{session_id}.json").write_text(
-            json.dumps(
-                {
-                    "project_name": project_name,
-                    "task_numbers": task_numbers,
-                    "updated": "2026-04-28T00:00:00+00:00",
-                }
-            )
-        )
-
-    def test_single_task_renders_number_and_text(self, tmp_path, monkeypatch):
-        """One active task: ``<number>. <text>``."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-1", self.PROJECT, ["54a"])
-
-        assert mod._get_active_task("sess-1", self.TASKS_MD, self.PROJECT) == (
-            "54a. M11.2 - VSCode statusline extension"
-        )
-
-    def test_unknown_number_falls_back_to_just_number(self, tmp_path, monkeypatch):
-        """Pointer references a number not in tasks.md -> render bare number.
-
-        Defensive: if tasks.md was edited and the pointer wasn't refreshed, we
-        still surface SOMETHING rather than hide the field. Caller can fix
-        the pointer via ``set_active_missioncache_tasks`` or ``clear_active_missioncache_tasks``.
-        """
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-2", self.PROJECT, ["999"])
-
-        assert mod._get_active_task("sess-2", self.TASKS_MD, self.PROJECT) == "999"
-
-    def test_three_siblings_collapse_to_parent_text(self, tmp_path, monkeypatch):
-        """``["54a","54b","54c"]`` collapses to parent 54's text + count."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(
-            tmp_path, "sess-3", self.PROJECT, ["54a", "54b", "54c"]
-        )
-
-        assert mod._get_active_task("sess-3", self.TASKS_MD, self.PROJECT) == (
-            "M11.2 - Per-tool hooks tracker (3 active)"
-        )
-
-    def test_two_siblings_collapse_to_parent_text(self, tmp_path, monkeypatch):
-        """Boundary case: 2 siblings sharing a parent collapse the same way as 3."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-3b", self.PROJECT, ["54a", "54b"])
-
-        assert mod._get_active_task("sess-3b", self.TASKS_MD, self.PROJECT) == (
-            "M11.2 - Per-tool hooks tracker (2 active)"
-        )
-
-    def test_two_unrelated_tasks_render_as_number_list(self, tmp_path, monkeypatch):
-        """No common parent -> comma-separated numbers."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-4", self.PROJECT, ["54a", "56"])
-
-        assert mod._get_active_task("sess-4", self.TASKS_MD, self.PROJECT) == (
-            "54a, 56"
-        )
-
-    def test_three_unrelated_tasks_render_as_number_list(self, tmp_path, monkeypatch):
-        """Three with no common parent -> all three as a comma list."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-5", self.PROJECT, ["54a", "56", "57"])
-
-        assert mod._get_active_task("sess-5", self.TASKS_MD, self.PROJECT) == (
-            "54a, 56, 57"
-        )
-
-    def test_four_plus_truncates_with_overflow_count(self, tmp_path, monkeypatch):
-        """4+ active -> first 3 + ``(+N)``."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(
-            tmp_path, "sess-6", self.PROJECT, ["54a", "56", "57", "8"]
-        )
-
-        assert mod._get_active_task("sess-6", self.TASKS_MD, self.PROJECT) == (
-            "54a, 56, 57 (+1)"
-        )
-
-    def test_empty_pointer_hides_field(self, tmp_path, monkeypatch):
-        """Pointer file with empty task_numbers -> ``""`` so caller hides field."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-7", self.PROJECT, [])
-
-        assert mod._get_active_task("sess-7", self.TASKS_MD, self.PROJECT) == ""
-
-    def test_missing_pointer_hides_field(self, tmp_path, monkeypatch):
-        """No pointer file -> ``""``."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        assert mod._get_active_task("never-set", self.TASKS_MD, self.PROJECT) == ""
-
-    def test_empty_session_id_short_circuits(self, tmp_path, monkeypatch):
-        """Empty session id never touches disk."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-
-        assert mod._get_active_task("", self.TASKS_MD, self.PROJECT) == ""
-
-    def test_corrupt_pointer_json_hides_field(self, tmp_path, monkeypatch):
-        """Malformed pointer JSON is treated as missing, not crashed on."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        pdir = tmp_path / ".claude" / "hooks" / "state" / "active-missioncache-task"
-        pdir.mkdir(parents=True)
-        (pdir / "sess-8.json").write_text("not valid json")
-
-        assert mod._get_active_task("sess-8", self.TASKS_MD, self.PROJECT) == ""
-
-    def test_per_session_isolation(self, tmp_path, monkeypatch):
-        """Concurrent sessions don't see each other's pointer."""
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        self._write_pointer(tmp_path, "sess-A", self.PROJECT, ["54a"])
-        self._write_pointer(tmp_path, "sess-B", self.PROJECT, ["56"])
-
-        assert mod._get_active_task("sess-A", self.TASKS_MD, self.PROJECT) == (
-            "54a. M11.2 - VSCode statusline extension"
-        )
-        assert mod._get_active_task("sess-B", self.TASKS_MD, self.PROJECT) == (
-            "56. Verify data-preservation contract"
-        )
-
-    def test_pointer_from_other_project_is_suppressed(self, tmp_path, monkeypatch):
-        """Switching projects in the same session must not render the prior
-        project's task numbers against the new project's tasks.md.
-
-        Pointers are keyed by session_id alone. Without a project_name guard,
-        the prior project's task_numbers would be looked up in the new
-        project's tasks.md - showing the wrong line's text if the number
-        coincidentally exists, or a bare misleading number if it doesn't.
-        """
-        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        # Pointer says we're working on 54a in project-a.
-        self._write_pointer(tmp_path, "sess-X", "project-a", ["54a"])
-
-        # Now the session is rendering for project-b (same TASKS_MD body, but
-        # the project context differs). The Task field must hide.
-        assert mod._get_active_task("sess-X", self.TASKS_MD, "project-b") == ""
-
-        # Sanity check: passing the matching project_name still renders.
-        assert mod._get_active_task("sess-X", self.TASKS_MD, "project-a") == (
-            "54a. M11.2 - VSCode statusline extension"
-        )
 
 
 # ── get_project_info (project_state binding -> name + progress) ────────────

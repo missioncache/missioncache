@@ -5,14 +5,14 @@ Reads JSON from stdin (Claude Code session data) and outputs
 a multi-line ANSI-colored status display.
 
 Layout:
-  Line 1: Project    - [project name + progress] [current task] (only if active MissionCache project)
+  Line 1: Project    - [project name + progress] [last action] (last action shows even with no active project)
   Line 2: Location   - [dir] [git branch+status]
   Line 3: Session    - [elapsed] [edits]
   Line 4: Metrics    - [model] [effort?]
   Line 5: K8s/Ctx    - [k8s context] [tokens] [ctx%]
   Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
-  Line 8: Vitals     - [last action] [version] [Claude status]
+  Line 8: Vitals     - [version] [Claude status]
 
 Configuration:
   All visibility toggles (Codex line, Claude subscription usage/type, Claude
@@ -225,6 +225,10 @@ _DEFAULT_STATUSLINE_CONFIG = {
     "subscription_type": True,
     "claude_status": True,
     "claude_status_services": ["Code", "Claude API"],
+    # Model-access announcements (e.g. "suspended access to ... Fable 5") are
+    # posted as long-lived status.claude.com incidents that pin to the health
+    # field for weeks. Hidden by default; opt in via the dashboard Settings.
+    "model_suspensions": False,
 }
 
 
@@ -607,141 +611,6 @@ def _parse_task_progress(tasks_content: str) -> str:
     return f"[{completed}/{total}]"
 
 
-def _read_active_task_pointer(session_id: str) -> dict | None:
-    """Return the MissionCache active-task pointer for this session, or None.
-
-    The pointer is written by the ``set_active_missioncache_tasks`` MCP tool when
-    a caller (Claude in interactive use, or any other MCP client) declares
-    which MissionCache checklist task numbers are currently in progress. Lives at
-    ``~/.claude/hooks/state/active-missioncache-task/<session-id>.json``.
-
-    Replaces the previous read of Claude Code's internal TodoList
-    (``~/.claude/tasks/<sid>/*.json``) which duplicated information Claude
-    already prints in chat - the statusline ``Task:`` field added zero
-    value above what was already on screen.
-    """
-    if not session_id:
-        return None
-    path = (
-        Path.home()
-        / ".claude"
-        / "hooks"
-        / "state"
-        / "active-missioncache-task"
-        / f"{session_id}.json"
-    )
-    try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-# Match a checklist line. Mirrors mcp_missioncache.tasks_parse._CHECKLIST_RE but
-# duplicated here so the statusline stays free of any mcp_missioncache dependency.
-# Captures (1) checked? marker, (2) number, (3) trailing text.
-_CHECKLIST_RE = re.compile(
-    r"^\s*[-*]\s*\[\s*([xX ])\s*\]\s*([0-9]+(?:[.][0-9]+)*[a-z]?)\s*\.\s*(.*?)\s*$"
-)
-
-
-def _items_from_tasks_content(tasks_content: str) -> dict[str, tuple[bool, str]]:
-    """Index a tasks.md body by checklist number.
-
-    Returns ``{number: (checked, text)}`` for every line matching the
-    checklist pattern. Used to look up the descriptive text that the
-    statusline renders next to each active task number.
-    """
-    out: dict[str, tuple[bool, str]] = {}
-    for line in tasks_content.splitlines():
-        m = _CHECKLIST_RE.match(line)
-        if not m:
-            continue
-        out[m.group(2)] = (m.group(1).lower() == "x", m.group(3))
-    return out
-
-
-def _common_parent(numbers: list[str]) -> str | None:
-    """Return the parent number all entries collapse to, else None.
-
-    ``["54a", "54b", "54c"]`` -> ``"54"``. ``["54a", "56"]`` -> None
-    (no common reduction). Single-element or empty inputs return None
-    because there's nothing to collapse.
-    """
-    if len(numbers) < 2:
-        return None
-    parents: set[str | None] = set()
-    for n in numbers:
-        if n and n[-1].isalpha() and n[-1].islower():
-            parents.add(n[:-1])
-        elif "." in n:
-            parents.add(n.rsplit(".", 1)[0])
-        else:
-            parents.add(None)
-    if len(parents) != 1:
-        return None
-    return next(iter(parents))
-
-
-def _format_active_task(
-    pointer: dict | None, tasks_content: str, current_project: str
-) -> str:
-    """Build the ``Task:`` field text from a pointer + tasks.md body.
-
-    Display rules (from the design discussion):
-      - 0 active or pointer missing -> ``""`` (caller hides the field)
-      - 1 active                    -> ``"54a. <text>"``
-      - 2-3 sharing parent          -> ``"<parent text> (N active)"``
-      - 2-3 not sharing parent      -> ``"54a, 56, 57"``
-      - 4+                          -> ``"54a, 56, 57 (+N)"``
-
-    Pointers are keyed by session id alone, so when a session switches
-    projects mid-flight ``pointer["project_name"]`` may name the prior
-    project. Suppress the field unless the pointer matches
-    ``current_project`` to avoid rendering the prior project's task
-    numbers against the new project's tasks.md.
-    """
-    if not pointer:
-        return ""
-    numbers = pointer.get("task_numbers") or []
-    if not numbers:
-        return ""
-    if pointer.get("project_name") != current_project:
-        return ""
-
-    items = _items_from_tasks_content(tasks_content)
-
-    if len(numbers) == 1:
-        n = numbers[0]
-        text = items.get(n, (False, ""))[1]
-        return f"{n}. {text}" if text else n
-
-    parent = _common_parent(numbers)
-    if parent is not None and parent in items:
-        parent_text = items[parent][1]
-        return f"{parent_text} ({len(numbers)} active)"
-
-    if len(numbers) <= 3:
-        return ", ".join(numbers)
-
-    head = ", ".join(numbers[:3])
-    return f"{head} (+{len(numbers) - 3})"
-
-
-def _get_active_task(
-    session_id: str, tasks_content: str, current_project: str
-) -> str:
-    """Return the MissionCache Task field text for the statusline, or "".
-
-    Composes ``_read_active_task_pointer`` and ``_format_active_task``;
-    kept as a single seam so callers (and tests) can mock either layer.
-    ``current_project`` scopes the pointer match - see the
-    ``_format_active_task`` docstring for the cross-project rationale.
-    """
-    return _format_active_task(
-        _read_active_task_pointer(session_id), tasks_content, current_project
-    )
-
-
 def _read_tasks_content(project_dir: Path, project_name: str) -> str:
     """Return the contents of the project's tasks.md, or "" if unreadable."""
     tasks_file = project_dir / f"{project_name}-tasks.md"
@@ -755,11 +624,10 @@ class ProjectInfo(NamedTuple):
     name: str = ""
     display: str = ""
     progress: str = ""
-    current_task: str = ""
 
 
 def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
-    """Return ProjectInfo(name, display, progress, current_task)."""
+    """Return ProjectInfo(name, display, progress)."""
     if not session_id:
         return ProjectInfo()
     name = ""
@@ -793,19 +661,11 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     project_dir = nested
                     break
 
-    # Active task is read from the MissionCache active-task pointer set by the
-    # set_active_missioncache_tasks MCP tool. Falling back to "first pending
-    # checklist item" or to Claude Code's internal TodoList both proved
-    # misleading - the first lied, the second duplicated information
-    # Claude already prints in chat. Show only what we can verify;
-    # otherwise hide the field.
     tasks_content = _read_tasks_content(project_dir, name)
-    current_task = _get_active_task(session_id, tasks_content, current_project=name)
-
     if not tasks_content:
-        return ProjectInfo(name, display, "", current_task)
+        return ProjectInfo(name, display, "")
     progress = f" {_parse_task_progress(tasks_content)}"
-    return ProjectInfo(name, display, progress, current_task)
+    return ProjectInfo(name, display, progress)
 
 
 # ============ LAST ACTION TIME ============
@@ -991,6 +851,41 @@ def _truncate_name(name: str, limit: int = 55) -> str:
     return name[:20] + "..." + name[-tail:]
 
 
+_MODEL_NOTICE_KEYWORDS = ("suspend", "deprecat", "sunset", "retir", "no longer available")
+
+
+def _is_model_notice(name: str, body: str = "") -> bool:
+    """True when an incident reads as a model access/suspension announcement
+    rather than an operational outage.
+
+    Anthropic posts model suspensions as long-lived ``monitoring`` incidents
+    (e.g. "We've suspended access to Claude Mythos 5 and Claude Fable 5") that
+    never resolve, so they pin to the statusline for weeks. Matched on the
+    incident name plus its latest update body against a small keyword set.
+    Operational incidents use "elevated errors" / "service disruption"
+    phrasing and do not collide with these tokens.
+    """
+    text = f"{name} {body}".lower()
+    return any(k in text for k in _MODEL_NOTICE_KEYWORDS)
+
+
+def _apply_health_filters(incidents: list[dict]) -> list[dict]:
+    """Apply user-configurable filters to a raw incident list and add the
+    all-clear fallback.
+
+    Runs on every call (both cache hits and fresh fetches) so toggling
+    ``model_suspensions`` in the dashboard takes effect on the next prompt
+    render instead of waiting for the 60s health cache to expire. Incidents
+    missing the ``is_model_notice`` tag (e.g. a cache written by an older
+    version) are treated as real incidents and kept.
+    """
+    if not STATUSLINE_CONFIG["model_suspensions"]:
+        incidents = [i for i in incidents if not i.get("is_model_notice")]
+    if not incidents:
+        return [{"service": "OK"}]
+    return incidents
+
+
 def get_health_status() -> list[dict]:
     """Return list of health incident dicts.
     An entry with service='OK' means all clear.
@@ -1003,7 +898,7 @@ def get_health_status() -> list[dict]:
         try:
             cache = json.loads(HEALTH_CACHE.read_text())
             if time.time() - cache.get("timestamp", 0) < HEALTH_TTL and "incidents" in cache:
-                return cache["incidents"]
+                return _apply_health_filters(cache["incidents"])
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -1038,6 +933,9 @@ def get_health_status() -> list[dict]:
                             latest.get("created_at", inc.get("updated_at", ""))
                         ),
                         "resolved": False,
+                        "is_model_notice": _is_model_notice(
+                            inc.get("name", ""), latest.get("body", "") or ""
+                        ),
                     })
                 elif resolved_at:
                     try:
@@ -1050,18 +948,18 @@ def get_health_status() -> list[dict]:
                                 "body": "",
                                 "time_ago": _relative_time(resolved_at),
                                 "resolved": True,
+                                "is_model_notice": _is_model_notice(inc.get("name", "")),
                             })
                     except Exception:
                         pass
     except Exception:
         pass
 
-    if not incidents:
-        incidents = [{"service": "OK"}]
-
-    # Cache
+    # Cache the raw (unfiltered, OK-fallback-free) incident list so the
+    # model_suspensions toggle applies on the next render without waiting for
+    # the 60s cache to expire. Filtering + all-clear fallback happen on read.
     _atomic_write_json(HEALTH_CACHE, {"timestamp": time.time(), "incidents": incidents})
-    return incidents
+    return _apply_health_filters(incidents)
 
 
 # ============ USAGE DATA ============
@@ -1441,16 +1339,11 @@ def main() -> None:
 
     _FUTURE_TIMEOUT = 3
     try:
-        project_name, project_display, project_progress, project_current_task = (
+        project_name, project_display, project_progress = (
             f_project.result(timeout=_FUTURE_TIMEOUT)
         )
     except Exception:
-        project_name, project_display, project_progress, project_current_task = (
-            "",
-            "",
-            "",
-            "",
-        )
+        project_name, project_display, project_progress = "", "", ""
     try:
         last_action_time = f_last_time.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1510,8 +1403,8 @@ def main() -> None:
     if pr_field:
         line1.append(pr_field)
 
-    # Line 2: Project + Task (Last Action moved to the bottom row alongside
-    # Version + Claude Status)
+    # Line 2 (top row): Project + Last Action. Last Action trails the row;
+    # when no MissionCache project is loaded it takes the row's first slot.
     line2: list[str] = []
     if project_name:
         linked_name = _osc8_link(f"{_DASHBOARD_URL}/#projects", project_display)
@@ -1521,17 +1414,8 @@ def main() -> None:
         else:
             linked_value = linked_name
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
-        if project_current_task:
-            task_text = project_current_task
-            # Truncate to 60 chars by default; shrink further on narrow
-            # terminals so the Task field doesn't push the row past the
-            # terminal edge. Floor at 20 so the text stays useful.
-            task_max = 60
-            if term_cols is not None:
-                task_max = min(60, max(20, term_cols - 30))
-            if len(task_text) > task_max:
-                task_text = task_text[:task_max] + "..."
-            line2.append(_item(COLORS["edit"], ICONS["edit"], "Task", task_text))
+    if last_action_time:
+        line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 
     # Line 3: Metrics
     line3 = [
@@ -1566,15 +1450,9 @@ def main() -> None:
     else:
         line_k8s.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
 
-    # Line Health: Last Action + Version + Claude Status (appears after Codex,
-    # or in place of it). Last Action lives here rather than next to Project so
-    # the bottom row carries the "session vitals" together (when, which version,
-    # what status) and the top row stays focused on the project + current task.
+    # Line Health: Version + Claude Status (appears after Codex, or in place of
+    # it). Last Action moved to the top row alongside Project.
     line_health: list[str] = []
-    if last_action_time:
-        line_health.append(
-            _item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time)
-        )
     if version:
         ver_color = COLORS["git_clean"] if is_version_reviewed(version) else COLORS["git_dirty"]
         changelog_url = "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
@@ -1699,10 +1577,11 @@ def main() -> None:
     all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex, line_health]
     all_widths = [[display_width(item) for item in items] for items in all_lines]
 
-    # line2's Task field and line_health's Claude Status are excluded from
-    # column-width aggregation so their long text doesn't stretch columns
-    # on the rows below (Task) or above (Status). line2's Project still
-    # contributes to col1 so the project label aligns with Dir/Elapsed/etc.
+    # line2's second field (Last Action) and line_health's Claude Status are
+    # excluded from column-width aggregation so their variable-length text
+    # doesn't stretch columns on the rows below or above (Status). line2's
+    # Project still contributes to col1 so the project label aligns with
+    # Dir/Elapsed/etc.
     max_col1 = CELL_WIDTH
     max_col2 = CELL_WIDTH
     for i, widths in enumerate(all_widths):

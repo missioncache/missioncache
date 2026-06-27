@@ -17,7 +17,8 @@ Schema (all keys optional; missing keys use defaults):
           "subscription_usage":     true,
           "subscription_type":      true,
           "claude_status":          true,
-          "claude_status_services": ["Code", "Claude API"]
+          "claude_status_services": ["Code", "Claude API"],
+          "model_suspensions":      false
       }
     }
 
@@ -39,6 +40,7 @@ _DEFAULT_STATUSLINE: dict[str, Any] = {
     "subscription_type": True,
     "claude_status": True,
     "claude_status_services": ["Code", "Claude API"],
+    "model_suspensions": False,
 }
 
 DEFAULTS: dict[str, Any] = {
