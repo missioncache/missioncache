@@ -107,6 +107,7 @@ class TestStatuslineConfig:
         assert cfg["subscription_type"] is True
         assert cfg["claude_status"] is True
         assert cfg["claude_status_services"] == ["Code", "Claude API"]
+        assert cfg["model_suspensions"] is False
 
     def test_set_and_get(self, tmp_config):
         config.set_statusline_config({
@@ -128,6 +129,7 @@ class TestStatuslineConfig:
         assert cfg["codex"] is False
         assert cfg["subscription_usage"] is True  # filled from default
         assert cfg["claude_status_services"] == ["Code", "Claude API"]
+        assert cfg["model_suspensions"] is False  # filled from default
 
     def test_non_dict_statusline_returns_all_defaults(self, tmp_config):
         tmp_config.write_text(json.dumps({"statusline": "not-a-dict"}))
@@ -138,6 +140,7 @@ class TestStatuslineConfig:
             "subscription_type": True,
             "claude_status": True,
             "claude_status_services": ["Code", "Claude API"],
+            "model_suspensions": False,
         }
 
 
