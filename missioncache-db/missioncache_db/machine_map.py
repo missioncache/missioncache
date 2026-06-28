@@ -146,41 +146,53 @@ def all_mappings() -> dict[str, Any]:
     return _read()
 
 
-def _git_remote(path: str) -> Optional[str]:
-    """Return the origin remote URL for a repo path, or None if not a git repo."""
+def _git_run(path: str, *args: str) -> tuple[str, Optional[str]]:
+    """Run ``git -C <path> <args>`` and report the outcome tri-state.
+
+    Returns ``("ok", stdout)`` when git ran with exit 0 and non-empty output,
+    ``("fail", None)`` when git ran but exited non-zero or returned nothing (not
+    a repo / no such ref), and ``("error", None)`` when git could not be run at
+    all (missing binary, timeout, transient OS error). Callers need the third
+    case so a probe TIMEOUT is not silently read as "no remote" / "not a
+    worktree" - the bug that collapsed a real repo or worktree onto the wrong
+    binding with a misleading warning.
+    """
     try:
         r = subprocess.run(
-            ["git", "-C", path, "remote", "get-url", "origin"],
+            ["git", "-C", path, *args],
             capture_output=True,
             text=True,
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return "error", None
     out = r.stdout.strip()
-    return out if r.returncode == 0 and out else None
+    return ("ok", out) if (r.returncode == 0 and out) else ("fail", None)
 
 
-def _is_linked_worktree(path: str) -> bool:
-    """True if ``path`` is a linked git worktree (git-common-dir != git-dir)."""
-    try:
-        common = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        gitdir = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--git-dir"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    if common.returncode != 0 or gitdir.returncode != 0:
-        return False
-    return common.stdout.strip() != gitdir.stdout.strip()
+def _git_remote(path: str) -> Optional[str]:
+    """Return the origin remote URL for a repo path, or None if unavailable.
+
+    Thin wrapper over ``_git_run`` for callers (``seed``) that only need the
+    URL. Callers that must distinguish "no remote" from "probe failed" call
+    ``_git_run`` directly.
+    """
+    status, out = _git_run(path, "remote", "get-url", "origin")
+    return out if status == "ok" else None
+
+
+def _is_linked_worktree(path: str) -> Optional[bool]:
+    """True/False if ``path`` is a linked git worktree, or None if undetermined.
+
+    None means a git probe failed (timeout / transient error) so the answer is
+    unknown - distinct from a confident False. A caller must not silently treat
+    None as "not a worktree", or it re-opens the silent-collapse-onto-parent bug.
+    """
+    s1, common = _git_run(path, "rev-parse", "--git-common-dir")
+    s2, gitdir = _git_run(path, "rev-parse", "--git-dir")
+    if s1 != "ok" or s2 != "ok":
+        return None
+    return common != gitdir
 
 
 def seed(db: Any, dry_run: bool = False) -> dict[str, list]:
