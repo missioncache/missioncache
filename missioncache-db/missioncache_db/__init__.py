@@ -42,6 +42,7 @@ Cleanup:
     python missioncache_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
 
 Cross-Machine Sharing:
+    python missioncache_db.py export <name> [--out <path>] [--no-time] [--json]  # Build a portable bundle (markdown + missioncache.json manifest)
     python missioncache_db.py config set-path <repo|vault|anchor>:<name> <localpath>  # Map a portable identifier to this machine's path
     python missioncache_db.py config list-paths [kind] [--json]  # Show the per-machine path map (--json prints raw machine.json)
     python missioncache_db.py config seed [--dry-run]            # Pre-fill the map from local repos' git remotes
@@ -4029,6 +4030,56 @@ def main():
             else:
                 print("Usage: missioncache-db config <set-path|list-paths|seed>")
                 sys.exit(1)
+
+        elif command == "export":
+            from missioncache_db import portability
+
+            args = sys.argv[2:]
+            if not args or args[0].startswith("-"):
+                print("Usage: missioncache-db export <name> [--out <path>] [--no-time] [--json]")
+                sys.exit(1)
+            name = args[0]
+            out = None
+            i = 1
+            while i < len(args):  # value-flag index walk (create-task precedent)
+                if args[i] == "--out" and i + 1 < len(args):
+                    out = args[i + 1]
+                    i += 2
+                    continue
+                i += 1
+            include_time = "--no-time" not in args
+            as_json = "--json" in args
+            try:
+                report = portability.export_project(
+                    db, name, out=out, include_time=include_time
+                )
+            except (ValueError, OSError) as e:
+                print(f"export failed: {e}", file=sys.stderr)
+                sys.exit(1)
+            for w in report["warnings"]:
+                print(f"warning: {w}", file=sys.stderr)
+            if as_json:
+                print(json.dumps(report["manifest"], indent=2, sort_keys=True))
+            else:
+                m = report["manifest"]
+                refs = m["references"]
+                repo = refs["repo"]
+                repo_desc = (
+                    repo["remote"] if repo and repo.get("kind") == "git"
+                    else repo["kind"] if repo else "none"
+                )
+                print(f"Exported '{name}' -> {report['bundle_path']}")
+                print(f"  files: {report['file_count']}")
+                print(f"  repo: {repo_desc}")
+                print(
+                    f"  vaults: {len(refs['vaults'])}, "
+                    f"embedded paths: {len(refs['other_paths'])}"
+                )
+                if include_time:
+                    print(
+                        f"  origin time (display-only): "
+                        f"{m['project']['time_total_seconds']}s"
+                    )
 
         else:
             print(f"Unknown command: {command}")
