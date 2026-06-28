@@ -40,6 +40,11 @@ Migration:
 
 Cleanup:
     python missioncache_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
+
+Cross-Machine Sharing:
+    python missioncache_db.py config set-path <repo|vault|anchor>:<name> <localpath>  # Map a portable identifier to this machine's path
+    python missioncache_db.py config list-paths [kind] [--json]  # Show the per-machine path map (--json prints raw machine.json)
+    python missioncache_db.py config seed [--dry-run]            # Pre-fill the map from local repos' git remotes
 """
 
 import json
@@ -64,8 +69,13 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-DB_PATH = Path.home() / ".missioncache" / "tasks.db"
-MISSIONCACHE_ROOT = Path.home() / ".missioncache"
+# MISSIONCACHE_ROOT can be overridden via the MISSIONCACHE_ROOT env var so a
+# fresh data dir can be targeted (cross-machine import into a throwaway root,
+# tests). DB_PATH derives from it. Mirrors the SHADOW_TRACKED_FOLDER override.
+# `or` (not a default arg) so a set-but-empty MISSIONCACHE_ROOT falls back to
+# the real dir instead of Path("") == cwd (which would silently relocate data).
+MISSIONCACHE_ROOT = Path(os.environ.get("MISSIONCACHE_ROOT") or str(Path.home() / ".missioncache"))
+DB_PATH = MISSIONCACHE_ROOT / "tasks.db"
 
 # Shared session-state database used by the dashboard, statusline, and hooks.
 # Multiple writers exist (dashboard's HTTP API, hooks at SessionStart, missioncache-db's
@@ -227,6 +237,13 @@ def check_legacy_paths() -> None:
 
     Public API: missioncache-auto calls this directly (missioncache-db>=1.0.5) to warn
     about unmigrated data without constructing a TaskDB."""
+    # An explicit, non-empty MISSIONCACHE_ROOT override targets a deliberately
+    # chosen root (cross-machine import into a fresh dir, tests). The
+    # legacy-migration prompt is about moving old data into the DEFAULT
+    # ~/.missioncache/ and does not apply. Gate on truthiness, not key-presence,
+    # so a set-but-empty value does not skip the guard while data goes to cwd.
+    if os.environ.get("MISSIONCACHE_ROOT"):
+        return
     if DB_PATH.exists():
         return
     orbit_legacy = _LEGACY_ORBIT_DB.exists() or _LEGACY_ORBIT_ROOT.exists()
@@ -3960,6 +3977,58 @@ def main():
             print(f"  Files moved: {files_moved}")
             if dry_run:
                 print("\n  Run without --dry-run to apply changes.")
+
+        elif command == "config":
+            from missioncache_db import machine_map
+
+            sub = sys.argv[2] if len(sys.argv) > 2 else ""
+
+            if sub == "set-path":
+                if len(sys.argv) < 5 or ":" not in sys.argv[3]:
+                    print("Usage: missioncache-db config set-path <repo|vault|anchor>:<name> <localpath>")
+                    sys.exit(1)
+                kind, name = sys.argv[3].split(":", 1)  # first colon only (remotes contain colons)
+                if kind not in machine_map.SECTION:
+                    print(f"Unknown kind '{kind}' (expected repo|vault|anchor)")
+                    sys.exit(1)
+                localpath = str(Path(sys.argv[4]).expanduser().resolve())
+                key = machine_map.record(kind, name, localpath)
+                print(f"Mapped {kind}:{key} -> {localpath}")
+                if not Path(localpath).exists():
+                    print(f"  warning: {localpath} does not exist yet (stored anyway)", file=sys.stderr)
+
+            elif sub == "list-paths":
+                mapping = machine_map.all_mappings()
+                if "--json" in sys.argv:
+                    print(json.dumps(mapping, indent=2, sort_keys=True))
+                else:
+                    kind_filter = next((a for a in sys.argv[3:] if not a.startswith("-")), None)
+                    sections = (
+                        [machine_map.SECTION[kind_filter]]
+                        if kind_filter in machine_map.SECTION
+                        else ["repos", "vaults", "anchors"]
+                    )
+                    for sec in sections:
+                        print(f"[{sec}]")
+                        for k, v in sorted(mapping.get(sec, {}).items()):
+                            print(f"  {k} -> {v}")
+
+            elif sub == "seed":
+                dry_run = "--dry-run" in sys.argv
+                result = machine_map.seed(db, dry_run=dry_run)
+                for kind, key, path in result["added"]:
+                    print(f"  added {kind}:{key} -> {path}")
+                for path, reason in result["skipped"]:
+                    print(f"  skipped {path} ({reason})")
+                for kind, name, path in result["proposed"]:
+                    print(f"  proposed {kind}:{name} -> {path}")
+                    print(f"    run: missioncache-db config set-path {kind}:{name} {path}")
+                if dry_run:
+                    print("\n  Run without --dry-run to write machine.json.")
+
+            else:
+                print("Usage: missioncache-db config <set-path|list-paths|seed>")
+                sys.exit(1)
 
         else:
             print(f"Unknown command: {command}")
