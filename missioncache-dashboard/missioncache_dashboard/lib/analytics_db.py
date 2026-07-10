@@ -79,6 +79,7 @@ class Task:
     completed_at: datetime | None
     archived_at: datetime | None
     last_worked_on: datetime | None
+    category: str | None = None
 
     @classmethod
     def from_row(cls, row: tuple, columns: list[str]) -> Task:
@@ -112,6 +113,7 @@ class Task:
             completed_at=data.get("completed_at"),
             archived_at=data.get("archived_at"),
             last_worked_on=data.get("last_worked_on"),
+            category=data.get("category"),
         )
 
     def to_dict(self) -> dict:
@@ -129,6 +131,7 @@ class Task:
             "jira_key": self.jira_key,
             "branch": self.branch,
             "pr_url": self.pr_url,
+            "category": self.category,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat()
@@ -377,9 +380,18 @@ class AnalyticsDB:
                 completed_at TIMESTAMP,
                 archived_at TIMESTAMP,
                 last_worked_on TIMESTAMP,
+                category VARCHAR,
                 UNIQUE(repo_id, full_path)
             )
         """)
+
+        # Idempotent column migration for pre-category DuckDB files (the
+        # CREATE above is a no-op on an existing DB).
+        task_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info('tasks')").fetchall()
+        }
+        if "category" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN category VARCHAR")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS task_updates (
@@ -735,8 +747,9 @@ class AnalyticsDB:
                         INSERT INTO tasks (
                             id, repo_id, name, full_path, parent_id,
                             status, type, tags, priority, jira_key, branch, pr_url,
-                            created_at, updated_at, completed_at, archived_at, last_worked_on
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            created_at, updated_at, completed_at, archived_at, last_worked_on,
+                            category
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT (id) DO UPDATE SET
                             repo_id = EXCLUDED.repo_id,
                             name = EXCLUDED.name,
@@ -752,7 +765,8 @@ class AnalyticsDB:
                             updated_at = EXCLUDED.updated_at,
                             completed_at = EXCLUDED.completed_at,
                             archived_at = EXCLUDED.archived_at,
-                            last_worked_on = EXCLUDED.last_worked_on
+                            last_worked_on = EXCLUDED.last_worked_on,
+                            category = EXCLUDED.category
                     """,
                         (
                             task_id,
@@ -772,6 +786,7 @@ class AnalyticsDB:
                             row_dict.get("completed_at"),
                             row_dict.get("archived_at"),
                             row_dict.get("last_worked_on"),
+                            row_dict.get("category"),
                         ),
                     )
                     synced += 1

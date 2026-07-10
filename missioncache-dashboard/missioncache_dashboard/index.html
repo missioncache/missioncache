@@ -7576,8 +7576,11 @@
             noncoding: '#868e96' // Gray
         };
 
-        // Determine task category from name, branch, or type
+        // Determine task category: stored value first, name heuristic as fallback
         function getTaskCategory(task) {
+            // Priority 0: category stored in the DB (assigned at creation time)
+            if (task.category) return task.category;
+
             const name = (task.name || task.display_name || '').toLowerCase();
             const branch = (task.branch || '').toLowerCase();
 
@@ -7601,8 +7604,13 @@
                 { keywords: ['perf', 'speed', 'cache', 'memory', 'optimize', 'fast'], category: 'perf' },
             ];
 
+            // Word-boundary match (optional plural s) instead of substring:
+            // includes() mislabeled every missioncache-* project as perf via
+            // the embedded 'cache', and matched 'ci' inside words like
+            // 'decide'. Kebab separators count as boundaries (underscores do
+            // not - \b treats _ as a word character; names are kebab-case).
             for (const { keywords, category } of patterns) {
-                if (keywords.some(kw => name.includes(kw))) return category;
+                if (keywords.some(kw => new RegExp('\\b' + kw + 's?\\b').test(name))) return category;
             }
 
             // Priority 3: Fallback based on task type
@@ -7614,7 +7622,9 @@
             const category = getTaskCategory(task);
             const icon = TASK_ICONS[category] || TASK_ICONS.coding;
             const color = TASK_ICON_COLORS[category] || TASK_ICON_COLORS.coding;
-            return `<span class="task-icon" style="color: ${color}" title="${category}">${icon}</span>`;
+            // escapeHtml: category can be a raw stored value; every other
+            // field in the row is escaped, keep the no-trust posture here too.
+            return `<span class="task-icon" style="color: ${color}" title="${escapeHtml(category)}">${icon}</span>`;
         }
 
 

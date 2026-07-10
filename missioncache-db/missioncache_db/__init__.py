@@ -30,7 +30,8 @@ Keyword Management:
     python missioncache_db.py backfill-tags             # Backfill tags for existing tasks
 
 Non-Coding Task Management:
-    python missioncache_db.py create-task [--type TYPE] [--jira TICKET] <name>  # Create task
+    python missioncache_db.py create-task [--type TYPE] [--jira TICKET] [--category CAT] <name>  # Create task
+    python missioncache_db.py set-category <task_id> <category|none>            # Set or clear project category
     python missioncache_db.py add-update <task_id> <note>                       # Add timestamped update
     python missioncache_db.py get-updates <task_id> [limit]                     # Get task updates
     python missioncache_db.py today-updates [task_id]                           # Get today's updates
@@ -508,6 +509,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     archived_at TEXT,
     last_worked_on TEXT,
     origin_uuid TEXT,
+    category TEXT,
     UNIQUE(repo_id, full_path)
 );
 
@@ -662,6 +664,35 @@ class Repository:
         )
 
 
+# Project category taxonomy. Assigned at creation time (the LLM derives it
+# from the project description in /missioncache:new); the dashboard renders
+# the stored value and only falls back to a name heuristic when NULL. Must
+# stay in sync with TASK_ICONS/TASK_ICON_COLORS in the dashboard index.html.
+CATEGORIES = (
+    "bug",
+    "feature",
+    "refactor",
+    "test",
+    "docs",
+    "infra",
+    "ui",
+    "api",
+    "database",
+    "security",
+    "perf",
+    "coding",
+    "noncoding",
+)
+
+
+def _validate_category(category: Optional[str]) -> None:
+    """Raise ValueError unless ``category`` is None or in CATEGORIES."""
+    if category is not None and category not in CATEGORIES:
+        raise ValueError(
+            f"Invalid category: {category!r}. Must be one of: {', '.join(CATEGORIES)}"
+        )
+
+
 @dataclass
 class Task:
     id: int
@@ -682,6 +713,7 @@ class Task:
     archived_at: Optional[str]
     last_worked_on: Optional[str]
     origin_uuid: Optional[str] = None  # stable cross-machine project identity
+    category: Optional[str] = None  # one of CATEGORIES; NULL = uncategorized
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -712,6 +744,7 @@ class Task:
             archived_at=row["archived_at"],
             last_worked_on=row["last_worked_on"],
             origin_uuid=row["origin_uuid"] if "origin_uuid" in keys else None,
+            category=row["category"] if "category" in keys else None,
         )
 
 
@@ -807,7 +840,7 @@ class AutoExecutionLog:
 _IMPORT_TASK_UPDATE_SQL = (
     "UPDATE tasks SET name=?, full_path=?, repo_id=?, status=?, type=?, tags=?, "
     "priority=?, jira_key=?, branch=?, pr_url=?, parent_id=?, created_at=?, "
-    "origin_uuid=? WHERE id=?"
+    "origin_uuid=?, category=? WHERE id=?"
 )
 
 
@@ -844,6 +877,10 @@ class TaskDB:
             # and any other first-time caller would crash on "no such table"
             # errors because __init__ only ever created an empty DB file.
             self._connection.executescript(SCHEMA_SQL)
+            # Column migrations must run here too, not only in initialize():
+            # writers like create_task reference the new columns, so a bare
+            # TaskDB() consumer (CLI, hooks) would crash on an un-migrated DB.
+            self._migrate_columns(self._connection)
             for key, value in DEFAULT_CONFIG.items():
                 self._connection.execute(
                     "INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)",
@@ -861,19 +898,29 @@ class TaskDB:
             self._connection.close()
             self._connection = None
 
+    @staticmethod
+    def _migrate_columns(conn: sqlite3.Connection) -> None:
+        """Idempotent column migrations for existing DBs.
+
+        CREATE TABLE IF NOT EXISTS is a no-op on an existing DB, so a new
+        column must be added via ALTER. Existing rows are deliberately left
+        origin_uuid=NULL (NOT backfilled): a fresh per-machine UUID for an
+        already-shared project would differ across machines and falsely read
+        as a "different project" on re-import. Existing rows stay
+        category=NULL: the dashboard falls back to its name heuristic for
+        NULL, and NULLs can be filled by hand via the set-category CLI.
+        """
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+        if "origin_uuid" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN origin_uuid TEXT")
+        if "category" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN category TEXT")
+
     def initialize(self) -> None:
         """Initialize the database schema and default config."""
         with self.connection() as conn:
             conn.executescript(SCHEMA_SQL)
-
-            # Idempotent column migration: CREATE TABLE IF NOT EXISTS is a no-op
-            # on an existing DB, so a new column must be added via ALTER. Existing
-            # rows are deliberately left origin_uuid=NULL (NOT backfilled): a fresh
-            # per-machine UUID for an already-shared project would differ across
-            # machines and falsely read as a "different project" on re-import.
-            cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
-            if "origin_uuid" not in cols:
-                conn.execute("ALTER TABLE tasks ADD COLUMN origin_uuid TEXT")
+            self._migrate_columns(conn)
 
             # Insert default config
             for key, value in DEFAULT_CONFIG.items():
@@ -1283,6 +1330,7 @@ class TaskDB:
         parent_id: Optional[int],
         created_at: Optional[str],
         origin_uuid: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> Tuple[Task, str]:
         """Name/path-keyed upsert for cross-machine import (Phase 3).
 
@@ -1311,11 +1359,17 @@ class TaskDB:
         re-export from this machine still matches the origin), or a fresh one is
         minted when the bundle predates the feature.
 
+        ``category`` follows the same asymmetry: an incoming value is
+        authoritative, but an incoming NULL is ambiguous (pre-category bundle
+        vs deliberately uncategorized), so on UPDATE a NULL preserves the
+        existing row's category instead of clearing it.
+
         A write that collides with a DIFFERENT row on ``UNIQUE(repo_id,
         full_path)`` raises ``ImportConflictError``; any other integrity error
         (a real bug) propagates unwrapped rather than being mislabeled a
         conflict.
         """
+        _validate_category(category)
         existing = self.find_import_target(name, full_path)
         with self.connection() as conn:
             try:
@@ -1326,22 +1380,24 @@ class TaskDB:
                         default=created_at,
                     )
                     keep_uuid = existing.origin_uuid or origin_uuid
+                    keep_category = category if category is not None else existing.category
                     conn.execute(
                         _IMPORT_TASK_UPDATE_SQL,
                         (name, full_path, repo_id, status, task_type,
                          json.dumps(tags), priority, jira_key, branch, pr_url,
-                         parent_id, keep_created, keep_uuid, existing.id),
+                         parent_id, keep_created, keep_uuid, keep_category,
+                         existing.id),
                     )
                     conn.commit()
                     return self.get_task(existing.id), "updated"
                 cur = conn.execute(
                     "INSERT INTO tasks (repo_id, name, full_path, parent_id, "
                     "status, type, tags, priority, jira_key, branch, pr_url, "
-                    "created_at, origin_uuid) VALUES (?,?,?,?,?,?,?,?,?,?,?,"
-                    "COALESCE(?, datetime('now','localtime')),?)",
+                    "created_at, origin_uuid, category) VALUES (?,?,?,?,?,?,?,?,?,?,?,"
+                    "COALESCE(?, datetime('now','localtime')),?,?)",
                     (repo_id, name, full_path, parent_id, status, task_type,
                      json.dumps(tags), priority, jira_key, branch, pr_url,
-                     created_at, origin_uuid or str(uuid.uuid4())),
+                     created_at, origin_uuid or str(uuid.uuid4()), category),
                 )
                 conn.commit()
                 return self.get_task(cur.lastrowid), "created"
@@ -1374,7 +1430,7 @@ class TaskDB:
                     (pre.name, pre.full_path, pre.repo_id, pre.status,
                      pre.task_type, json.dumps(pre.tags), pre.priority,
                      pre.jira_key, pre.branch, pre.pr_url, pre.parent_id,
-                     pre.created_at, pre.origin_uuid, task_id),
+                     pre.created_at, pre.origin_uuid, pre.category, task_id),
                 )
             conn.commit()
 
@@ -1388,6 +1444,7 @@ class TaskDB:
         task_type: str = "coding",
         repo_id: Optional[int] = None,
         jira_key: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> Task:
         """Create a new task (coding or non-coding).
 
@@ -1396,12 +1453,14 @@ class TaskDB:
             task_type: 'coding' or 'non-coding'
             repo_id: Repository ID (required for coding, None for non-coding)
             jira_key: Optional JIRA ticket ID
+            category: Optional project category (one of CATEGORIES)
 
         Returns:
             The created Task object
         """
         if task_type not in ("coding", "non-coding"):
             raise ValueError(f"Invalid task type: {task_type}")
+        _validate_category(category)
 
         # Non-coding tasks must not have a repo_id
         if task_type == "non-coding" and repo_id is not None:
@@ -1414,13 +1473,39 @@ class TaskDB:
         with self.connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO tasks (repo_id, name, full_path, type, tags,
-                   jira_key, status, origin_uuid)
-                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
+                   jira_key, status, origin_uuid, category)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
                 (repo_id, name, full_path, task_type, json.dumps(tags), jira_key,
-                 str(uuid.uuid4())),
+                 str(uuid.uuid4()), category),
             )
             conn.commit()
             return self.get_task(cursor.lastrowid)
+
+    def set_task_category(self, task_id: int, category: Optional[str]) -> Task:
+        """Set (or clear) a task's category.
+
+        Args:
+            task_id: The task ID
+            category: One of CATEGORIES, or None to clear
+
+        Returns:
+            The updated Task object
+
+        Raises:
+            ValueError: If the category is not in CATEGORIES or the task
+                does not exist
+        """
+        _validate_category(category)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET category = ?, "
+                "updated_at = datetime('now', 'localtime') WHERE id = ?",
+                (category, task_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Task {task_id} not found")
+            conn.commit()
+            return self.get_task(task_id)
 
     def add_task_update(self, task_id: int, note: str) -> int:
         """Add a timestamped update to a task.
@@ -3542,6 +3627,8 @@ def main():
             name = None
             jira_key = None
 
+            category = None
+
             i = 2
             while i < len(sys.argv):
                 if sys.argv[i] == "--type" and i + 1 < len(sys.argv):
@@ -3553,6 +3640,9 @@ def main():
                 elif sys.argv[i] == "--jira" and i + 1 < len(sys.argv):
                     jira_key = sys.argv[i + 1]
                     i += 2
+                elif sys.argv[i] == "--category" and i + 1 < len(sys.argv):
+                    category = sys.argv[i + 1]
+                    i += 2
                 elif not name:
                     # First positional arg is the name
                     name = sys.argv[i]
@@ -3562,20 +3652,27 @@ def main():
 
             if not name:
                 print(
-                    "Usage: missioncache_db.py create-task [--type coding|non-coding] [--jira TICKET] <name>"
+                    "Usage: missioncache_db.py create-task [--type coding|non-coding] [--jira TICKET] [--category CAT] <name>"
                 )
                 print(
                     "       missioncache_db.py create-task --type non-coding --name 'Sprint planning'"
                 )
                 sys.exit(1)
 
-            task = db.create_task(name, task_type=task_type, jira_key=jira_key)
+            try:
+                task = db.create_task(
+                    name, task_type=task_type, jira_key=jira_key, category=category
+                )
+            except ValueError as e:
+                print(str(e))
+                sys.exit(1)
             output = {
                 "id": task.id,
                 "name": task.name,
                 "type": task.task_type,
                 "tags": task.tags,
                 "jira_key": task.jira_key,
+                "category": task.category,
                 "status": task.status,
             }
             print(json.dumps(output, indent=2))
@@ -3643,6 +3740,34 @@ def main():
                         "name": task.name if task else None,
                         "jira_key": jira_key,
                         "message": f"Set JIRA key to {jira_key}",
+                    },
+                    indent=2,
+                )
+            )
+
+        elif command == "set-category":
+            if len(sys.argv) < 4:
+                print("Usage: missioncache_db.py set-category <task_id> <category|none>")
+                print(f"Categories: {', '.join(CATEGORIES)}")
+                sys.exit(1)
+            category = None if sys.argv[3].lower() == "none" else sys.argv[3]
+            try:
+                task_id = int(sys.argv[2])
+                task = db.set_task_category(task_id, category)
+            except ValueError as e:
+                print(str(e))
+                sys.exit(1)
+            print(
+                json.dumps(
+                    {
+                        "id": task_id,
+                        "name": task.name,
+                        "category": task.category,
+                        "message": (
+                            f"Set category to {category}"
+                            if category
+                            else "Cleared category"
+                        ),
                     },
                     indent=2,
                 )

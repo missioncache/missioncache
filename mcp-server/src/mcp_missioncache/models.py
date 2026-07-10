@@ -38,6 +38,9 @@ class TaskSummary(BaseModel):
     repo_name: str | None = None
     repo_path: str | None = None
     jira_key: str | None = None
+    category: str | None = Field(
+        default=None, description="Project category (None = uncategorized)"
+    )
     tags: list[str] = Field(default_factory=list)
     time_total_seconds: int = Field(default=0, description="Total time in seconds")
     time_formatted: str = Field(default="0m", description="Human-readable time")
@@ -99,6 +102,7 @@ class CreateTaskResult(BaseModel):
     task_id: int
     task_name: str
     task_type: str
+    category: str | None = None
     missioncache_path: str | None = None
 
 

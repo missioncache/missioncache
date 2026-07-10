@@ -303,6 +303,7 @@ def _task_to_summary(
         repo_name=repo_name,
         repo_path=repo_path,
         jira_key=task.jira_key,
+        category=task.category,
         tags=task.tags,
         time_total_seconds=time_seconds,
         time_formatted=time_formatted,

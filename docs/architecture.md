@@ -118,7 +118,7 @@ The canonical tables are all defined in `missioncache-db/missioncache_db/__init_
 | Table | Purpose | Key columns |
 |-------|---------|-------------|
 | `repositories` | Tracked git repos | `id`, `path` (UNIQUE), `short_name`, `active`, `last_scanned_at` |
-| `tasks` | Projects (both coding and non-coding) | `id`, `repo_id`, `name`, `full_path`, `parent_id`, `status`, `type`, `tags` (JSON), `jira_key`, `branch`, `pr_url`, `last_worked_on` |
+| `tasks` | Projects (both coding and non-coding) | `id`, `repo_id`, `name`, `full_path`, `parent_id`, `status`, `type`, `tags` (JSON), `category`, `jira_key`, `branch`, `pr_url`, `last_worked_on` |
 | `task_updates` | Append-only progress notes for non-coding projects | `task_id`, `note`, `created_at` |
 | `heartbeats` | WakaTime-style activity pings, one per non-skipped user prompt | `task_id`, `timestamp`, `session_id`, `processed` |
 | `sessions` | Aggregated work sessions, computed from heartbeats by `process_heartbeats()` | `task_id`, `session_id`, `start_time`, `end_time`, `duration_seconds`, `heartbeat_count` |
