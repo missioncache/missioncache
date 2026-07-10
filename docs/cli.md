@@ -69,6 +69,16 @@ missioncache-db cleanup [--dry-run]
 
 `cleanup` is the broader housekeeping pass, in four phases: archive orphaned active tasks whose files no longer exist on disk, move stray repo-local MissionCache files into the centralized `~/.missioncache/` layout, resolve duplicate task names, and normalize non-standard paths. Run it with `--dry-run` first - it prints exactly what each phase would touch.
 
+## Health / diagnostics
+
+```bash
+missioncache-db health
+```
+
+Scans every active project's context file and reports, per project: a stale `Last Updated` (older than 14 days), stale Waiting-on rows (`Since` older than 7 days), a context file over the 100KB size budget, missing core sections (`Description`, `Gotchas`, `Waiting on`, `Next Steps`, `Recent Changes`), and a Recent Changes section over its 12-entry cap (meaning a journal rollover is pending on the next save). A project directory without a context file is itself a finding.
+
+Report-only: exit code is always 0, warnings or not. The thresholds are constants in `missioncache_db/context_health.py`, not config keys. The same warnings surface per-project in the `/missioncache:load` digest, so `health` is mainly the fleet-wide sweep.
+
 ## Bulk repo registration
 
 ```bash

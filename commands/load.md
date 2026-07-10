@@ -5,7 +5,7 @@ argument-hint: "[project-name]"
 
 # Continue Project
 
-Resume work on an active project with full context loading.
+Resume work on an active project via the context digest.
 
 ## Quick Start
 
@@ -100,11 +100,21 @@ Capture the printed `SESSION_ID`. Then call `mcp__plugin_missioncache_pm__get_ta
 
 If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg and rely entirely on the Step 4 bash binding.
 
-### Step 2: Read Context Files
+### Step 2: Get the Context Digest
 
-Read the key files:
-- `<project-name>-context.md` - For current state and next steps
-- `<project-name>-tasks.md` - For checklist progress
+Do NOT read the full context file - call the digest tool instead:
+
+```
+mcp__plugin_missioncache_pm__get_context_digest(project_name="<name>")
+```
+
+It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name + line number), `file_size_bytes`, and `health_warnings`.
+
+Checklist progress comes from `get_task`'s `progress` field (Step 1) - no need to read the tasks file either.
+
+Read the FULL context file (or a specific section via the `section_index` line numbers with Read offset/limit) only when the user asks for it or the digest is not enough for the task at hand. Older Recent Changes history lives in `<project-name>-journal.md` - grep it on demand, never load it on resume.
+
+If `get_context_digest` returns an error (older MCP server without the tool), fall back to reading `<project-name>-context.md` and `<project-name>-tasks.md` directly.
 
 ### Step 3: Display Resume Summary
 
@@ -154,19 +164,28 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 
 **PreCompact warning:** <from PRECOMPACT_WARNING line> *(only if surfaced)*
 
-**Where You Left Off:** <from context.md Next Steps>
+**Hub:** <digest hub line, if any>
+**Related projects:** <digest related_projects line, if any>
 
 **Progress:** <X/Y tasks complete (Z%)>
 
 **Dashboard:** http://localhost:8787/#projects?task=<name> *(only if probe emitted a line)*
 
-**Key Decisions:**
-<from context.md Key Architectural Decisions>
+**Waiting on:** *(from digest waiting_on; omit if the table is empty)*
+| What | Who | Since | Gates |
+|------|-----|-------|-------|
+<rows - mark any row whose Since is older than 7 days with a trailing " (stale)">
 
-**Next Steps:**
-1. <first item from Next Steps>
+**Next Steps:** *(from digest next_steps)*
+1. <first item>
 2. <second item>
+
+**Recent activity:** <1-2 line synthesis of digest recent_changes_last3>
+
+**Health:** <digest health_warnings, one line, only when non-empty>
 ```
+
+Waiting on renders NEXT TO Next Steps by design - both are the "what now" surface. When a Waiting-on row's external reply has arrived (the user mentions it, or you see it in the conversation), act on what it gates and resolve the row via `/missioncache:save`'s `waiting_on_resolve`. Offer the full context file ("say 'full context' for the whole file") instead of dumping it.
 
 ### Step 4: Register Session for Time Tracking
 
@@ -297,19 +316,20 @@ Note: Omit the Repo column for "This Repo" group since it's redundant.
 **JIRA:** PROJ-12345
 **Progress:** 3/8 tasks complete (37%)
 
-**Where You Left Off:**
+**Waiting on:**
+| What | Who | Since | Gates |
+|------|-----|-------|-------|
+| Broker config review | Dana | 2026-07-02 (stale) | Retry rollout |
+
+**Next Steps:**
 1. Implement retry logic in consumer.py:145
 2. Add unit tests for retry
 
-**Key Decisions:**
-- Exponential backoff (2^n seconds, max 30s)
-- Max 3 retries before dead-letter queue
+**Recent activity:** Retry backoff shipped behind a flag; consumer tests still red on the timeout path.
 
-**Key Files:**
-- `src/consumer.py:145` - Main consumer logic
-- `tests/test_consumer.py` - Test file to update
+**Health:** context file is 112KB (> 100KB budget)
 
-Ready to continue. What would you like to work on?
+Ready to continue. What would you like to work on? (say "full context" for the whole file)
 ```
 
 ## MCP Tools Used
@@ -318,6 +338,7 @@ Ready to continue. What would you like to work on?
 |------|---------|
 | `mcp__plugin_missioncache_pm__list_active_tasks` | List projects with repo prioritization |
 | `mcp__plugin_missioncache_pm__get_task` | Get full project details |
+| `mcp__plugin_missioncache_pm__get_context_digest` | Resume digest of the context file (replaces the full-file read) |
 | `mcp__plugin_missioncache_pm__get_missioncache_files` | Get file paths |
 | `mcp__plugin_missioncache_pm__get_missioncache_progress` | Get checklist progress |
 | `mcp__plugin_missioncache_pm__record_heartbeat` | Start time tracking |

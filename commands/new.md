@@ -212,7 +212,11 @@ This generates numbered tasks:
 
 The response includes `session_bound: true|false`. If `session_bound` is `false` and you DID pass a session_id, the binding helper rejected it (invalid shape or DB error); the user can recover via `/missioncache:load`.
 
-### Step 5: Probe Dashboard (optional)
+### Step 4b: Fill Definition of Done (and Key People when relevant)
+
+The generated context file carries a `## Definition of Done` section with a TBD placeholder. Right after creation, fill it via a direct Edit when the conversation gave you acceptance criteria - concrete, verifiable exit conditions, not restated goals. If no criteria exist yet, leave the TBD and say so in the confirmation output ("Definition of Done: not defined yet - estimates stay gated until it is"), per the estimation discipline: no estimate without acceptance criteria.
+
+If the project involves specific colleagues (reviewers, SMEs, external owners), add a `## Key People` section between Definition of Done and Gotchas listing who owns what. Skip it entirely for solo/personal-tool projects - do not add an empty section.
 
 Check whether the dashboard is reachable so the confirmation output can surface a deep link to the newly-created project. Skip silently when the dashboard is not installed or not running - dead links teach users to ignore the hint.
 

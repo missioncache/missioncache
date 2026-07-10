@@ -159,7 +159,8 @@ Projects have their own directory on disk under `~/.missioncache/`:
 ├── active/
 │   └── <project-name>/
 │       ├── <project-name>-plan.md       # Optional: implementation plan
-│       ├── <project-name>-context.md    # Key decisions, gotchas, next steps
+│       ├── <project-name>-context.md    # Key decisions, gotchas, waiting-on, next steps
+│       ├── <project-name>-journal.md    # Recent Changes overflow (oldest first), auto-managed by the 12-entry cap
 │       ├── <project-name>-tasks.md      # Checkboxes - source of truth for progress
 │       ├── <project-name>-auto-log.md   # Written by missioncache-auto during runs (optional)
 │       └── prompts/                     # Optional: optimized per-subtask prompts
