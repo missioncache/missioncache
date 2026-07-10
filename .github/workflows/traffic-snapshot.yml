@@ -1,0 +1,63 @@
+name: Traffic snapshot
+
+# GitHub keeps only the last 14 days of clone/view traffic. This snapshots it
+# daily and merges into a history on the `traffic-data` branch so the numbers
+# survive (important for preserving launch-window data). Requires a repo secret
+# TRAFFIC_TOKEN: a PAT with push access to this repo (contents read/write).
+# Push-level access is required both by the traffic API endpoints themselves
+# and by the git push to the traffic-data branch, which authenticates with
+# this same token via the checkout below (the default GITHUB_TOKEN is not
+# reliably accepted by the traffic endpoints).
+
+on:
+  schedule:
+    - cron: "17 4 * * *"   # daily at 04:17 UTC
+  workflow_dispatch: {}
+
+# The default GITHUB_TOKEN only needs to read the script from main; all
+# writes go through TRAFFIC_TOKEN.
+permissions:
+  contents: read
+
+# A manual dispatch overlapping the nightly cron would race on the branch
+# push; queue instead.
+concurrency:
+  group: traffic-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (for the snapshot script)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          # Nothing pushes from this checkout; don't leave a token in it.
+          persist-credentials: false
+
+      - name: Checkout traffic-data branch (history store)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          ref: traffic-data
+          path: _traffic-data
+          token: ${{ secrets.TRAFFIC_TOKEN }}
+
+      - name: Snapshot traffic
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TRAFFIC_DIR: _traffic-data/traffic
+        run: python3 .github/scripts/snapshot_traffic.py
+
+      - name: Commit and push if changed
+        working-directory: _traffic-data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add traffic
+          if git diff --cached --quiet; then
+            echo "No traffic changes to commit"
+          else
+            git commit -m "chore: traffic snapshot $(date -u +%F)"
+            git push
+          fi
