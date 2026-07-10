@@ -1245,14 +1245,14 @@ class AnalyticsDB:
             rows, columns = self._fetch_all(
                 """SELECT * FROM tasks
                    WHERE status IN ('active', 'paused') AND repo_id = ?
-                   ORDER BY last_worked_on DESC NULLS LAST""",
+                   ORDER BY COALESCE(last_worked_on, created_at) DESC NULLS LAST""",
                 (repo_id,),
             )
         else:
             rows, columns = self._fetch_all(
                 """SELECT * FROM tasks
                    WHERE status IN ('active', 'paused')
-                   ORDER BY last_worked_on DESC NULLS LAST"""
+                   ORDER BY COALESCE(last_worked_on, created_at) DESC NULLS LAST"""
             )
         return [Task.from_row(r, columns) for r in rows]
 

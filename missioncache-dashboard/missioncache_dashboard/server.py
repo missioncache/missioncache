@@ -1141,7 +1141,10 @@ async def api_tasks_active(repo_id: int = None):
         etime = _effective_time(task.id, times, jsonl_times)
         task_dict["time_spent_seconds"] = etime
         task_dict["time_spent_formatted"] = db.format_duration(etime)
-        task_dict["last_worked_ago"] = db.format_time_ago(task.last_worked_on)
+        if task.last_worked_on:
+            task_dict["last_worked_ago"] = db.format_time_ago(task.last_worked_on)
+        else:
+            task_dict["last_worked_ago"] = f"Created {db.format_time_ago(task.created_at)}"
         task_dict["jira_url"] = get_jira_url(task.jira_key)
 
         # Get repo info
