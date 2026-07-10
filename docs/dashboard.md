@@ -37,6 +37,10 @@ The active table filters out "orphan" tasks where the DB still says `status=acti
 
 Each project row carries a colored SVG icon for its category (bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). `getTaskCategory()` in `index.html` uses the `category` value stored on the task row first - assigned at creation time by `/missioncache:new`, which derives it from the project description. Only when the stored value is NULL (projects created before the feature) does it fall back to a name-keyword heuristic, which matches on word boundaries so an embedded substring (e.g. the "cache" inside "missioncache") cannot mislabel a project. The icon and color maps (`TASK_ICONS` / `TASK_ICON_COLORS`) must carry an entry per `CATEGORIES` value; unknown values render with the default coding icon.
 
+#### Filter bar
+
+A filter bar above the two tables narrows both at once, entirely client-side: a search box matching project name and description (a parent also matches when one of its subtasks does), category chips, and a repo dropdown. The chips are built from the categories actually present in the loaded data - stored values and heuristic fallbacks alike, so a chip always corresponds to an icon you can see in the rows - and multi-select with OR semantics. On the Completed table the filter runs before the newest-10 display cap, so searching can surface completions that are not among the ten shown by default. Filter state is session-only (unlike the sort order, it is not persisted to localStorage): a filter silently restored from a past visit would read as missing data.
+
 ### Activity view
 
 The Activity view is the richest part of the dashboard and the most complicated, because it merges two independent sources of time data:
