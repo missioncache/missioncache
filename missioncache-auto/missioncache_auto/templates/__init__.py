@@ -49,27 +49,15 @@ CONTEXT_TEMPLATE = """# {task_name} - Context
 
 {description}
 
-## Key Files
+## Definition of Done
 
-| File | Purpose |
-|------|---------|
-| `path/to/file.py` | Description |
-
-## Architecture Decisions
-
-(Add important decisions about how to approach this)
+- TBD
 
 ## Constraints
 
 - Any limitations or requirements
 - Tech stack constraints
 - Performance requirements
-
-## Gotchas
-
-(Things to watch out for - missioncache-auto will read this)
-
----
 
 ## Key Learnings
 
@@ -78,6 +66,37 @@ CONTEXT_TEMPLATE = """# {task_name} - Context
 ## Blockers
 
 (missioncache-auto will add blocking issues here if encountered)
+
+## Gotchas
+
+(Things to watch out for - missioncache-auto will read this)
+
+## Waiting on
+
+External replies/events that gate work. Check on every resume; when one resolves, act on what it gates and move the row into Recent Changes.
+
+| What | Who | Since | Gates |
+|------|-----|-------|-------|
+
+## Next Steps
+
+1. TBD
+
+## Recent Changes
+
+### {date}
+
+- Created MissionCache files
+
+## Key Architectural Decisions
+
+- TBD
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `path/to/file.py` | Description |
 """
 
 PLAN_TEMPLATE = """# {task_name} - Plan
