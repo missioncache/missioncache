@@ -4,6 +4,14 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - task updates silently frozen out of the dashboard read path (missioncache-dashboard)
+
+On a DuckDB file created by `migrate_to_duckdb.py`, every task row referenced by sessions or heartbeats failed to sync updates from SQLite: the migrate script's schema declared foreign keys, DuckDB rejects upserts of FK-referenced parent rows ("still referenced by a foreign key"), and the sync's per-row try/except reduced each failure to a stdout print. Renames, completions, and category changes never reached `/api/tasks/active` on such files - the server-created schema (no FKs) was unaffected, which is why the drift went unnoticed. Fixed by removing the FK constraints from the migrate script's schema (the DuckDB mirror is a disposable read replica; SQLite owns integrity - the two schema definitions now agree), counting per-row sync failures into the sync result (`tasks_sync_failed`, `sessions_sync_failed`, `repos_sync_failed` - the sessions case previously dropped time-tracking data with no signal at all), and surfacing them as warnings from the rename/category endpoints, whose except-only handling could never fire for sync errors (`sync_from_sqlite` reports problems in its result dict rather than raising). Recovery for affected files: rerun `migrate_to_duckdb.py`. The missing-table leniency added to the migrate script is scoped to the lazily-created feature tables only - an absent core table still crashes loudly.
+
+### Fixed - migrate_to_duckdb.py crashed on DBs without the shadow-repo feature tables (missioncache-dashboard)
+
+The script assumed `shadow_repos` / `shadow_commits` / `non_git_activity` exist in the source SQLite, but those are created lazily by their feature - any user who never enabled it got `sqlite3.OperationalError: no such table`. Missing feature tables now migrate as empty, reported explicitly in the source-counts and per-table output.
+
 ### Added - projects filter bar (missioncache-dashboard)
 
 The Projects view gained a filter bar above the Active and Completed tables: a search box matching project name and description (subtask names/descriptions count toward their parent), category chips showing only the categories present in the loaded data (multi-select, OR semantics, icons matching the table rows), and a repo dropdown. Filtering is client-side and applies to both tables at once; on the Completed table it runs before the newest-10 display cap, so a search can surface older completions. Filters are session-only by design - a filter silently restored from a past visit would read as missing data.

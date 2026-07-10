@@ -53,10 +53,10 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY,
-            repo_id INTEGER REFERENCES repositories(id),
+            repo_id INTEGER,
             name VARCHAR NOT NULL,
             full_path VARCHAR NOT NULL,
-            parent_id INTEGER REFERENCES tasks(id),
+            parent_id INTEGER,
             status VARCHAR NOT NULL DEFAULT 'active',
             type VARCHAR NOT NULL DEFAULT 'coding',
             tags JSON NOT NULL DEFAULT '[]',
@@ -77,7 +77,7 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS task_updates (
             id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL REFERENCES tasks(id),
+            task_id INTEGER NOT NULL,
             note VARCHAR NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT now()
         )
@@ -86,7 +86,7 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS heartbeats (
             id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL REFERENCES tasks(id),
+            task_id INTEGER NOT NULL,
             timestamp TIMESTAMP NOT NULL DEFAULT now(),
             session_id VARCHAR,
             context VARCHAR,
@@ -97,7 +97,7 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL REFERENCES tasks(id),
+            task_id INTEGER NOT NULL,
             session_id VARCHAR,
             start_time TIMESTAMP NOT NULL,
             end_time TIMESTAMP,
@@ -130,8 +130,8 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS shadow_commits (
             id INTEGER PRIMARY KEY,
-            shadow_repo_id INTEGER NOT NULL REFERENCES shadow_repos(id),
-            task_id INTEGER REFERENCES tasks(id),
+            shadow_repo_id INTEGER NOT NULL,
+            task_id INTEGER,
             sha VARCHAR NOT NULL,
             timestamp TIMESTAMP NOT NULL,
             lines_added INTEGER NOT NULL DEFAULT 0,
@@ -479,6 +479,23 @@ def migrate_non_git_activity(
     return len(rows)
 
 
+# Tables created lazily by their feature - a source DB that never used the
+# feature legitimately lacks them, so they migrate as empty. Core tables
+# (tasks, sessions, ...) are NOT in this set: their absence means a corrupt
+# source and should crash loudly, not migrate-as-empty.
+FEATURE_TABLES = {"shadow_repos", "shadow_commits", "non_git_activity"}
+
+
+def _skip_absent_feature_table(sqlite_conn: sqlite3.Connection, table: str) -> bool:
+    """True when ``table`` is a feature table absent from the SQLite source."""
+    if table not in FEATURE_TABLES:
+        return False
+    row = sqlite_conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    return row is None
+
+
 def verify_migration(
     sqlite_conn: sqlite3.Connection, duck_conn: duckdb.DuckDBPyConnection
 ) -> dict:
@@ -497,9 +514,14 @@ def verify_migration(
 
     results = {}
     for table in tables:
-        sqlite_count = sqlite_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
+        # An absent feature table counts as 0 rows (the DuckDB side always
+        # has the empty table from the schema, so 0 == 0 passes). Absent
+        # CORE tables are not excused - the COUNT below raises on them.
+        sqlite_count = (
             0
-        ]
+            if _skip_absent_feature_table(sqlite_conn, table)
+            else sqlite_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        )
         duck_count = duck_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         results[table] = {
             "sqlite": sqlite_count,
@@ -544,8 +566,11 @@ def run_migration(dry_run: bool = False) -> None:
 
     print("Source row counts:")
     for table in tables:
-        count = sqlite_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        print(f"  {table}: {count}")
+        if _skip_absent_feature_table(sqlite_conn, table):
+            print(f"  {table}: absent in source (feature table, migrates as empty)")
+        else:
+            count = sqlite_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            print(f"  {table}: {count}")
     print()
 
     if dry_run:
@@ -589,6 +614,9 @@ def run_migration(dry_run: bool = False) -> None:
     ]
 
     for table_name, migrate_func in migrations:
+        if _skip_absent_feature_table(sqlite_conn, table_name):
+            print(f"  {table_name}: absent in source, left empty")
+            continue
         count = migrate_func(sqlite_conn, duck_conn)
         print(f"  {table_name}: {count} rows")
 
