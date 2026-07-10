@@ -8,6 +8,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 The Projects view gained a filter bar above the Active and Completed tables: a search box matching project name and description (subtask names/descriptions count toward their parent), category chips showing only the categories present in the loaded data (multi-select, OR semantics, icons matching the table rows), and a repo dropdown. Filtering is client-side and applies to both tables at once; on the Completed table it runs before the newest-10 display cap, so a search can surface older completions. Filters are session-only by design - a filter silently restored from a past visit would read as missing data.
 
+### Added - CLI reference and MCP signpost for CLI-only operations (mcp-missioncache 1.0.6)
+
+New `docs/cli.md` documents the deliberately-CLI-only operations - cross-machine `export`/`import` with the per-machine `config` path map, tag keyword management, `prune`/`cleanup` maintenance, and `add-repos-glob` bulk registration - linked from the README docs section. The MCP server now sets the FastMCP `instructions` field with a short pointer at that surface, so every MCP client (Claude Code, Codex, OpenCode, VSCode) learns per session that those operations live in the `missioncache-db` CLI rather than in MCP tools.
+
 ### Added - project category taxonomy (missioncache-db 1.0.4, mcp-missioncache 1.0.5)
 
 Tasks gained a nullable `category` column validated against a 13-value taxonomy (`CATEGORIES` in missioncache-db: bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). The category is assigned at creation time - `/missioncache:new` derives it from the project description via a rubric in `commands/new.md` and echoes it in the creation summary - replacing the dashboard's render-time name-keyword guess that mislabeled every `missioncache-*` project as `perf` via the embedded "cache".
