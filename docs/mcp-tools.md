@@ -258,12 +258,27 @@ If the task exists in the DB, uses `task.full_path` to resolve subtask directori
 - `key_decisions: list[str] | None = None` - Lines to add under "Key Architectural Decisions".
 - `gotchas: list[str] | None = None` - Lines to add under "Gotchas".
 - `key_files: dict[str, str] | None = None` - `{path: description}` map to add to the "Key Files" table.
+- `waiting_on_add: list[dict] | None = None` - Waiting-on rows to append, each `{"what", "who", "since", "gates"}`. `since` defaults to today. Creates the `## Waiting on` section immediately before Next Steps when the file predates the convention.
+- `waiting_on_resolve: list[dict] | None = None` - Rows to resolve, each `{"match", "outcome"}`. Removes the first row whose What cell contains `match` and records "Resolved (was waiting on <who>): <what> - <outcome>" in today's Recent Changes subsection.
 
-**Returns:** `{"success": True, "file": str, "timestamp": str, "sections_updated": list[str]}`.
+**Returns:** `{"success": True, "file": str, "timestamp": str, "sections_updated": list[str], "waiting_on_unmatched": list[str], "journal_rolled_over": int}`.
 
 All sections are optional. Passing `None` for a section means "don't touch it". Passing an empty list means "touch the section but add nothing" - surprisingly useful for forcing a timestamp update without changing content. The `sections_updated` field tells you which sections actually received non-empty input.
 
-The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched.
+`waiting_on_unmatched` lists `match` values that resolved to no row - check it, a resolve is never silently dropped (same contract as `update_tasks_file.unmatched`). `journal_rolled_over` reports how many Recent Changes subsections the 12-entry cap moved into the per-project `<name>-journal.md` on this write (0 almost always; informational).
+
+The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched. Cap overflow and the context rewrite happen under one sidecar lock, journal written first (a crash duplicates entries into the journal rather than losing them).
+
+### `get_context_digest`
+
+**When to use:** Resuming a project (`/missioncache:load` Step 2). This is the read path for context files - it replaces reading the whole file, and it is the ONLY way to read a context file past the 256KB Read-tool cap (parsing happens server-side via plain file I/O).
+
+**Parameters:**
+- `project_name: str` - Resolved via `get_missioncache_files` (active first, then completed).
+
+**Returns:** `{"success": True, "file": str, "last_updated": str | None, "hub": str | None, "related_projects": str | None, "waiting_on": str | None, "next_steps": str | None, "recent_changes_last3": list[str], "section_index": list[{"name", "line"}], "file_size_bytes": int, "health_warnings": list[str]}`.
+
+`waiting_on` and `next_steps` are the verbatim section bodies. `section_index` gives every `## ` heading with its 1-based line number, so a follow-up targeted Read (offset/limit) can fetch one specific section without loading the file. `health_warnings` carries the same per-project findings as `missioncache-db health`.
 
 ### `update_tasks_file`
 

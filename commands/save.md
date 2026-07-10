@@ -107,6 +107,7 @@ Ask the user or infer from conversation:
 - What are the next steps?
 - Any key decisions made?
 - Any gotchas discovered?
+- **Waiting on changes:** Did this session send an ask that now gates work (a message to a colleague, a ticket assigned out, a CI run someone else owns)? Add it as a `waiting_on_add` row. Did an external reply/event arrive that a Waiting-on row was tracking? Resolve it via `waiting_on_resolve` - the resolution is recorded in Recent Changes automatically, do NOT also add it as a recent_changes entry.
 
 ### Step 3: Update Files Atomically
 
@@ -119,9 +120,16 @@ mcp__plugin_missioncache_pm__update_context_file(
   next_steps=["First thing to do", "Second thing"],
   recent_changes=["Added retry logic", "Fixed config parsing"],
   key_decisions=["Using exponential backoff"],
-  gotchas=["Config path must be absolute"]
+  gotchas=["Config path must be absolute"],
+  waiting_on_add=[{"what": "Broker config review", "who": "Dana", "gates": "Retry rollout"}],
+  waiting_on_resolve=[{"match": "Schema signoff", "outcome": "approved as-is"}]
 )
 ```
+
+Waiting-on notes:
+- `waiting_on_add` rows: `since` defaults to today; the section is created before Next Steps if the file predates the convention.
+- `waiting_on_resolve` removes the first row whose What cell contains `match` and writes "Resolved (was waiting on <who>): <what> - <outcome>" into today's Recent Changes. Check `waiting_on_unmatched` in the response - a non-empty list means a resolve found no row (typo or already resolved); tell the user, never drop it silently.
+- The response's `journal_rolled_over` reports Recent Changes entries moved to `<name>-journal.md` by the cap - no action needed, it is informational.
 
 **Tasks file (if tasks completed):**
 ```
