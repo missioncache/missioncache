@@ -31,6 +31,8 @@ Clicking a row opens a modal with four tabs:
 
 The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the MissionCache files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
 
+The modal header also carries an inline category selector (icon + dropdown next to the repo badge). It shows the STORED category - "uncategorized" for NULL rows, even when the row icon renders a name-heuristic guess - because the selector edits what the database holds, not the guess. The value paints from the client cache first, then refreshes from the `/api/task/{id}/files` response (which reads it from SQLite), so it stays correct even when the category changed via the MCP tool or CLI since the tables were loaded. Changing it PUTs to `/api/tasks/{id}/category`; on success the modal icon, the table row icons, and the filter-bar chips all update in place without a refetch. A sync warning in the response surfaces as "Saved (list refresh delayed)" in the status text.
+
 The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 #### Project category icons
@@ -167,6 +169,10 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/task/{id}/updates` | Append-only `task_updates` rows for non-coding tasks. |
 | GET | `/api/task/{id}/prompt/{subtask_id}` | Contents of a specific `prompts/task-NN-prompt.md` file. |
 | GET | `/api/repos` | Tracked repositories with their metadata. |
+| POST | `/api/tasks/{id}/rename` | Rename a project. Body `{"new_name": "..."}`; delegates to missioncache-db's `rename_task` and resyncs DuckDB. |
+| PUT | `/api/tasks/{id}/category` | Set or clear a project's category. Body `{"category": "ui"}` or `{"category": null}`; validated server-side against `CATEGORIES`, resyncs DuckDB. |
+
+Both write endpoints return `{"success": true, ...}` with a `warnings` list; a warning means the SQLite write succeeded but the DuckDB read-path refresh failed or was incomplete, so the list view may lag until the sync issue clears.
 
 The `/api/tasks/active` response shape is the largest; the relevant fields are:
 

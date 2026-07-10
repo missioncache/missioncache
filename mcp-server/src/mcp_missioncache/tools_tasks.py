@@ -38,6 +38,7 @@ from .models import (
     ListTasksResult,
     RenameTaskResult,
     ReopenTaskResult,
+    UpdateTaskResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -725,6 +726,112 @@ async def rename_task(
         return e.to_dict()
     except Exception as e:
         logger.exception("Error renaming task")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def update_task(
+    task_id: Annotated[int | None, Field(description="Task ID")] = None,
+    project_name: Annotated[
+        str | None, Field(description="Project name (alternative to ID)")
+    ] = None,
+    jira_key: Annotated[
+        str | None,
+        Field(
+            description="JIRA ticket ID to set (e.g. 'PROJ-12345'). Pass the "
+            "literal string 'none' to clear. Omit to leave unchanged."
+        ),
+    ] = None,
+    category: Annotated[
+        str | None,
+        Field(
+            description="Project category to set. One of: "
+            + ", ".join(CATEGORIES)
+            + ". Pass the literal string 'none' to clear. Omit to leave "
+            "unchanged."
+        ),
+    ] = None,
+) -> dict:
+    """
+    Update a task's JIRA key and/or category after creation.
+
+    Provide either task_id OR project_name to identify the task, and at
+    least one of jira_key / category. The literal string 'none' (any
+    case) clears a field, matching the CLI's set-category convention.
+    An empty/whitespace jira_key is rejected (pass 'none' to clear).
+
+    All input validation runs BEFORE any write, so invalid input never
+    leaves a half-applied update (e.g. jira_key written, category
+    rejected). The two writes themselves are separate transactions, not
+    one atomic unit.
+    """
+    db = get_db()
+
+    try:
+        if task_id:
+            task = db.get_task(task_id)
+        elif project_name:
+            task = db.get_task_by_name(project_name)
+        else:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Provide task_id or project_name",
+            }
+
+        if not task:
+            raise TaskNotFoundError(task_id or project_name)
+
+        if jira_key is None and category is None:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Provide at least one of jira_key or category",
+            }
+
+        # 'none' sentinel (any case) clears the field. An empty string is
+        # rejected rather than stored ("" would persist as a falsy ghost
+        # value) or treated as clear (too easy to send by accident).
+        if jira_key is not None and jira_key.strip() == "":
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "jira_key cannot be empty; pass 'none' to clear it",
+            }
+        new_jira = (
+            None if jira_key is not None and jira_key.lower() == "none" else jira_key
+        )
+        new_category = (
+            None if category is not None and category.lower() == "none" else category
+        )
+
+        if new_category is not None and new_category not in CATEGORIES:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+            }
+
+        updated = []
+        if jira_key is not None:
+            task = db.set_task_jira(task.id, new_jira)
+            updated.append("jira_key")
+        if category is not None:
+            task = db.set_task_category(task.id, new_category)
+            updated.append("category")
+
+        return UpdateTaskResult(
+            task_id=task.id,
+            task_name=task.name,
+            jira_key=task.jira_key,
+            category=task.category,
+            updated=updated,
+        ).model_dump()
+
+    except MissionCacheError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error updating task")
         return {"error": True, "message": str(e)}
 
 

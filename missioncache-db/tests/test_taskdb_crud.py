@@ -129,6 +129,29 @@ class TestSetTaskCategory:
             db.set_task_category(99999, "docs")
 
 
+# ── set_task_jira ─────────────────────────────────────────────────────────
+
+
+class TestSetTaskJira:
+    def test_set_jira(self, db):
+        """set_task_jira stores the key and get_task round-trips it."""
+        task = db.create_task("jira-me")
+        updated = db.set_task_jira(task.id, "PROJ-12345")
+        assert updated.jira_key == "PROJ-12345"
+        assert db.get_task(task.id).jira_key == "PROJ-12345"
+
+    def test_clear_jira(self, db):
+        """Passing None clears the JIRA key."""
+        task = db.create_task("clear-jira", jira_key="PROJ-1")
+        updated = db.set_task_jira(task.id, None)
+        assert updated.jira_key is None
+
+    def test_set_jira_missing_task_raises(self, db):
+        """set_task_jira on a non-existent task id raises."""
+        with pytest.raises(ValueError, match="not found"):
+            db.set_task_jira(99999, "PROJ-1")
+
+
 # ── category column migration ─────────────────────────────────────────────
 
 

@@ -126,6 +126,20 @@ class ReopenTaskResult(BaseModel):
     new_status: str = "active"
 
 
+class UpdateTaskResult(BaseModel):
+    """Result of updating a task's JIRA key and/or category.
+
+    ``jira_key`` and ``category`` echo the stored values after the
+    update; ``updated`` names the fields this call actually changed.
+    """
+
+    task_id: int
+    task_name: str
+    jira_key: str | None = None
+    category: str | None = None
+    updated: list[str]
+
+
 class RenameTaskResult(BaseModel):
     """Result of renaming a project / task.
 

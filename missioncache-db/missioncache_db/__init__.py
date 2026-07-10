@@ -1507,6 +1507,30 @@ class TaskDB:
             conn.commit()
             return self.get_task(task_id)
 
+    def set_task_jira(self, task_id: int, jira_key: Optional[str]) -> Task:
+        """Set (or clear) a task's JIRA key.
+
+        Args:
+            task_id: The task ID
+            jira_key: The JIRA ticket ID (e.g. "PROJ-12345"), or None to clear
+
+        Returns:
+            The updated Task object
+
+        Raises:
+            ValueError: If the task does not exist
+        """
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "UPDATE tasks SET jira_key = ?, "
+                "updated_at = datetime('now', 'localtime') WHERE id = ?",
+                (jira_key, task_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Task {task_id} not found")
+            conn.commit()
+            return self.get_task(task_id)
+
     def add_task_update(self, task_id: int, note: str) -> int:
         """Add a timestamped update to a task.
 
