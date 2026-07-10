@@ -697,16 +697,22 @@ class AnalyticsDB:
             sqlite_conn.row_factory = sqlite3.Row
 
             # Sync repositories first (tasks reference repos via foreign key)
-            repos_synced = self._sync_repos_from_sqlite(sqlite_conn)
+            repos_synced, repos_failed = self._sync_repos_from_sqlite(sqlite_conn)
             result["repos_synced"] = repos_synced
+            if repos_failed:
+                result["repos_sync_failed"] = repos_failed
 
             # Sync tasks (after repos are available)
-            tasks_synced = self._sync_tasks_from_sqlite(sqlite_conn)
+            tasks_synced, tasks_failed = self._sync_tasks_from_sqlite(sqlite_conn)
             result["tasks_synced"] = tasks_synced
+            if tasks_failed:
+                result["tasks_sync_failed"] = tasks_failed
 
             # Sync sessions (incremental - only new sessions)
-            sessions_synced = self._sync_sessions_from_sqlite(sqlite_conn)
+            sessions_synced, sessions_failed = self._sync_sessions_from_sqlite(sqlite_conn)
             result["sessions_synced"] = sessions_synced
+            if sessions_failed:
+                result["sessions_sync_failed"] = sessions_failed
 
             # Get stats
             today = datetime.now().strftime("%Y-%m-%d")
@@ -729,13 +735,20 @@ class AnalyticsDB:
 
         return result
 
-    def _sync_tasks_from_sqlite(self, sqlite_conn) -> int:
-        """Sync tasks from SQLite to DuckDB."""
+    def _sync_tasks_from_sqlite(self, sqlite_conn) -> tuple[int, int]:
+        """Sync tasks from SQLite to DuckDB. Returns (synced, failed).
+
+        Failures MUST be counted, not just printed: a per-row constraint
+        error here (e.g. the FK-bearing legacy schema rejecting upserts of
+        referenced parent rows) silently froze every task update out of
+        the dashboard's read path until the count was surfaced.
+        """
         rows = sqlite_conn.execute("SELECT * FROM tasks").fetchall()
         if not rows:
-            return 0
+            return 0, 0
 
         synced = 0
+        failed = 0
         with self.connection() as conn:
             for row in rows:
                 try:
@@ -791,19 +804,21 @@ class AnalyticsDB:
                     )
                     synced += 1
                 except Exception as e:
+                    failed += 1
                     print(
                         f"[SYNC WARNING] Failed to sync task {task_id} ({row_dict.get('name')}): {e}"
                     )
 
-        return synced
+        return synced, failed
 
-    def _sync_repos_from_sqlite(self, sqlite_conn) -> int:
-        """Sync repositories from SQLite to DuckDB."""
+    def _sync_repos_from_sqlite(self, sqlite_conn) -> tuple[int, int]:
+        """Sync repositories from SQLite to DuckDB. Returns (synced, failed)."""
         rows = sqlite_conn.execute("SELECT * FROM repositories").fetchall()
         if not rows:
-            return 0
+            return 0, 0
 
         synced = 0
+        failed = 0
         with self.connection() as conn:
             for row in rows:
                 try:
@@ -841,14 +856,20 @@ class AnalyticsDB:
                             ),
                         )
                     synced += 1
-                except Exception:
-                    # Skip repos that fail due to constraints
-                    pass
+                except Exception as e:
+                    failed += 1
+                    print(f"[SYNC WARNING] Failed to sync repo {row_dict.get('id')}: {e}")
 
-        return synced
+        return synced, failed
 
-    def _sync_sessions_from_sqlite(self, sqlite_conn) -> int:
-        """Sync sessions from SQLite to DuckDB (incremental)."""
+    def _sync_sessions_from_sqlite(self, sqlite_conn) -> tuple[int, int]:
+        """Sync sessions from SQLite to DuckDB (incremental). Returns (synced, failed).
+
+        Failed sessions are counted, not silently skipped: on a legacy
+        FK-bearing DuckDB schema, a task row that fails to upsert makes
+        every session referencing it fail its insert - dropping time data
+        with no signal unless the count is surfaced.
+        """
 
         def parse_timestamp(ts_str: str | None) -> datetime | None:
             """Parse SQLite timestamp string to datetime."""
@@ -878,9 +899,10 @@ class AnalyticsDB:
         ).fetchall()
 
         if not rows:
-            return 0
+            return 0, 0
 
         synced = 0
+        failed = 0
         with self.connection() as conn:
             for row in rows:
                 try:
@@ -903,11 +925,11 @@ class AnalyticsDB:
                         ),
                     )
                     synced += 1
-                except Exception:
-                    # Skip sessions that fail due to constraints
-                    pass
+                except Exception as e:
+                    failed += 1
+                    print(f"[SYNC WARNING] Failed to sync session {row_dict.get('id')}: {e}")
 
-        return synced
+        return synced, failed
 
     def get_sqlite_stats(self) -> dict:
         """Get current session/heartbeat stats directly from SQLite."""

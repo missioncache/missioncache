@@ -114,6 +114,107 @@ class TestCategorySync:
         assert task.to_dict()["category"] == "perf"
 
 
+class TestSyncFailureCounting:
+    """Per-row sync failures must be COUNTED into the result dict, not just
+    printed - a swallowed constraint error froze every task update out of
+    the dashboard read path with the whole suite green. These run the REAL
+    sync against a DuckDB whose table carries a CHECK constraint so one
+    row genuinely fails."""
+
+    # Mirrors analytics_db's tasks DDL minus FKs, plus a poison CHECK. The
+    # column list must match the sync INSERT exactly.
+    _TASKS_DDL_WITH_POISON_CHECK = """
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY,
+            repo_id INTEGER,
+            name VARCHAR NOT NULL CHECK (name <> 'poison-task'),
+            full_path VARCHAR NOT NULL,
+            parent_id INTEGER,
+            status VARCHAR,
+            type VARCHAR,
+            tags JSON,
+            priority INTEGER,
+            jira_key VARCHAR,
+            branch VARCHAR,
+            pr_url VARCHAR,
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            archived_at TIMESTAMP,
+            last_worked_on TIMESTAMP,
+            category VARCHAR
+        )
+    """
+
+    def test_clean_sync_reports_no_failure_keys(self, synced_pair):
+        """Happy path: counts synced, no *_sync_failed keys at all."""
+        source, target = synced_pair
+        source.create_task("clean-one")
+        source.create_task("clean-two")
+
+        result = target.sync_from_sqlite()
+
+        assert result.get("error") is None
+        assert result["tasks_synced"] == 2
+        assert "tasks_sync_failed" not in result
+        assert "sessions_sync_failed" not in result
+        assert "repos_sync_failed" not in result
+
+    def test_failed_task_rows_are_counted_in_result(self, synced_pair):
+        """One genuinely failing row -> tasks_sync_failed=1, others sync.
+
+        Locks the counting semantics end-to-end: deleting the failed
+        counter or the result-dict surfacing line turns this red."""
+        source, target = synced_pair
+        source.create_task("poison-task")
+        source.create_task("healthy-task")
+        with target.connection() as conn:
+            conn.execute("DROP TABLE tasks")
+            conn.execute(self._TASKS_DDL_WITH_POISON_CHECK)
+
+        result = target.sync_from_sqlite()
+
+        assert result.get("error") is None
+        assert result["tasks_synced"] == 1
+        assert result["tasks_sync_failed"] == 1
+        assert _duck_category(target, "healthy-task") is None  # row arrived
+
+    def test_failed_session_rows_are_counted_in_result(self, synced_pair):
+        """Sessions share the counting contract: a dropped session means
+        missing time data, which is exactly the silent loss the counting
+        exists to surface."""
+        source, target = synced_pair
+        task = source.create_task("session-owner")
+        with source.connection() as conn:
+            for hb_count in (99, 1):  # 99 trips the poison CHECK below
+                conn.execute(
+                    "INSERT INTO sessions (task_id, start_time, duration_seconds, heartbeat_count) "
+                    "VALUES (?, datetime('now'), 60, ?)",
+                    (task.id, hb_count),
+                )
+            conn.commit()
+        with target.connection() as conn:
+            conn.execute("DROP TABLE sessions")
+            conn.execute("""
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY,
+                    task_id INTEGER NOT NULL,
+                    session_id VARCHAR,
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP,
+                    duration_seconds INTEGER NOT NULL DEFAULT 0,
+                    heartbeat_count INTEGER NOT NULL DEFAULT 0
+                        CHECK (heartbeat_count <> 99)
+                )
+            """)
+
+        result = target.sync_from_sqlite()
+
+        assert result.get("error") is None
+        assert result["sessions_synced"] == 1
+        assert result["sessions_sync_failed"] == 1
+
+
 class TestMigrateScriptCategory:
     """migrate_to_duckdb.py is a SEPARATE implementation from analytics_db's
     sync (its own schema DDL + column list) and is the documented recovery
@@ -154,6 +255,64 @@ class TestMigrateScriptCategory:
         finally:
             sqlite_conn.close()
             duck_conn.close()
+
+    def test_run_migration_end_to_end(self, tmp_path, monkeypatch):
+        """Full run_migration against a TaskDB-initialized source.
+
+        Locks two recovery-path behaviors at once: (a) TaskDB never creates
+        the lazy feature tables (shadow_repos, shadow_commits,
+        non_git_activity), so the missing-table guard must let the migration
+        complete with them empty rather than crash; (b) the produced DuckDB
+        schema must carry ZERO foreign key constraints - DuckDB rejects
+        upserts of FK-referenced parent rows, which froze every task update
+        out of the read path on FK-bearing files.
+        """
+        import importlib.util
+        import sqlite3
+
+        import duckdb
+
+        script = Path(__file__).resolve().parents[1] / "migrate_to_duckdb.py"
+        spec = importlib.util.spec_from_file_location("migrate_e2e", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        sqlite_path = tmp_path / "tasks.db"
+        source = TaskDB(db_path=sqlite_path)
+        source.initialize()
+        source.create_task("survivor", category="infra")
+        source.create_task("plain")
+        source.close()
+
+        # Precondition: the source genuinely lacks the feature tables.
+        conn = sqlite3.connect(str(sqlite_path))
+        present = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        conn.close()
+        assert not (present & mod.FEATURE_TABLES), "precondition: no feature tables"
+
+        duckdb_path = tmp_path / "tasks.duckdb"
+        monkeypatch.setattr(mod, "SQLITE_PATH", sqlite_path)
+        monkeypatch.setattr(mod, "DUCKDB_PATH", duckdb_path)
+        monkeypatch.setattr(mod, "BACKUP_PATH", tmp_path / "tasks.db.backup")
+
+        mod.run_migration(dry_run=False)  # must not raise
+
+        duck = duckdb.connect(str(duckdb_path), read_only=True)
+        try:
+            assert duck.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 2
+            assert duck.execute("SELECT COUNT(*) FROM shadow_repos").fetchone()[0] == 0
+            fk_count = duck.execute(
+                "SELECT COUNT(*) FROM duckdb_constraints() "
+                "WHERE constraint_type = 'FOREIGN KEY'"
+            ).fetchone()[0]
+            assert fk_count == 0, "migrate schema must stay FK-free"
+        finally:
+            duck.close()
 
 
 class TestTaxonomyFrontendSync:
