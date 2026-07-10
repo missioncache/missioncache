@@ -591,6 +591,7 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "parent": parent_name,
             "created_at": task.created_at,
             "origin_uuid": task.origin_uuid,
+            "category": task.category,
             "time_total_seconds": time_total,
         }
     else:
@@ -602,7 +603,8 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "name": name, "status": "active", "type": "coding",
             "tags": [], "priority": None, "jira_key": None, "branch": None,
             "pr_url": None, "full_path": full_path, "parent": None,
-            "created_at": None, "origin_uuid": None, "time_total_seconds": 0,
+            "created_at": None, "origin_uuid": None, "category": None,
+            "time_total_seconds": 0,
         }
 
     manifest = {
@@ -1651,6 +1653,17 @@ def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
         # direction holds too: if placement fails AFTER this commit, the
         # rollback below deletes/restores the row (pre_image is the restore
         # source for the update case). ---
+        # A bundle is untrusted input: an unknown category (hostile, corrupt,
+        # or from a newer taxonomy) degrades to NULL with a warning instead of
+        # failing the whole import.
+        incoming_category = project.get("category")
+        if incoming_category is not None and incoming_category not in missioncache_db.CATEGORIES:
+            report["warnings"].append(
+                f"bundle category {incoming_category!r} is not in the known "
+                f"taxonomy; importing as uncategorized"
+            )
+            incoming_category = None
+
         task = None
         pre_image = None
         if not dry_run:
@@ -1668,6 +1681,7 @@ def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
                 parent_id=parent_id,
                 created_at=project.get("created_at"),
                 origin_uuid=incoming_uuid,
+                category=incoming_category,
             )
             report["task_id"] = task.id
 

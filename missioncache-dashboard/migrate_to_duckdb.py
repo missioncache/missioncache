@@ -69,6 +69,7 @@ def create_duckdb_schema(conn: duckdb.DuckDBPyConnection) -> None:
             completed_at TIMESTAMP,
             archived_at TIMESTAMP,
             last_worked_on TIMESTAMP,
+            category VARCHAR,
             UNIQUE(repo_id, full_path)
         )
     """)
@@ -255,8 +256,9 @@ def migrate_tasks(
             """
             INSERT INTO tasks (id, repo_id, name, full_path, parent_id, status, type,
                               tags, priority, jira_key, branch, pr_url,
-                              created_at, updated_at, completed_at, archived_at, last_worked_on)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              created_at, updated_at, completed_at, archived_at, last_worked_on,
+                              category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 row["id"],
@@ -276,6 +278,7 @@ def migrate_tasks(
                 parse_timestamp(row["completed_at"]),
                 parse_timestamp(row["archived_at"]),
                 parse_timestamp(row["last_worked_on"]),
+                row["category"] if "category" in row.keys() else None,
             ),
         )
 

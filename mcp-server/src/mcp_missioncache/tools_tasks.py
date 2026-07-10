@@ -7,6 +7,7 @@ from typing import Annotated
 from pydantic import Field
 
 from missioncache_db import (
+    CATEGORIES,
     AutoRunActiveError,
     FilesystemCollisionError,
     NameCollisionError,
@@ -392,6 +393,13 @@ async def create_task(
     jira_key: Annotated[
         str | None, Field(description="JIRA ticket ID (e.g., 'PROJ-12345')")
     ] = None,
+    category: Annotated[
+        str | None,
+        Field(
+            description="Project category, derived from the project "
+            "description at creation time. One of: " + ", ".join(CATEGORIES)
+        ),
+    ] = None,
     session_id: Annotated[
         str | None,
         Field(
@@ -428,6 +436,12 @@ async def create_task(
                 "code": "VALIDATION_ERROR",
                 "message": "type must be 'coding' or 'non-coding'",
             }
+        if category is not None and category not in CATEGORIES:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+            }
 
         repo_id = None
         missioncache_path = None
@@ -459,6 +473,7 @@ async def create_task(
             task_type=task_type,
             repo_id=repo_id,
             jira_key=jira_key,
+            category=category,
         )
 
         await _notify_dashboard_task_created()
@@ -475,6 +490,7 @@ async def create_task(
             task_id=task.id,
             task_name=task.name,
             task_type=task.task_type,
+            category=task.category,
             missioncache_path=missioncache_path,
         ).model_dump()
         result["session_bound"] = session_bound

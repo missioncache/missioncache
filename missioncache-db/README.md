@@ -31,6 +31,7 @@ db.record_heartbeat(task_id=task.id, directory="/path/to/repo")
 missioncache-db list-active
 missioncache-db heartbeat-auto
 missioncache-db task-time <task_id>
+missioncache-db set-category <task_id> <category|none>
 missioncache-db --help
 ```
 

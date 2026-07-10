@@ -79,18 +79,19 @@ def _committed_repo(path: Path, remote: str = SSH_REMOTE) -> Path:
 def _insert_task(db, *, name, full_path=None, repo_id=None, status="active",
                  task_type="coding", tags=None, priority=None, jira_key=None,
                  branch=None, pr_url=None, parent_id=None,
-                 created_at="2026-05-02T09:11:00", origin_uuid=None) -> int:
+                 created_at="2026-05-02T09:11:00", origin_uuid=None,
+                 category=None) -> int:
     # origin_uuid defaults to None so the repo-identity heuristic tests still
     # exercise the fallback path (a uuid on both sides would short-circuit it).
     full_path = full_path or f"active/{name}"
     with db.connection() as conn:
         cur = conn.execute(
             "INSERT INTO tasks (repo_id, name, full_path, parent_id, status, type, "
-            "tags, priority, jira_key, branch, pr_url, created_at, origin_uuid) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "tags, priority, jira_key, branch, pr_url, created_at, origin_uuid, "
+            "category) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (repo_id, name, full_path, parent_id, status, task_type,
              json.dumps(tags or []), priority, jira_key, branch, pr_url,
-             created_at, origin_uuid),
+             created_at, origin_uuid, category),
         )
         conn.commit()
         return cur.lastrowid
@@ -1116,6 +1117,65 @@ class TestImportRoundTrip:
         repo_entries = [e for e in report["resolved"] if e["kind"] == "repo"]
         assert repo_entries and repo_entries[0]["bucket"] == "resolved"
         assert row.repo_id is not None
+
+
+# ============ category portability ============
+
+
+class TestCategoryPortability:
+    """category rides the bundle like origin_uuid does (the lockstep invariant
+    on _IMPORT_TASK_UPDATE_SQL)."""
+
+    def test_export_manifest_carries_category(self, mc, tmp_path):
+        name = "categorized-export"
+        _seed_files(mc, name, _plain_md(name))
+        _insert_task(mc.db, name=name, category="ui")
+        bundle = _export(mc, name, out=str(tmp_path / "bundle"))["bundle_path"]
+        man = json.loads((Path(bundle) / "missioncache.json").read_text())
+        assert man["project"]["category"] == "ui"
+
+    def test_category_round_trips_on_import(self, mc, mc_b, tmp_path, monkeypatch):
+        name = "categorized-trip"
+        bundle = _build_bundle(mc, name, tmp_path / "bundle", category="infra")
+        report = _import(mc_b, monkeypatch, bundle)
+        assert report["exit_code"] == 0
+        assert mc_b.db.get_task_by_name(name).category == "infra"
+
+    def test_unknown_bundle_category_imports_as_null_with_warning(
+        self, mc, mc_b, tmp_path, monkeypatch
+    ):
+        """A bundle is untrusted input: an out-of-taxonomy category degrades
+        to uncategorized instead of failing the import or storing garbage."""
+        name = "hostile-category"
+        bundle = _build_bundle(mc, name, tmp_path / "bundle")
+        man_path = Path(bundle) / "missioncache.json"
+        man = json.loads(man_path.read_text())
+        man["project"]["category"] = "<img src=x onerror=alert(1)>"
+        man_path.write_text(json.dumps(man))
+
+        report = _import(mc_b, monkeypatch, bundle)
+
+        assert report["exit_code"] == 0
+        assert mc_b.db.get_task_by_name(name).category is None
+        assert any("taxonomy" in w for w in report["warnings"])
+
+    def test_null_bundle_category_preserves_local_on_reimport(
+        self, mc, mc_b, tmp_path, monkeypatch
+    ):
+        """An incoming NULL is ambiguous (pre-category bundle), so a re-import
+        must not clear a category set locally on the target machine."""
+        name = "locally-categorized"
+        bundle = _build_bundle(mc, name, tmp_path / "bundle")  # no category
+        report = _import(mc_b, monkeypatch, bundle)
+        assert report["exit_code"] == 0
+        local = mc_b.db.get_task_by_name(name)
+        assert local.category is None
+        mc_b.db.set_task_category(local.id, "docs")
+
+        report = _import(mc_b, monkeypatch, bundle, force=True)
+
+        assert report["exit_code"] == 0
+        assert mc_b.db.get_task_by_name(name).category == "docs"
 
 
 # ============ case 11: dry-run writes nothing ============

@@ -79,7 +79,7 @@ These are the tools you reach for when you are working with tasks as first-class
 
 **Returns:** A `ListTasksResult` with `tasks` (list of `TaskSummary`), `total_count`, `filter_applied` (human-readable filter description), and optional `other_tasks` (present only in prioritize-by-repo mode).
 
-Each `TaskSummary` has: `id`, `name`, `status`, `task_type`, `repo_name`, `repo_path`, `jira_key`, `tags`, `time_total_seconds`, `time_formatted`, `last_worked_on`, `last_worked_ago`, `has_missioncache_files`. The time fields come from a single batch query (`db.get_batch_task_times`) rather than N individual lookups, which is the reason this tool is faster than calling `get_task` in a loop.
+Each `TaskSummary` has: `id`, `name`, `status`, `task_type`, `repo_name`, `repo_path`, `jira_key`, `category`, `tags`, `time_total_seconds`, `time_formatted`, `last_worked_on`, `last_worked_ago`, `has_missioncache_files`. The time fields come from a single batch query (`db.get_batch_task_times`) rather than N individual lookups, which is the reason this tool is faster than calling `get_task` in a loop.
 
 The `last_worked_ago` field is computed via `db.get_effective_last_updated(task)`, which takes the max of the DB's `updated_at` and the mtime of the project's `-tasks.md` file, so editing the task file from outside MissionCache still advances the "last worked" timestamp.
 
@@ -132,8 +132,9 @@ The resolution order is documented in `find_task_for_cwd`: per-session file (`pr
 - `task_type: str = "coding"` - Must be `"coding"` or `"non-coding"`. Validated inline.
 - `repo_path: str | None = None` - Required for coding tasks, ignored for non-coding. Auto-registers the repo via `db.add_repo()` if it is not already tracked.
 - `jira_key: str | None = None` - Optional JIRA ticket ID for display.
+- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values (bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). Validated inline; invalid values return `VALIDATION_ERROR`.
 
-**Returns:** `CreateTaskResult` with `task_id`, `task_name`, `task_type`, and `missioncache_path` (the directory created on disk, or `None` for non-coding tasks).
+**Returns:** `CreateTaskResult` with `task_id`, `task_name`, `task_type`, `category`, and `missioncache_path` (the directory created on disk, or `None` for non-coding tasks).
 
 Non-coding tasks do not get a directory - they exist only as DB rows and use `add_task_update` for progress notes. This is the split between "projects with files you edit" and "projects you log notes against" (meetings, reviews, investigations).
 
@@ -195,10 +196,11 @@ These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~
 - `description: str = "TBD"` - Short description, embedded into the template files. Max 12 words is the convention but not enforced.
 - `jira_key: str | None = None` - JIRA ticket ID.
 - `branch: str | None = None` - Git branch.
+- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values. Derived from the project description at creation time by `/missioncache:new`. Validated before any file is written; set on the task row after the registration scan.
 - `tasks: list[str] | None = None` - Initial task list to seed `<project>-tasks.md` with. Each string becomes a `- [ ]` line.
 - `plan: dict | None = None` - Plan content dict with keys like `summary`, `goals`, `approach`. Structure is flexible - the template renderer picks up what it finds.
 
-**Returns:** `{"success": True, "task_id": int, "task_name": str, "files": MissionCacheFiles}` where `MissionCacheFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`.
+**Returns:** `{"success": True, "task_id": int, "task_name": str, "category": str | None, "files": MissionCacheFiles}` where `MissionCacheFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`.
 
 Internally this is a four-step dance:
 

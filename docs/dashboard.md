@@ -33,6 +33,10 @@ The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GE
 
 The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
+#### Project category icons
+
+Each project row carries a colored SVG icon for its category (bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). `getTaskCategory()` in `index.html` uses the `category` value stored on the task row first - assigned at creation time by `/missioncache:new`, which derives it from the project description. Only when the stored value is NULL (projects created before the feature) does it fall back to a name-keyword heuristic, which matches on word boundaries so an embedded substring (e.g. the "cache" inside "missioncache") cannot mislabel a project. The icon and color maps (`TASK_ICONS` / `TASK_ICON_COLORS`) must carry an entry per `CATEGORIES` value; unknown values render with the default coding icon.
+
 ### Activity view
 
 The Activity view is the richest part of the dashboard and the most complicated, because it merges two independent sources of time data:

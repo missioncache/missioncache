@@ -150,12 +150,33 @@ Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is
 
 Now create the MissionCache files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
+**Derive the project category** from the description (and the conversation context), and pass it as `category`. Pick the single best fit from this taxonomy - judge by what the project DOES, not by keywords in its name:
+
+| Category | Use for |
+|----------|---------|
+| `bug` | Fixing a defect, crash, or regression |
+| `feature` | Building new user-facing functionality |
+| `refactor` | Restructuring code without behavior change |
+| `test` | Test coverage, test infrastructure, QA suites |
+| `docs` | Documentation, guides, READMEs |
+| `infra` | CI/CD, deployment, K8s, build systems, tooling setup |
+| `ui` | Frontend, dashboards, design, styling |
+| `api` | Backend endpoints, services, MCP servers, integrations |
+| `database` | Schemas, migrations, queries, data layers |
+| `security` | Auth, permissions, credential handling, hardening |
+| `perf` | Speed, memory, caching, optimization work |
+| `coding` | General coding work that fits none of the above |
+| `noncoding` | Non-coding projects (planning, research, writing) |
+
+If genuinely ambiguous between two, prefer the more specific one (e.g. a dashboard feature is `ui`, not `feature`). The coding branch never picks `noncoding`; the non-coding branch never picks `coding`. Echo the chosen category in the Step 6 confirmation so the user can correct it.
+
 **Flat tasks (simple):**
 ```
 mcp__plugin_missioncache_pm__create_missioncache_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
+  category="<derived category>",
   session_id="<SESSION_ID from bash above; omit if empty>",
   jira_key="<optional JIRA ticket>",
   tasks=["subtask 1", "subtask 2", ...],
@@ -169,6 +190,7 @@ mcp__plugin_missioncache_pm__create_missioncache_files(
   repo_path="<git repository root from step 3>",
   project_name="<kebab-case-name>",
   description="<short description>",
+  category="<derived category>",
   session_id="<SESSION_ID from bash above; omit if empty>",
   tasks=[
     {"title": "Authentication", "subtasks": ["Create user model", "Add login endpoint"]},
@@ -212,6 +234,7 @@ If the probe emits a line, include it as a **Dashboard** entry in the confirmati
 ## Plan for: my-feature
 
 **Description:** Short description here
+**Category:** ui (say "change category" to correct)
 **JIRA:** PROJ-12345 (if provided)
 **Research:** Quick/Deep/Skipped
 
@@ -254,11 +277,12 @@ Non-coding projects don't need prompts:
    echo "$SESSION_ID"
    ```
 
-3. Create project, passing `session_id` so the statusline binds atomically:
+3. Create project, passing `session_id` so the statusline binds atomically. Non-coding projects default to `category="noncoding"` unless the description clearly fits another taxonomy value (e.g. a docs-writing project is `docs`):
    ```
    mcp__plugin_missioncache_pm__create_task(
      name="<project-name>",
      task_type="non-coding",
+     category="noncoding",
      session_id="<SESSION_ID from bash above; omit if empty>",
      jira_key="<optional>"
    )

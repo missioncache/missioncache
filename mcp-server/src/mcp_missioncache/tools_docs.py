@@ -6,6 +6,8 @@ from typing import Annotated
 
 from pydantic import Field
 
+from missioncache_db import CATEGORIES
+
 from . import active_task, project_files
 from .app import mcp
 from .config import settings
@@ -31,6 +33,13 @@ async def create_missioncache_files(
     ] = "TBD",
     jira_key: Annotated[str | None, Field(description="JIRA ticket ID")] = None,
     branch: Annotated[str | None, Field(description="Git branch name")] = None,
+    category: Annotated[
+        str | None,
+        Field(
+            description="Project category, derived from the project "
+            "description at creation time. One of: " + ", ".join(CATEGORIES)
+        ),
+    ] = None,
     tasks: Annotated[
         list[str] | None, Field(description="List of task descriptions")
     ] = None,
@@ -92,6 +101,13 @@ async def create_missioncache_files(
     db = get_db()
 
     try:
+        if category is not None and category not in CATEGORIES:
+            return {
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+            }
+
         # Validate the raw input first; otherwise an empty string passed
         # with resolve_git_root=True would silently resolve to the MCP
         # server's cwd via Path("").resolve() and bypass the empty-string
@@ -129,6 +145,24 @@ async def create_missioncache_files(
         if task and task.repo_id != repo_id:
             db.update_task_repo(task.id, repo_id)
 
+        # This creation path registers the task via scan_all_repos (not
+        # create_task), so the category is set on the scanned row after
+        # the fact. By this point files and the DB row already exist, so a
+        # failure here must NOT fail the whole call - the client would retry
+        # into ALREADY_EXISTS. Degrade to uncategorized (recoverable via
+        # set-category) and log.
+        if task and category is not None:
+            try:
+                task = db.set_task_category(task.id, category)
+            except Exception:
+                logger.warning(
+                    "Project %s created but category %r could not be set; "
+                    "it is uncategorized until set via set-category",
+                    project_name,
+                    category,
+                    exc_info=True,
+                )
+
         await _notify_dashboard_task_created()
 
         # Bind the current session to the new project so the statusline
@@ -143,6 +177,9 @@ async def create_missioncache_files(
             "success": True,
             "task_id": task.id if task else None,
             "task_name": project_name,
+            # Echo what was actually STORED: None when the scan found no row
+            # (nothing was persisted) or when the category set degraded.
+            "category": task.category if task else None,
             "files": files.model_dump(),
             "repo_path": registered_repo_path,
             "session_bound": session_bound,
