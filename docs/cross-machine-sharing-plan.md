@@ -201,7 +201,7 @@ missioncache-db config seed [--dry-run]                      # pre-fill from loc
 Strict order; only steps 1-2 and 7 hard-fail.
 
 1. **Validate bundle.** Manifest present + parseable; `manifest_version == 1`; `project.name` passes `validate_task_name()` (`:198`, `^[a-z0-9][a-z0-9-]*$`); `status`/`type` match the CHECK enums; `files/<name>/` exists. Fail → exit 1, nothing written.
-2. **Classify collision** (below). Different-project name collision → exit 1.
+2. **Classify collision** (below). Different-project name collision → exit 1. Identity is the stable `origin_uuid` when both the incoming bundle and the existing row carry one (different uuids → different project, aborted even with `--force`); when either side lacks a uuid (old bundle, or a pre-migration row left un-backfilled), it falls back to the repo-identity heuristic. Residual: a bundle that omits `origin_uuid` still falls to the heuristic, so a null-repo victim can be force-overwritten by a same-named uuid-less bundle — bounded to pre-feature bundles + `--force`, and recoverable via the swap backup.
 3. **Place files** → `MISSIONCACHE_ROOT / full_path`, crash-safe (temp dir + `os.replace`, mirroring `lib/config.py:80-91`). CRLF→LF normalize `*.md`/`*.json` (WSL, §9).
 4. **Resolve primary repo** (§6.1) → `repo_id` or NULL + report entry.
 5. **Resolve vaults** (§6.2) → report entries.
@@ -213,6 +213,8 @@ Strict order; only steps 1-2 and 7 hard-fail.
 11. **Emit report + exit.**
 
 `--dry-run` runs 1-9 with writes suppressed, then 11.
+
+> **Implementation note (shipped ordering).** The DB upsert (step 7) runs BEFORE file placement (step 3), not after. Reason: a `UNIQUE(repo_id, full_path)` conflict must abort with the filesystem untouched, so the row is written first; if placement then fails, `rollback_imported_task` deletes the just-created row (or restores the pre-image on an update). This preserves the "exit 1 = nothing committed" invariant in both directions, which the literal 3-then-7 order does not (a step-7 conflict after step-3 placement would strand placed files). See `TestImportPlacementFailureRollback`.
 
 ### 3-bucket alignment report
 
