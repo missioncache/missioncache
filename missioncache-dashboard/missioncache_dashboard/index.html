@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MissionCache Dashboard</title>
     <link rel="icon" type="image/png" href="/static/logo_icon.png">
-    <script>(function(){var t=localStorage.getItem('missioncache-theme')||'dark';if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
+    <script>(function(){var p=localStorage.getItem('missioncache-theme')||'auto';var t=p==='auto'?(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):p;document.documentElement.setAttribute('data-theme-pref',p);if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -471,10 +471,22 @@
         /* Dark mode: show sun icon (switch to light) */
         .theme-icon-sun { display: block; }
         .theme-icon-moon { display: none; }
+        .theme-icon-auto { display: none; }
 
         /* Light mode: show moon icon (switch to dark) */
         [data-theme="light"] .theme-icon-sun { display: none; }
         [data-theme="light"] .theme-icon-moon { display: block; }
+
+        /* Auto mode: show the auto (half-circle) icon regardless of resolved theme */
+        [data-theme-pref="auto"] .theme-icon-sun,
+        [data-theme-pref="auto"] .theme-icon-moon { display: none; }
+        [data-theme-pref="auto"] .theme-icon-auto { display: block; }
+
+        /* Sortable table headers (Active Projects) */
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { color: var(--text-primary); }
+        th.sortable.sorted-asc::after { content: ' \25B2'; font-size: 9px; opacity: 0.7; }
+        th.sortable.sorted-desc::after { content: ' \25BC'; font-size: 9px; opacity: 0.7; }
 
         .main-content {
             flex: 1;
@@ -4545,6 +4557,10 @@
                     <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                     </svg>
+                    <svg class="theme-icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="9"/>
+                        <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>
+                    </svg>
                 </button>
             </div>
         </nav>
@@ -4577,11 +4593,11 @@
                             <table>
                                 <thead>
                                     <tr>
-                                        <th class="col-task">Project</th>
+                                        <th class="col-task sortable" data-sort="name" onclick="setProjectsSort('name')">Project</th>
                                         <th class="col-description">Description</th>
-                                        <th class="col-progress">Progress</th>
-                                        <th class="col-time">Time</th>
-                                        <th class="col-updated">Updated</th>
+                                        <th class="col-progress sortable" data-sort="progress" onclick="setProjectsSort('progress')">Progress</th>
+                                        <th class="col-time sortable" data-sort="time" onclick="setProjectsSort('time')">Time</th>
+                                        <th class="col-updated sortable" data-sort="updated" onclick="setProjectsSort('updated')">Updated</th>
                                     </tr>
                                 </thead>
                                 <tbody id="activeTasksBody"></tbody>
@@ -6213,9 +6229,59 @@
             return `${minutes}m`;
         }
 
+        // Active Projects sort state (persisted). Default mirrors the server
+        // order: most recently touched first, creation counts as a touch.
+        let activeTasksCache = [];
+
+        function getProjectsSort() {
+            try {
+                const s = JSON.parse(localStorage.getItem('missioncache-projects-sort'));
+                if (s && s.key) return s;
+            } catch (e) { /* corrupt value: fall through to default */ }
+            return { key: 'updated', dir: 'desc' };
+        }
+
+        function setProjectsSort(key) {
+            const cur = getProjectsSort();
+            const dir = cur.key === key
+                ? (cur.dir === 'desc' ? 'asc' : 'desc')
+                : (key === 'name' ? 'asc' : 'desc');
+            localStorage.setItem('missioncache-projects-sort', JSON.stringify({ key, dir }));
+            renderActiveTasks(activeTasksCache);
+        }
+
+        function sortProjects(tasks) {
+            const { key, dir } = getProjectsSort();
+            const val = t => {
+                switch (key) {
+                    case 'name': return (t.name || '').toLowerCase();
+                    case 'progress': return t.completion_pct || 0;
+                    case 'time': return t.time_spent_seconds || 0;
+                    default: return t.last_worked_on || t.created_at || '';
+                }
+            };
+            const mul = dir === 'asc' ? 1 : -1;
+            return tasks.slice().sort((a, b) => {
+                const av = val(a), bv = val(b);
+                return av < bv ? -mul : av > bv ? mul : 0;
+            });
+        }
+
+        function updateProjectsSortIndicators() {
+            const { key, dir } = getProjectsSort();
+            document.querySelectorAll('#activeTasksCard th.sortable').forEach(th => {
+                th.classList.toggle('sorted-asc', th.dataset.sort === key && dir === 'asc');
+                th.classList.toggle('sorted-desc', th.dataset.sort === key && dir === 'desc');
+            });
+        }
+
         function renderActiveTasks(tasks) {
             const tbody = document.getElementById('activeTasksBody');
             if (!tbody) return;
+
+            activeTasksCache = tasks;
+            updateProjectsSortIndicators();
+            tasks = sortProjects(tasks);
 
             if (tasks.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No active tasks</td></tr>`;
@@ -7559,10 +7625,18 @@
         // Theme Toggle
         // =============================================================================
         function getTheme() {
-            return localStorage.getItem('missioncache-theme') || 'dark';
+            return localStorage.getItem('missioncache-theme') || 'auto';
         }
 
-        function applyTheme(theme) {
+        function resolveTheme(pref) {
+            if (pref !== 'auto') return pref;
+            return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light' : 'dark';
+        }
+
+        function applyTheme(pref) {
+            const theme = resolveTheme(pref);
+            document.documentElement.setAttribute('data-theme-pref', pref);
             if (theme === 'dark') {
                 document.documentElement.removeAttribute('data-theme');
             } else {
@@ -7574,10 +7648,13 @@
                     ? '/static/missioncache_logo_black.png'
                     : '/static/missioncache_logo_white.png';
             }
+            const btn = document.getElementById('themeToggle');
+            if (btn) btn.title = 'Theme: ' + pref;
         }
 
         function toggleTheme() {
-            const next = getTheme() === 'dark' ? 'light' : 'dark';
+            const order = ['auto', 'light', 'dark'];
+            const next = order[(order.indexOf(getTheme()) + 1) % order.length];
             localStorage.setItem('missioncache-theme', next);
             applyTheme(next);
         }
@@ -7585,6 +7662,13 @@
         function init() {
             // Apply theme
             applyTheme(getTheme());
+
+            // In auto mode, follow live OS appearance changes
+            if (window.matchMedia) {
+                window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+                    if (getTheme() === 'auto') applyTheme('auto');
+                });
+            }
 
             initNavigation();
             // Initial data load is handled by initNavigation() -> handleHashChange() -> switchView()
