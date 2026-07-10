@@ -242,14 +242,20 @@ def _build_snapshot_body(user_prompts, assistant_replies):
 # ── context.md transform ─────────────────────────────────────────────────
 
 
-def _make_transform(timestamp, snapshot_body):
+def _make_transform(timestamp, snapshot_body, context_health):
     """Build the in-memory transform fn for ``_atomic_update_text``.
 
     Updates **Last Updated** and prepends a ``### <timestamp>`` Pre-Compact
-    Snapshot subsection under the existing ``## Recent Changes`` heading
-    (newest-first, same shape as manual /missioncache:save entries). Tolerates the
-    legacy ``## Recent Changes (timestamp)`` heading by only matching the
-    prefix.
+    Snapshot subsection via ``context_health.prepend_recent_changes`` - the
+    one shared owner of the prepend shape (fence-aware, ^-anchored,
+    tolerates the legacy ``## Recent Changes (timestamp)`` heading). The
+    module is passed in by ``main()``, which lazy-imports it next to TaskDB
+    so this file keeps zero module-level missioncache_db imports.
+
+    Deliberately does NOT enforce the Recent Changes cap / journal rollover
+    (that lives in project_files.update_context_file) - the cap re-enforces
+    on the next update_context_file call. A compaction snapshot can
+    therefore leave the section temporarily over cap; that is expected.
     """
 
     def transform(content):
@@ -258,18 +264,9 @@ def _make_transform(timestamp, snapshot_body):
             f"**Last Updated:** {timestamp}",
             content,
         )
-        new_subsection = f"### {timestamp}\n\n{snapshot_body}\n"
-        match = re.search(r"(## Recent Changes[^\n]*\n)", content)
-        if match:
-            heading_end = match.end()
-            content = (
-                content[:heading_end]
-                + f"\n{new_subsection}\n"
-                + content[heading_end:]
-            )
-        else:
-            content = content + f"\n## Recent Changes\n\n{new_subsection}"
-        return content
+        return context_health.prepend_recent_changes(
+            content, timestamp, snapshot_body
+        )
 
     return transform
 
@@ -299,6 +296,7 @@ def main():
 
     try:
         from missioncache_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import context_health  # type: ignore[import-not-found]
     except ImportError:
         # No missioncache-db on sys.path - cannot resolve task. Bail quietly.
         return
@@ -344,7 +342,7 @@ def main():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     try:
         _atomic_update_text(
-            context_file, _make_transform(timestamp, snapshot_body)
+            context_file, _make_transform(timestamp, snapshot_body, context_health)
         )
     except Exception as e:
         _write_sticky_error(
