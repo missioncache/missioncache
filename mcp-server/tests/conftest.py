@@ -1,6 +1,42 @@
 """Shared fixtures for MissionCache MCP server tests."""
 
+import pathlib
+
 import pytest
+
+
+@pytest.fixture
+def isolated_orbit(tmp_path, monkeypatch):
+    """Bind MISSIONCACHE_ROOT, DB_PATH, and Path.home() to tmp.
+
+    Moved here from test_category.py when test_update_task.py became a
+    second consumer (test_session_binding pattern originally).
+    """
+    root_dir = tmp_path / ".missioncache"
+    root_dir.mkdir()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    db_path = tmp_path / "tasks.db"
+    hooks_db_path = fake_home / ".claude" / "hooks-state.db"
+
+    import missioncache_db
+
+    from mcp_missioncache import config, db as db_module, project_files
+
+    monkeypatch.setattr(config.settings, "root", root_dir)
+    monkeypatch.setattr(config.settings, "db_path", db_path)
+    monkeypatch.setattr(project_files, "settings", config.settings)
+    monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", root_dir)
+    monkeypatch.setattr(missioncache_db, "DB_PATH", db_path)
+    monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", hooks_db_path)
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_DB", tmp_path / "no-legacy-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_CLAUDE_ORBIT_ROOT", tmp_path / "no-legacy-orbit")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
+    monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setattr(db_module, "_db", None)
+
+    return tmp_path, root_dir, fake_home
 
 
 @pytest.fixture(autouse=True)

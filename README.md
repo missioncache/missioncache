@@ -405,7 +405,7 @@ Deep dives for each component live in `docs/`:
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
-- [**MCP Tools**](docs/mcp-tools.md) - all 30 tools by module, error handling, extension patterns
+- [**MCP Tools**](docs/mcp-tools.md) - all 35 tools by module, error handling, extension patterns
 - [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks

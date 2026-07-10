@@ -54,13 +54,15 @@ GET /api/stats/today       # Today's activity (tasks, LOC, sessions)
 GET /api/stats/day?date=   # Historical day stats
 GET /api/stats/history?days=N  # Aggregate with heatmap, trends
 GET /api/task/{id}/files   # Task MissionCache files (plan, context, tasks.md)
+POST /api/tasks/{id}/rename    # Rename project, body {"new_name": "..."}
+PUT /api/tasks/{id}/category   # Set/clear category, body {"category": "ui"|null}
 ```
 
 ### Utility APIs
 
 ```
 GET /api/all       # Combined initial load data
-GET /api/sync      # Trigger SQLite -> DuckDB sync
+POST /api/sync     # Trigger SQLite -> DuckDB sync (POST, not GET - GET returns 405)
 GET /health        # Health check
 ```
 

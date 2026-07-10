@@ -3312,6 +3312,7 @@
         .task-modal-title {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 12px;
         }
 
@@ -3359,6 +3360,32 @@
         .task-modal-rename-btn:hover {
             background: var(--bg-secondary);
             color: var(--text-primary);
+        }
+
+        .task-modal-category {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .task-modal-category .task-icon {
+            margin-right: 0;
+        }
+
+        .task-modal-category-select {
+            padding: 4px 6px;
+            font-size: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .task-modal-category-select:focus {
+            outline: none;
+            border-color: var(--accent-purple);
         }
 
         .task-modal-rename-form {
@@ -5104,6 +5131,13 @@
                 <div class="task-modal-title" id="taskModalTitleView">
                     <span id="taskModalName">Task Name</span>
                     <span class="task-modal-repo" id="taskModalRepo">repo</span>
+                    <span class="task-modal-category">
+                        <span class="task-icon" id="taskModalCategoryIcon" aria-hidden="true"></span>
+                        <select id="taskModalCategorySelect" class="task-modal-category-select"
+                                aria-label="Project category" title="Project category"
+                                onchange="submitCategoryChange()"></select>
+                        <span id="taskCategoryStatus" class="settings-save-status" aria-live="polite"></span>
+                    </span>
                     <button class="task-modal-rename-btn"
                             onclick="openRenameForm()"
                             title="Rename project">Rename</button>
@@ -6085,7 +6119,7 @@
                         </div>
                         <div class="task-meta">
                             ${task.repo_name ? `<span class="repo-badge">${task.repo_name}</span>` : ''}
-                            ${task.jira_key ? (task.jira_url ? `<a href="${task.jira_url}" class="jira-link" target="_blank" onclick="event.stopPropagation()">${task.jira_key}</a>` : `<span class="jira-link jira-link-plain">${task.jira_key}</span>`) : ''}
+                            ${task.jira_key ? (task.jira_url ? `<a href="${escapeHtml(task.jira_url)}" class="jira-link" target="_blank" onclick="event.stopPropagation()">${escapeHtml(task.jira_key)}</a>` : `<span class="jira-link jira-link-plain">${escapeHtml(task.jira_key)}</span>`) : ''}
                             ${task.tags && task.tags.length > 0 ? `
                                 <div class="task-tags">
                                     ${task.tags.slice(0, 2).map(t => `<span class="task-tag">${t}</span>`).join('')}
@@ -6535,8 +6569,8 @@
                 // plain span otherwise (prevents broken href="#" navigation).
                 const jiraLink = task.jira_key
                     ? (task.jira_url
-                        ? `<a href="${task.jira_url}" class="jira-link" target="_blank" title="${task.jira_key}">${task.jira_key}</a>`
-                        : `<span class="jira-link jira-link-plain" title="${task.jira_key}">${task.jira_key}</span>`)
+                        ? `<a href="${escapeHtml(task.jira_url)}" class="jira-link" target="_blank" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</a>`
+                        : `<span class="jira-link jira-link-plain" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</span>`)
                     : '';
 
                 // Build description (show full text)
@@ -7090,6 +7124,15 @@
             document.getElementById('taskModalName').textContent = taskName;
             document.getElementById('taskModalRepo').textContent = repoName || 'unknown';
 
+            // Category selector reflects the STORED value (null shows as
+            // "uncategorized" even when the row icon renders a heuristic
+            // guess) - the selector edits what the DB holds, not the guess.
+            const cachedTask = _findTaskInCaches(taskId);
+            _setModalCategoryUI(cachedTask ? cachedTask.category : null);
+            const catStatus = document.getElementById('taskCategoryStatus');
+            catStatus.textContent = '';
+            catStatus.className = 'settings-save-status';
+
             // Show modal with loading
             modal.classList.add('open');
             loading.classList.remove('hidden');
@@ -7104,6 +7147,14 @@
             try {
                 const response = await fetch(API_BASE + `/api/task/${taskId}/files`);
                 currentTaskFiles = await response.json();
+
+                // The response carries the fresh stored category (read from
+                // SQLite, the source of truth) - prefer it over the cache
+                // value set above, which is only as fresh as the last table
+                // load and misses MCP/CLI writes made since.
+                if ('category' in currentTaskFiles) {
+                    _setModalCategoryUI(currentTaskFiles.category);
+                }
 
                 if (currentTaskFiles.error && !currentTaskFiles.files) {
                     document.getElementById('taskModalMarkdown').innerHTML =
@@ -7259,6 +7310,100 @@
                 // Brief dwell so the user reads the confirmation, then
                 // collapse back to the title view.
                 setTimeout(closeRenameForm, 2500);
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'settings-save-status error';
+            }
+        }
+
+        // =============================================================================
+        // Edit Category (modal inline selector)
+        // =============================================================================
+        function _findTaskInCaches(taskId) {
+            for (const t of [...activeTasksCache, ...completedTasksCache]) {
+                if (t.id === taskId) return t;
+                for (const s of (t.subtasks || [])) {
+                    if (s.id === taskId) return s;
+                }
+            }
+            return null;
+        }
+
+        function _setModalCategoryUI(category) {
+            const sel = document.getElementById('taskModalCategorySelect');
+            const icon = document.getElementById('taskModalCategoryIcon');
+            const options = ['', ...Object.keys(TASK_ICONS)];
+            // A stored value outside the icon map (future custom category)
+            // still needs to be selectable, else opening + saving would wipe it.
+            if (category && !options.includes(category)) options.push(category);
+            sel.innerHTML = '';
+            for (const cat of options) {
+                const o = document.createElement('option');
+                o.value = cat;
+                o.textContent = cat || 'uncategorized';
+                sel.appendChild(o);
+            }
+            sel.value = category || '';
+            if (category) {
+                icon.innerHTML = TASK_ICONS[category] || TASK_ICONS.coding;
+                icon.style.color = TASK_ICON_COLORS[category] || TASK_ICON_COLORS.coding;
+                icon.style.display = '';
+            } else {
+                icon.style.display = 'none';
+            }
+        }
+
+        async function submitCategoryChange() {
+            if (!currentTaskId) return;
+            const sel = document.getElementById('taskModalCategorySelect');
+            const status = document.getElementById('taskCategoryStatus');
+            const value = sel.value || null;
+            status.textContent = 'Saving...';
+            status.className = 'settings-save-status';
+
+            try {
+                const res = await fetch(API_BASE + `/api/tasks/${currentTaskId}/category`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: value }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok || body.error) {
+                    // FastAPI HTTPException puts our payload under `.detail`.
+                    const detail = body.detail || body;
+                    status.textContent = (detail && detail.message) || `HTTP ${res.status}`;
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+
+                // A warning means the SQLite write landed but the DuckDB
+                // read-path refresh did not - the list view will lag. Say so
+                // in the status (and keep it visible) instead of a green
+                // "Saved" that the next full reload would contradict.
+                const warnings = body.warnings || [];
+                warnings.forEach(w => console.warn(w));
+                if (warnings.length > 0) {
+                    status.textContent = 'Saved (list refresh delayed)';
+                    status.className = 'settings-save-status';
+                } else {
+                    status.textContent = 'Saved';
+                    status.className = 'settings-save-status success';
+                    setTimeout(() => {
+                        if (status.textContent === 'Saved') {
+                            status.textContent = '';
+                            status.className = 'settings-save-status';
+                        }
+                    }, 2500);
+                }
+
+                // Reflect the canonical value locally: modal icon, cached
+                // row (so the table icon and filter chips update on the
+                // re-render below), no refetch needed.
+                _setModalCategoryUI(body.category);
+                const cached = _findTaskInCaches(currentTaskId);
+                if (cached) cached.category = body.category;
+                renderActiveTasks(activeTasksCache);
+                renderCompletedTasks(completedTasksCache);
             } catch (err) {
                 status.textContent = `Error: ${err.message}`;
                 status.className = 'settings-save-status error';
@@ -7678,9 +7823,17 @@
         }, { passive: false });
 
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            // Replace chain rather than the textContent/innerHTML trick: that
+            // trick leaves quotes intact, which is unsafe when the escaped
+            // value lands inside an HTML attribute (title="...", href="...").
+            // Escaping quotes is harmless in element-body context, so this is
+            // safe for every existing caller.
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function renderMarkdown(content) {

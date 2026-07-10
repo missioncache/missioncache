@@ -4,9 +4,20 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - edit category in place (missioncache-db 1.0.5, mcp-missioncache 1.0.8, missioncache-dashboard)
+
+Categories are now editable after creation, from both surfaces:
+
+- **Dashboard:** the task modal header carries an inline category selector (icon + dropdown next to the repo badge). It shows the stored value ("uncategorized" for NULL rows, even when the row icon renders a heuristic guess), refreshed from SQLite via the `/api/task/{id}/files` response so it stays correct across MCP/CLI writes, and saves through the new `PUT /api/tasks/{id}/category` endpoint; on success the modal icon, row icons, and filter-bar chips update in place. The endpoint validates against `CATEGORIES` server-side (the selector is not the validation layer), mirrors the rename endpoint's DuckDB-resync contract, and reports refresh problems in its `warnings` list - which the selector surfaces as a visible "Saved (list refresh delayed)" status instead of a clean green "Saved".
+- **MCP:** a new `update_task` tool sets `jira_key` and/or `category` post-creation in any MCP client - the conversational equivalent of the CLI's `set-jira`/`set-category`. Fields are optional, the literal string `'none'` clears (an empty string is rejected rather than stored or treated as clear), and all validation runs before ANY write so invalid input never half-applies. Backed by a new `TaskDB.set_task_jira()` primitive mirroring `set_task_category()`.
+
 ### Fixed - task updates silently frozen out of the dashboard read path (missioncache-dashboard)
 
 On a DuckDB file created by `migrate_to_duckdb.py`, every task row referenced by sessions or heartbeats failed to sync updates from SQLite: the migrate script's schema declared foreign keys, DuckDB rejects upserts of FK-referenced parent rows ("still referenced by a foreign key"), and the sync's per-row try/except reduced each failure to a stdout print. Renames, completions, and category changes never reached `/api/tasks/active` on such files - the server-created schema (no FKs) was unaffected, which is why the drift went unnoticed. Fixed by removing the FK constraints from the migrate script's schema (the DuckDB mirror is a disposable read replica; SQLite owns integrity - the two schema definitions now agree), counting per-row sync failures into the sync result (`tasks_sync_failed`, `sessions_sync_failed`, `repos_sync_failed` - the sessions case previously dropped time-tracking data with no signal at all), and surfacing them as warnings from the rename/category endpoints, whose except-only handling could never fire for sync errors (`sync_from_sqlite` reports problems in its result dict rather than raising). Recovery for affected files: rerun `migrate_to_duckdb.py`. The missing-table leniency added to the migrate script is scoped to the lazily-created feature tables only - an absent core table still crashes loudly.
+
+### Fixed - jira_key rendered unescaped in the dashboard task lists (missioncache-dashboard)
+
+Both task-list renderers interpolated `task.jira_key` (and `task.jira_url`) raw into `innerHTML` templates - in element-body AND `title`/`href` attribute contexts - while every sibling field was escaped, a stored-XSS sink for hostile jira_key values (reachable via the CLI and the new `update_task` tool, which do not constrain the key's format). Both sites now escape, and `escapeHtml` itself switched from the textContent/innerHTML trick to an explicit replace chain that also escapes quotes, making it safe in attribute contexts (the old version was not, which the taxonomy-bounded `category` values masked).
 
 ### Fixed - migrate_to_duckdb.py crashed on DBs without the shadow-repo feature tables (missioncache-dashboard)
 

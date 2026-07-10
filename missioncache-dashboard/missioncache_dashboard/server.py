@@ -1365,9 +1365,15 @@ async def api_task_files(task_id: int):
     if not task:
         return {"error": "Task not found", "task_id": task_id}
 
+    # Category comes from SQLite (the source of truth), not the DuckDB row:
+    # the modal's selector shows this value, and MCP/CLI category writes
+    # reach DuckDB only on the next sync.
+    sqlite_task = get_sqlite_db().get_task(task_id)
+
     result = {
         "task_id": task_id,
         "task_name": task.name,
+        "category": sqlite_task.category if sqlite_task else task.category,
         "files": {},
     }
 
@@ -2682,6 +2688,43 @@ async def hook_task_created(body: dict):
     return {}
 
 
+def _sync_read_path(operation: str) -> str | None:
+    """Run the SQLite -> DuckDB sync and return a warning string on failure.
+
+    ``sync_from_sqlite`` reports problems in its RESULT dict (an ``error``
+    key, or ``tasks_sync_failed`` for per-row upsert failures) rather than
+    raising - a bare try/except around it never fires for sync errors, which
+    is how per-row FK failures froze the read path silently. Used by the
+    write endpoints (rename, category) whose contract is immediate read-path
+    visibility.
+    """
+    try:
+        result = get_db().sync_from_sqlite()
+    except Exception as e:
+        logger.warning("DuckDB sync after %s failed: %s", operation, e)
+        return (
+            f"Dashboard list refresh failed ({type(e).__name__}); "
+            "the change will appear on the next periodic sync."
+        )
+    failed_bits = [
+        f"{result[key]} {label} rows failed to sync"
+        for key, label in (
+            ("tasks_sync_failed", "task"),
+            ("sessions_sync_failed", "session"),
+            ("repos_sync_failed", "repo"),
+        )
+        if result.get(key)
+    ]
+    problem = result.get("error") or ("; ".join(failed_bits) if failed_bits else None)
+    if problem:
+        logger.warning("DuckDB sync after %s incomplete: %s", operation, problem)
+        return (
+            f"Dashboard list refresh incomplete ({problem}); "
+            "the change may not show until the sync issue is fixed."
+        )
+    return None
+
+
 @app.post("/api/tasks/{task_id}/rename")
 async def rename_task_endpoint(task_id: int, body: dict):
     """Rename a project / task.
@@ -2742,21 +2785,76 @@ async def rename_task_endpoint(task_id: int, body: dict):
     # logged AND surfaced as a warning in the response so the caller can
     # tell the dashboard list will be stale until the next periodic sync.
     warnings = list(result.get("warnings", []))
-    try:
-        get_db().sync_from_sqlite()
-    except Exception as e:
-        logger.warning("DuckDB sync after rename failed: %s", e)
-        warnings.append(
-            f"Dashboard list refresh failed ({type(e).__name__}); "
-            "the new name will appear on the next periodic sync."
-        )
+    sync_warning = _sync_read_path("rename")
+    if sync_warning:
+        warnings.append(sync_warning)
 
     response = {"success": True, "task_id": task_id, **result}
     response["warnings"] = warnings
     return response
 
 
+@app.put("/api/tasks/{task_id}/category")
+async def set_task_category_endpoint(task_id: int, body: dict):
+    """Set or clear a project's category.
 
+    Delegates to ``missioncache_db.TaskDB.set_task_category`` (the
+    source-of-truth primitive, which validates against ``CATEGORIES``
+    server-side - the frontend selector is NOT the validation layer) and
+    triggers a SQLite -> DuckDB sync so the read endpoints reflect the
+    change immediately.
+
+    Body: ``{"category": "ui"}`` or ``{"category": null}`` to clear.
+    """
+    if not isinstance(body, dict) or "category" not in body:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Missing 'category' key in request body (string or null).",
+            },
+        )
+    category = body["category"]
+    if category is not None and not isinstance(category, str):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "'category' must be a string or null.",
+            },
+        )
+
+    sqlite_db = get_sqlite_db()
+    task = sqlite_db.get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "TASK_NOT_FOUND",
+                "message": f"No project found with id {task_id}.",
+            },
+        )
+
+    try:
+        updated = sqlite_db.set_task_category(task_id, category)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": True, "code": "VALIDATION_ERROR", "message": str(e)},
+        )
+
+    # Same read-path refresh contract as rename above: log AND surface
+    # sync failures so the caller knows the list view may lag.
+    sync_warning = _sync_read_path("category change")
+    return {
+        "success": True,
+        "task_id": task_id,
+        "category": updated.category,
+        "warnings": [sync_warning] if sync_warning else [],
+    }
 
 
 @app.get("/health")

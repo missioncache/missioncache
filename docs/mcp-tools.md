@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 30 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 35 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -52,16 +52,16 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 
 ### The six modules
 
-| Module | Lines | Tools | Purpose |
-|--------|-------|-------|---------|
-| `tools_tasks.py` | 521 | 9 | Task lifecycle: list, get, create, complete, reopen, update notes |
-| `tools_docs.py` | 289 | 5 | MissionCache files: create, get, update context, update tasks, get progress |
-| `tools_tracking.py` | 215 | 6 | Time tracking and repository management |
-| `tools_iteration.py` | 167 | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
-| `tools_planning.py` | 473 | 7 | Parallel agent execution plans |
-| `tools_active.py` | 183 | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
+| Module | Tools | Purpose |
+|--------|-------|---------|
+| `tools_tasks.py` | 11 | Task lifecycle: list, get, create, complete, reopen, rename, update fields and notes |
+| `tools_docs.py` | 5 | MissionCache files: create, get, update context, update tasks, get progress |
+| `tools_tracking.py` | 7 | Time tracking and repository management |
+| `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
+| `tools_planning.py` | 7 | Parallel agent execution plans |
+| `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
 
-**Total: 30 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 30 times.
+**Total: 35 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 35 times.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
@@ -181,6 +181,31 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 - `limit: int = 20` - Max updates to return.
 
 **Returns:** `{"task_id": int, "task_name": str, "updates": list[dict], "total_count": int}`. Each update has `id`, `note`, `created_at`.
+
+### `rename_task`
+
+**When to use:** A project needs a new name. This is the safe path: it updates the DB row, moves the MissionCache directory, renames the files inside, and rewrites the template H1 titles - time tracking, heartbeats, sessions, and JIRA links survive because they key on the integer task ID, not the name.
+
+**Parameters:**
+- `new_name: str` - Target name, kebab-case. Trimmed + lowercased before validation.
+- `task_id: int | None = None` or `project_name: str | None = None` - Provide one to identify the project.
+
+**Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, and `warnings`.
+
+Refuses with `ALREADY_EXISTS` when another project holds the target name (in the DB or on disk), with `INVALID_STATE` while a missioncache-auto run is in progress, and with `VALIDATION_ERROR` for subtasks (rename the parent instead).
+
+### `update_task`
+
+**When to use:** A task needs its JIRA key or category changed after creation - "link this project to PROJ-123", "this is actually an infra project". This is the conversational equivalent of the CLI's `set-jira` / `set-category`.
+
+**Parameters:**
+- `task_id: int | None = None` or `project_name: str | None = None` - Provide one.
+- `jira_key: str | None = None` - JIRA ticket ID to set. Omit to leave unchanged; pass the literal string `'none'` (any case) to clear.
+- `category: str | None = None` - Category to set, one of the 13 `CATEGORIES` values. Same omit / `'none'` semantics.
+
+**Returns:** `UpdateTaskResult` with `task_id`, `task_name`, the stored `jira_key` and `category` after the update, and `updated` (which fields this call changed).
+
+At least one of `jira_key` / `category` is required. The category is validated against `CATEGORIES` before ANY write, so an invalid value never leaves a half-applied update (a valid `jira_key` in the same call is not written either).
 
 ## MissionCache file tools (`tools_docs.py`)
 
@@ -326,6 +351,17 @@ The `formatted` string is `"1h 23m"`-style output from `db.format_duration`. The
 
 **Returns:** `{"repo_id": int, "path": str, "short_name": str}`.
 
+### `set_task_repo`
+
+**When to use:** A task got created against the wrong repository - typically `/missioncache:new` capturing the wrong working directory - or the project's source of truth moved. `/missioncache:load` offers this on a repo mismatch.
+
+**Parameters:**
+- `repo_path: str` - The new repository path. Must already be registered (call `add_repo` first if not).
+- `task_id: int | None = None` or `task_name: str | None = None` - Provide one.
+- `resolve_git_root: bool = True` - Walk parents of `repo_path` to the containing git root before rebinding, mirroring `create_missioncache_files`. Pass `False` when a sub-package inside a monorepo is the real project boundary.
+
+**Returns:** `{"task_id", "task_name", "repo_id", "repo_short_name", "repo_path", "changed"}` - plus `previous_repo_id` when a rebind actually happened. Rebinding to the repo the task already has returns `changed: False` with a message instead of erroring. A target repo that is not registered returns `REPO_NOT_FOUND`.
+
 ### `scan_repos`
 
 **When to use:** You manually created MissionCache files outside of MissionCache tools (or moved them around) and you need the DB to pick them up.
@@ -467,6 +503,32 @@ Each entry in `task_calls` has `subagent_type`, `description`, `prompt`, `run_in
 **Returns:** `{"plan_id": int, "status": str, "completed": True}`.
 
 Most plans will auto-transition via `_update_plan_counters`, but this tool is the explicit way to finalize a plan regardless of its automatic state.
+
+## Active-task pointer tools (`tools_active.py`)
+
+These two tools drive the statusline's `Task:` field: a per-session pointer file recording which checklist items from a project's `-tasks.md` are currently in progress. The pointer is scoped by session ID so concurrent Claude sessions don't clobber each other's display.
+
+### `set_active_missioncache_tasks`
+
+**When to use:** The user signals which checklist task they are working on ("let's do 54a") - `/missioncache:load` Step 5 calls this so the statusline reflects the focus.
+
+**Parameters:**
+- `project_name: str` - MissionCache project name (kebab-case, validated).
+- `task_numbers: list[str]` - Checklist numbers to mark in-progress, e.g. `['54a']` or `['56', '57']`. Each must match an unchecked `[ ]` line in the project's tasks.md. An empty list is a no-op clear.
+- `session_id: str | None = None` - Resolved from `CLAUDE_CODE_SESSION_ID` when omitted (Claude Code 2.1.154+); pass explicitly for older versions or non-Claude clients.
+
+**Returns:** `{"success": True, "project_name", "task_numbers", "pointer_path"}` with the validated set. Replaces any prior pointer for the session (idempotent).
+
+The pointer auto-clears when `update_tasks_file` marks the pointed-at items `[x]`.
+
+### `clear_active_missioncache_tasks`
+
+**When to use:** Focus shifts off-task without completing anything - the statusline field should hide rather than show stale focus.
+
+**Parameters:**
+- `session_id: str | None = None` - Same resolution rules as above.
+
+**Returns:** `{"success": True, "session_id", "cleared": bool}` (`cleared` is `False` when there was no pointer to remove).
 
 ## Error handling
 
