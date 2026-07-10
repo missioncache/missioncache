@@ -622,11 +622,24 @@ class TestPreCompact:
         return task_dir, ctx_file, mock_task, mock_repo
 
     def _run(self, monkeypatch, mock_db, transcript_path=None):
-        """Reload pre_compact with stdin payload and mock missioncache_db."""
+        """Reload pre_compact with stdin payload and mock missioncache_db.
+
+        The mock carries the REAL context_health module: the hook routes its
+        Recent Changes prepend through
+        ``missioncache_db.context_health.prepend_recent_changes``, and the
+        tests assert on real file content, so that path must not be mocked.
+        """
+        from missioncache_db import context_health as real_context_health
+
         payload = {"transcript_path": str(transcript_path) if transcript_path else "", "cwd": "/fake/cwd"}
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
         with patch.dict(
-            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
+            "sys.modules",
+            {
+                "missioncache_db": MagicMock(
+                    TaskDB=lambda: mock_db, context_health=real_context_health
+                )
+            },
         ):
             import importlib
             import hooks.pre_compact as mod
