@@ -30,9 +30,11 @@ import os
 import re
 import shutil
 import socket
+import stat
 import sys
 import tarfile
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -41,6 +43,21 @@ from missioncache_db import machine_map
 
 MANIFEST_VERSION = 1
 BUNDLE_KIND = "missioncache-project-bundle"
+
+# Decompression-bomb guard for untrusted archives: a project bundle is markdown
+# plus small assets, so these caps are far above any real bundle while stopping
+# a crafted .tgz/.zip from exhausting disk. Enforced on declared uncompressed
+# size + member count before extraction.
+_MAX_EXTRACT_BYTES = 512 * 1024 * 1024  # 512 MiB total uncompressed
+_MAX_EXTRACT_MEMBERS = 10_000
+
+# Best-effort DuckDB analytics rebuild trigger. The dashboard owns the
+# SQLite->DuckDB sync; import never imports missioncache_dashboard (that would
+# invert the dashboard->db dependency), it just pokes the HTTP route if the
+# dashboard happens to be running. Failure is swallowed - import never blocks on
+# the dashboard.
+_SYNC_URL = "http://localhost:8787/api/sync"
+_SYNC_TIMEOUT = 2.0
 
 # Junk files dropped from the bundle silently (§7). Matched on a lowercased
 # basename (see _matches), so patterns are lowercase.
@@ -523,7 +540,14 @@ def _copy_tree(source_dir: Path, dest_dir: Path) -> tuple[list, list]:
                 continue
             dest = dest_dir / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(abs_path, dest)
+            # Text members are written LF (§9: export writes LF) so the bundle
+            # does not carry CRLF churn into a Phase-4 git-sync folder, and the
+            # recorded checksum is of the LF bytes - which import's EOL-normalized
+            # verification matches even if the bundle later gains CRLF in transit.
+            if fn.lower().endswith((".md", ".json")):
+                dest.write_bytes(_normalize_eol(fn, abs_path.read_bytes()))
+            else:
+                shutil.copy2(abs_path, dest)
             files.append({"path": f"{name}/{rel.as_posix()}", "sha256": _sha256(dest)})
     files.sort(key=lambda f: f["path"])
     return files, warnings
@@ -566,6 +590,7 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "full_path": task.full_path,
             "parent": parent_name,
             "created_at": task.created_at,
+            "origin_uuid": task.origin_uuid,
             "time_total_seconds": time_total,
         }
     else:
@@ -577,7 +602,7 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "name": name, "status": "active", "type": "coding",
             "tags": [], "priority": None, "jira_key": None, "branch": None,
             "pr_url": None, "full_path": full_path, "parent": None,
-            "created_at": None, "time_total_seconds": 0,
+            "created_at": None, "origin_uuid": None, "time_total_seconds": 0,
         }
 
     manifest = {
@@ -611,11 +636,20 @@ def _atomic_swap_dir(staging: Path, dest: Path) -> str:
     """
     backup = None
     if dest.exists():
-        backup = dest.with_name(f"{dest.name}.old-{os.getpid()}")
+        # Dot-prefix the backup: scan_repo skips dot-dirs, so a backup left
+        # behind by a failed cleanup can never resurface as a phantom task.
+        backup = dest.with_name(f".{dest.name}.old-{os.getpid()}")
         if backup.exists():
             shutil.rmtree(backup, ignore_errors=True)
         os.replace(dest, backup)
-    os.replace(staging, dest)  # same-filesystem sibling -> atomic
+    try:
+        os.replace(staging, dest)  # same-filesystem sibling -> atomic
+    except OSError:
+        # Swap-in failed with dest already moved aside: restore the old tree so
+        # the failure leaves dest intact rather than deleted, then re-raise.
+        if backup is not None and not dest.exists():
+            os.replace(backup, dest)
+        raise
     if backup:
         shutil.rmtree(backup, ignore_errors=True)
     return str(dest)
@@ -733,3 +767,1024 @@ def export_project(db: Any, name: str, *, out: Optional[str] = None,
         "file_count": len(manifest["files"]),
         "name": name,
     }
+
+
+# ===========================================================================
+# Import (Phase 3): place files, reconcile references, name-keyed upsert,
+# 3-bucket alignment report. Spec: docs/cross-machine-sharing-plan.md
+# sections 5 (resolver + report + conflict policy), 6 (reference kinds),
+# 7 (upsert + file list), 8 (tests), 9 (WSL edge cases).
+# ===========================================================================
+
+
+def _normalize_eol(name: str, data: bytes) -> bytes:
+    """CRLF -> LF for text bundle members (``*.md`` / ``*.json``).
+
+    Bundles routed through Windows tooling / git autocrlf can gain CRLF; the
+    target writes LF so ``Hub:`` / ``[[..]]`` / frontmatter parsers stay stable
+    and a git-sync folder does not churn on line-ending diffs. Other files
+    (none expected) are copied byte-for-byte.
+    """
+    if name.lower().endswith((".md", ".json")):
+        return data.replace(b"\r\n", b"\n")
+    return data
+
+
+def _entry(bucket: str, kind: str, ident: Any, local: Optional[str],
+           hint: str = "") -> dict:
+    """One alignment-report line. Every reference produces exactly one."""
+    return {"bucket": bucket, "kind": kind, "id": ident, "local": local,
+            "hint": hint}
+
+
+def _bucket(report: dict, entry: dict) -> None:
+    key = {"resolved": "resolved", "needs-mapping": "needs_mapping",
+           "missing": "missing"}[entry["bucket"]]
+    report[key].append(entry)
+
+
+def _fail(report: dict, message: str) -> dict:
+    """Record a hard failure (exit 1, nothing written) and return the report."""
+    report["errors"].append(message)
+    report["exit_code"] = 1
+    return report
+
+
+def _under_root(path: Path, root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except OSError:
+        return False
+
+
+def _under_drvfs(root: Path) -> bool:
+    """True if the data root resolves under ``/mnt/`` (WSL DrvFs, §9).
+
+    SQLite WAL can corrupt on DrvFs and it is slow with bad inotify/perms, so
+    import warns (but never hard-fails) when ``~/.missioncache`` lives there.
+    """
+    try:
+        return str(root.resolve()).startswith("/mnt/")
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Bundle location + extraction (path-traversal safe)
+# ---------------------------------------------------------------------------
+
+
+def _locate_bundle_root(path: Path) -> Optional[Path]:
+    """Return the dir holding ``missioncache.json`` (the bundle, or its child)."""
+    if (path / "missioncache.json").is_file():
+        return path
+    if path.is_dir():
+        for child in sorted(path.iterdir()):
+            if child.is_dir() and (child / "missioncache.json").is_file():
+                return child
+    return None
+
+
+def _check_extract_budget(member_count: int, total_bytes: int) -> None:
+    """Refuse an archive whose declared size/count exceeds the bomb caps."""
+    if member_count > _MAX_EXTRACT_MEMBERS:
+        raise ValueError(
+            f"archive has {member_count} members (max {_MAX_EXTRACT_MEMBERS})"
+        )
+    if total_bytes > _MAX_EXTRACT_BYTES:
+        raise ValueError(
+            f"archive declares {total_bytes} uncompressed bytes "
+            f"(max {_MAX_EXTRACT_BYTES})"
+        )
+
+
+def _safe_extract_tar(tar_path: Path, dest: Path) -> None:
+    """Extract a tarball, refusing any member that escapes ``dest``.
+
+    Links are skipped entirely (a symlink/hardlink could redirect a later write
+    outside the temp dir). Path traversal (``../``, absolute) raises ValueError.
+    """
+    dest = dest.resolve()
+    with tarfile.open(tar_path, "r:*") as tar:
+        members = tar.getmembers()
+        _check_extract_budget(len(members), sum(max(0, m.size) for m in members))
+        for member in members:
+            if member.issym() or member.islnk():
+                continue
+            target = (dest / member.name).resolve()
+            if target != dest and not str(target).startswith(str(dest) + os.sep):
+                raise ValueError(f"unsafe path in archive: {member.name}")
+            tar.extract(member, dest)
+
+
+def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
+    """Extract a zip, refusing any member that escapes ``dest``."""
+    dest = dest.resolve()
+    with zipfile.ZipFile(zip_path) as zf:
+        infos = zf.infolist()
+        _check_extract_budget(len(infos), sum(max(0, i.file_size) for i in infos))
+        for info in infos:
+            # Skip symlink entries, mirroring the tar extractor. Python's
+            # zipfile.extract writes a symlink member as a plain file (it does
+            # not honor S_IFLNK), so this is defense-in-depth rather than a live
+            # hole, but it keeps the two extractors symmetric.
+            if stat.S_ISLNK(info.external_attr >> 16):
+                continue
+            target = (dest / info.filename).resolve()
+            if target != dest and not str(target).startswith(str(dest) + os.sep):
+                raise ValueError(f"unsafe path in archive: {info.filename}")
+            zf.extract(info, dest)
+
+
+def _load_and_validate(bundle_root: Path) -> tuple[Optional[dict], list]:
+    """Read + validate the manifest (step 1). Returns ``(manifest, errors)``.
+
+    A non-empty ``errors`` list means hard failure (exit 1, nothing written);
+    when fatal-on-first (unreadable, wrong version, bad name) the manifest is
+    None. The ``references`` block is defaulted so later steps can index it.
+    """
+    import missioncache_db
+
+    mpath = bundle_root / "missioncache.json"
+    try:
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        # UnicodeDecodeError (a ValueError, not an OSError) is caught explicitly
+        # so a bad-encoding manifest produces a clean report error for library
+        # callers (the MCP wrapper), not a raw exception the CLI-only catch hides.
+        return None, [f"cannot read manifest: {e}"]
+    if not isinstance(manifest, dict):
+        return None, ["manifest is not a JSON object"]
+    if manifest.get("manifest_version") != MANIFEST_VERSION:
+        return None, [
+            f"unsupported manifest_version {manifest.get('manifest_version')!r} "
+            f"(this build imports version {MANIFEST_VERSION})"
+        ]
+    if manifest.get("kind") != BUNDLE_KIND:
+        return None, [f"not a MissionCache bundle (kind={manifest.get('kind')!r})"]
+    project = manifest.get("project")
+    if not isinstance(project, dict):
+        return None, ["manifest has no project block"]
+    name = project.get("name")
+    try:
+        missioncache_db.validate_task_name(name or "")
+    except Exception as e:
+        return None, [f"invalid project name {name!r}: {e}"]
+
+    errors: list = []
+    if project.get("status") not in ("active", "paused", "completed", "archived"):
+        errors.append(f"invalid project.status {project.get('status')!r}")
+    if project.get("type") not in ("coding", "non-coding"):
+        errors.append(f"invalid project.type {project.get('type')!r}")
+    # full_path must be exactly <active|global|manual>/<name>. A bare "." or
+    # "tasks.db"/"active"/"machine.json" would land the project ON a reserved
+    # path inside the data root (the atomic swap then rmtree's it), so anything
+    # that is not the canonical two-segment shape is rejected before any write.
+    full_path = project.get("full_path")
+    if not full_path or not isinstance(full_path, str):
+        errors.append("manifest project.full_path is missing")
+    else:
+        parts = full_path.split("/")
+        if len(parts) != 2 or parts[0] not in ("active", "global", "manual") \
+                or parts[1] != name:
+            errors.append(
+                f"manifest project.full_path {full_path!r} is not a valid "
+                f"<active|global|manual>/{name} path"
+            )
+    if not (bundle_root / "files" / name).is_dir():
+        errors.append(f"bundle is missing its files/{name}/ tree")
+
+    errors.extend(_verify_checksums(bundle_root, manifest.get("files") or []))
+
+    refs = manifest.setdefault("references", {})
+    if not isinstance(refs, dict):
+        refs = manifest["references"] = {}
+    refs.setdefault("repo", None)
+    refs.setdefault("vaults", [])
+    refs.setdefault("other_paths", [])
+    return manifest, errors
+
+
+def _verify_checksums(bundle_root: Path, files: list) -> list:
+    """Verify each manifest ``files[]`` entry against the on-disk bundle (§3/I8).
+
+    Detects a truncated/corrupted/tampered bundle BEFORE any file is placed -
+    "nothing fails silently". Hashing is EOL-normalized (`_normalize_eol`) so a
+    bundle whose text files gained CRLF in a Windows/git transit still matches
+    the LF checksum the exporter recorded; only real content corruption fails.
+    A files[] ``path`` that escapes the bundle tree is rejected, not read.
+    """
+    problems: list = []
+    files_root = (bundle_root / "files").resolve()
+    for entry in files:
+        rel = entry.get("path") if isinstance(entry, dict) else None
+        want = entry.get("sha256") if isinstance(entry, dict) else None
+        if not rel or not want:
+            problems.append(f"manifest files[] entry missing path/sha256: {entry!r}")
+            continue
+        disk = (files_root / rel)
+        if not disk.resolve().is_relative_to(files_root) or disk.is_symlink():
+            problems.append(f"manifest files[] path escapes the bundle: {rel}")
+            continue
+        if not disk.is_file():
+            problems.append(f"bundle file listed in manifest is missing: {rel}")
+            continue
+        got = hashlib.sha256(
+            _normalize_eol(disk.name, disk.read_bytes())
+        ).hexdigest()
+        if got != want:
+            problems.append(f"bundle file checksum mismatch (corrupt bundle): {rel}")
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# File placement + content comparison
+# ---------------------------------------------------------------------------
+
+
+def _dir_checksums(root: Path) -> dict:
+    """Normalized sha256 per relative path, junk/secret/symlink/.git excluded.
+
+    Normalization (CRLF->LF for text) is applied so a CRLF bundle compares equal
+    to its LF on-disk landing - the property idempotent re-import relies on.
+    """
+    out: dict = {}
+    if not root.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _EXCLUDE_DIRS and not (Path(dirpath) / d).is_symlink()
+        ]
+        for fn in filenames:
+            ap = Path(dirpath) / fn
+            if ap.is_symlink():
+                continue
+            if _matches(fn, _JUNK_GLOBS, _JUNK_NAMES):
+                continue
+            if _matches(fn, _SECRET_GLOBS, _SECRET_NAMES):
+                continue
+            rel = ap.relative_to(root).as_posix()
+            out[rel] = hashlib.sha256(_normalize_eol(fn, ap.read_bytes())).hexdigest()
+    return out
+
+
+def _place_files(src_dir: Path, landing_dir: Path) -> tuple:
+    """Place the bundle tree at ``landing_dir`` crash-safe + LF-normalized.
+
+    Builds a sibling staging dir, writes every file (text members EOL-normalized),
+    then atomically swaps it in (mirroring ``_atomic_swap_dir`` + lib/config.py's
+    tmp+os.replace). A failed/interrupted import never leaves a half-written
+    project dir clobbering the previous one.
+
+    Applies the SAME exclusions as the export-side ``_copy_tree`` (symlinks,
+    secret/credential files, junk) so a hand-crafted or third-party bundle can
+    never plant a ``.env``/``id_rsa`` on disk or dereference a symlink (e.g.
+    ``notes.md -> ~/.ssh/id_rsa``) into the placed tree - the symlink path
+    matters because a directory bundle skips the archive extractor's link guard.
+    Returns ``(placed_rel_paths, warnings)``.
+    """
+    landing_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = landing_dir.parent / f".{landing_dir.name}.import-tmp-{os.getpid()}"
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    placed: list = []
+    warnings: list = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(src_dir):
+            kept = []
+            for d in dirnames:
+                if d in _EXCLUDE_DIRS:
+                    continue
+                if (Path(dirpath) / d).is_symlink():
+                    rel = (Path(dirpath) / d).relative_to(src_dir).as_posix()
+                    warnings.append(f"skipped symlinked directory {rel} (not placed)")
+                    continue
+                kept.append(d)
+            dirnames[:] = kept
+            for fn in filenames:
+                ap = Path(dirpath) / fn
+                rel = ap.relative_to(src_dir)
+                if _matches(fn, _JUNK_GLOBS, _JUNK_NAMES):
+                    continue
+                if ap.is_symlink():
+                    warnings.append(f"skipped symlink {rel.as_posix()} (not placed)")
+                    continue
+                if _matches(fn, _SECRET_GLOBS, _SECRET_NAMES):
+                    warnings.append(
+                        f"skipped {rel.as_posix()} (looks like a secret/credential "
+                        f"file; not placed)"
+                    )
+                    continue
+                dest = staging / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(_normalize_eol(fn, ap.read_bytes()))
+                placed.append(rel.as_posix())
+        _atomic_swap_dir(staging, landing_dir)
+        staging = None  # consumed by the swap
+    finally:
+        if staging is not None and staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+    placed.sort()
+    return placed, warnings
+
+
+# ---------------------------------------------------------------------------
+# Collision classification (§5 conflict policy)
+# ---------------------------------------------------------------------------
+
+
+def _incoming_repo_key(repo_ref: Optional[dict]) -> tuple:
+    """Comparable identity for the bundle's repo ref (canonical, not local id)."""
+    if not repo_ref:
+        return ("null", None)
+    kind = repo_ref.get("kind")
+    if kind == "git":
+        return ("git", repo_ref.get("remote"))
+    if kind == "anchor":
+        return ("anchor", repo_ref.get("anchor") or repo_ref.get("short_name"))
+    if kind == "home-relative":
+        return ("home-relative", repo_ref.get("home_relative"))
+    return ("unknown", None)
+
+
+def _existing_repo_key(db: Any, task: Any) -> tuple:
+    """Comparable identity for an existing local row's repo.
+
+    Only a portable git remote yields a CONCRETE identity (``("git", remote)``)
+    that can be compared across machines. A non-git binding (anchor /
+    home-relative / dangling) has no machine-portable identity - its local
+    basename differs per machine - so it is reported as ``("null", None)`` and
+    treated as a same-project (re)bind by ``_same_project``. Minting an
+    ``("anchor", short_name)`` key here was the bug that broke re-import of any
+    non-git project: the basename never matched the bundle's logical name across
+    machines, so a byte-identical re-import aborted as "different project".
+    """
+    if task.repo_id is None:
+        return ("null", None)
+    repo = db.get_repo(task.repo_id)
+    if repo is None:
+        return ("null", None)
+    remote = machine_map._git_remote(repo.path) if Path(repo.path).exists() else None
+    if remote and _is_portable_remote(remote):
+        return ("git", machine_map.remote_key(remote))
+    return ("null", None)
+
+
+def _same_project(incoming: tuple, existing: tuple,
+                  incoming_uuid: Optional[str] = None,
+                  existing_uuid: Optional[str] = None) -> bool:
+    """Whether an incoming bundle and an existing row are the same project (§5).
+
+    The stable ``origin_uuid`` is authoritative WHEN BOTH SIDES CARRY ONE: equal
+    uuids are the same project, different uuids are different projects (this
+    closes the force-clobber hole where a null-repo row was treated as always
+    the same project, so an unrelated bundle could overwrite it with --force).
+
+    When either side lacks a uuid - an old bundle, or a pre-migration row that
+    was never re-created (rows are deliberately not backfilled, see initialize())
+    - fall back to the repo-identity heuristic: "different" fires only when the
+    existing row binds a CONCRETE repo (git) that differs from the incoming one;
+    a null-repo existing row is treated as the same project getting its binding.
+    """
+    if incoming_uuid and existing_uuid:
+        return incoming_uuid == existing_uuid
+    if incoming == existing:
+        return True
+    return existing[0] == "null"
+
+
+def _classify_collision(db: Any, name: str, full_path: str, landing_dir: Path,
+                        bundle_files_dir: Path, repo_ref: Optional[dict],
+                        force: bool, incoming_uuid: Optional[str] = None) -> str:
+    """Decide CREATE / UPDATE / ABORT per §5. Returns a decision token.
+
+    Identity is the stable ``origin_uuid`` when both sides carry one, else the
+    ``active/<name>`` dir slot + the repo the row binds. A different-project
+    name collision never gets clobbered, even with ``--force`` (the
+    force-must-not-destroy-an-unrelated-project property).
+    """
+    existing = db.find_import_target(name, full_path)
+    if existing is None:
+        return "create"
+    if not _same_project(
+        _incoming_repo_key(repo_ref), _existing_repo_key(db, existing),
+        incoming_uuid, existing.origin_uuid,
+    ):
+        return "abort_different"
+    # Row exists but its files are gone/empty: restoring them is non-destructive,
+    # so place without demanding --force (a missing landing is not "local edits").
+    if not landing_dir.is_dir() or not any(landing_dir.iterdir()):
+        return "update_restore"
+    # Normalized comparison: a CRLF bundle compares equal to its LF landing
+    # (see _dir_checksums) - the property idempotent re-import relies on.
+    if _dir_checksums(bundle_files_dir) == _dir_checksums(landing_dir):
+        return "update_noop"
+    if force:
+        return "update_force"
+    return "abort_same_differs"
+
+
+# ---------------------------------------------------------------------------
+# Reference resolution (§6)
+# ---------------------------------------------------------------------------
+
+
+def _bind_repo(db: Any, path: Path) -> Optional[int]:
+    """Resolve/insert a repositories row for ``path``, gated on existence.
+
+    ``add_repo`` has no disk check (§9), so never call it for a path that does
+    not exist - that would pollute ``repositories`` with a bogus machine-specific
+    row. Reuses an existing row when present.
+    """
+    existing = db.get_repo_by_path(path)
+    if existing:
+        return existing.id
+    if not path.exists():
+        return None
+    return db.add_repo(str(path))
+
+
+def _resolve_repo(db: Any, repo_ref: Optional[dict], repo_override: Optional[str],
+                  dry_run: bool) -> tuple:
+    """Resolve the primary repo binding (§6.1). Returns ``(repo_id, entry, warns)``.
+
+    ``--repo`` wins over the map. A git worktree ref is forced to needs-mapping
+    so it never silently collapses onto the parent checkout. A mapped-but-absent
+    path is ``missing``; an unmapped portable ref is ``needs-mapping``.
+    """
+    warnings: list = []
+
+    if repo_override:
+        p = Path(repo_override).expanduser()
+        if p.is_dir():
+            repo_id = None if dry_run else _bind_repo(db, p)
+            return repo_id, _entry("resolved", "repo", str(p), str(p)), warnings
+        return None, _entry(
+            "missing", "repo", repo_override, str(p),
+            f"--repo path {p} does not exist; create/clone it then re-import",
+        ), warnings
+
+    if repo_ref is None:
+        return None, _entry("resolved", "repo", "(none)", None), warnings
+
+    kind = repo_ref.get("kind")
+
+    if kind == "git":
+        remote = repo_ref.get("remote")
+        if repo_ref.get("worktree"):
+            return None, _entry(
+                "needs-mapping", "repo(worktree)", remote, None,
+                f"bundle was bound to a linked git worktree; map the real checkout: "
+                f"missioncache-db config set-path repo:{remote} <local-path> && re-import",
+            ), warnings
+        local = machine_map.resolve("repo", remote)
+        if not local:
+            return None, _entry(
+                "needs-mapping", "repo", remote, None,
+                f"missioncache-db config set-path repo:{remote} <local-path> && re-import",
+            ), warnings
+        if not Path(local).is_dir():
+            return None, _entry(
+                "missing", "repo", remote, local,
+                f"mapped path {local} does not exist; clone {remote} there then re-import",
+            ), warnings
+        actual = machine_map._git_remote(local)
+        if actual and machine_map.remote_key(actual) == remote:
+            repo_id = None if dry_run else _bind_repo(db, Path(local))
+            return repo_id, _entry("resolved", "repo", remote, local), warnings
+        warnings.append(
+            f"mapped path {local} origin does not match {remote}; not binding repo"
+        )
+        return None, _entry(
+            "needs-mapping", "repo", remote, local,
+            f"mapped path {local} points at a different repo; fix it: "
+            f"missioncache-db config set-path repo:{remote} <correct-path> && re-import",
+        ), warnings
+
+    if kind == "anchor":
+        anchor = repo_ref.get("anchor") or repo_ref.get("short_name")
+        local = machine_map.resolve("anchor", anchor)
+        if not local:
+            return None, _entry(
+                "needs-mapping", "repo", anchor, None,
+                f"missioncache-db config set-path anchor:{anchor} <local-path> && re-import",
+            ), warnings
+        if not Path(local).is_dir():
+            return None, _entry(
+                "missing", "repo", anchor, local,
+                f"mapped path {local} does not exist; create it then re-import",
+            ), warnings
+        repo_id = None if dry_run else _bind_repo(db, Path(local))
+        return repo_id, _entry("resolved", "repo", anchor, local), warnings
+
+    if kind == "home-relative":
+        hr = repo_ref.get("home_relative") or ""
+        home = machine_map.resolve("anchor", "HOME") or str(Path.home())
+        local = str(Path(home) / hr) if hr else home
+        if Path(local).is_dir():
+            repo_id = None if dry_run else _bind_repo(db, Path(local))
+            return repo_id, _entry("resolved", "repo", hr or "~", local), warnings
+        return None, _entry(
+            "missing", "repo", hr or "~", local,
+            f"path {local} does not exist; create it then re-import",
+        ), warnings
+
+    return None, _entry(
+        "needs-mapping", "repo", str(kind), None,
+        f"unrecognized repo ref kind {kind!r}; cannot resolve",
+    ), warnings
+
+
+def _find_note(roots: list, note: str) -> Optional[Path]:
+    """Find ``<note>.md`` under any vault root (top-level first, then recursive)."""
+    for root in roots:
+        cand = root / f"{note}.md"
+        if cand.is_file():
+            return cand
+    for root in roots:
+        if root.is_dir():
+            hit = next(root.rglob(f"{note}.md"), None)
+            if hit is not None:
+                return hit
+    return None
+
+
+def _resolve_vaults(vault_refs: list) -> list:
+    """Resolve ``Hub:``/``[[wikilink]]`` notes against the vault map (§6.2)."""
+    entries: list = []
+    vault_map = machine_map.all_mappings().get("vaults", {})
+    roots = [Path(v) for v in vault_map.values() if v]
+    for ref in vault_refs:
+        note = ref.get("note")
+        if not roots:
+            entries.append(_entry(
+                "needs-mapping", "vault", note, None,
+                f"no vault roots mapped; missioncache-db config set-path "
+                f"vault:<name> <vault-root> && re-import",
+            ))
+            continue
+        found = _find_note(roots, note)
+        if found is not None:
+            entries.append(_entry("resolved", "vault", note, str(found)))
+        else:
+            entries.append(_entry(
+                "missing", "vault", note, None,
+                f"note {note}.md not found under any mapped vault root; "
+                f"create it then re-import",
+            ))
+    return entries
+
+
+_TOKEN_RE = re.compile(r"^\$\{(repo|vault):(.+?)\}(?:/(.*))?$")
+
+
+def _expand_token(token: str, mapping: dict) -> Optional[str]:
+    """Re-expand a portable path token against THIS machine's map (§6.3).
+
+    Returns the local absolute path, or None when no mapping can produce one
+    (an unmapped ``${repo:...}`` / ``${vault:...}``). ``${HOME}`` always
+    resolves (live home dir as the fallback).
+    """
+    if token == "${HOME}" or token.startswith("${HOME}/"):
+        home = mapping.get("anchors", {}).get("HOME") or str(Path.home())
+        rest = token[len("${HOME}"):].lstrip("/")
+        return str(Path(home) / rest) if rest else home
+    m = _TOKEN_RE.match(token)
+    if m:
+        kind, key, rest = m.group(1), m.group(2), m.group(3) or ""
+        if kind == "repo":
+            base = mapping.get("repos", {}).get(machine_map.remote_key(key))
+        else:
+            base = mapping.get("vaults", {}).get(key)
+        if not base:
+            return None
+        return str(Path(base) / rest) if rest else base
+    return None
+
+
+def _embedded_hint(token: str) -> tuple:
+    """``(id, hint)`` for an unmapped embedded path token."""
+    m = _TOKEN_RE.match(token)
+    if m:
+        kind, key = m.group(1), m.group(2)
+        return key, (f"missioncache-db config set-path {kind}:{key} "
+                     f"<local-path> && re-import")
+    return token, f"no machine.json mapping produces a local path for {token}"
+
+
+def _rewrite_embedded(landing_dir: Path, source: str, raw: str, local: str) -> str:
+    """Replace the recorded ``raw`` with ``local`` on its exact line. Returns a
+    status: ``"rewritten"`` | ``"noop"`` (raw not present as a token) | ``"failed"``.
+
+    Surgical on two axes: only the single ``<file>:<line>`` the manifest recorded
+    is touched, AND ``raw`` is matched only as a COMPLETE path token (followed by
+    a path terminator or end-of-line). The token boundary stops a shorter path
+    from corrupting a longer prefix-colliding path on the same line
+    (``/h/work`` must not rewrite the ``/h/work`` inside ``/h/work-backup/x``).
+    The three distinct return values let the caller tell a genuine write failure
+    (IO error) apart from "nothing to do", instead of mislabeling both.
+    """
+    relfile, _, lineno_s = source.rpartition(":")
+    if not relfile:
+        return "failed"
+    path = landing_dir / relfile
+    # ``source`` comes from the untrusted manifest: refuse any target that
+    # escapes the landing dir (via ../ or absolute) or goes through a symlink,
+    # else a crafted bundle gets an arbitrary-file write on --rewrite-paths.
+    try:
+        if not path.resolve().is_relative_to(landing_dir.resolve()):
+            return "failed"
+    except OSError:
+        return "failed"
+    if path.is_symlink() or not path.is_file():
+        return "failed"
+    try:
+        idx = int(lineno_s) - 1
+        lines = path.read_text(encoding="utf-8", errors="replace").split("\n")
+    except (ValueError, OSError):
+        return "failed"
+    if not (0 <= idx < len(lines)):
+        return "failed"
+    pattern = re.escape(raw) + r"(?=" + _PATH_TERMINATOR + r"|$)"
+    new_line, n = re.subn(pattern, lambda _m: local, lines[idx])
+    if n == 0:
+        return "noop"
+    lines[idx] = new_line
+    try:
+        path.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        return "failed"
+    return "rewritten"
+
+
+def _resolve_embedded(refs: list) -> tuple:
+    """Classify embedded absolute paths into report entries (§6.3, read-only).
+
+    Returns ``(entries, plan)``. ``plan`` lists the rewrite targets (each tied to
+    its report entry) for the optional post-placement ``_apply_embedded_rewrites``
+    pass - rewriting is deferred until after the files are placed, and is opt-in
+    via ``--rewrite-paths``.
+    """
+    entries: list = []
+    plan: list = []
+    mapping = machine_map.all_mappings()
+    for ref in refs:
+        token = ref.get("token") or ""
+        raw = ref.get("raw")
+        source = ref.get("source") or ""
+        local = _expand_token(token, mapping)
+        if local is None:
+            ident, hint = _embedded_hint(token)
+            entries.append(_entry("needs-mapping", "embedded-path", ident, None, hint))
+            continue
+        if Path(local).exists():
+            entry = _entry("resolved", "embedded-path", token, local)
+        else:
+            entry = _entry(
+                "missing", "embedded-path", token, local,
+                f"path {local} does not exist; create it then re-import",
+            )
+        entries.append(entry)
+        if raw and source:
+            plan.append({"entry": entry, "raw": raw, "source": source, "local": local})
+    return entries, plan
+
+
+def _apply_embedded_rewrites(plan: list, landing_dir: Path) -> list:
+    """Apply opt-in ``--rewrite-paths`` edits after files are placed (I10).
+
+    A requested rewrite that fails with an IO error DEMOTES its entry out of
+    ``resolved`` (the entry dict is shared with the report), so the user is never
+    told a path was rewritten when it was not. A ``noop`` (text already absent on
+    the line) only warns. Returns warning strings.
+    """
+    warnings: list = []
+    for item in plan:
+        status = _rewrite_embedded(
+            landing_dir, item["source"], item["raw"], item["local"]
+        )
+        if status == "failed":
+            entry = item["entry"]
+            entry["bucket"] = "missing"
+            entry["hint"] = (
+                f"embedded path could not be rewritten at {item['source']}; "
+                f"edit it by hand"
+            )
+            warnings.append(
+                f"could not rewrite embedded path at {item['source']} (read/write failed)"
+            )
+        elif status == "noop":
+            warnings.append(
+                f"embedded path at {item['source']} not rewritten "
+                f"(text not found on that line; may already be rewritten)"
+            )
+    return warnings
+
+
+def _resolve_parent(db: Any, parent_name: Optional[str]) -> tuple:
+    """Reconcile the parent task by NAME -> local parent_id (§5 step 8)."""
+    if not parent_name:
+        return None, None
+    parent = db.get_task_by_name(parent_name)
+    if parent is not None:
+        return parent.id, _entry("resolved", "parent", parent_name, f"task#{parent.id}")
+    return None, _entry(
+        "needs-mapping", "parent", parent_name, None,
+        f"import the parent project '{parent_name}' first, then re-import",
+    )
+
+
+def _trigger_duckdb_sync() -> Optional[str]:
+    """Best-effort poke at the dashboard's SQLite->DuckDB sync route (§5 step 10).
+
+    NEVER imports missioncache_dashboard (that inverts the dashboard->db
+    dependency). Pure stdlib HTTP, short timeout, failure swallowed. Returns a
+    note string when the dashboard was unreachable, else None.
+    """
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(_SYNC_URL, method="POST")
+        with urllib.request.urlopen(req, timeout=_SYNC_TIMEOUT):
+            return None
+    except Exception:
+        # Covers both "dashboard not running" and "running but errored" - the
+        # advice is the same and we never block import on it.
+        return ("dashboard sync not confirmed; DuckDB analytics will refresh on "
+                "next dashboard start")
+
+
+def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
+                  force: bool = False, rewrite: bool = False,
+                  dry_run: bool = False) -> dict:
+    """Import a portable bundle and emit a 3-bucket alignment report (Phase 3).
+
+    Pipeline (§5): validate -> classify collision -> place files (atomic, LF) ->
+    resolve repo / vaults / embedded paths -> name-keyed upsert -> reconcile
+    parent -> record origin time (display-only) -> best-effort DuckDB rebuild.
+    ``--dry-run`` runs the full classification with every write suppressed.
+
+    DB authority: import never re-parses the placed markdown for DB fields - the
+    manifest is authoritative. The ``jira_key``/``branch``/``pr_url`` copies that
+    also live in the markdown are treated as inert (the "no double source of
+    truth" property holds because they are never re-read, not because they are
+    absent).
+
+    Returns the report dict; the CLI owns all I/O and exits on ``report["exit_code"]``
+    (0 = all resolved, 2 = imported with needs-mapping/missing entries, 1 = hard
+    failure with nothing committed).
+    """
+    import missioncache_db
+
+    report: dict = {
+        "name": None, "action": None, "task_id": None,
+        "resolved": [], "needs_mapping": [], "missing": [],
+        "warnings": [], "notes": [], "errors": [],
+        "exit_code": 0, "dry_run": dry_run, "time_origin_seconds": 0,
+        "bundle_dir": None,
+    }
+    tmpdir: Optional[Path] = None
+    try:
+        bundle_path = Path(bundle).expanduser()
+        if not bundle_path.exists():
+            return _fail(report, f"bundle not found: {bundle}")
+
+        # --- locate / extract bundle root ---
+        try:
+            if bundle_path.is_dir():
+                bundle_root = _locate_bundle_root(bundle_path)
+            else:
+                tmpdir = Path(tempfile.mkdtemp(prefix="mc-import-"))
+                low = bundle_path.name.lower()
+                if low.endswith((".tgz", ".tar.gz")) or tarfile.is_tarfile(bundle_path):
+                    _safe_extract_tar(bundle_path, tmpdir)
+                elif low.endswith(".zip") or zipfile.is_zipfile(bundle_path):
+                    _safe_extract_zip(bundle_path, tmpdir)
+                else:
+                    return _fail(report, f"unrecognized bundle format: {bundle}")
+                bundle_root = _locate_bundle_root(tmpdir)
+        except (ValueError, OSError, tarfile.TarError, zipfile.BadZipFile) as e:
+            return _fail(report, f"could not open bundle: {e}")
+
+        if bundle_root is None:
+            return _fail(report, "missioncache.json not found in bundle")
+        report["bundle_dir"] = str(bundle_root)
+
+        # --- step 1: validate ---
+        manifest, errors = _load_and_validate(bundle_root)
+        if errors:
+            report["errors"].extend(errors)
+            report["exit_code"] = 1
+            return report
+        assert manifest is not None  # errors empty => manifest present
+
+        project = manifest["project"]
+        refs = manifest["references"]
+        name = project["name"]
+        full_path = project["full_path"]
+        report["name"] = name
+        bundle_files_dir = bundle_root / "files" / name
+        # A directory bundle skips the archive extractor's symlink guard, so a
+        # symlinked files/<name> top would let _place_files (followlinks=False
+        # walks INTO a symlinked root) copy an out-of-tree tree. The checksum
+        # check only catches this when files[] is populated; guard it directly.
+        if bundle_files_dir.is_symlink():
+            return _fail(report, f"bundle files/{name} is a symlink; refusing to import")
+
+        root = missioncache_db.MISSIONCACHE_ROOT
+        landing_dir = root / full_path
+        # Must be a STRICT descendant: landing == root would make the atomic swap
+        # rmtree the whole data dir. (full_path is already shape-validated, this
+        # is belt-and-suspenders.)
+        if not _under_root(landing_dir, root) \
+                or landing_dir.resolve() == root.resolve():
+            return _fail(
+                report,
+                f"project full_path {full_path!r} does not resolve to a project "
+                f"directory under the data root {root}",
+            )
+
+        # WSL DrvFs warning (§9): SQLite WAL corrupts on /mnt/.
+        if _under_drvfs(root):
+            report["warnings"].append(
+                f"{root} is under /mnt/ (DrvFs); move ~/.missioncache to the WSL "
+                f"native filesystem - SQLite WAL can corrupt on DrvFs"
+            )
+
+        # --- step 2: classify collision ---
+        incoming_uuid = project.get("origin_uuid")
+        decision = _classify_collision(
+            db, name, full_path, landing_dir, bundle_files_dir, refs["repo"],
+            force, incoming_uuid,
+        )
+        if decision == "abort_different":
+            return _fail(
+                report,
+                f"name '{name}' is already used by a DIFFERENT project (identity "
+                f"mismatch); rename one side - --force will not clobber an "
+                f"unrelated project",
+            )
+        if decision == "abort_same_differs":
+            return _fail(
+                report,
+                f"project '{name}' already exists with different local content. "
+                f"If it is the same project, pass --force to overwrite its files; "
+                f"if it is a different project that happens to share the name, "
+                f"rename one side first.",
+            )
+        action = "created" if decision == "create" else "updated"
+        place = decision in ("create", "update_force", "update_restore")
+
+        # --- resolve references (reads; _resolve_repo may add_repo) ---
+        repo_id, repo_entry, repo_warns = _resolve_repo(
+            db, refs["repo"], repo_override, dry_run
+        )
+        report["warnings"].extend(repo_warns)
+        vault_entries = _resolve_vaults(refs["vaults"])
+        emb_entries, emb_plan = _resolve_embedded(refs["other_paths"])
+        parent_id, parent_entry = _resolve_parent(db, project.get("parent"))
+
+        # --- the DB write FIRST: a UNIQUE conflict aborts here, before any file
+        # is touched, so exit 1 truly means nothing was committed. The mirror
+        # direction holds too: if placement fails AFTER this commit, the
+        # rollback below deletes/restores the row (pre_image is the restore
+        # source for the update case). ---
+        task = None
+        pre_image = None
+        if not dry_run:
+            pre_image = db.find_import_target(name, full_path)
+            task, action = db.upsert_imported_task(
+                name, full_path,
+                repo_id=repo_id,
+                status=project["status"],
+                task_type=project["type"],
+                tags=project.get("tags") or [],
+                priority=project.get("priority"),
+                jira_key=project.get("jira_key"),
+                branch=project.get("branch"),
+                pr_url=project.get("pr_url"),
+                parent_id=parent_id,
+                created_at=project.get("created_at"),
+                origin_uuid=incoming_uuid,
+            )
+            report["task_id"] = task.id
+
+        # --- place files AFTER the row is safely written (atomic + LF) ---
+        if place and not dry_run:
+            try:
+                placed, place_warns = _place_files(bundle_files_dir, landing_dir)
+            except OSError as e:
+                try:
+                    db.rollback_imported_task(action, task.id, pre_image)
+                    if action == "created":
+                        report["task_id"] = None
+                    report["notes"].append(
+                        f"rolled back the '{action}' DB row after the placement failure"
+                    )
+                except Exception as rb:
+                    report["warnings"].append(
+                        f"could NOT roll back task row {task.id} after the "
+                        f"placement failure ({rb}); a re-import will heal it "
+                        f"(update_restore)"
+                    )
+                return _fail(report, f"file placement failed: {e}")
+            report["warnings"].extend(place_warns)
+        else:
+            placed = sorted(
+                p.relative_to(bundle_files_dir).as_posix()
+                for p in bundle_files_dir.rglob("*") if p.is_file()
+            )
+
+        # --- apply opt-in embedded rewrites AFTER placement ---
+        if rewrite and not dry_run:
+            report["warnings"].extend(
+                _apply_embedded_rewrites(emb_plan, landing_dir)
+            )
+
+        # --- assemble the report (embedded buckets reflect any rewrite demotion) ---
+        report["resolved"].append(
+            _entry("resolved", "files", len(placed), str(landing_dir))
+        )
+        _bucket(report, repo_entry)
+        for entry in vault_entries:
+            _bucket(report, entry)
+        for entry in emb_entries:
+            _bucket(report, entry)
+        if parent_entry is not None:
+            _bucket(report, parent_entry)
+        if task is not None:
+            report["resolved"].append(
+                _entry("resolved", "db-row", task.id, str(landing_dir))
+            )
+        else:
+            report["resolved"].append(
+                _entry("resolved", "db-row", f"(dry-run: would be {action})",
+                       str(landing_dir))
+            )
+        report["action"] = action
+
+        # --- pass-through portables (inert in markdown, carried by manifest) ---
+        for field in ("jira_key", "branch", "pr_url"):
+            val = project.get(field)
+            if val:
+                report["resolved"].append(
+                    _entry("resolved", "portable", field, None, str(val))
+                )
+
+        # --- time (display-only origin metadata) ---
+        origin = int(project.get("time_total_seconds") or 0)
+        report["time_origin_seconds"] = origin
+        report["resolved"].append(_entry(
+            "resolved", "time", "origin", None,
+            f"{origin}s origin time is display-only; not imported "
+            f"(this machine starts at 0)",
+        ))
+
+        # --- best-effort DuckDB rebuild ---
+        if dry_run:
+            report["notes"].append("dry-run: no files placed, no DB row written")
+        else:
+            note = _trigger_duckdb_sync()
+            if note:
+                report["notes"].append(note)
+
+        # --- exit code ---
+        report["exit_code"] = 2 if (report["needs_mapping"] or report["missing"]) else 0
+        return report
+
+    except missioncache_db.ImportConflictError as e:
+        report["errors"].append(str(e))
+        report["exit_code"] = 1
+        return report
+    finally:
+        if tmpdir is not None and tmpdir.exists():
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def format_report_lines(report: dict) -> list:
+    """Human-readable stdout lines for an import report.
+
+    Kept here (not in the CLI branch) so the dispatch stays thin and the deep
+    bucket/entry/hint nesting lives in one testable place. Warnings are printed
+    to stderr by the caller; this returns the stdout summary only.
+    """
+    verb = "would import" if report["dry_run"] else "imported"
+    outcome = "fully resolved" if report["exit_code"] == 0 else "see report below"
+    lines = [f"{verb} '{report['name']}' ({report['action']}) - {outcome}"]
+    for bucket, label in (("resolved", "resolved"),
+                          ("needs_mapping", "needs mapping"),
+                          ("missing", "missing")):
+        rows = report[bucket]
+        if not rows:
+            continue
+        lines.append(f"  [{label}] {len(rows)}")
+        for entry in rows:
+            local = f" -> {entry['local']}" if entry["local"] else ""
+            lines.append(f"    {entry['kind']}: {entry['id']}{local}")
+            if entry["hint"] and bucket != "resolved":
+                lines.append(f"      fix: {entry['hint']}")
+    for note in report["notes"]:
+        lines.append(f"  note: {note}")
+    return lines

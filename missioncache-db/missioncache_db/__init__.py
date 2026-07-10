@@ -43,8 +43,10 @@ Cleanup:
 
 Cross-Machine Sharing:
     python missioncache_db.py export <name> [--out <path>] [--no-time] [--json]  # Build a portable bundle (markdown + missioncache.json manifest)
+    python missioncache_db.py import <bundle> [--repo <path>] [--force] [--rewrite-paths] [--dry-run] [--json]  # Import a bundle, reconcile refs, print a 3-bucket alignment report
     python missioncache_db.py config set-path <repo|vault|anchor>:<name> <localpath>  # Map a portable identifier to this machine's path
     python missioncache_db.py config list-paths [kind] [--json]  # Show the per-machine path map (--json prints raw machine.json)
+    python missioncache_db.py config show                        # Print the live machine.json (or a skeleton)
     python missioncache_db.py config seed [--dry-run]            # Pre-fill the map from local repos' git remotes
 """
 
@@ -55,6 +57,7 @@ import re
 import sqlite3
 import sys
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -201,6 +204,15 @@ class FilesystemCollisionError(RenameError):
 
 class AutoRunActiveError(RenameError):
     """A missioncache-auto run is currently in progress on this task."""
+
+
+class ImportConflictError(RuntimeError):
+    """Raised by upsert_imported_task when a cross-machine import would collide
+    with a DIFFERENT existing row on UNIQUE(repo_id, full_path).
+
+    Surfaced as a hard import failure (exit 1) rather than letting the raw
+    sqlite3.IntegrityError escape. Subclasses RuntimeError so callers using
+    `except Exception` catch it cleanly."""
 
 
 _TASK_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -495,6 +507,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TEXT,
     archived_at TEXT,
     last_worked_on TEXT,
+    origin_uuid TEXT,
     UNIQUE(repo_id, full_path)
 );
 
@@ -668,6 +681,7 @@ class Task:
     completed_at: Optional[str]
     archived_at: Optional[str]
     last_worked_on: Optional[str]
+    origin_uuid: Optional[str] = None  # stable cross-machine project identity
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -678,6 +692,7 @@ class Task:
         except (json.JSONDecodeError, TypeError):
             tags = []
 
+        keys = row.keys()
         return cls(
             id=row["id"],
             repo_id=row["repo_id"],
@@ -685,7 +700,7 @@ class Task:
             full_path=row["full_path"],
             parent_id=row["parent_id"],
             status=row["status"],
-            task_type=row["type"] if "type" in row.keys() else "coding",
+            task_type=row["type"] if "type" in keys else "coding",
             tags=tags,
             priority=row["priority"],
             jira_key=row["jira_key"],
@@ -696,6 +711,7 @@ class Task:
             completed_at=row["completed_at"],
             archived_at=row["archived_at"],
             last_worked_on=row["last_worked_on"],
+            origin_uuid=row["origin_uuid"] if "origin_uuid" in keys else None,
         )
 
 
@@ -785,6 +801,16 @@ class AutoExecutionLog:
 # =============================================================================
 
 
+# Shared by upsert_imported_task (update branch) and rollback_imported_task:
+# both rewrite the full authoritative field set on an existing row. Kept in one
+# place so a tasks-column change updates both writers in lockstep.
+_IMPORT_TASK_UPDATE_SQL = (
+    "UPDATE tasks SET name=?, full_path=?, repo_id=?, status=?, type=?, tags=?, "
+    "priority=?, jira_key=?, branch=?, pr_url=?, parent_id=?, created_at=?, "
+    "origin_uuid=? WHERE id=?"
+)
+
+
 class TaskDB:
     """SQLite-based task management database."""
 
@@ -839,6 +865,15 @@ class TaskDB:
         """Initialize the database schema and default config."""
         with self.connection() as conn:
             conn.executescript(SCHEMA_SQL)
+
+            # Idempotent column migration: CREATE TABLE IF NOT EXISTS is a no-op
+            # on an existing DB, so a new column must be added via ALTER. Existing
+            # rows are deliberately left origin_uuid=NULL (NOT backfilled): a fresh
+            # per-machine UUID for an already-shared project would differ across
+            # machines and falsely read as a "different project" on re-import.
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
+            if "origin_uuid" not in cols:
+                conn.execute("ALTER TABLE tasks ADD COLUMN origin_uuid TEXT")
 
             # Insert default config
             for key, value in DEFAULT_CONFIG.items():
@@ -1118,8 +1153,8 @@ class TaskDB:
             # Create new task only if it doesn't exist anywhere
             cursor = conn.execute(
                 """INSERT INTO tasks (repo_id, name, full_path, parent_id, status,
-                   jira_key, branch, pr_url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   jira_key, branch, pr_url, origin_uuid)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     repo_id,
                     task_name,
@@ -1129,6 +1164,7 @@ class TaskDB:
                     metadata.get("jira_key"),
                     metadata.get("branch"),
                     metadata.get("pr_url"),
+                    str(uuid.uuid4()),
                 ),
             )
             conn.commit()
@@ -1208,6 +1244,140 @@ class TaskDB:
             ).fetchone()
             return Task.from_row(row) if row else None
 
+    def find_import_target(self, name: str, full_path: str) -> Optional[Task]:
+        """Find the row a cross-machine import would UPDATE, or None to INSERT.
+
+        The single lookup shared by the import collision classifier and
+        ``upsert_imported_task`` so both act on the SAME row (no active-only vs
+        active+paused scope drift). Prefers a live (active/paused) row at
+        ``full_path``; falls back to the same-named row, active first. A
+        completed/archived row at a different ``full_path`` is intentionally not
+        matched here - it can still collide on ``UNIQUE(repo_id, full_path)`` at
+        write time, which the upsert surfaces as ``ImportConflictError``.
+        """
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM tasks WHERE full_path = ? "
+                "AND status IN ('active','paused') ORDER BY id DESC",
+                (full_path,),
+            ).fetchone() or conn.execute(
+                "SELECT * FROM tasks WHERE name = ? "
+                "ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, id DESC",
+                (name,),
+            ).fetchone()
+            return Task.from_row(row) if row else None
+
+    def upsert_imported_task(
+        self,
+        name: str,
+        full_path: str,
+        *,
+        repo_id: Optional[int],
+        status: str,
+        task_type: str,
+        tags: List[str],
+        priority: Optional[int],
+        jira_key: Optional[str],
+        branch: Optional[str],
+        pr_url: Optional[str],
+        parent_id: Optional[int],
+        created_at: Optional[str],
+        origin_uuid: Optional[str] = None,
+    ) -> Tuple[Task, str]:
+        """Name/path-keyed upsert for cross-machine import (Phase 3).
+
+        The DB write at the heart of ``portability.import_bundle``. Import must
+        NOT route through ``create_task`` (writes a ``manual/``/``global/``
+        full_path, lacks status/branch/pr_url/priority/parent/tags) or
+        ``_sync_task_from_dir`` (COALESCE-only update can't correct drift; its
+        cross-repo dedup skips a repo rebind). This writes every authoritative
+        field from the manifest directly.
+
+        The existing row is found via ``find_import_target`` - the SAME lookup
+        the import pipeline's collision classifier uses, so the row this UPDATEs
+        is exactly the row the classifier validated (no active-vs-paused scope
+        drift). An existing match is UPDATED in place (``.id`` preserved), so
+        re-import is idempotent and a changed ``repo_id`` rebinds; the UPDATE
+        also rewrites ``name``/``full_path`` so the row never desyncs from where
+        the files were placed. ``created_at`` is preserved as the EARLIER of
+        existing vs incoming (compared separator-insensitively so a ``T`` vs
+        space form does not flip the order) so the origin date survives a
+        re-import. A missing incoming ``created_at`` falls back to the column
+        default. Returns ``(task, "created"|"updated")``.
+
+        ``origin_uuid`` is the stable cross-machine project identity. On UPDATE
+        the existing row's uuid is preserved, adopting the incoming one only to
+        heal a pre-migration NULL. On CREATE the incoming uuid is adopted (so a
+        re-export from this machine still matches the origin), or a fresh one is
+        minted when the bundle predates the feature.
+
+        A write that collides with a DIFFERENT row on ``UNIQUE(repo_id,
+        full_path)`` raises ``ImportConflictError``; any other integrity error
+        (a real bug) propagates unwrapped rather than being mislabeled a
+        conflict.
+        """
+        existing = self.find_import_target(name, full_path)
+        with self.connection() as conn:
+            try:
+                if existing:
+                    keep_created = min(
+                        filter(None, [existing.created_at, created_at]),
+                        key=lambda s: s.replace("T", " "),
+                        default=created_at,
+                    )
+                    keep_uuid = existing.origin_uuid or origin_uuid
+                    conn.execute(
+                        _IMPORT_TASK_UPDATE_SQL,
+                        (name, full_path, repo_id, status, task_type,
+                         json.dumps(tags), priority, jira_key, branch, pr_url,
+                         parent_id, keep_created, keep_uuid, existing.id),
+                    )
+                    conn.commit()
+                    return self.get_task(existing.id), "updated"
+                cur = conn.execute(
+                    "INSERT INTO tasks (repo_id, name, full_path, parent_id, "
+                    "status, type, tags, priority, jira_key, branch, pr_url, "
+                    "created_at, origin_uuid) VALUES (?,?,?,?,?,?,?,?,?,?,?,"
+                    "COALESCE(?, datetime('now','localtime')),?)",
+                    (repo_id, name, full_path, parent_id, status, task_type,
+                     json.dumps(tags), priority, jira_key, branch, pr_url,
+                     created_at, origin_uuid or str(uuid.uuid4())),
+                )
+                conn.commit()
+                return self.get_task(cur.lastrowid), "created"
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE constraint" in str(e):
+                    raise ImportConflictError(
+                        f"import conflict: (repo_id={repo_id}, {full_path}) is "
+                        f"already held by another task row: {e}"
+                    )
+                raise
+
+    def rollback_imported_task(
+        self, action: str, task_id: int, pre: Optional[Task]
+    ) -> None:
+        """Compensate a committed ``upsert_imported_task`` after placement failure.
+
+        Import writes the DB row before placing files so a UNIQUE conflict
+        aborts with the filesystem untouched (see ``portability.import_bundle``).
+        This covers the mirror direction: when file placement raises AFTER the
+        upsert committed, a ``created`` row is deleted and an ``updated`` row
+        gets its pre-image fields written back, so import's exit 1 keeps
+        meaning nothing was committed.
+        """
+        with self.connection() as conn:
+            if action == "created":
+                conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+            elif pre is not None:
+                conn.execute(
+                    _IMPORT_TASK_UPDATE_SQL,
+                    (pre.name, pre.full_path, pre.repo_id, pre.status,
+                     pre.task_type, json.dumps(pre.tags), pre.priority,
+                     pre.jira_key, pre.branch, pre.pr_url, pre.parent_id,
+                     pre.created_at, pre.origin_uuid, task_id),
+                )
+            conn.commit()
+
     # =========================================================================
     # Non-Coding Task Management
     # =========================================================================
@@ -1243,9 +1413,11 @@ class TaskDB:
 
         with self.connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO tasks (repo_id, name, full_path, type, tags, jira_key, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'active')""",
-                (repo_id, name, full_path, task_type, json.dumps(tags), jira_key),
+                """INSERT INTO tasks (repo_id, name, full_path, type, tags,
+                   jira_key, status, origin_uuid)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
+                (repo_id, name, full_path, task_type, json.dumps(tags), jira_key,
+                 str(uuid.uuid4())),
             )
             conn.commit()
             return self.get_task(cursor.lastrowid)
@@ -4014,6 +4186,9 @@ def main():
                         for k, v in sorted(mapping.get(sec, {}).items()):
                             print(f"  {k} -> {v}")
 
+            elif sub == "show":
+                print(json.dumps(machine_map.all_mappings(), indent=2, sort_keys=True))
+
             elif sub == "seed":
                 dry_run = "--dry-run" in sys.argv
                 result = machine_map.seed(db, dry_run=dry_run)
@@ -4028,7 +4203,7 @@ def main():
                     print("\n  Run without --dry-run to write machine.json.")
 
             else:
-                print("Usage: missioncache-db config <set-path|list-paths|seed>")
+                print("Usage: missioncache-db config <set-path|list-paths|show|seed>")
                 sys.exit(1)
 
         elif command == "export":
@@ -4080,6 +4255,53 @@ def main():
                         f"  origin time (display-only): "
                         f"{m['project']['time_total_seconds']}s"
                     )
+
+        elif command == "import":
+            from missioncache_db import portability
+
+            args = sys.argv[2:]
+            if not args or args[0].startswith("-"):
+                print(
+                    "Usage: missioncache-db import <bundle> [--repo <path>] "
+                    "[--force] [--rewrite-paths] [--dry-run] [--json]"
+                )
+                sys.exit(1)
+            bundle = args[0]
+            repo_override = None
+            i = 1
+            while i < len(args):  # value-flag index walk (create-task precedent)
+                if args[i] == "--repo":
+                    if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                        print("--repo requires a path argument", file=sys.stderr)
+                        sys.exit(1)
+                    repo_override = args[i + 1]
+                    i += 2
+                    continue
+                i += 1
+            force = "--force" in args
+            rewrite = "--rewrite-paths" in args
+            dry_run = "--dry-run" in args
+            as_json = "--json" in args
+            try:
+                report = portability.import_bundle(
+                    db, bundle, repo_override=repo_override, force=force,
+                    rewrite=rewrite, dry_run=dry_run,
+                )
+            except (ValueError, OSError) as e:
+                print(f"import failed: {e}", file=sys.stderr)
+                sys.exit(1)
+
+            if as_json:
+                print(json.dumps(report, indent=2, sort_keys=True))
+            elif report["errors"]:
+                for err in report["errors"]:
+                    print(f"import failed: {err}", file=sys.stderr)
+            else:
+                for line in portability.format_report_lines(report):
+                    print(line)
+                for w in report["warnings"]:
+                    print(f"  warning: {w}", file=sys.stderr)
+            sys.exit(report["exit_code"])
 
         else:
             print(f"Unknown command: {command}")
