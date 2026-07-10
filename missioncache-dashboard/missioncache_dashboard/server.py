@@ -175,11 +175,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MissionCache Dashboard", version="2.0.0", lifespan=lifespan)
 
-# CORS for local development
+# CORS scoped to the dashboard's own origin. A wildcard here would let any
+# website the user visits read every endpoint and drive the mutating ones
+# cross-origin (the 127.0.0.1 bind stops remote hosts, not the user's own
+# browser). Non-browser consumers (statusline, hooks, curl) are unaffected -
+# CORS only gates browser-initiated cross-origin requests.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://localhost:8787", "http://127.0.0.1:8787"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

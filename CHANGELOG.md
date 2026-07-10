@@ -10,6 +10,10 @@ The built-in 13-value category taxonomy is now extensible. A new dashboard Setti
 
 Deleting a custom category always succeeds: projects still carrying the value keep it (rendered with default styling, still selectable per-task so a modal save cannot wipe it), and re-adding the name restores the emoji and color. New assignments of a deleted name are rejected. Storage is a new `custom_categories` SQLite table created by the idempotent schema DDL, so existing installs pick it up on the next open with no migration step; the dashboard reads it directly from SQLite (`GET/POST /api/categories`, `DELETE /api/categories/{name}`) with no DuckDB involvement. The dashboard's 15-minute auto-refresh re-fetches the category map, so customs created from another tab, another machine, or the CLI stop rendering as the generic fallback within one cycle; a failed categories fetch keeps the previous map and says so in Settings instead of showing a false "No custom categories yet".
 
+### Fixed - dashboard CORS was wildcard with credentials (missioncache-dashboard)
+
+The dashboard's CORS middleware allowed `*` origins with credentials, letting any website open in the user's browser read every API response and drive the mutating endpoints cross-origin (the 127.0.0.1 bind blocks remote hosts, not the user's own browser tabs). CORS is now scoped to the dashboard's own origin (`localhost:8787` / `127.0.0.1:8787`) and the credentials flag is gone (nothing uses cookies). Non-browser consumers - the statusline, hooks, curl - are unaffected, since CORS only gates browser-initiated cross-origin requests.
+
 ### Added - edit category in place (missioncache-db 1.0.5, mcp-missioncache 1.0.8, missioncache-dashboard)
 
 Categories are now editable after creation, from both surfaces:
