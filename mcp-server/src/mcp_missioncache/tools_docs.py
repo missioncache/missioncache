@@ -38,6 +38,7 @@ async def create_missioncache_files(
         Field(
             description="Project category, derived from the project "
             "description at creation time. One of: " + ", ".join(CATEGORIES)
+            + ", or an existing custom category"
         ),
     ] = None,
     tasks: Annotated[
@@ -101,11 +102,16 @@ async def create_missioncache_files(
     db = get_db()
 
     try:
-        if category is not None and category not in CATEGORIES:
+        if (
+            category is not None
+            and category not in CATEGORIES
+            and category not in db.custom_category_names()
+        ):
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}, "
+                "or an existing custom category",
             }
 
         # Validate the raw input first; otherwise an empty string passed

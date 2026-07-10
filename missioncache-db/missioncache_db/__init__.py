@@ -549,6 +549,15 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- User-defined categories (extend the built-in CATEGORIES taxonomy).
+-- Rendered as emoji + color in the dashboard; managed from its Settings view.
+CREATE TABLE IF NOT EXISTS custom_categories (
+    name TEXT PRIMARY KEY,
+    emoji TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_repos_active ON repositories(active);
 CREATE INDEX IF NOT EXISTS idx_repos_path ON repositories(path);
@@ -685,12 +694,28 @@ CATEGORIES = (
 )
 
 
-def _validate_category(category: Optional[str]) -> None:
-    """Raise ValueError unless ``category`` is None or in CATEGORIES."""
-    if category is not None and category not in CATEGORIES:
+def _validate_category(
+    category: Optional[str], custom: frozenset = frozenset()
+) -> None:
+    """Raise ValueError unless ``category`` is None, in CATEGORIES, or in ``custom``."""
+    if category is not None and category not in CATEGORIES and category not in custom:
         raise ValueError(
-            f"Invalid category: {category!r}. Must be one of: {', '.join(CATEGORIES)}"
+            f"Invalid category: {category!r}. Must be one of: "
+            f"{', '.join(CATEGORIES)}, or a custom category"
         )
+
+
+# Custom category field constraints. name shares the kebab-case shape of the
+# built-ins; "none" is reserved (it is the clear sentinel in update_task and
+# the set-category CLI). color is strict hex because it lands in a style
+# attribute - anything looser is a CSS injection channel. emoji must contain
+# non-ASCII and no HTML metacharacters: a bare length cap would accept plain
+# text ("abcdefgh") and markup fragments ("<img/"), leaving render-time
+# escaping as the only XSS defense. The cap is generous because ZWJ and
+# skin-tone emoji sequences span many codepoints.
+_CUSTOM_CATEGORY_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,23}")
+_CUSTOM_CATEGORY_COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}")
+_CUSTOM_CATEGORY_EMOJI_MAX_LEN = 16
 
 
 @dataclass
@@ -1369,7 +1394,7 @@ class TaskDB:
         (a real bug) propagates unwrapped rather than being mislabeled a
         conflict.
         """
-        _validate_category(category)
+        _validate_category(category, self.custom_category_names())
         existing = self.find_import_target(name, full_path)
         with self.connection() as conn:
             try:
@@ -1460,7 +1485,7 @@ class TaskDB:
         """
         if task_type not in ("coding", "non-coding"):
             raise ValueError(f"Invalid task type: {task_type}")
-        _validate_category(category)
+        _validate_category(category, self.custom_category_names())
 
         # Non-coding tasks must not have a repo_id
         if task_type == "non-coding" and repo_id is not None:
@@ -1495,7 +1520,7 @@ class TaskDB:
             ValueError: If the category is not in CATEGORIES or the task
                 does not exist
         """
-        _validate_category(category)
+        _validate_category(category, self.custom_category_names())
         with self.connection() as conn:
             cursor = conn.execute(
                 "UPDATE tasks SET category = ?, "
@@ -1530,6 +1555,90 @@ class TaskDB:
                 raise ValueError(f"Task {task_id} not found")
             conn.commit()
             return self.get_task(task_id)
+
+    # =========================================================================
+    # Custom categories
+    # =========================================================================
+
+    def list_custom_categories(self) -> List[Dict[str, str]]:
+        """All custom categories as [{"name", "emoji", "color"}], name-ordered."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT name, emoji, color FROM custom_categories ORDER BY name"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def custom_category_names(self) -> frozenset:
+        """The set of custom category names (for validation)."""
+        with self.connection() as conn:
+            return frozenset(
+                r["name"] for r in conn.execute("SELECT name FROM custom_categories")
+            )
+
+    def add_custom_category(self, name: str, emoji: str, color: str) -> Dict[str, str]:
+        """Add a custom category. Returns the stored row.
+
+        Raises:
+            ValueError: On invalid name/emoji/color, a name that collides
+                with the built-in taxonomy or the 'none' clear sentinel,
+                or a duplicate custom name.
+        """
+        name = (name or "").strip().lower()
+        emoji = (emoji or "").strip()
+        color = (color or "").strip()
+
+        if not _CUSTOM_CATEGORY_NAME_RE.fullmatch(name):
+            raise ValueError(
+                "Invalid category name: lowercase letters, digits, and hyphens "
+                "only, starting with a letter or digit (max 24 chars)"
+            )
+        if name in CATEGORIES or name == "none":
+            raise ValueError(f"{name!r} is reserved (built-in category or sentinel)")
+        if not emoji or len(emoji) > _CUSTOM_CATEGORY_EMOJI_MAX_LEN:
+            raise ValueError(
+                f"emoji is required (max {_CUSTOM_CATEGORY_EMOJI_MAX_LEN} chars)"
+            )
+        # Content, not just length: all-ASCII means plain text, not an emoji,
+        # and the metacharacter check keeps markup fragments (even mixed with
+        # real emoji) out of the DB entirely.
+        if emoji.isascii() or any(c in emoji for c in "<>&\"'"):
+            raise ValueError(
+                "emoji must be emoji characters, not plain text or markup"
+            )
+        if not _CUSTOM_CATEGORY_COLOR_RE.fullmatch(color):
+            raise ValueError("color must be a #RRGGBB hex value")
+
+        with self.connection() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO custom_categories (name, emoji, color) VALUES (?, ?, ?)",
+                    (name, emoji, color),
+                )
+            except sqlite3.IntegrityError as e:
+                # Only the duplicate-PK case is a "conflict"; any other
+                # integrity error is a real bug and propagates unwrapped
+                # (the import_task pattern - don't mislabel it).
+                if "UNIQUE constraint" in str(e):
+                    raise ValueError(f"Custom category {name!r} already exists")
+                raise
+            conn.commit()
+        return {"name": name, "emoji": emoji, "color": color}
+
+    def remove_custom_category(self, name: str) -> bool:
+        """Remove a custom category. Returns True when a row was deleted.
+
+        Tasks still carrying the removed value keep it by design (the
+        dashboard renders the bare name with default styling, and the value
+        stays selectable per-task); re-adding the category restores styling.
+        """
+        # Normalize like add_custom_category stores, so DELETE "UI" hits "ui".
+        name = (name or "").strip().lower()
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM custom_categories WHERE name = ?", (name,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def add_task_update(self, task_id: int, note: str) -> int:
         """Add a timestamped update to a task.
@@ -3773,6 +3882,9 @@ def main():
             if len(sys.argv) < 4:
                 print("Usage: missioncache_db.py set-category <task_id> <category|none>")
                 print(f"Categories: {', '.join(CATEGORIES)}")
+                customs = sorted(db.custom_category_names())
+                if customs:
+                    print(f"Custom categories: {', '.join(customs)}")
                 sys.exit(1)
             category = None if sys.argv[3].lower() == "none" else sys.argv[3]
             try:

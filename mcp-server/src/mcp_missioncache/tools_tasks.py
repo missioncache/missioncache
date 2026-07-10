@@ -399,6 +399,7 @@ async def create_task(
         Field(
             description="Project category, derived from the project "
             "description at creation time. One of: " + ", ".join(CATEGORIES)
+            + ", or an existing custom category"
         ),
     ] = None,
     session_id: Annotated[
@@ -437,11 +438,16 @@ async def create_task(
                 "code": "VALIDATION_ERROR",
                 "message": "type must be 'coding' or 'non-coding'",
             }
-        if category is not None and category not in CATEGORIES:
+        if (
+            category is not None
+            and category not in CATEGORIES
+            and category not in db.custom_category_names()
+        ):
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}, "
+                "or an existing custom category",
             }
 
         repo_id = None
@@ -747,8 +753,8 @@ async def update_task(
         Field(
             description="Project category to set. One of: "
             + ", ".join(CATEGORIES)
-            + ". Pass the literal string 'none' to clear. Omit to leave "
-            "unchanged."
+            + ", or an existing custom category. Pass the literal string "
+            "'none' to clear. Omit to leave unchanged."
         ),
     ] = None,
 ) -> dict:
@@ -805,11 +811,16 @@ async def update_task(
             None if category is not None and category.lower() == "none" else category
         )
 
-        if new_category is not None and new_category not in CATEGORIES:
+        if (
+            new_category is not None
+            and new_category not in CATEGORIES
+            and new_category not in db.custom_category_names()
+        ):
             return {
                 "error": True,
                 "code": "VALIDATION_ERROR",
-                "message": f"category must be one of: {', '.join(CATEGORIES)}",
+                "message": f"category must be one of: {', '.join(CATEGORIES)}, "
+                "or an existing custom category",
             }
 
         updated = []

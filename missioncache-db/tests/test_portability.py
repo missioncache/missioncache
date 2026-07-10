@@ -1159,6 +1159,27 @@ class TestCategoryPortability:
         assert mc_b.db.get_task_by_name(name).category is None
         assert any("taxonomy" in w for w in report["warnings"])
 
+    def test_locally_defined_custom_category_imports_intact(
+        self, mc, mc_b, tmp_path, monkeypatch
+    ):
+        """A bundle category matching a custom category defined on the
+        TARGET machine counts as known: it imports preserved, with no
+        taxonomy warning (the cross-machine import contract - custom
+        definitions do not travel, so only the target's set matters)."""
+        name = "custom-categorized"
+        bundle = _build_bundle(mc, name, tmp_path / "bundle")
+        man_path = Path(bundle) / "missioncache.json"
+        man = json.loads(man_path.read_text())
+        man["project"]["category"] = "research"
+        man_path.write_text(json.dumps(man))
+
+        mc_b.db.add_custom_category("research", "🔬", "#4dabf7")
+        report = _import(mc_b, monkeypatch, bundle)
+
+        assert report["exit_code"] == 0
+        assert mc_b.db.get_task_by_name(name).category == "research"
+        assert not any("taxonomy" in w for w in report["warnings"])
+
     def test_null_bundle_category_preserves_local_on_reimport(
         self, mc, mc_b, tmp_path, monkeypatch
     ):

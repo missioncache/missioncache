@@ -1998,6 +1998,57 @@
             border-color: var(--accent-purple);
         }
 
+        /* Custom-category emoji icons (tables, chips, modal) */
+        .task-icon-emoji {
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        .filter-chip .task-icon-emoji {
+            font-size: 12px;
+        }
+
+        /* Size parity with the modal's 16px SVG icon slot */
+        .task-modal-category .task-icon-emoji {
+            font-size: 16px;
+        }
+
+        /* Custom categories settings rows */
+        .settings-category-row {
+            padding: 4px 0;
+        }
+
+        .settings-category-emoji {
+            font-size: 16px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .settings-category-name {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            flex: 0 1 200px;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .settings-category-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        /* Must out-specify the .settings-row input[type="text"] flex:1 rule,
+           which appears later in the sheet. */
+        .settings-row input[type="text"].settings-emoji-input {
+            flex: 0 0 70px;
+            text-align: center;
+        }
+
         /* ============================================
            Loading Overlay
            ============================================ */
@@ -5064,6 +5115,25 @@
                                 <span id="statuslineSaveStatus" class="settings-save-status"></span>
                             </div>
                         </div>
+
+                        <!-- Custom categories -->
+                        <div class="settings-section">
+                            <h3>Custom categories</h3>
+                            <p class="settings-hint">Extend the built-in project category taxonomy. Custom categories render as an emoji in the project tables, the filter bar, and the project modal's selector. Deleting one keeps the value on projects that still use it (shown with default styling) - re-adding the name restores the emoji and color.</p>
+                            <div id="customCategoryRows" class="settings-rows"></div>
+                            <div class="settings-row">
+                                <input type="text" id="newCategoryName" placeholder="category-name"
+                                       maxlength="24" autocomplete="off" spellcheck="false"
+                                       aria-label="New category name"
+                                       onkeydown="if (event.key === 'Enter') addCustomCategory()">
+                                <input type="text" id="newCategoryEmoji" placeholder="emoji" class="settings-emoji-input"
+                                       maxlength="16" autocomplete="off" aria-label="New category emoji"
+                                       onkeydown="if (event.key === 'Enter') addCustomCategory()">
+                                <select id="newCategoryColor" class="filter-repo-select" aria-label="New category color"></select>
+                                <button class="settings-btn-primary" onclick="addCustomCategory()">Add category</button>
+                                <span id="categorySaveStatus" class="settings-save-status" aria-live="polite"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div><!-- End Settings View -->
@@ -5680,8 +5750,136 @@
                 renderEmailRows(settings.author_emails || []);
                 renderRepoRows(reposData.repositories || [], settings.repos || {});
                 renderStatuslineSettings(settings.statusline || {});
+                await fetchCustomCategories();
+                renderCustomCategorySettings();
             } catch (err) {
                 console.error('Failed to load settings:', err);
+            }
+        }
+
+        // =====================================================================
+        // Custom categories (Settings)
+        // =====================================================================
+        // Preset palette for new categories - a fixed offer keeps the picker
+        // to one dropdown (the server accepts any #RRGGBB, so this is UI
+        // convenience, not the validation layer).
+        const CATEGORY_PALETTE = [
+            ['red', '#ff6b6b'], ['orange', '#ff922b'], ['yellow', '#ffd43b'],
+            ['green', '#51cf66'], ['teal', '#20c997'], ['blue', '#4dabf7'],
+            ['purple', '#b18cff'], ['pink', '#f06595'],
+        ];
+
+        function renderCustomCategorySettings() {
+            const box = document.getElementById('customCategoryRows');
+            if (!box) return;
+
+            // Populate the palette select once.
+            const colorSel = document.getElementById('newCategoryColor');
+            if (colorSel && !colorSel.options.length) {
+                for (const [label, hex] of CATEGORY_PALETTE) {
+                    const o = document.createElement('option');
+                    o.value = hex;
+                    o.textContent = label;
+                    colorSel.appendChild(o);
+                }
+            }
+
+            box.replaceChildren();
+            const names = Object.keys(CUSTOM_CATEGORIES).sort();
+            if (!names.length) {
+                const hint = document.createElement('p');
+                hint.className = 'settings-hint';
+                // Distinguish "none defined" from "the load failed" - the
+                // false-empty state would invite re-adding existing names.
+                hint.textContent = customCategoriesLoadFailed
+                    ? 'Could not load custom categories (see browser console); showing nothing rather than a wrong list.'
+                    : 'No custom categories yet.';
+                box.appendChild(hint);
+                return;
+            }
+            for (const name of names) {
+                const c = CUSTOM_CATEGORIES[name];
+                const row = document.createElement('div');
+                row.className = 'settings-row settings-category-row';
+                const emoji = document.createElement('span');
+                emoji.className = 'settings-category-emoji';
+                emoji.textContent = c.emoji;
+                // The user-chosen color goes on a swatch, NOT the name text:
+                // palette colors fail WCAG AA contrast as text on the light
+                // theme, and the swatch communicates the same thing.
+                const label = document.createElement('span');
+                label.className = 'settings-category-name';
+                label.textContent = name;
+                const swatch = document.createElement('span');
+                swatch.className = 'settings-category-swatch';
+                swatch.style.background = c.color;
+                const del = document.createElement('button');
+                del.className = 'settings-btn-secondary';
+                del.textContent = 'Delete';
+                del.setAttribute('aria-label', `Delete category ${name}`);
+                del.addEventListener('click', () => deleteCustomCategory(name));
+                row.append(emoji, label, swatch, del);
+                box.appendChild(row);
+            }
+        }
+
+        function _categoryStatus(text, isError) {
+            const status = document.getElementById('categorySaveStatus');
+            status.textContent = text;
+            status.className = 'settings-save-status' + (isError ? ' error' : ' success');
+            if (!isError && text) {
+                setTimeout(() => {
+                    if (status.textContent === text) status.textContent = '';
+                }, 2500);
+            }
+        }
+
+        async function _refreshCategoriesEverywhere() {
+            await fetchCustomCategories();  // re-renders tables + chips itself
+            renderCustomCategorySettings();
+        }
+
+        async function addCustomCategory() {
+            const name = document.getElementById('newCategoryName').value;
+            const emoji = document.getElementById('newCategoryEmoji').value;
+            const color = document.getElementById('newCategoryColor').value;
+            _categoryStatus('Adding...', false);
+            try {
+                const res = await fetch(API_BASE + '/api/categories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, emoji, color }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = body.detail || body;
+                    _categoryStatus((detail && detail.message) || `HTTP ${res.status}`, true);
+                    return;
+                }
+                document.getElementById('newCategoryName').value = '';
+                document.getElementById('newCategoryEmoji').value = '';
+                _categoryStatus(`Added '${body.name}'`, false);
+                await _refreshCategoriesEverywhere();
+            } catch (err) {
+                _categoryStatus(`Error: ${err.message}`, true);
+            }
+        }
+
+        async function deleteCustomCategory(name) {
+            try {
+                const res = await fetch(API_BASE + `/api/categories/${encodeURIComponent(name)}`, {
+                    method: 'DELETE',
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = body.detail || body;
+                    _categoryStatus((detail && detail.message) || `HTTP ${res.status}`, true);
+                    return;
+                }
+                _categoryStatus(`Deleted '${name}'`, false);
+                await _refreshCategoriesEverywhere();
+            } catch (err) {
+                _categoryStatus(`Error: ${err.message}`, true);
             }
         }
 
@@ -6443,8 +6641,17 @@
                 chip.dataset.category = cat;
                 const icon = document.createElement('span');
                 icon.className = 'task-icon';
-                icon.style.color = TASK_ICON_COLORS[cat] || TASK_ICON_COLORS.coding;
-                icon.innerHTML = TASK_ICONS[cat] || TASK_ICONS.coding;
+                icon.setAttribute('aria-hidden', 'true');  // chip text carries the name
+                const custom = CUSTOM_CATEGORIES[cat];
+                if (custom) {
+                    // Emoji via textContent (stored value, no markup path).
+                    icon.classList.add('task-icon-emoji');
+                    icon.textContent = custom.emoji;
+                    icon.style.color = custom.color;
+                } else {
+                    icon.style.color = TASK_ICON_COLORS[cat] || TASK_ICON_COLORS.coding;
+                    icon.innerHTML = TASK_ICONS[cat] || TASK_ICONS.coding;
+                }
                 chip.appendChild(icon);
                 chip.appendChild(document.createTextNode(cat));
                 chip.addEventListener('click', () => toggleProjectsCategoryFilter(cat));
@@ -7332,19 +7539,28 @@
         function _setModalCategoryUI(category) {
             const sel = document.getElementById('taskModalCategorySelect');
             const icon = document.getElementById('taskModalCategoryIcon');
-            const options = ['', ...Object.keys(TASK_ICONS)];
-            // A stored value outside the icon map (future custom category)
-            // still needs to be selectable, else opening + saving would wipe it.
+            const options = ['', ...Object.keys(TASK_ICONS), ...Object.keys(CUSTOM_CATEGORIES).sort()];
+            // A stored value outside both maps (e.g. a deleted custom
+            // category) still needs to be selectable, else opening + saving
+            // would wipe it.
             if (category && !options.includes(category)) options.push(category);
             sel.innerHTML = '';
             for (const cat of options) {
                 const o = document.createElement('option');
                 o.value = cat;
-                o.textContent = cat || 'uncategorized';
+                const custom = CUSTOM_CATEGORIES[cat];
+                o.textContent = custom ? `${custom.emoji} ${cat}` : (cat || 'uncategorized');
                 sel.appendChild(o);
             }
             sel.value = category || '';
-            if (category) {
+            const custom = category && CUSTOM_CATEGORIES[category];
+            if (custom) {
+                icon.classList.add('task-icon-emoji');
+                icon.textContent = custom.emoji;
+                icon.style.color = custom.color;
+                icon.style.display = '';
+            } else if (category) {
+                icon.classList.remove('task-icon-emoji');
                 icon.innerHTML = TASK_ICONS[category] || TASK_ICONS.coding;
                 icon.style.color = TASK_ICON_COLORS[category] || TASK_ICON_COLORS.coding;
                 icon.style.display = '';
@@ -7961,6 +8177,41 @@
             noncoding: '#868e96' // Gray
         };
 
+        // User-defined categories (name -> {emoji, color}), loaded from
+        // /api/categories. Built-ins render from TASK_ICONS/TASK_ICON_COLORS;
+        // customs render their emoji in the stored color.
+        let CUSTOM_CATEGORIES = {};
+        // Set when the last categories fetch failed, so the Settings section
+        // can show a real failure message instead of a misleading
+        // "No custom categories yet" empty state.
+        let customCategoriesLoadFailed = false;
+
+        async function fetchCustomCategories() {
+            try {
+                const res = await fetch(API_BASE + '/api/categories');
+                // An HTTP error page still parses as JSON - without this
+                // check a transient 5xx would silently wipe the map (and
+                // every custom emoji on screen) with no signal anywhere.
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                CUSTOM_CATEGORIES = {};
+                for (const c of data.custom || []) {
+                    CUSTOM_CATEGORIES[c.name] = { emoji: c.emoji, color: c.color };
+                }
+                customCategoriesLoadFailed = false;
+                // Re-render whatever is already on screen so custom emoji
+                // replace the generic fallback icon without a manual refresh.
+                projectsFilterOptionsSignature = '';
+                if (activeTasksCache.length) renderActiveTasks(activeTasksCache);
+                if (completedTasksCache.length) renderCompletedTasks(completedTasksCache);
+            } catch (e) {
+                // Keep the prior map - stale custom styling beats silently
+                // degrading every custom category to the generic icon.
+                customCategoriesLoadFailed = true;
+                console.warn('Failed to load custom categories:', e);
+            }
+        }
+
         // Determine task category: stored value first, name heuristic as fallback
         function getTaskCategory(task) {
             // Priority 0: category stored in the DB (assigned at creation time)
@@ -8005,10 +8256,18 @@
         // Generate HTML for task icon
         function getTaskIconHTML(task) {
             const category = getTaskCategory(task);
+            // escapeHtml: category/emoji/color are raw stored values; every
+            // other field in the row is escaped, keep the no-trust posture
+            // here too (color is server-validated #RRGGBB, escaped anyway).
+            const custom = CUSTOM_CATEGORIES[category];
+            if (custom) {
+                // aria-hidden: screen readers would announce the emoji's
+                // Unicode name ("microscope") as noise; the row text and
+                // title carry the meaning.
+                return `<span class="task-icon task-icon-emoji" aria-hidden="true" style="color: ${escapeHtml(custom.color)}" title="${escapeHtml(category)}">${escapeHtml(custom.emoji)}</span>`;
+            }
             const icon = TASK_ICONS[category] || TASK_ICONS.coding;
             const color = TASK_ICON_COLORS[category] || TASK_ICON_COLORS.coding;
-            // escapeHtml: category can be a raw stored value; every other
-            // field in the row is escaped, keep the no-trust posture here too.
             return `<span class="task-icon" style="color: ${color}" title="${escapeHtml(category)}">${icon}</span>`;
         }
 
@@ -8073,11 +8332,20 @@
             // JIRA keys into clickable links on the first modal open.
             ensureJiraUrlsLoaded();
 
+            // Load custom categories so table icons, filter chips, and the
+            // modal selector render them from the first paint (re-renders
+            // whatever already loaded when it resolves later).
+            fetchCustomCategories();
+
             // Auto-refresh every 15 minutes
             setInterval(async () => {
                 if (!LoadingManager.isInitialLoad) {
                     const view = getCurrentView();
                     if (view === 'projects') {
+                        // Categories too: another tab/machine/CLI may have
+                        // added one since load - without this, its tasks
+                        // would paint with the generic fallback icon.
+                        await fetchCustomCategories();
                         dataLoaded.projects = false;
                         await loadProjectsData();
                     } else if (view === 'activity') {
