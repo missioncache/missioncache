@@ -202,7 +202,7 @@ class TestUpdateContextFile:
         ctx_file = tmp_path / "context.md"
         ctx_file.write_text(sample_context_md)
 
-        updated = update_context_file(str(ctx_file))
+        updated = update_context_file(str(ctx_file))["content"]
         assert "**Last Updated:**" in updated
         # Should NOT contain the old timestamp
         assert "2026-04-01 10:00" not in updated
@@ -215,7 +215,7 @@ class TestUpdateContextFile:
         updated = update_context_file(
             str(ctx_file),
             recent_changes=["Added new module", "Fixed tests"],
-        )
+        )["content"]
 
         assert "Added new module" in updated
         assert "Fixed tests" in updated
@@ -611,3 +611,355 @@ class TestAtomicWrites:
 
         tmp_file = ctx_file.with_name(ctx_file.name + ".tmp")
         assert not tmp_file.exists(), ".tmp staging file should be gone"
+
+
+# ── Waiting on maintenance + Recent Changes cap (context-file conventions) ──
+
+
+WAITING_CONTEXT = """# Demo - Context
+
+**Last Updated:** 2026-04-01 10:00
+
+## Description
+
+A demo project.
+
+## Gotchas
+
+- TBD
+
+## Waiting on
+
+External replies/events that gate work. Check on every resume; when one resolves, act on what it gates and move the row into Recent Changes.
+
+| What | Who | Since | Gates |
+|------|-----|-------|-------|
+| Reply on PR | Jose | 2026-07-10 | GC-1 rework |
+| Egress check | Nitzan | 2026-07-09 | GC-2 closure |
+
+## Next Steps
+
+1. Do the thing
+
+## Recent Changes
+
+### 2026-07-01 10:00
+
+- created
+"""
+
+
+class TestWaitingOnAdd:
+    def test_adds_row_to_existing_section(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[
+                {"what": "SA reply", "who": "Shasho", "since": "2026-07-10", "gates": "IAP binding"}
+            ],
+        )
+        content = ctx.read_text()
+        assert "| SA reply | Shasho | 2026-07-10 | IAP binding |" in content
+        # Existing rows survive.
+        assert "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |" in content
+        # Usage note prose untouched.
+        assert "External replies/events that gate work" in content
+
+    def test_self_heals_missing_section_before_next_steps(self, tmp_path, sample_context_md):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(sample_context_md)
+        assert "## Waiting on" not in sample_context_md
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[{"what": "A thing", "who": "Bob", "gates": "X"}],
+        )
+        content = ctx.read_text()
+        assert "## Waiting on" in content
+        assert content.index("## Waiting on") < content.index("## Next Steps")
+        assert "| A thing | Bob |" in content
+
+    def test_default_since_is_today(self, tmp_path):
+        from datetime import datetime
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        # Capture the date BEFORE the call so a midnight rollover between
+        # write and assert can't flip the expectation.
+        before = datetime.now().strftime("%Y-%m-%d")
+        update_context_file(
+            str(ctx), waiting_on_add=[{"what": "New ask", "who": "Ann"}]
+        )
+        after = datetime.now().strftime("%Y-%m-%d")
+        content = ctx.read_text()
+        assert (
+            f"| New ask | Ann | {before} |" in content
+            or f"| New ask | Ann | {after} |" in content
+        )
+
+    def test_pipe_in_cell_survives_write_roundtrip(self, tmp_path):
+        """Integration-level guard for the pipe-escaping fix (flagged by
+        three reviewers): a cell pipe must not shift columns on rewrite."""
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[
+                {"what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "GC-1 | GC-2"}
+            ],
+        )
+        # Second write touching the table re-parses and re-renders all rows.
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[{"what": "Unrelated", "who": "Y", "since": "2026-07-11", "gates": "g"}],
+        )
+        rows = ch.parse_waiting_on(ctx.read_text())
+        piped = next(r for r in rows if "Fix a" in r["what"])
+        assert piped == {
+            "what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "GC-1 | GC-2"
+        }
+
+    def test_multiple_rows_appended_in_order(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[
+                {"what": "First", "who": "A", "since": "2026-07-11", "gates": "g1"},
+                {"what": "Second", "who": "B", "since": "2026-07-11", "gates": "g2"},
+            ],
+        )
+        content = ctx.read_text()
+        assert content.index("| First |") < content.index("| Second |")
+
+
+class TestWaitingOnResolve:
+    def test_removes_first_match_and_records_resolution(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        result = update_context_file(
+            str(ctx),
+            waiting_on_resolve=[{"match": "Egress check", "outcome": "confirmed open"}],
+        )
+        content = ctx.read_text()
+        assert "| Egress check |" not in content
+        # Resolution lands in today's Recent Changes subsection.
+        assert (
+            "- Resolved (was waiting on Nitzan): Egress check - confirmed open"
+            in content
+        )
+        assert result["waiting_on_unmatched"] == []
+        # Other row untouched.
+        assert "| Reply on PR | Jose |" in content
+
+    def test_unmatched_returned_never_silent(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        result = update_context_file(
+            str(ctx),
+            waiting_on_resolve=[{"match": "No such row", "outcome": "n/a"}],
+        )
+        assert result["waiting_on_unmatched"] == ["No such row"]
+        # Table unchanged.
+        assert "| Reply on PR |" in ctx.read_text()
+
+    def test_resolve_without_section_all_unmatched(self, tmp_path, sample_context_md):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(sample_context_md)
+        result = update_context_file(
+            str(ctx), waiting_on_resolve=[{"match": "anything", "outcome": "x"}]
+        )
+        assert result["waiting_on_unmatched"] == ["anything"]
+
+    def test_substring_match(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(
+            str(ctx), waiting_on_resolve=[{"match": "Egress", "outcome": "done"}]
+        )
+        assert "| Egress check |" not in ctx.read_text()
+
+    def test_resolution_joins_recent_changes_entries(self, tmp_path):
+        """Resolved bullets and recent_changes share ONE dated subsection."""
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(
+            str(ctx),
+            recent_changes=["Shipped the fix"],
+            waiting_on_resolve=[{"match": "Reply on PR", "outcome": "merged"}],
+        )
+        content = ctx.read_text()
+        # Both bullets under the same (single new) ### subsection.
+        subsection_count = len(re.findall(r"^### \d{4}-", content, re.MULTILINE))
+        assert subsection_count == 2  # original + one new
+        assert "Resolved (was waiting on Jose)" in content
+        assert "- Shipped the fix" in content
+
+
+class TestWaitingOnPreservesNextStepsReplacement:
+    def test_next_steps_replace_leaves_waiting_on_intact(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        update_context_file(str(ctx), next_steps=["New step one", "New step two"])
+        content = ctx.read_text()
+        assert "1. New step one" in content
+        assert "1. Do the thing" not in content
+        # Waiting on rows and note untouched by the Next Steps replacement.
+        assert "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |" in content
+        assert "External replies/events that gate work" in content
+
+
+class TestRecentChangesCap:
+    def _saturate(self, ctx, n):
+        for i in range(n):
+            update_context_file(str(ctx), recent_changes=[f"entry {i}"])
+
+    def test_saves_beyond_cap_roll_to_journal(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)  # starts with 1 subsection
+        self._saturate(ctx, ch.RECENT_CHANGES_CAP)  # 1 + 12 = 13 -> 1 rolls
+        journal = tmp_path / "demo-journal.md"
+        assert journal.exists()
+        jcontent = journal.read_text()
+        # The OLDEST subsection (the original "- created") rolled over.
+        assert "- created" in jcontent
+        content = ctx.read_text()
+        assert "- created" not in content
+        subsections = ch.parse_recent_changes_subsections(content)
+        assert len(subsections) == ch.RECENT_CHANGES_CAP
+
+    def test_journal_created_with_header(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        self._saturate(ctx, ch.RECENT_CHANGES_CAP)
+        jcontent = (tmp_path / "demo-journal.md").read_text()
+        assert jcontent.startswith("# ")
+        assert "oldest" in jcontent
+
+    def test_journal_reads_oldest_first_across_rollovers(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        self._saturate(ctx, ch.RECENT_CHANGES_CAP + 2)  # rolls 3 times total
+        jcontent = (tmp_path / "demo-journal.md").read_text()
+        # "- created" was oldest, then "entry 0", then "entry 1".
+        assert (
+            jcontent.index("- created")
+            < jcontent.index("- entry 0")
+            < jcontent.index("- entry 1")
+        )
+
+    def test_pointer_line_at_bottom_survives_next_save(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        self._saturate(ctx, ch.RECENT_CHANGES_CAP)  # first rollover: pointer added
+        # One more save (prepends AND rolls again): pointer must stay single
+        # and stay at the bottom of the section.
+        update_context_file(str(ctx), recent_changes=["after pointer"])
+        content = ctx.read_text()
+        pointer = ch.RECENT_CHANGES_POINTER.format(journal_name="demo-journal.md")
+        assert content.count(pointer) == 1
+        body = ch.extract_section(content, "Recent Changes")
+        assert body.rindex(pointer) > body.rindex("- entry")
+
+    def test_under_cap_no_journal(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        result = update_context_file(str(ctx), recent_changes=["one more"])
+        assert result["journal_rolled_over"] == 0
+        assert not (tmp_path / "demo-journal.md").exists()
+
+    def test_rolled_over_count_returned(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        self._saturate(ctx, ch.RECENT_CHANGES_CAP - 1)  # exactly at cap
+        result = update_context_file(str(ctx), recent_changes=["overflow trigger"])
+        assert result["journal_rolled_over"] == 1
+
+
+class TestJournalDerivation:
+    def test_prefixed_context_writes_prefixed_journal(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "myproj-context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        for i in range(ch.RECENT_CHANGES_CAP):
+            update_context_file(str(ctx), recent_changes=[f"e{i}"])
+        assert (tmp_path / "myproj-journal.md").exists()
+
+    def test_legacy_bare_context_writes_bare_journal(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "context.md"
+        ctx.write_text(WAITING_CONTEXT)
+        for i in range(ch.RECENT_CHANGES_CAP):
+            update_context_file(str(ctx), recent_changes=[f"e{i}"])
+        assert (tmp_path / "journal.md").exists()
+
+
+class TestUpdateContextReturnContract:
+    def test_returns_dict_with_all_keys(self, tmp_path, sample_context_md):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(sample_context_md)
+        result = update_context_file(str(ctx), recent_changes=["x"])
+        assert set(result) == {"content", "waiting_on_unmatched", "journal_rolled_over"}
+        assert isinstance(result["content"], str)
+        assert result["waiting_on_unmatched"] == []
+        assert result["journal_rolled_over"] == 0
+
+
+class TestAnchoredHeadingMatch:
+    """Regression guards for the unanchored-regex bug (found 2026-07-11).
+
+    A prose bullet containing the literal string `## Recent Changes` (or any
+    section heading) used to be matched as the heading itself, sending weeks
+    of prepended entries into the middle of another section. All heading
+    matches are now ^-anchored with MULTILINE.
+    """
+
+    MIDLINE_MENTION = (
+        "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+        "## Key Architectural Decisions\n\n"
+        "- Section shape: single `## Recent Changes` heading with dated "
+        "subsections prepended newest-first.\n\n"
+        "## Next Steps\n\n1. old step\n\n"
+        "## Recent Changes\n\n### 2026-07-01 10:00\n\n- existing entry\n"
+    )
+
+    def test_recent_changes_prepend_ignores_midline_mention(self, tmp_path):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.MIDLINE_MENTION)
+        update_context_file(str(ctx), recent_changes=["new entry"])
+        content = ctx.read_text()
+        # The new entry lands under the REAL heading, after the decisions
+        # bullet region - not inside Key Architectural Decisions.
+        real_heading = content.index("\n## Recent Changes\n")
+        assert content.index("- new entry") > real_heading
+        # The decisions bullet is untouched and still ahead of Next Steps.
+        assert content.index("- Section shape:") < content.index("## Next Steps")
+
+    def test_next_steps_replace_ignores_midline_mention(self, tmp_path):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+            "## Description\n\nMentions ## Next Steps mid-line in prose.\n\n"
+            "## Next Steps\n\n1. old step\n"
+        )
+        update_context_file(str(ctx), next_steps=["new step"])
+        content = ctx.read_text()
+        assert "1. new step" in content
+        assert "1. old step" not in content
+        # The prose mention survives; Description body was not treated as
+        # the Next Steps section.
+        assert "Mentions ## Next Steps mid-line in prose." in content

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from missioncache_db import CATEGORIES
+from missioncache_db import CATEGORIES, context_health
 
 from . import active_task, project_files
 from .app import mcp
@@ -269,22 +269,50 @@ async def update_context_file(
         dict[str, str] | None,
         Field(description="Key files to add: {path: description}"),
     ] = None,
+    waiting_on_add: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                "Waiting-on rows to append, each "
+                '{"what": ..., "who": ..., "since": "YYYY-MM-DD", "gates": ...}. '
+                "'since' defaults to today. Creates the '## Waiting on' "
+                "section before Next Steps if the file does not have one yet."
+            )
+        ),
+    ] = None,
+    waiting_on_resolve: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                'Waiting-on rows to resolve, each {"match": <substring of the '
+                'What cell>, "outcome": <what happened>}. The first matching '
+                "row is removed and the resolution is recorded in today's "
+                "Recent Changes subsection. Entries matching no row are "
+                "returned in 'waiting_on_unmatched' - check it, never assume "
+                "a resolve landed."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """
     Update a context.md file atomically.
 
     Updates timestamp and specified sections. Much faster than multiple
-    Read/Edit calls.
+    Read/Edit calls. Maintains the '## Waiting on' table via waiting_on_add /
+    waiting_on_resolve, and enforces the Recent Changes cap (overflow rolls
+    into the per-project journal file automatically).
     """
     try:
         _validate_path(context_file, "context_file", must_be_under=settings.root)
-        content = project_files.update_context_file(
+        result = project_files.update_context_file(
             context_file=context_file,
             next_steps=next_steps,
             recent_changes=recent_changes,
             key_decisions=key_decisions,
             gotchas=gotchas,
             key_files=key_files,
+            waiting_on_add=waiting_on_add,
+            waiting_on_resolve=waiting_on_resolve,
         )
 
         return {
@@ -299,15 +327,56 @@ async def update_context_file(
                     ("key_decisions", key_decisions),
                     ("gotchas", gotchas),
                     ("key_files", key_files),
+                    ("waiting_on", waiting_on_add or waiting_on_resolve),
                 ]
                 if v
             ],
+            "waiting_on_unmatched": result["waiting_on_unmatched"],
+            "journal_rolled_over": result["journal_rolled_over"],
         }
 
     except MissionCacheError as e:
         return e.to_dict()
     except Exception as e:
         logger.exception("Error updating context file")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def get_context_digest(
+    project_name: Annotated[str, Field(description="Project name")],
+) -> dict:
+    """
+    Resume digest of a project's context file - read this INSTEAD of the
+    full file on /missioncache:load.
+
+    Parses server-side (no file-size limit; works on context files past the
+    256KB Read-tool cap) and returns the resume-critical slices: Last
+    Updated, Hub / Related-projects header lines, the Waiting on section
+    verbatim, Next Steps verbatim, the newest 3 Recent Changes subsections,
+    a section index (name + line number) for targeted follow-up reads, the
+    file size, and per-project health warnings.
+    """
+    try:
+        # Fail fast on junk names and close the pre-validation existence
+        # probe: get_missioncache_files joins the name onto settings.root and
+        # calls .exists() before _validate_path runs.
+        project_files.validate_task_name(project_name)
+        files = project_files.get_missioncache_files(project_name)
+        if not files.context_file:
+            raise MissionCacheFileNotFoundError(
+                f"context file for project '{project_name}'"
+            )
+        _validate_path(files.context_file, "context_file", must_be_under=settings.root)
+        path = Path(files.context_file)
+        content = path.read_text()
+        digest = context_health.build_digest(content, path)
+        return {"success": True, "file": files.context_file, **digest}
+
+    except MissionCacheError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error building context digest")
         return {"error": True, "message": str(e)}
 
 

@@ -10,6 +10,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from missioncache_db import context_health
 from missioncache_db import validate_task_name as _missioncache_db_validate_task_name
 
 from .config import settings
@@ -56,6 +57,41 @@ def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
         tmp_path = path.with_name(path.name + ".tmp")
         tmp_path.write_text(new_content)
         os.replace(tmp_path, path)
+        return new_content
+
+
+def _atomic_update_context_with_journal(
+    context_path: Path,
+    journal_path: Path,
+    transform: Callable[[str], tuple[str, str | None]],
+) -> str:
+    """Like ``_atomic_update_text`` but the transform may emit journal text.
+
+    The transform returns ``(new_content, journal_append_or_None)``. Both
+    writes happen under the CONTEXT file's sidecar lock - the journal is only
+    ever written while that lock is held, so it needs no lock of its own.
+    Write order is journal first, context second: a crash between the two
+    replaces duplicates the rolled-over entries into the journal (they are
+    still in the context, so the next rollover re-moves them) rather than
+    losing them. The window is one ``os.replace`` wide.
+    """
+    with _file_lock(context_path):
+        content = context_path.read_text()
+        new_content, journal_append = transform(content)
+        if journal_append:
+            if journal_path.exists():
+                journal_content = journal_path.read_text().rstrip("\n") + "\n\n"
+            else:
+                journal_content = (
+                    context_health.journal_header(context_path.parent.name) + "\n"
+                )
+            journal_content += journal_append
+            journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
+            journal_tmp.write_text(journal_content)
+            os.replace(journal_tmp, journal_path)
+        tmp_path = context_path.with_name(context_path.name + ".tmp")
+        tmp_path.write_text(new_content)
+        os.replace(tmp_path, context_path)
         return new_content
 
 
@@ -308,6 +344,66 @@ def create_missioncache_files(
     )
 
 
+def _apply_waiting_on(
+    content: str,
+    timestamp: str,
+    waiting_on_add: list[dict[str, str]] | None,
+    waiting_on_resolve: list[dict[str, str]] | None,
+) -> tuple[str, list[str], list[str]]:
+    """Apply waiting-on resolves then adds; pure function.
+
+    Returns ``(content, resolved_changes, unmatched)``. ``resolved_changes``
+    are the "Resolved (was waiting on ...)" bullets destined for today's
+    Recent Changes subsection; ``unmatched`` are resolve ``match`` values
+    that hit no row (surfaced to the caller, never dropped).
+    """
+    resolved_changes: list[str] = []
+    unmatched: list[str] = []
+
+    if waiting_on_resolve:
+        rows = context_health.parse_waiting_on(content)
+        remaining = list(rows)
+        for item in waiting_on_resolve:
+            match_text = (item.get("match") or "").strip()
+            outcome = (item.get("outcome") or "").strip()
+            found = next(
+                (r for r in remaining if match_text and match_text in r["what"]),
+                None,
+            )
+            if found is None:
+                unmatched.append(match_text)
+                continue
+            remaining.remove(found)
+            note = f"Resolved (was waiting on {found['who']}): {found['what']}"
+            if outcome:
+                note += f" - {outcome}"
+            resolved_changes.append(note)
+        if len(remaining) != len(rows):
+            content = context_health.replace_waiting_on_table(content, remaining)
+
+    if waiting_on_add:
+        # Self-heal the section if missing so the convention works on
+        # not-yet-migrated files.
+        if context_health.extract_section(content, "Waiting on") is None:
+            content = context_health.insert_waiting_on_before_next_steps(
+                content, context_health.build_waiting_on_section([])
+            )
+        rows = context_health.parse_waiting_on(content)
+        today = timestamp.split(" ")[0]
+        for row in waiting_on_add:
+            rows.append(
+                {
+                    "what": (row.get("what") or "").strip(),
+                    "who": (row.get("who") or "").strip(),
+                    "since": (row.get("since") or today).strip(),
+                    "gates": (row.get("gates") or "").strip(),
+                }
+            )
+        content = context_health.replace_waiting_on_table(content, rows)
+
+    return content, resolved_changes, unmatched
+
+
 def update_context_file(
     context_file: str | Path,
     next_steps: list[str] | None = None,
@@ -315,7 +411,9 @@ def update_context_file(
     key_decisions: list[str] | None = None,
     gotchas: list[str] | None = None,
     key_files: dict[str, str] | None = None,
-) -> str:
+    waiting_on_add: list[dict[str, str]] | None = None,
+    waiting_on_resolve: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """Update sections in a context.md file atomically.
 
     Args:
@@ -325,15 +423,30 @@ def update_context_file(
         key_decisions: List of decisions to add
         gotchas: List of gotchas to add
         key_files: Dict of file paths to descriptions
+        waiting_on_add: Waiting-on rows to append, each
+            ``{"what", "who", "since", "gates"}`` (``since`` defaults to
+            today). Creates the section before Next Steps if missing.
+        waiting_on_resolve: Rows to resolve, each ``{"match", "outcome"}``.
+            Removes the first row whose What cell contains ``match`` and
+            records the resolution in today's Recent Changes subsection.
 
     Returns:
-        Updated file content
+        Dict with ``content`` (updated file text), ``waiting_on_unmatched``
+        (``match`` values that resolved to no row - never silently dropped,
+        mirroring ``update_tasks_file``'s ``unmatched`` contract), and
+        ``journal_rolled_over`` (Recent Changes subsections moved to the
+        per-project journal by the cap).
     """
     path = Path(context_file)
     if not path.exists():
         raise MissionCacheFileNotFoundError(str(path))
 
-    def _transform(content: str) -> str:
+    journal_path = context_health.derive_journal_path(path)
+    waiting_on_unmatched: list[str] = []
+    rolled_over = 0
+
+    def _transform(content: str) -> tuple[str, str | None]:
+        nonlocal rolled_over
         # Stamp inside the lock so serialized writers each get a fresh
         # timestamp instead of all sharing the function-entry value.
         timestamp = get_timestamp()
@@ -345,33 +458,40 @@ def update_context_file(
             content,
         )
 
-        # Update Next Steps section
+        # Update Next Steps section. (Replacement stops at the next `## `
+        # heading, so a Waiting on section placed before Next Steps is
+        # untouched by this.)
         if next_steps:
             next_steps_md = "\n".join(
                 f"{i + 1}. {step}" for i, step in enumerate(next_steps)
             )
             content = _update_section(content, "Next Steps", next_steps_md)
 
-        # Update Recent Changes section - consolidate into one `## Recent Changes`
-        # heading with dated `###` sub-sections prepended (newest first). Before,
-        # each save appended a new top-level `## Recent Changes (timestamp)` which
-        # fragmented the file with N unmerged sections.
-        if recent_changes:
-            changes_md = "\n".join(f"- {change}" for change in recent_changes)
-            new_subsection = f"### {timestamp}\n\n{changes_md}\n"
-            # Tolerates old-style `## Recent Changes (timestamp)` heading so
-            # pre-existing context files keep working without migration.
-            heading_pattern = r"(## Recent Changes[^\n]*\n)"
-            match = re.search(heading_pattern, content)
-            if match:
-                heading_end = match.end()
-                content = (
-                    content[:heading_end]
-                    + f"\n{new_subsection}\n"
-                    + content[heading_end:]
-                )
-            else:
-                content = content + f"\n## Recent Changes\n\n{new_subsection}"
+        # Waiting-on maintenance (resolves BEFORE Recent Changes so the
+        # resolutions land in today's subsection alongside recent_changes).
+        content, resolved_changes, unmatched = _apply_waiting_on(
+            content, timestamp, waiting_on_add, waiting_on_resolve
+        )
+        waiting_on_unmatched.extend(unmatched)
+
+        # Update Recent Changes - one `## Recent Changes` heading with dated
+        # `###` sub-sections prepended newest-first. The prepend shape lives
+        # in context_health.prepend_recent_changes (shared with the
+        # pre-compact hook; fence-aware and ^-anchored).
+        combined_changes = resolved_changes + list(recent_changes or [])
+        if combined_changes:
+            changes_md = "\n".join(f"- {change}" for change in combined_changes)
+            content = context_health.prepend_recent_changes(
+                content, timestamp, changes_md
+            )
+
+        # Enforce the Recent Changes cap AFTER the prepend, in the same
+        # transform under the same lock. Overflow (the oldest subsections)
+        # becomes journal text written by the atomic helper.
+        content, journal_append, moved = context_health.split_recent_changes_for_cap(
+            content, journal_path.name
+        )
+        rolled_over = moved
 
         # Update Key Decisions section
         if key_decisions:
@@ -393,9 +513,14 @@ def update_context_file(
             )
             content = _append_to_section(content, "Key Files", files_md)
 
-        return content
+        return content, journal_append
 
-    return _atomic_update_text(path, _transform)
+    new_content = _atomic_update_context_with_journal(path, journal_path, _transform)
+    return {
+        "content": new_content,
+        "waiting_on_unmatched": waiting_on_unmatched,
+        "journal_rolled_over": rolled_over,
+    }
 
 
 # Pull a checklist number ("7", "54a", "0.1") off the front of a
@@ -611,11 +736,18 @@ def parse_task_progress(content: str) -> TaskProgress:
 
 
 def _update_section(content: str, section_name: str, new_content: str) -> str:
-    """Replace content of a section (from ## heading to next ## heading)."""
-    pattern = rf"(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
+    """Replace content of a section (from ## heading to next ## heading).
 
-    if re.search(pattern, content, re.DOTALL):
-        return re.sub(pattern, rf"\1\n{new_content}\n\n", content, flags=re.DOTALL)
+    The heading match is ^-anchored (MULTILINE) so a prose mention of the
+    literal ``## <name>`` inside another section can never be mistaken for
+    the heading - the bug class found on 2026-07-11 in the Recent Changes
+    prepend path.
+    """
+    pattern = rf"^(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
+    flags = re.DOTALL | re.MULTILINE
+
+    if re.search(pattern, content, flags):
+        return re.sub(pattern, rf"\1\n{new_content}\n\n", content, flags=flags)
     else:
         # Section doesn't exist, append it
         return content + f"\n## {section_name}\n\n{new_content}\n"
@@ -626,10 +758,12 @@ def _append_to_section(content: str, section_name: str, new_content: str) -> str
 
     Strips template placeholders (lines that are exactly `- TBD` or `1. TBD`)
     so the first real write replaces the template rather than sitting alongside it.
+    The heading match is ^-anchored (MULTILINE) - see ``_update_section``.
     """
-    pattern = rf"(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
+    pattern = rf"^(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
+    flags = re.DOTALL | re.MULTILINE
 
-    match = re.search(pattern, content, re.DOTALL)
+    match = re.search(pattern, content, flags)
     if match:
         existing_lines = [
             line for line in match.group(2).strip().splitlines()
@@ -637,7 +771,7 @@ def _append_to_section(content: str, section_name: str, new_content: str) -> str
         ]
         existing = "\n".join(existing_lines)
         combined = f"{existing}\n{new_content}" if existing else new_content
-        return re.sub(pattern, rf"\1{combined}\n\n", content, flags=re.DOTALL)
+        return re.sub(pattern, rf"\1{combined}\n\n", content, flags=flags)
     else:
         # Section doesn't exist, create it
         return content + f"\n## {section_name}\n\n{new_content}\n"
