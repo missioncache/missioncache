@@ -1910,6 +1910,95 @@
         }
 
         /* ============================================
+           Projects Filter Bar
+           ============================================ */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .filter-search {
+            flex: 0 1 220px;
+            min-width: 140px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .filter-search:focus {
+            outline: none;
+            border-color: var(--accent-purple);
+        }
+
+        .filter-chips {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            flex: 1 1 auto;
+        }
+
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .filter-chip:hover {
+            border-color: var(--accent-purple);
+        }
+
+        .filter-chip.active {
+            border-color: var(--accent-purple);
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--text-primary);
+        }
+
+        .filter-chip .task-icon {
+            width: 13px;
+            height: 13px;
+            margin-right: 0;
+        }
+
+        .filter-chip .task-icon svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        .filter-repo-select {
+            flex: 0 0 auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .filter-repo-select:focus {
+            outline: none;
+            border-color: var(--accent-purple);
+        }
+
+        /* ============================================
            Loading Overlay
            ============================================ */
         .loading-overlay {
@@ -4583,6 +4672,16 @@
             <div class="view active" id="projectsView">
                 <div class="container">
 
+                    <!-- Filter Bar (applies to both tables below) -->
+                    <div class="filter-bar" id="projectsFilterBar">
+                        <input type="text" id="projectsSearchInput" class="filter-search"
+                               placeholder="Search projects..." oninput="onProjectsFilterChange()">
+                        <div class="filter-chips" id="projectsCategoryChips"></div>
+                        <select id="projectsRepoFilter" class="filter-repo-select" onchange="onProjectsFilterChange()">
+                            <option value="">All repos</option>
+                        </select>
+                    </div>
+
                     <!-- Active Tasks Table -->
                     <div class="glass-card" id="activeTasksCard">
                         <div class="card-loading-overlay" data-loader="tasks"><div class="card-spinner"></div></div>
@@ -6232,6 +6331,126 @@
         // Active Projects sort state (persisted). Default mirrors the server
         // order: most recently touched first, creation counts as a touch.
         let activeTasksCache = [];
+        let completedTasksCache = [];
+
+        // Projects filter state (Task 81): session-only, no persistence -
+        // a filter silently restored from a past visit reads as missing data.
+        const projectsFilter = { search: '', categories: new Set(), repo: '' };
+        let projectsFilterOptionsSignature = '';
+
+        function projectsFiltersActive() {
+            return !!(projectsFilter.search || projectsFilter.categories.size || projectsFilter.repo);
+        }
+
+        function taskMatchesProjectsFilters(task) {
+            const subtasks = task.subtasks || [];
+            if (projectsFilter.repo && (task.repo_name || '') !== projectsFilter.repo) return false;
+            if (projectsFilter.categories.size > 0) {
+                // Project-level match: a parent qualifies when it or any of
+                // its subtasks carries a selected category (the whole project
+                // stays visible rather than filtering individual rows).
+                const cats = [task, ...subtasks].map(getTaskCategory);
+                if (!cats.some(c => projectsFilter.categories.has(c))) return false;
+            }
+            if (projectsFilter.search) {
+                const q = projectsFilter.search.toLowerCase();
+                const haystacks = [task.name, task.description,
+                                   ...subtasks.map(s => s.name), ...subtasks.map(s => s.description)];
+                if (!haystacks.some(h => (h || '').toLowerCase().includes(q))) return false;
+            }
+            return true;
+        }
+
+        function applyProjectsFilters(tasks) {
+            return tasks.filter(taskMatchesProjectsFilters);
+        }
+
+        function updateProjectsFilterOptions() {
+            const chipsBox = document.getElementById('projectsCategoryChips');
+            const select = document.getElementById('projectsRepoFilter');
+            if (!chipsBox || !select) return;
+
+            const presentCats = new Set();
+            const repos = new Set();
+            for (const task of [...activeTasksCache, ...completedTasksCache]) {
+                for (const t of [task, ...(task.subtasks || [])]) presentCats.add(getTaskCategory(t));
+                if (task.repo_name) repos.add(task.repo_name);
+            }
+            // Taxonomy order for stability; unknown stored values (future
+            // custom categories) append at the end.
+            const orderedCats = Object.keys(TASK_ICONS).filter(c => presentCats.has(c));
+            for (const c of presentCats) if (!orderedCats.includes(c)) orderedCats.push(c);
+            const repoList = [...repos].sort((a, b) => a.localeCompare(b));
+
+            // Skip the DOM rebuild when options are unchanged (every filter
+            // re-render lands here); just refresh chip active states.
+            const signature = JSON.stringify([orderedCats, repoList]);
+            if (signature === projectsFilterOptionsSignature) {
+                chipsBox.querySelectorAll('.filter-chip').forEach(chip => {
+                    chip.classList.toggle('active', projectsFilter.categories.has(chip.dataset.category));
+                });
+                return;
+            }
+            projectsFilterOptionsSignature = signature;
+
+            // Drop selections that disappeared from the data.
+            for (const c of [...projectsFilter.categories]) {
+                if (!orderedCats.includes(c)) projectsFilter.categories.delete(c);
+            }
+
+            // Chips are built via createElement (category lands in a text
+            // node + dataset, never markup) - keeps the no-trust posture on
+            // stored values without any escaping gymnastics.
+            chipsBox.innerHTML = '';
+            for (const cat of orderedCats) {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'filter-chip' + (projectsFilter.categories.has(cat) ? ' active' : '');
+                chip.dataset.category = cat;
+                const icon = document.createElement('span');
+                icon.className = 'task-icon';
+                icon.style.color = TASK_ICON_COLORS[cat] || TASK_ICON_COLORS.coding;
+                icon.innerHTML = TASK_ICONS[cat] || TASK_ICONS.coding;
+                chip.appendChild(icon);
+                chip.appendChild(document.createTextNode(cat));
+                chip.addEventListener('click', () => toggleProjectsCategoryFilter(cat));
+                chipsBox.appendChild(chip);
+            }
+
+            const currentRepo = projectsFilter.repo;
+            select.innerHTML = '';
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All repos';
+            select.appendChild(allOpt);
+            for (const r of repoList) {
+                const opt = document.createElement('option');
+                opt.value = r;
+                opt.textContent = r;
+                select.appendChild(opt);
+            }
+            if (currentRepo && repoList.includes(currentRepo)) {
+                select.value = currentRepo;
+            } else if (currentRepo) {
+                projectsFilter.repo = '';
+            }
+        }
+
+        function toggleProjectsCategoryFilter(cat) {
+            if (projectsFilter.categories.has(cat)) projectsFilter.categories.delete(cat);
+            else projectsFilter.categories.add(cat);
+            renderActiveTasks(activeTasksCache);
+            renderCompletedTasks(completedTasksCache);
+        }
+
+        function onProjectsFilterChange() {
+            const searchInput = document.getElementById('projectsSearchInput');
+            const repoSelect = document.getElementById('projectsRepoFilter');
+            projectsFilter.search = searchInput ? searchInput.value.trim() : '';
+            projectsFilter.repo = repoSelect ? repoSelect.value : '';
+            renderActiveTasks(activeTasksCache);
+            renderCompletedTasks(completedTasksCache);
+        }
 
         function getProjectsSort() {
             try {
@@ -6281,10 +6500,14 @@
 
             activeTasksCache = tasks;
             updateProjectsSortIndicators();
-            tasks = sortProjects(tasks);
+            updateProjectsFilterOptions();
+            tasks = sortProjects(applyProjectsFilters(tasks));
 
             if (tasks.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No active tasks</td></tr>`;
+                const emptyMsg = activeTasksCache.length > 0 && projectsFiltersActive()
+                    ? 'No active projects match the current filters'
+                    : 'No active tasks';
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">${emptyMsg}</td></tr>`;
                 return;
             }
 
@@ -6404,8 +6627,17 @@
             const tbody = document.getElementById('completedTasksBody');
             if (!tbody) return;
 
+            completedTasksCache = tasks;
+            updateProjectsFilterOptions();
+            // Filter BEFORE the display cap below so a search can surface
+            // completed projects that fall outside the newest 10.
+            tasks = applyProjectsFilters(tasks);
+
             if (tasks.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No completed tasks</td></tr>`;
+                const emptyMsg = completedTasksCache.length > 0 && projectsFiltersActive()
+                    ? 'No completed projects match the current filters'
+                    : 'No completed tasks';
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">${emptyMsg}</td></tr>`;
                 return;
             }
 
