@@ -1655,9 +1655,15 @@ def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
         # source for the update case). ---
         # A bundle is untrusted input: an unknown category (hostile, corrupt,
         # or from a newer taxonomy) degrades to NULL with a warning instead of
-        # failing the whole import.
+        # failing the whole import. Locally-defined custom categories count
+        # as known; the exporting machine's customs do NOT travel with the
+        # bundle, so a category only defined over there degrades here.
         incoming_category = project.get("category")
-        if incoming_category is not None and incoming_category not in missioncache_db.CATEGORIES:
+        if (
+            incoming_category is not None
+            and incoming_category not in missioncache_db.CATEGORIES
+            and incoming_category not in db.custom_category_names()
+        ):
             report["warnings"].append(
                 f"bundle category {incoming_category!r} is not in the known "
                 f"taxonomy; importing as uncategorized"

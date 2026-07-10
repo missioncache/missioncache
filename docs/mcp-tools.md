@@ -132,7 +132,7 @@ The resolution order is documented in `find_task_for_cwd`: per-session file (`pr
 - `task_type: str = "coding"` - Must be `"coding"` or `"non-coding"`. Validated inline.
 - `repo_path: str | None = None` - Required for coding tasks, ignored for non-coding. Auto-registers the repo via `db.add_repo()` if it is not already tracked.
 - `jira_key: str | None = None` - Optional JIRA ticket ID for display.
-- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values (bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). Validated inline; invalid values return `VALIDATION_ERROR`.
+- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values (bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding) or an existing custom category (defined in the dashboard Settings). Validated inline; invalid values return `VALIDATION_ERROR`.
 
 **Returns:** `CreateTaskResult` with `task_id`, `task_name`, `task_type`, `category`, and `missioncache_path` (the directory created on disk, or `None` for non-coding tasks).
 
@@ -201,7 +201,7 @@ Refuses with `ALREADY_EXISTS` when another project holds the target name (in the
 **Parameters:**
 - `task_id: int | None = None` or `project_name: str | None = None` - Provide one.
 - `jira_key: str | None = None` - JIRA ticket ID to set. Omit to leave unchanged; pass the literal string `'none'` (any case) to clear.
-- `category: str | None = None` - Category to set, one of the 13 `CATEGORIES` values. Same omit / `'none'` semantics.
+- `category: str | None = None` - Category to set, one of the 13 `CATEGORIES` values or an existing custom category. Same omit / `'none'` semantics.
 
 **Returns:** `UpdateTaskResult` with `task_id`, `task_name`, the stored `jira_key` and `category` after the update, and `updated` (which fields this call changed).
 
@@ -221,7 +221,7 @@ These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~
 - `description: str = "TBD"` - Short description, embedded into the template files. Max 12 words is the convention but not enforced.
 - `jira_key: str | None = None` - JIRA ticket ID.
 - `branch: str | None = None` - Git branch.
-- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values. Derived from the project description at creation time by `/missioncache:new`. Validated before any file is written; set on the task row after the registration scan.
+- `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values or an existing custom category. Derived from the project description at creation time by `/missioncache:new`. Validated before any file is written; set on the task row after the registration scan.
 - `tasks: list[str] | None = None` - Initial task list to seed `<project>-tasks.md` with. Each string becomes a `- [ ]` line.
 - `plan: dict | None = None` - Plan content dict with keys like `summary`, `goals`, `approach`. Structure is flexible - the template renderer picks up what it finds.
 

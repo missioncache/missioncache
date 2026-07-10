@@ -49,6 +49,7 @@ from missioncache_dashboard.lib.analytics_db import (
 
 # Import SQLite MissionCacheDB for auto execution queries (these tables are only in SQLite)
 from missioncache_db import (
+    CATEGORIES,
     AutoExecution,
     AutoExecutionLog,
     AutoRunActiveError,
@@ -2855,6 +2856,75 @@ async def set_task_category_endpoint(task_id: int, body: dict):
         "category": updated.category,
         "warnings": [sync_warning] if sync_warning else [],
     }
+
+
+@app.get("/api/categories")
+async def list_categories():
+    """Built-in taxonomy names plus the user's custom categories.
+
+    The frontend derives built-in icons/colors from its own maps; only
+    custom categories carry emoji + color server-side.
+    """
+    return {
+        "built_in": list(CATEGORIES),
+        "custom": get_sqlite_db().list_custom_categories(),
+    }
+
+
+@app.post("/api/categories")
+async def add_category_endpoint(body: dict):
+    """Create a custom category. Body: {"name", "emoji", "color"}.
+
+    All field validation (name shape, reserved names, emoji length, strict
+    #RRGGBB color - the color lands in style attributes) lives in
+    ``TaskDB.add_custom_category``, the source-of-truth primitive.
+    """
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": True,
+                "code": "VALIDATION_ERROR",
+                "message": "Expected a JSON object body.",
+            },
+        )
+    try:
+        created = get_sqlite_db().add_custom_category(
+            str(body.get("name") or ""),
+            str(body.get("emoji") or ""),
+            str(body.get("color") or ""),
+        )
+    except ValueError as e:
+        status = 409 if "already exists" in str(e) else 400
+        code = "ALREADY_EXISTS" if status == 409 else "VALIDATION_ERROR"
+        raise HTTPException(
+            status_code=status,
+            detail={"error": True, "code": code, "message": str(e)},
+        )
+    return {"success": True, **created}
+
+
+@app.delete("/api/categories/{name}")
+async def delete_category_endpoint(name: str):
+    """Delete a custom category.
+
+    Always succeeds for existing customs; projects still carrying the value
+    keep it (they render with default styling until it is re-added or
+    recategorized). Built-in names never match a row, so they 404.
+    """
+    normalized = (name or "").strip().lower()
+    removed = get_sqlite_db().remove_custom_category(normalized)
+    if not removed:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "NOT_FOUND",
+                "message": f"No custom category named {normalized!r}.",
+            },
+        )
+    # Echo the normalized name (what was actually removed), not the raw input.
+    return {"success": True, "removed": normalized}
 
 
 @app.get("/health")

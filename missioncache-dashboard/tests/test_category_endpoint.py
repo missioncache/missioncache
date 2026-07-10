@@ -195,3 +195,84 @@ def test_category_change_warns_on_per_row_sync_failures(sandboxed, monkeypatch):
     assert body["success"] is True
     assert any("Dashboard list refresh incomplete" in w for w in body["warnings"])
     assert any("2 task rows failed" in w for w in body["warnings"])
+
+
+# ── custom categories CRUD (/api/categories) ─────────────────────────────
+
+
+def _add_category(body):
+    return asyncio.run(server.add_category_endpoint(body))
+
+
+def _delete_category(name):
+    return asyncio.run(server.delete_category_endpoint(name))
+
+
+def _list_categories():
+    return asyncio.run(server.list_categories())
+
+
+class TestCustomCategoryEndpoints:
+    def test_add_list_delete_roundtrip(self, sandboxed):
+        _seed_task("ensure-db")  # initialize the sandboxed DB
+
+        created = _add_category({"name": "research", "emoji": "🔬", "color": "#4dabf7"})
+        assert created["success"] is True
+        assert created["name"] == "research"
+
+        listing = _list_categories()
+        assert "research" in [c["name"] for c in listing["custom"]]
+        assert listing["built_in"][0] == "bug"  # taxonomy order preserved
+
+        removed = _delete_category("research")
+        assert removed["success"] is True
+        assert _list_categories()["custom"] == []
+
+    def test_add_invalid_fields_return_400(self, sandboxed):
+        _seed_task("ensure-db")
+        for bad in (
+            {"name": "bad name", "emoji": "🔬", "color": "#4dabf7"},
+            {"name": "ok-name", "emoji": "", "color": "#4dabf7"},
+            {"name": "ok-name", "emoji": "plaintext", "color": "#4dabf7"},
+            {"name": "ok-name", "emoji": "🔬", "color": "red"},
+            {"name": "bug", "emoji": "🐛", "color": "#4dabf7"},  # reserved
+        ):
+            with pytest.raises(HTTPException) as exc:
+                _add_category(bad)
+            assert exc.value.status_code == 400
+            assert exc.value.detail["code"] == "VALIDATION_ERROR"
+
+    def test_add_non_dict_body_returns_400(self, sandboxed):
+        """Reachable in tests (direct function call bypasses FastAPI body
+        validation) and locks the endpoint's own type guard."""
+        _seed_task("ensure-db")
+        with pytest.raises(HTTPException) as exc:
+            _add_category(["not", "a", "dict"])
+        assert exc.value.status_code == 400
+        assert exc.value.detail["code"] == "VALIDATION_ERROR"
+
+    def test_add_duplicate_returns_409(self, sandboxed):
+        _seed_task("ensure-db")
+        _add_category({"name": "research", "emoji": "🔬", "color": "#4dabf7"})
+        with pytest.raises(HTTPException) as exc:
+            _add_category({"name": "research", "emoji": "🧪", "color": "#51cf66"})
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "ALREADY_EXISTS"
+
+    def test_delete_unknown_returns_404(self, sandboxed):
+        _seed_task("ensure-db")
+        with pytest.raises(HTTPException) as exc:
+            _delete_category("no-such-category")
+        assert exc.value.status_code == 404
+
+    def test_put_category_endpoint_accepts_custom(self, sandboxed):
+        """The task-category endpoint accepts custom values - the primitive
+        it delegates to validates against built-ins PLUS customs."""
+        tid = _seed_task("custom-target")
+        _add_category({"name": "research", "emoji": "🔬", "color": "#4dabf7"})
+
+        result = _call(tid, {"category": "research"})
+
+        assert result["success"] is True
+        assert result["category"] == "research"
+        assert _stored_category(tid) == "research"

@@ -76,6 +76,24 @@ class TestCreateTaskCategory:
         assert result.get("code") == "VALIDATION_ERROR"
         assert db_module.get_db().get_task_by_name("bad-category") is None
 
+    def test_custom_category_accepted(self, isolated_orbit):
+        """A custom category passes the creation pre-flight and is stored."""
+        tmp_path, _root_dir, _home = isolated_orbit
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        db_module.get_db().add_custom_category("research", "🔬", "#4dabf7")
+
+        result = asyncio.run(
+            tools_tasks.create_task(
+                name="custom-category-task",
+                repo_path=str(repo_path),
+                category="research",
+            )
+        )
+
+        assert result.get("error") is None
+        assert result["category"] == "research"
+
 
 # ── create_missioncache_files ─────────────────────────────────────────────
 
@@ -142,6 +160,27 @@ class TestCreateMissionCacheFilesCategory:
         assert result.get("error") is True
         assert result.get("code") == "VALIDATION_ERROR"
         assert not (root_dir / "active" / "rejected-project").exists()
+
+    def test_custom_category_accepted(self, isolated_orbit):
+        """create_missioncache_files' own pre-flight copy accepts customs
+        (the three tool checks are separate copies, each tested where it
+        lives)."""
+        tmp_path, _root_dir, _home = isolated_orbit
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        db_module.get_db().add_custom_category("research", "🔬", "#4dabf7")
+
+        result = asyncio.run(
+            tools_docs.create_missioncache_files(
+                repo_path=str(repo_path),
+                project_name="custom-cat-project",
+                category="research",
+                resolve_git_root=False,
+            )
+        )
+
+        assert result.get("success") is True
+        assert result["category"] == "research"
 
 
 # ── read-path exposure ────────────────────────────────────────────────────

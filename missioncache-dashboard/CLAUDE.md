@@ -56,6 +56,9 @@ GET /api/stats/history?days=N  # Aggregate with heatmap, trends
 GET /api/task/{id}/files   # Task MissionCache files (plan, context, tasks.md)
 POST /api/tasks/{id}/rename    # Rename project, body {"new_name": "..."}
 PUT /api/tasks/{id}/category   # Set/clear category, body {"category": "ui"|null}
+GET /api/categories            # Built-in + custom categories
+POST /api/categories           # Add custom category, body {"name","emoji","color"}
+DELETE /api/categories/{name}  # Remove custom category (orphaned values degrade)
 ```
 
 ### Utility APIs

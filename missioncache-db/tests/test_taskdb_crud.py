@@ -129,6 +129,115 @@ class TestSetTaskCategory:
             db.set_task_category(99999, "docs")
 
 
+# ── custom categories ─────────────────────────────────────────────────────
+
+
+class TestCustomCategories:
+    def test_add_list_remove_roundtrip(self, db):
+        created = db.add_custom_category("research", "🔬", "#4dabf7")
+        assert created == {"name": "research", "emoji": "🔬", "color": "#4dabf7"}
+        assert db.list_custom_categories() == [created]
+        assert db.custom_category_names() == frozenset({"research"})
+
+        assert db.remove_custom_category("research") is True
+        assert db.list_custom_categories() == []
+        assert db.remove_custom_category("research") is False
+
+    def test_name_is_normalized_and_validated(self, db):
+        """Names trim + lowercase; bad shapes are rejected."""
+        assert db.add_custom_category("  Research  ", "🔬", "#4dabf7")["name"] == "research"
+        for bad in ("", "-leading-hyphen", "has space", "UPPER!", "a" * 25):
+            with pytest.raises(ValueError, match="Invalid category name"):
+                db.add_custom_category(bad, "🔬", "#4dabf7")
+
+    def test_reserved_names_rejected(self, db):
+        """Built-in taxonomy names and the 'none' clear sentinel collide."""
+        with pytest.raises(ValueError, match="reserved"):
+            db.add_custom_category("bug", "🐛", "#ff6b6b")
+        with pytest.raises(ValueError, match="reserved"):
+            db.add_custom_category("none", "🚫", "#ff6b6b")
+
+    def test_emoji_and_color_validated(self, db):
+        with pytest.raises(ValueError, match="emoji is required"):
+            db.add_custom_category("no-emoji", "", "#4dabf7")
+        with pytest.raises(ValueError, match="emoji is required"):
+            db.add_custom_category("long-emoji", "🔬" * 17, "#4dabf7")
+        # Strict hex: the color lands in style attributes, so anything
+        # looser (names, rgb(), url()) is a CSS injection channel.
+        for bad in ("blue", "#fff", "#12345g", "url(x)", "#4dabf7;background:red"):
+            with pytest.raises(ValueError, match="RRGGBB"):
+                db.add_custom_category("bad-color", "🎨", bad)
+
+    def test_emoji_content_not_just_length(self, db):
+        """The field is named emoji and must hold emoji: plain ASCII text
+        and markup fragments (even mixed with a real emoji) are rejected,
+        so render-time escaping is never the only XSS defense."""
+        for bad in ("abcdefgh", "<img/", "hi!!", "🔬<img", '🔬"x'):
+            with pytest.raises(ValueError, match="emoji characters"):
+                db.add_custom_category("text-emoji", bad, "#4dabf7")
+        # Multi-emoji and multi-codepoint ZWJ sequences are legitimate.
+        assert db.add_custom_category("dual", "🔬🧪", "#4dabf7")["emoji"] == "🔬🧪"
+        assert db.add_custom_category("family", "👨‍👩‍👧", "#4dabf7")
+
+    def test_remove_normalizes_name_like_add(self, db):
+        """DELETE 'UI ' removes the row stored as 'ui' - remove uses the
+        same strip+lower normalization as add."""
+        db.add_custom_category("research", "🔬", "#4dabf7")
+        assert db.remove_custom_category("  ReSearch  ") is True
+        assert db.list_custom_categories() == []
+
+    def test_duplicate_rejected(self, db):
+        db.add_custom_category("research", "🔬", "#4dabf7")
+        with pytest.raises(ValueError, match="already exists"):
+            db.add_custom_category("research", "🧪", "#51cf66")
+
+    def test_custom_category_assignable_to_tasks(self, db):
+        """create_task and set_task_category accept custom categories."""
+        db.add_custom_category("research", "🔬", "#4dabf7")
+        task = db.create_task("custom-at-create", category="research")
+        assert task.category == "research"
+
+        other = db.create_task("custom-via-set")
+        assert db.set_task_category(other.id, "research").category == "research"
+
+    def test_unknown_category_still_rejected(self, db):
+        db.add_custom_category("research", "🔬", "#4dabf7")
+        with pytest.raises(ValueError, match="Invalid category"):
+            db.create_task("nope", category="not-defined")
+
+    def test_removal_orphans_keep_value(self, db):
+        """Deleting a custom category leaves assigned tasks untouched (they
+        render with default styling until it is re-added), but new
+        assignments of the removed name are rejected."""
+        db.add_custom_category("research", "🔬", "#4dabf7")
+        task = db.create_task("orphan-me", category="research")
+        db.remove_custom_category("research")
+
+        assert db.get_task(task.id).category == "research"
+        with pytest.raises(ValueError, match="Invalid category"):
+            db.set_task_category(task.id, "research")
+
+    def test_table_appears_on_reopen_of_pre_custom_db(self, tmp_path):
+        """A pre-custom-categories DB gains the table on reopen via the
+        idempotent SCHEMA_SQL executescript at connection open - no
+        migration step (unlike the category COLUMN, which needed an ALTER).
+        Locks the CHANGELOG claim to the column-migration test precedent."""
+        db_path = tmp_path / "legacy.db"
+        db = TaskDB(db_path=db_path)
+        db.initialize()
+        with db.connection() as conn:
+            conn.execute("DROP TABLE custom_categories")
+            conn.commit()
+        db.close()
+
+        bare = TaskDB(db_path=db_path)  # no .initialize() call
+        try:
+            created = bare.add_custom_category("research", "🔬", "#4dabf7")
+            assert created["name"] == "research"
+        finally:
+            bare.close()
+
+
 # ── set_task_jira ─────────────────────────────────────────────────────────
 
 

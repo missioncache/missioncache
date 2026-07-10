@@ -4,6 +4,12 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - custom categories (missioncache-db 1.0.6, mcp-missioncache 1.0.9, missioncache-dashboard)
+
+The built-in 13-value category taxonomy is now extensible. A new dashboard Settings section manages custom categories - a name (kebab-case, built-in names and the `'none'` sentinel are reserved), an emoji (content-validated: must contain non-ASCII and no HTML metacharacters, so plain text and markup fragments never reach the DB and render-time escaping is not the only XSS defense), and a palette color (validated server-side as strict `#RRGGBB`, since the value lands in style attributes). Custom categories surface everywhere the built-ins do: project-table icons (the emoji, in the chosen color), filter-bar chips, and the modal selector, and every category write path accepts them (the dashboard PUT endpoint, `update_task`, `create_task`, `create_missioncache_files`, and the CLI via the shared `TaskDB` validation). Cross-machine import counts locally-defined customs as known; a category only defined on the exporting machine still degrades to uncategorized with a warning, since custom definitions do not travel with bundles.
+
+Deleting a custom category always succeeds: projects still carrying the value keep it (rendered with default styling, still selectable per-task so a modal save cannot wipe it), and re-adding the name restores the emoji and color. New assignments of a deleted name are rejected. Storage is a new `custom_categories` SQLite table created by the idempotent schema DDL, so existing installs pick it up on the next open with no migration step; the dashboard reads it directly from SQLite (`GET/POST /api/categories`, `DELETE /api/categories/{name}`) with no DuckDB involvement. The dashboard's 15-minute auto-refresh re-fetches the category map, so customs created from another tab, another machine, or the CLI stop rendering as the generic fallback within one cycle; a failed categories fetch keeps the previous map and says so in Settings instead of showing a false "No custom categories yet".
+
 ### Added - edit category in place (missioncache-db 1.0.5, mcp-missioncache 1.0.8, missioncache-dashboard)
 
 Categories are now editable after creation, from both surfaces:

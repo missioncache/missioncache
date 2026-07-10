@@ -33,6 +33,12 @@ The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GE
 
 The modal header also carries an inline category selector (icon + dropdown next to the repo badge). It shows the STORED category - "uncategorized" for NULL rows, even when the row icon renders a name-heuristic guess - because the selector edits what the database holds, not the guess. The value paints from the client cache first, then refreshes from the `/api/task/{id}/files` response (which reads it from SQLite), so it stays correct even when the category changed via the MCP tool or CLI since the tables were loaded. Changing it PUTs to `/api/tasks/{id}/category`; on success the modal icon, the table row icons, and the filter-bar chips all update in place without a refetch. A sync warning in the response surfaces as "Saved (list refresh delayed)" in the status text.
 
+#### Custom categories
+
+The Settings view's "Custom categories" section extends the built-in taxonomy: each custom category is a kebab-case name (built-in names and the `none` clear sentinel are reserved), an emoji, and a palette color. Custom categories render their emoji (in the chosen color) wherever built-ins render SVG icons - table rows, filter chips, the modal selector - and every category write path accepts them, because validation lives in `TaskDB` against built-ins plus the `custom_categories` table. The color is validated server-side as strict `#RRGGBB` (it lands in `style` attributes); the emoji is content-validated (non-ASCII required, HTML metacharacters rejected) and renders through text nodes and escaping, never as markup. The category map refreshes with the 15-minute auto-refresh, so categories created from another tab or the CLI catch up without a manual reload.
+
+Deletion always succeeds and orphans degrade: projects keeping a deleted value render with default styling, the value stays selectable on those projects (a modal save cannot wipe it), and re-adding the name restores its look. The API surface is `GET /api/categories` (built-in names + custom rows), `POST /api/categories` (400 on validation, 409 on duplicate), and `DELETE /api/categories/{name}` (404 for unknown names) - all reading and writing SQLite directly, no DuckDB sync involved.
+
 The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 #### Project category icons
@@ -170,7 +176,10 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/task/{id}/prompt/{subtask_id}` | Contents of a specific `prompts/task-NN-prompt.md` file. |
 | GET | `/api/repos` | Tracked repositories with their metadata. |
 | POST | `/api/tasks/{id}/rename` | Rename a project. Body `{"new_name": "..."}`; delegates to missioncache-db's `rename_task` and resyncs DuckDB. |
-| PUT | `/api/tasks/{id}/category` | Set or clear a project's category. Body `{"category": "ui"}` or `{"category": null}`; validated server-side against `CATEGORIES`, resyncs DuckDB. |
+| PUT | `/api/tasks/{id}/category` | Set or clear a project's category. Body `{"category": "ui"}` or `{"category": null}`; validated server-side against `CATEGORIES` plus custom categories, resyncs DuckDB. |
+| GET | `/api/categories` | Built-in taxonomy names plus custom categories (`{name, emoji, color}` rows). |
+| POST | `/api/categories` | Create a custom category. Body `{"name", "emoji", "color"}`; 400 on validation, 409 on duplicate. |
+| DELETE | `/api/categories/{name}` | Delete a custom category (404 for unknown names). Projects keeping the value render with default styling. |
 
 Both write endpoints return `{"success": true, ...}` with a `warnings` list; a warning means the SQLite write succeeded but the DuckDB read-path refresh failed or was incomplete, so the list view may lag until the sync issue clears.
 

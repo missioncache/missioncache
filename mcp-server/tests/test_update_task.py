@@ -135,6 +135,19 @@ class TestUpdateTaskValidation:
         assert result.get("code") == "VALIDATION_ERROR"
         assert db_module.get_db().get_task(tid).jira_key == "PROJ-KEEP"
 
+    def test_custom_category_accepted(self, isolated_orbit):
+        """A category defined in custom_categories passes update_task's
+        pre-flight. (The creation tools carry their own copies of this
+        check, each tested in its own file - the checks are NOT shared.)"""
+        db_module.get_db().add_custom_category("research", "🔬", "#4dabf7")
+        tid = _create("custom-cat-target")
+
+        result = _update(task_id=tid, category="research")
+
+        assert result.get("error") is None
+        assert result["category"] == "research"
+        assert db_module.get_db().get_task(tid).category == "research"
+
     def test_invalid_category_rejected_before_jira_write(self, isolated_orbit):
         """Atomicity: a valid jira_key paired with an invalid category
         must NOT half-apply - the jira_key stays untouched."""
