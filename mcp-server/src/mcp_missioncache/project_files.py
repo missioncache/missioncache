@@ -736,42 +736,26 @@ def parse_task_progress(content: str) -> TaskProgress:
 
 
 def _update_section(content: str, section_name: str, new_content: str) -> str:
-    """Replace content of a section (from ## heading to next ## heading).
+    """Replace a whole section's body, fence-aware.
 
-    The heading match is ^-anchored (MULTILINE) so a prose mention of the
-    literal ``## <name>`` inside another section can never be mistaken for
-    the heading - the bug class found on 2026-07-11 in the Recent Changes
-    prepend path.
+    Delegates to the context-file structure owner (``context_health``) so
+    heading location uses the same fence-masking as Recent Changes and
+    Waiting on: a column-0 ``## <name>`` inside a fenced code block can
+    never be mistaken for the section. This closes, for the sibling
+    sections (Next Steps etc.), the same bug class the 2026-07-11 anchored
+    fix closed for Recent Changes.
     """
-    pattern = rf"^(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
-    flags = re.DOTALL | re.MULTILINE
-
-    if re.search(pattern, content, flags):
-        return re.sub(pattern, rf"\1\n{new_content}\n\n", content, flags=flags)
-    else:
-        # Section doesn't exist, append it
-        return content + f"\n## {section_name}\n\n{new_content}\n"
+    return context_health.replace_section_body(content, section_name, new_content)
 
 
 def _append_to_section(content: str, section_name: str, new_content: str) -> str:
-    """Append content to an existing section.
+    """Append content to a section's body, fence-aware.
 
-    Strips template placeholders (lines that are exactly `- TBD` or `1. TBD`)
-    so the first real write replaces the template rather than sitting alongside it.
-    The heading match is ^-anchored (MULTILINE) - see ``_update_section``.
+    Strips template placeholders (lines that are exactly ``- TBD`` or
+    ``1. TBD``) so the first real write replaces the template rather than
+    sitting alongside it. Fence-aware for the same reason as
+    ``_update_section``.
     """
-    pattern = rf"^(## {re.escape(section_name)}[^\n]*\n)(.+?)(?=\n## |\Z)"
-    flags = re.DOTALL | re.MULTILINE
-
-    match = re.search(pattern, content, flags)
-    if match:
-        existing_lines = [
-            line for line in match.group(2).strip().splitlines()
-            if line.strip() not in ("- TBD", "1. TBD")
-        ]
-        existing = "\n".join(existing_lines)
-        combined = f"{existing}\n{new_content}" if existing else new_content
-        return re.sub(pattern, rf"\1{combined}\n\n", content, flags=flags)
-    else:
-        # Section doesn't exist, create it
-        return content + f"\n## {section_name}\n\n{new_content}\n"
+    return context_health.append_to_section_body(
+        content, section_name, new_content, drop_lines=("- TBD", "1. TBD")
+    )

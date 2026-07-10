@@ -430,6 +430,93 @@ Example of the section shape:
         assert rows == []
 
 
+class TestSectionBodyFenceAware:
+    """replace_section_body / append_to_section_body must target the REAL
+    section, never a column-0 heading inside a fenced code example that
+    appears before it (Codex adversarial review, 2026-07-11: the sibling of
+    the Recent Changes fence bug, on Next Steps / Gotchas / Key Files /
+    Key Architectural Decisions)."""
+
+    FIXTURE = """# Demo - Context
+
+**Last Updated:** 2026-07-10 12:00
+
+## Description
+
+The canonical order, shown as an example:
+
+```markdown
+## Gotchas
+
+## Next Steps
+
+## Recent Changes
+```
+
+## Gotchas
+
+- TBD
+
+## Next Steps
+
+1. old step
+
+## Recent Changes
+
+### 2026-07-10 11:00
+
+- entry
+"""
+
+    FENCE_BLOCK = "```markdown\n## Gotchas\n\n## Next Steps\n\n## Recent Changes\n```"
+
+    def test_replace_targets_real_next_steps_not_fenced(self):
+        out = ch.replace_section_body(self.FIXTURE, "Next Steps", "1. new step")
+        assert "1. new step" in out
+        assert "1. old step" not in out
+        # The fenced example is byte-for-byte intact - not torn open.
+        assert self.FENCE_BLOCK in out
+
+    def test_replace_leaves_following_sections_intact(self):
+        out = ch.replace_section_body(self.FIXTURE, "Next Steps", "1. new step")
+        # Recent Changes (the section after Next Steps) survives unharmed.
+        assert "### 2026-07-10 11:00" in out
+        assert "- entry" in out
+
+    def test_append_targets_real_gotchas_and_strips_tbd(self):
+        out = ch.append_to_section_body(
+            self.FIXTURE, "Gotchas", "- a real gotcha", drop_lines=("- TBD", "1. TBD")
+        )
+        assert "- a real gotcha" in out
+        # The placeholder in the REAL Gotchas is gone; the fenced example
+        # (which carries no '- TBD') is untouched.
+        gotchas_body = ch.extract_section(out, "Gotchas")
+        assert gotchas_body is not None
+        assert "- TBD" not in gotchas_body
+        assert self.FENCE_BLOCK in out
+
+    def test_append_keeps_drop_lines_only_on_exact_match(self):
+        # A body line that merely CONTAINS 'TBD' is preserved; only exact
+        # '- TBD' / '1. TBD' placeholder lines are dropped.
+        content = self.FIXTURE.replace("- TBD", "- TBD: still deciding the retry cap")
+        out = ch.append_to_section_body(
+            content, "Gotchas", "- new", drop_lines=("- TBD", "1. TBD")
+        )
+        assert "- TBD: still deciding the retry cap" in out
+
+    def test_replace_creates_section_at_eof_when_absent(self):
+        base = "# Doc\n\n**Last Updated:** 2026-01-01\n\n## Description\n\nx\n"
+        out = ch.replace_section_body(base, "Next Steps", "1. step")
+        assert ch.extract_section(out, "Next Steps") is not None
+        assert "1. step" in out
+
+    def test_append_creates_section_at_eof_when_absent(self):
+        base = "# Doc\n\n**Last Updated:** 2026-01-01\n\n## Description\n\nx\n"
+        out = ch.append_to_section_body(base, "Notes", "- note")
+        assert ch.extract_section(out, "Notes") is not None
+        assert "- note" in out
+
+
 class TestPipeEscaping:
     """Cell values containing pipes must round-trip without column shifts
     (flagged independently by three reviewers)."""

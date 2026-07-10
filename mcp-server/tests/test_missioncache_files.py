@@ -963,3 +963,59 @@ class TestAnchoredHeadingMatch:
         # The prose mention survives; Description body was not treated as
         # the Next Steps section.
         assert "Mentions ## Next Steps mid-line in prose." in content
+
+
+class TestFencedHeadingNotCorrupted:
+    """update_context_file must not treat a column-0 ## heading inside a
+    fenced code block as the target section (Codex adversarial review,
+    2026-07-11). Sibling of TestAnchoredHeadingMatch, which guards the
+    prose-mention (mid-line) case; this guards the fenced-example case for
+    the section helpers (_update_section / _append_to_section).
+    """
+
+    FENCED = (
+        "# Title\n\n**Last Updated:** 2026-04-01\n\n"
+        "## Description\n\n"
+        "Canonical order, shown as an example:\n\n"
+        "```markdown\n## Gotchas\n\n## Next Steps\n\n## Recent Changes\n```\n\n"
+        "## Gotchas\n\n- TBD\n\n"
+        "## Next Steps\n\n1. old step\n\n"
+        "## Recent Changes\n\n### 2026-04-01 09:00\n\n- seed\n"
+    )
+
+    FENCE_BLOCK = "```markdown\n## Gotchas\n\n## Next Steps\n\n## Recent Changes\n```"
+
+    def test_next_steps_replace_skips_fenced_heading(self, tmp_path):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.FENCED)
+        update_context_file(str(ctx), next_steps=["new step"])
+        content = ctx.read_text()
+        assert "1. new step" in content
+        assert "1. old step" not in content
+        # The fenced example is byte-for-byte intact - not torn open.
+        assert self.FENCE_BLOCK in content
+
+    def test_gotchas_append_skips_fenced_heading(self, tmp_path):
+        from missioncache_db import context_health as ch
+
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.FENCED)
+        update_context_file(str(ctx), gotchas=["a real gotcha"])
+        content = ctx.read_text()
+        # The entry lands in the REAL Gotchas, and its '- TBD' placeholder
+        # is stripped; the fenced example is untouched.
+        gotchas_body = ch.extract_section(content, "Gotchas")
+        assert gotchas_body is not None
+        assert "a real gotcha" in gotchas_body
+        assert "- TBD" not in gotchas_body
+        assert self.FENCE_BLOCK in content
+
+    def test_fenced_recent_changes_left_intact_by_section_writes(self, tmp_path):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.FENCED)
+        # A Next Steps replacement must not disturb the fenced example NOR
+        # the real Recent Changes seed entry that follows it.
+        update_context_file(str(ctx), next_steps=["new step"])
+        content = ctx.read_text()
+        assert "- seed" in content
+        assert "### 2026-04-01 09:00" in content

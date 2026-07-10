@@ -162,6 +162,46 @@ def extract_section(content: str, name: str) -> Optional[str]:
     return content[span[1] : span[2]]
 
 
+def replace_section_body(content: str, name: str, new_body: str) -> str:
+    """Replace the whole body of ``## <name>``; create at EOF if absent.
+
+    Fence-aware (locates via ``_section_span``): a column-0 ``## <name>``
+    inside a fenced code block can never be mistaken for the section, the
+    same protection Recent Changes and Waiting on already have. Used for
+    whole-section replacements like Next Steps. The heading line is kept;
+    the body becomes a blank line, ``new_body``, then a trailing blank line
+    before the next section.
+    """
+    span = _section_span(content, name)
+    if span is None:
+        return content.rstrip("\n") + f"\n\n## {name}\n\n{new_body}\n"
+    _, body_start, body_end = span
+    return content[:body_start] + f"\n{new_body}\n\n" + content[body_end:]
+
+
+def append_to_section_body(
+    content: str, name: str, added: str, drop_lines: tuple[str, ...] = ()
+) -> str:
+    """Append ``added`` to the body of ``## <name>``; create at EOF if absent.
+
+    Fence-aware, same as ``replace_section_body``. Existing body lines are
+    preserved except any whose stripped form is in ``drop_lines`` (used to
+    strip ``- TBD`` / ``1. TBD`` template placeholders on the first real
+    write).
+    """
+    span = _section_span(content, name)
+    if span is None:
+        return content.rstrip("\n") + f"\n\n## {name}\n\n{added}\n"
+    _, body_start, body_end = span
+    body = content[body_start:body_end]
+    existing_lines = [
+        line for line in body.strip().splitlines() if line.strip() not in drop_lines
+    ]
+    existing = "\n".join(existing_lines)
+    combined = f"{existing}\n{added}" if existing else added
+    return content[:body_start] + f"\n{combined}\n\n" + content[body_end:]
+
+
 def _subsection_starts(masked_body: str) -> list[int]:
     """Offsets of ``### `` subsection starts within a fence-masked body."""
     return [m.start() for m in _H3_LINE_RE.finditer(masked_body)]
