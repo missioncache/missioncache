@@ -23,11 +23,6 @@ Prompts match by number:
 
 {{tasks}}
 
-## Phase 2: Validation
-
-- [ ] Typecheck passes
-- [ ] Tests pass
-
 ## Notes
 
 - TBD
