@@ -42,6 +42,9 @@ Migration:
 Cleanup:
     python missioncache_db.py cleanup [--dry-run]              # Archive orphans, resolve dupes, normalize paths
 
+Diagnostics:
+    python missioncache_db.py health                    # Report context-file health for all active projects
+
 Cross-Machine Sharing:
     python missioncache_db.py export <name> [--out <path>] [--no-time] [--json]  # Build a portable bundle (markdown + missioncache.json manifest)
     python missioncache_db.py import <bundle> [--repo <path>] [--force] [--rewrite-paths] [--dry-run] [--json]  # Import a bundle, reconcile refs, print a 3-bucket alignment report
@@ -4411,6 +4414,51 @@ def main():
             print(f"  Files moved: {files_moved}")
             if dry_run:
                 print("\n  Run without --dry-run to apply changes.")
+
+        elif command == "health":
+            from missioncache_db import context_health
+
+            # Bare module-global lookup resolves at call time, so tests can
+            # monkeypatch missioncache_db.MISSIONCACHE_ROOT directly.
+            active_dir = MISSIONCACHE_ROOT / "active"
+            project_dirs = (
+                sorted(p for p in active_dir.iterdir() if p.is_dir())
+                if active_dir.exists()
+                else []
+            )
+            total_warnings = 0
+            for project_dir in project_dirs:
+                name = project_dir.name
+                context_file = project_dir / f"{name}-context.md"
+                if not context_file.exists():
+                    context_file = project_dir / "context.md"
+                if not context_file.exists():
+                    print(f"{name}:")
+                    print("  - no context file found")
+                    total_warnings += 1
+                    continue
+                # Report-only contract: one unreadable/undecodable file is a
+                # finding for THAT project, never a crash that voids the
+                # sweep for every project after it.
+                try:
+                    content = context_file.read_text()
+                except (OSError, UnicodeDecodeError) as e:
+                    print(f"{name}:")
+                    print(f"  - context file unreadable: {e.__class__.__name__}")
+                    total_warnings += 1
+                    continue
+                warnings = context_health.check_context_health(content, context_file)
+                if warnings:
+                    print(f"{name}:")
+                    for w in warnings:
+                        print(f"  - {w}")
+                    total_warnings += len(warnings)
+                else:
+                    print(f"{name}: ok")
+            print(
+                f"\n{len(project_dirs)} active projects checked, "
+                f"{total_warnings} warnings"
+            )
 
         elif command == "config":
             from missioncache_db import machine_map
