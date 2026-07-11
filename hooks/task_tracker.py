@@ -49,6 +49,12 @@ PENDING_RE = re.compile(
 # Context file heading pattern - captures "### Task N" or "### Task N: description"
 HEADING_RE = re.compile(r"^###\s+Task\s+(\d+)", re.MULTILINE | re.IGNORECASE)
 
+# Session id charset (UUID-shaped) - guards the dedup filename against path
+# traversal. Similar to session_start's guard (`[A-Za-z0-9_-]`, capped) but
+# not identical across files: mcp-server/helpers.py also allows `.` and caps
+# at 128. Do not assume the three are interchangeable.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+
 
 def should_skip(prompt: str) -> bool:
     """Return True if this prompt shouldn't trigger divergence checks."""
@@ -64,6 +70,51 @@ def parse_pending_tasks(tasks_content: str) -> dict[int, str]:
 def parse_context_headings(context_content: str) -> set[int]:
     """Return set of task numbers that have `### Task N` headings."""
     return {int(num) for num in HEADING_RE.findall(context_content)}
+
+
+def _divergence_state_file(session_id: str):
+    """Path to the per-session dedup state file, or None if session_id unusable.
+
+    Keyed by session_id so the reminder is surfaced once per divergence state
+    instead of re-injected on every prompt. Computed from Path.home() at call
+    time so a patched home (tests) is honored.
+    """
+    if not _SESSION_ID_RE.match(session_id or ""):
+        return None
+    return (
+        Path.home()
+        / ".claude"
+        / "hooks"
+        / "state"
+        / f"divergence-{session_id}.json"
+    )
+
+
+def _load_last_divergence(state_file) -> list[int]:
+    """Return the last-emitted sorted divergent task numbers for this session."""
+    try:
+        return sorted(int(n) for n in json.loads(state_file.read_text()))
+    except Exception:
+        return []
+
+
+def _store_divergence(state_file, nums: list[int]) -> None:
+    """Record the divergent set just emitted; best-effort."""
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(nums))
+    except Exception:
+        pass
+
+
+def _clear_divergence_state(state_file) -> None:
+    """Drop the per-session dedup state so a later recurrence re-fires."""
+    if state_file is None:
+        return
+    try:
+        state_file.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def build_reminder(
@@ -174,23 +225,38 @@ def main() -> None:
         if tasks_file is None or context_file is None:
             return
 
-        tasks_content = tasks_file.read_text()
-        context_content = context_file.read_text()
+        state_file = _divergence_state_file(session_id)
 
+        # Read tasks.md first and bail before touching the (larger) context.md
+        # when nothing is pending - no divergence can fire in that case. Clear
+        # any stored dedup state on the way out so a later recurrence re-fires.
+        tasks_content = tasks_file.read_text()
         pending = parse_pending_tasks(tasks_content)
         if not pending:
+            _clear_divergence_state(state_file)
             return
 
+        context_content = context_file.read_text()
         heading_nums = parse_context_headings(context_content)
-        if not heading_nums:
+        divergent_nums = heading_nums & set(pending.keys())
+        current = sorted(divergent_nums)
+
+        if not current:
+            # No divergence now. Reset any stored state so a later recurrence
+            # of the same set fires again, then stay quiet.
+            _clear_divergence_state(state_file)
             return
 
-        divergent_nums = heading_nums & set(pending.keys())
-        if not divergent_nums:
+        # Per-session dedup: only surface the reminder when the divergent set
+        # changes. Without this the identical block is re-injected on every
+        # prompt for the whole time a task is worked before its box is checked.
+        if state_file is not None and _load_last_divergence(state_file) == current:
             return
 
         divergent_tasks = {num: pending[num] for num in divergent_nums}
         print(build_reminder(divergent_tasks, str(tasks_file)))
+        if state_file is not None:
+            _store_divergence(state_file, current)
 
     except ImportError:
         # missioncache_db not available, skip silently
