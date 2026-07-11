@@ -23,6 +23,10 @@ from rich.text import Text
 # panels; rich still wraps on panel boundaries.
 _console = Console(soft_wrap=False)
 _error_console = Console(stderr=True, style="bold red")
+# Plain (unstyled) stderr console for warnings that must reach the error stream
+# without the red "fatal" styling of `_error_console` - e.g. an install
+# failure summary that should be visible when stdout is captured/redirected.
+_warn_stderr_console = Console(stderr=True)
 
 
 # Human-readable labels for the end-of-install summary table. Keys match
@@ -161,9 +165,15 @@ def success(msg: str) -> None:
     _console.print(f"  [green]✓[/green] {msg}")
 
 
-def warn(msg: str) -> None:
-    """Print a warning line (non-fatal)."""
-    _console.print(f"  [yellow]⚠[/yellow]  {msg}")
+def warn(msg: str, *, stderr: bool = False) -> None:
+    """Print a warning line (non-fatal).
+
+    When `stderr=True`, emit to the stderr stream so the message survives a
+    stdout capture/redirect (used for the install failure summary, which pairs
+    with a non-zero exit code).
+    """
+    console = _warn_stderr_console if stderr else _console
+    console.print(f"  [yellow]⚠[/yellow]  {msg}")
 
 
 def detail(msg: str) -> None:

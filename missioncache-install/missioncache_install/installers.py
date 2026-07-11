@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib import resources
 from pathlib import Path
 from typing import Literal
@@ -93,9 +93,12 @@ def _install_plugin_pypi() -> None:
         else:
             raise
 
-    settings.enable_plugin(PLUGIN_ID_PYPI)
     ui.detail(f"Installing {PLUGIN_ID_PYPI}")
     subprocess_utils.run(["claude", "plugins", "install", PLUGIN_ID_PYPI])
+    # Enable only AFTER the install succeeds. If the install above raises,
+    # settings.json must not carry an enabledPlugins entry for a plugin the
+    # CLI never registered.
+    settings.enable_plugin(PLUGIN_ID_PYPI)
 
 
 def _install_plugin_local(ctx: InstallContext) -> None:
@@ -133,8 +136,6 @@ def _install_plugin_local(ctx: InstallContext) -> None:
         plugin_link.symlink_to(repo)
         ui.detail(f"Created symlink -> {repo}")
 
-    settings.enable_plugin(PLUGIN_ID_LOCAL)
-
     if shutil.which("claude"):
         try:
             subprocess_utils.run(["claude", "plugins", "install", PLUGIN_ID_LOCAL])
@@ -142,6 +143,11 @@ def _install_plugin_local(ctx: InstallContext) -> None:
         except subprocess_utils.CommandFailed as e:
             ui.warn(f"Claude CLI install failed: {e.stderr.strip() or 'unknown error'}")
             ui.detail(f"You can retry with: claude plugins install {PLUGIN_ID_LOCAL}")
+            # Propagate so install_plugin does not enable/record/report success
+            # for a plugin the CLI never registered.
+            raise
+        # Enable only after a successful CLI install.
+        settings.enable_plugin(PLUGIN_ID_LOCAL)
     else:
         ui.warn(f"Claude CLI not found. Run: claude plugins install {PLUGIN_ID_LOCAL}")
 
@@ -246,7 +252,7 @@ def uninstall_dashboard(ctx: InstallContext) -> None:
             subprocess_utils.run_streaming(["missioncache-dashboard", "uninstall-service"])
         except subprocess_utils.CommandFailed:
             ui.warn("missioncache-dashboard uninstall-service failed (non-fatal)")
-    if ctx.mode != "local":
+    if _recorded_mode("dashboard", ctx) != "local":
         _pipx_uninstall("missioncache-dashboard")
     settings.remove_edit_count_hook()
     state.remove_component("dashboard")
@@ -273,7 +279,7 @@ def install_missioncache_auto(ctx: InstallContext) -> None:
 
 
 def uninstall_missioncache_auto(ctx: InstallContext) -> None:
-    if ctx.mode != "local":
+    if _recorded_mode("missioncache_auto", ctx) != "local":
         _pipx_uninstall("missioncache-auto")
     state.remove_component("missioncache_auto")
     ui.detail("missioncache-auto uninstalled")
@@ -462,7 +468,7 @@ def install_missioncache_db(ctx: InstallContext) -> None:
 
 
 def uninstall_missioncache_db(ctx: InstallContext) -> None:
-    if ctx.mode != "local":
+    if _recorded_mode("missioncache_db", ctx) != "local":
         _pipx_uninstall("missioncache-db")
     state.remove_component("missioncache_db")
     ui.detail("missioncache-db uninstalled")
@@ -591,6 +597,23 @@ def _require_repo(ctx: InstallContext) -> Path:
     return ctx.repo_root
 
 
+def _recorded_mode(component: str, ctx: InstallContext) -> Mode:
+    """Install-time mode for a component, preferring recorded state over ctx.mode.
+
+    Uninstall and update re-derive ctx.mode from the current directory (see
+    __main__._resolve_mode_and_repo), which is wrong when they run from a
+    different directory than the install (e.g. uninstalling from a clone a
+    package that was pipx-installed). The pipx-vs-editable distinction must
+    follow how the component was actually installed, so read the per-component
+    mode persisted at install time; fall back to ctx.mode only when nothing
+    was recorded (manual install, or state predating this field).
+    """
+    recorded = state.load().get("components", {}).get(component, {}).get("mode")
+    if recorded in ("pypi", "local"):
+        return recorded
+    return ctx.mode
+
+
 def _service_kind(skip: bool) -> str:
     if skip:
         return "none"
@@ -657,11 +680,33 @@ _UNINSTALLERS = {
 }
 
 
-def install_components(components: list[str], ctx: InstallContext) -> None:
-    """Run install for each component in ALL_COMPONENTS order."""
+def install_components(components: list[str], ctx: InstallContext) -> list[str]:
+    """Run install for each component in ALL_COMPONENTS order.
+
+    Isolates per-component failures: a CommandFailed from one installer is
+    reported and the remaining (independent) components still run - a failed
+    dashboard pipx install must not skip the pure-file-copy rules/commands that
+    follow it. Returns the list of components that failed so callers can render
+    an honest summary. Programming/invariant errors (anything other than
+    CommandFailed) still propagate so real bugs are not silently swallowed.
+    """
     ordered = [c for c in ALL_COMPONENTS if c in components]
+    failed: list[str] = []
     for c in ordered:
-        _INSTALLERS[c](ctx)
+        try:
+            _INSTALLERS[c](ctx)
+        except subprocess_utils.CommandFailed as e:
+            reason = e.stderr.strip() or e.stdout.strip() or str(e)
+            ui.warn(f"{c.replace('_', '-')} failed to install: {reason}")
+            failed.append(c)
+    if failed:
+        ui.warn(
+            "Some components did not install: "
+            + ", ".join(c.replace("_", "-") for c in failed)
+            + ". Re-run `missioncache-install --update` after fixing the issue(s).",
+            stderr=True,
+        )
+    return failed
 
 
 def uninstall_components(components: list[str], ctx: InstallContext) -> None:
@@ -677,5 +722,12 @@ def update_all(ctx: InstallContext) -> None:
     if not installed:
         ui.warn("Nothing to update - no prior install detected in state file.")
         return
+    # Update must reinstall in the SAME mode it was installed in, not the mode
+    # re-derived from the current directory. The install-time mode was recorded
+    # globally at install; prefer it so an update run from a clone doesn't flip
+    # a pypi install to an editable one (or vice versa).
+    recorded = state.load().get("mode")
+    if recorded in ("pypi", "local") and recorded != ctx.mode:
+        ctx = replace(ctx, mode=recorded)
     ui.info(f"Updating: {', '.join(installed)}")
     install_components(installed, ctx)

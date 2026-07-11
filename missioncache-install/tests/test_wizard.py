@@ -403,3 +403,77 @@ def test_uninstall_wizard_rejects_non_numeric_input(
         wizard.run_uninstall_wizard()
 
     assert any("invalid" in f.lower() for f in failures)
+
+
+# ---------------------------------------------------------------------------
+# run() exit status: the interactive install path must report component
+# failures as a non-zero status so main() can propagate them.
+# ---------------------------------------------------------------------------
+
+def _stub_prereqs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the system-probing prereq steps so run() reaches the install."""
+    monkeypatch.setattr(wizard.prereqs, "detect", lambda: object())
+    monkeypatch.setattr(wizard.prereqs, "report", lambda p: None)
+    monkeypatch.setattr(wizard.prereqs, "ensure_python_or_fail", lambda p: None)
+    monkeypatch.setattr(wizard.prereqs, "ensure_claude_cli_or_warn", lambda p: None)
+    monkeypatch.setattr(wizard.ui, "banner", lambda: None)
+
+
+def _local_ctx() -> installers.InstallContext:
+    """A local-mode context so run() skips the PyPI pip-runner prompt."""
+    return installers.InstallContext(
+        mode="local",
+        repo_root=None,
+        skip_service=True,
+        port=8787,
+        assume_yes=True,
+    )
+
+
+def test_run_returns_1_when_a_component_fails(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed component in the wizard install path yields exit status 1."""
+    _stub_prereqs(monkeypatch)
+    monkeypatch.setattr(wizard, "_select_components", lambda: ["plugin", "dashboard"])
+    monkeypatch.setattr(
+        wizard.installers, "install_components", lambda comps, ctx: ["dashboard"]
+    )
+
+    rc = wizard.run(_local_ctx())
+
+    assert rc == 1, "wizard.run must report 1 when install_components returns failures"
+
+
+def test_run_returns_0_when_all_components_succeed(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fully-successful wizard install yields exit status 0."""
+    _stub_prereqs(monkeypatch)
+    monkeypatch.setattr(wizard, "_select_components", lambda: ["plugin", "dashboard"])
+    monkeypatch.setattr(
+        wizard.installers, "install_components", lambda comps, ctx: []
+    )
+
+    rc = wizard.run(_local_ctx())
+
+    assert rc == 0
+
+
+def test_run_returns_0_when_nothing_selected(
+    isolated_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selecting no components is a clean no-op exit, not a failure."""
+    _stub_prereqs(monkeypatch)
+    monkeypatch.setattr(wizard, "_select_components", lambda: [])
+    called: list[bool] = []
+    monkeypatch.setattr(
+        wizard.installers,
+        "install_components",
+        lambda comps, ctx: called.append(True) or [],
+    )
+
+    rc = wizard.run(_local_ctx())
+
+    assert rc == 0
+    assert called == [], "install must not run when nothing was selected"
