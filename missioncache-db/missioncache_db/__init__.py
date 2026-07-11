@@ -210,6 +210,18 @@ class AutoRunActiveError(RenameError):
     """A missioncache-auto run is currently in progress on this task."""
 
 
+class DeleteError(ValueError):
+    """Base class for delete_task failures other than a missing task.
+
+    Subclasses are catchable by name in callers (dashboard endpoint) to
+    surface specific user-facing messages.
+    """
+
+
+class SubtasksExistError(DeleteError):
+    """The project has subtasks; delete or reassign them before deleting it."""
+
+
 class ImportConflictError(RuntimeError):
     """Raised by upsert_imported_task when a cross-machine import would collide
     with a DIFFERENT existing row on UNIQUE(repo_id, full_path).
@@ -2120,6 +2132,108 @@ class TaskDB:
             "h1_skipped": h1_skipped,
             "sessions_updated": sweep["updated"],
             "warnings": sweep["warnings"],
+        }
+
+    def delete_task(
+        self, task_id: int, *, delete_files: bool = False
+    ) -> Dict[str, Any]:
+        """Delete a project: remove its DB row, and optionally its files.
+
+        By default only the database record is removed. FK cascades take
+        care of heartbeats, sessions, task_updates, auto_executions and
+        their logs (the schema declares ON DELETE CASCADE and
+        PRAGMA foreign_keys is ON). The on-disk MissionCache directory is
+        left in place unless ``delete_files=True``.
+
+        Subtasks are refused: the ``tasks.parent_id`` FK is ON DELETE SET
+        NULL, so deleting a parent would silently orphan its children.
+        Delete or reassign them first.
+
+        Args:
+            task_id: the project row id.
+            delete_files: also remove the on-disk directory
+                (``MISSIONCACHE_ROOT / full_path``), guarded so it can
+                never escape the root.
+
+        Returns:
+            Dict with keys: success, deleted, name, full_path,
+            files_deleted, warnings.
+
+        Raises:
+            ValueError: no task with that id.
+            SubtasksExistError: the project has subtasks.
+            AutoRunActiveError: a missioncache-auto run is in progress.
+        """
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"No project found with id {task_id}.")
+
+        warnings: List[str] = []
+
+        # Guard subtasks (the parent_id FK only NULLs on delete, which
+        # would orphan them) and an active auto-run, then delete the row;
+        # child rows cascade via FK. The guards run in the same connection
+        # as the DELETE, which narrows but does not close the TOCTOU window:
+        # sqlite3 opens a DEFERRED transaction, so the guard SELECTs take no
+        # write lock and a concurrent process could commit a new subtask or
+        # a running auto-run between the SELECT and the DELETE. Acceptable on
+        # a single-user tool; a BEGIN IMMEDIATE would be needed to fully close it.
+        with self.connection() as conn:
+            children = conn.execute(
+                "SELECT id FROM tasks WHERE parent_id = ?",
+                (task_id,),
+            ).fetchall()
+            if children:
+                raise SubtasksExistError(
+                    f"'{task.name}' has {len(children)} subtask(s). "
+                    f"Delete or reassign them before deleting the project."
+                )
+            running = conn.execute(
+                "SELECT id FROM auto_executions "
+                "WHERE task_id = ? AND status = 'running' LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if running:
+                raise AutoRunActiveError(
+                    "Cannot delete while missioncache-auto is running on this project. "
+                    "Stop the run and try again."
+                )
+            conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            conn.commit()
+
+        # Optional on-disk removal - best-effort, AFTER the row is gone, so
+        # a failure here leaves an orphaned directory (warned) rather than a
+        # DB row pointing at missing files. Resolve + containment check so a
+        # corrupted full_path can never escape the MissionCache root.
+        files_deleted = False
+        if delete_files:
+            import shutil
+
+            target = MISSIONCACHE_ROOT / task.full_path
+            try:
+                resolved = target.resolve()
+                root = MISSIONCACHE_ROOT.resolve()
+                if resolved == root:
+                    warnings.append("Refused to delete the MissionCache root itself.")
+                elif not resolved.is_relative_to(root):
+                    warnings.append(
+                        f"Refused to delete files outside the MissionCache root: {target}"
+                    )
+                elif target.is_dir():
+                    shutil.rmtree(target)
+                    files_deleted = True
+                # No directory (non-coding task, or already gone): nothing to do.
+            except OSError as e:
+                logger.exception("delete: file removal failed for %s", target)
+                warnings.append(f"Could not delete files at {target}: {e}")
+
+        return {
+            "success": True,
+            "deleted": True,
+            "name": task.name,
+            "full_path": task.full_path,
+            "files_deleted": files_deleted,
+            "warnings": warnings,
         }
 
     def _sweep_session_pointers(
