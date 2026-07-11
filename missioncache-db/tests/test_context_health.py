@@ -145,6 +145,19 @@ class TestRecentChangesParsing:
     def test_missing_section_returns_empty(self):
         assert ch.parse_recent_changes_subsections("# X\n\n## Description\n\nd\n") == []
 
+    def test_non_dated_h3_inside_entry_stays_with_entry(self):
+        # A bare '### ' sub-heading in an entry body is NOT a subsection
+        # boundary - only dated '### <timestamp>' headings are. The one
+        # logical entry must parse as one subsection, keeping its tail.
+        recent = "### 2026-07-11 10:00\n\n- did X\n\n### Design note\n\nmore detail\n"
+        content = _context(recent=recent)
+        subs = ch.parse_recent_changes_subsections(content)
+        assert len(subs) == 1
+        heading, body = subs[0]
+        assert heading == "### 2026-07-11 10:00"
+        assert "### Design note" in body
+        assert "more detail" in body
+
 
 class TestSplitForCap:
     def test_under_limit_noop(self):
@@ -428,6 +441,30 @@ Example of the section shape:
         )
         rows = ch.parse_waiting_on(content)
         assert rows == []
+
+    def test_four_backtick_fence_masks_inner_three_backtick_block(self):
+        # A ```` fence shown to display a ``` sample stays open until the
+        # matching ```` closer (CommonMark: closer length >= opener). The
+        # inner ``` lines are content, so the fake section/entry inside must
+        # stay masked and never shadow the real Recent Changes below it.
+        content = (
+            "# Demo - Context\n\n"
+            "**Last Updated:** 2026-07-10 12:00\n\n"
+            "## Description\n\n"
+            "````markdown\n"
+            "```\n"
+            "## Recent Changes\n\n### 2020-01-01 00:00\n\n- fake entry\n"
+            "```\n"
+            "````\n\n"
+            "## Recent Changes\n\n"
+            "### 2026-07-10 11:00\n\n- real entry\n"
+        )
+        masked = ch.mask_fences(content)
+        assert len(masked) == len(content)
+        assert "fake entry" not in masked
+        assert "real entry" in masked
+        subs = ch.parse_recent_changes_subsections(content)
+        assert [h for h, _ in subs] == ["### 2026-07-10 11:00"]
 
 
 class TestSectionBodyFenceAware:
