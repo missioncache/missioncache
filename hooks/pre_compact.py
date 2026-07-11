@@ -259,10 +259,15 @@ def _make_transform(timestamp, snapshot_body, context_health):
     """
 
     def transform(content):
+        # Anchor to the start of a line and stamp only the first match so an
+        # embedded snapshot body that quotes a `**Last Updated:**` line does
+        # not get rewritten - the real header is always the first one.
         content = re.sub(
-            r"\*\*Last Updated:\*\* .+",
+            r"^\*\*Last Updated:\*\* .+",
             f"**Last Updated:** {timestamp}",
             content,
+            count=1,
+            flags=re.MULTILINE,
         )
         return context_health.prepend_recent_changes(
             content, timestamp, snapshot_body

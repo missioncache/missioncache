@@ -16,6 +16,42 @@ _BUNDLED_MISSIONCACHE_DB = Path(__file__).resolve().parent.parent / "missioncach
 if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sys.path:
     sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
+# File-editing tools whose presence in the transcript should trigger the
+# /missioncache:save reminder.
+EDIT_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+
+def _transcript_has_edits(transcript):
+    """Return True if the session transcript contains a file-editing tool_use.
+
+    Streams the JSONL transcript and inspects each assistant message's content
+    blocks for a ``tool_use`` whose name is a Write/Edit-family tool. Claude
+    Code writes transcripts as compact JSON (no space after the colon), so a
+    substring match on spaced literals never fires; parsing is spacing-agnostic
+    and stops at the first hit, so large transcripts are not read fully into
+    memory.
+    """
+    try:
+        with transcript.open() as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                content = (rec.get("message") or {}).get("content")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_use"
+                        and block.get("name") in EDIT_TOOLS
+                    ):
+                        return True
+    except Exception:
+        return False
+    return False
+
 
 def main():
     """Check if MissionCache update reminder is needed."""
@@ -32,16 +68,8 @@ def main():
         if not transcript.exists():
             return
 
-        # Read transcript to check for Write/Edit tool uses
-        transcript_content = transcript.read_text()
-
-        # Simple check for file modifications (Write or Edit tools)
-        has_edits = '"tool_use"' in transcript_content and (
-            '"name": "Write"' in transcript_content
-            or '"name": "Edit"' in transcript_content
-        )
-
-        if not has_edits:
+        # Check the transcript for Write/Edit tool uses.
+        if not _transcript_has_edits(transcript):
             return
 
         # Check for active task

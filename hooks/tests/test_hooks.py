@@ -833,12 +833,47 @@ class TestStop:
             mod.main()
 
     def test_detects_edits_shows_reminder(self, tmp_path, monkeypatch, capsys):
-        """stop shows missioncache reminder when transcript contains Write/Edit tool uses."""
-        # Create a fake transcript with edit tool uses
+        """stop shows missioncache reminder when transcript contains Write/Edit tool uses.
+
+        Uses the real Claude Code transcript shape: a top-level ``assistant``
+        record whose ``message.content`` is a list of blocks, one a compact-JSON
+        ``tool_use`` block. Written with compact separators (no space after the
+        colon) to match how Claude Code serializes transcripts.
+        """
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text(
-            '{"type": "tool_use", "name": "Edit"}\n'
-            '{"type": "tool_use", "name": "Write"}\n'
+            # A record with an explicit null message must not abort the scan:
+            # ``rec.get("message", {})`` returns None here (the key exists), so
+            # a naive ``.get("content")`` chain would AttributeError and the
+            # outer except would silently skip the reminder. The Edit below it
+            # must still be seen.
+            json.dumps({"type": "user", "message": None}, separators=(",", ":"))
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "editing now"},
+                            {"type": "tool_use", "id": "t1", "name": "Edit", "input": {}},
+                        ]
+                    },
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_use", "id": "t2", "name": "Write", "input": {}},
+                        ]
+                    },
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
         )
 
         orbit_dir = tmp_path / ".claude" / "orbit" / "active" / "stop-task"
@@ -866,7 +901,20 @@ class TestStop:
     def test_no_reminder_when_no_edits(self, tmp_path, monkeypatch, capsys):
         """stop does not show reminder when transcript has no Write/Edit tool uses."""
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text('{"type": "tool_use", "name": "Read"}\n')
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_use", "id": "r1", "name": "Read", "input": {}},
+                        ]
+                    },
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
 
         mock_db = MagicMock()
 
@@ -1252,17 +1300,109 @@ class TestTaskTracker:
         # Task 1 is done - not flagged
         assert "Task 1:" not in out
 
+    def test_divergence_deduped_within_session(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Same divergence set surfaces once per session, not on every prompt."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [ ] 2. Framework wiring review\n",
+            context_content="### Task 2: Framework wiring review\nfindings\n",
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+
+        # First prompt: divergence surfaces.
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "Task 2: Framework wiring review" in capsys.readouterr().out
+
+        # Second prompt, identical divergence state: stays silent.
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+    def test_divergence_refires_when_set_changes(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """A changed divergent set re-surfaces within the same session."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [ ] 2. First\n- [ ] 3. Second\n",
+            context_content="### Task 2: First\nf\n### Task 3: Second\nf\n",
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "Task 2: First" in capsys.readouterr().out
+
+        # Same set again -> silent.
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+        # Mark task 2 done: divergent set shrinks to {3}, so it re-fires.
+        tasks_file = (
+            tmp_path
+            / ".missioncache"
+            / "active"
+            / "fake-task"
+            / "fake-task-tasks.md"
+        )
+        tasks_file.write_text("- [x] 2. First\n- [ ] 3. Second\n")
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        out = capsys.readouterr().out
+        assert "Task 3: Second" in out
+        assert "Task 2:" not in out
+
+    def test_divergence_refires_after_clearing_and_recurring(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Clearing then re-introducing the same divergence re-fires the reminder."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [ ] 2. Framework wiring review\n",
+            context_content="### Task 2: Framework wiring review\nfindings\n",
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+        tasks_file = (
+            tmp_path
+            / ".missioncache"
+            / "active"
+            / "fake-task"
+            / "fake-task-tasks.md"
+        )
+
+        # First divergence fires and records state.
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "Task 2: Framework wiring review" in capsys.readouterr().out
+
+        # Divergence clears (box checked): silent, and stored state is reset.
+        tasks_file.write_text("- [x] 2. Framework wiring review\n")
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+        # Same divergence recurs (box unchecked again): fires again.
+        tasks_file.write_text("- [ ] 2. Framework wiring review\n")
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "Task 2: Framework wiring review" in capsys.readouterr().out
+
 
 # ── session_start task discipline reminder ────────────────────────────────
 
 
 class TestSessionStartTaskDiscipline:
-    """Verify the session_start hook includes the task tracking discipline reminder."""
+    """Verify the session_start hook includes the trimmed task-tracking pointer."""
 
     def test_output_includes_discipline_reminder(
         self, tmp_path, monkeypatch, capsys
     ):
-        """session_start output mentions update_tasks_file and the TaskCreate anti-pattern."""
+        """session_start output points at /missioncache:load and update_tasks_file."""
         # Redirect Path.home() to tmp_path so the hook's state-file writes
         # (pending-task.json, projects/<session>.json) land in our sandbox
         # instead of polluting the real ~/.claude/hooks/state/.
@@ -1302,9 +1442,53 @@ class TestSessionStartTaskDiscipline:
             mod.main()
 
         output = capsys.readouterr().out
-        assert "Task tracking discipline" in output
+        assert "/missioncache:load" in output
         assert "update_tasks_file" in output
+
+    def test_taskcreate_note_is_unconditional(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The 'ignore built-in TaskCreate/task tools' note fires whenever a
+        task is active, even when no repo path resolves (so the MissionCache-files
+        Tip block is skipped). The divergence hook only nudges this on
+        divergence, so session_start must state it proactively.
+        """
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        # repo_id=None -> repo_path stays None -> the Tip block never runs,
+        # so the note must come from the unconditional line, not the Tip.
+        mock_task = SimpleNamespace(
+            id=1,
+            name="my-task",
+            status="active",
+            jira_key=None,
+            repo_id=None,
+            full_path="active/my-task",
+        )
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = mock_task
+        mock_db.get_task_time.return_value = 0
+        mock_db.format_duration.return_value = "0m"
+
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-unconditional")
+        monkeypatch.setattr("os.getcwd", lambda: str(tmp_path))
+
+        with patch.dict(
+            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
+        ):
+            import importlib
+            import hooks.session_start as mod
+
+            importlib.reload(mod)
+            mod.main()
+
+        output = capsys.readouterr().out
+        # The Tip block did not run (no repo path)...
+        assert "**MissionCache files:**" not in output
+        # ...but the unconditional TaskCreate note still appears.
         assert "TaskCreate" in output
+        assert "update_tasks_file" in output
 
 
 class TestParallelSessionDetection:
