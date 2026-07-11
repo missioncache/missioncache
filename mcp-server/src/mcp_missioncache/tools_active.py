@@ -22,7 +22,7 @@ from pydantic import Field
 from . import active_task, project_files
 from .app import mcp
 from .errors import ErrorCode, MissionCacheError, ValidationError
-from .helpers import _resolve_session_id
+from .helpers import SESSION_ID_RESOLVE_HINT, _resolve_session_id
 from .tasks_parse import find_item, parse_tasks_md
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,9 @@ async def set_active_missioncache_tasks(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code (or other tool) session ID. Pointer is "
-            "scoped per session so concurrent sessions don't clobber each "
-            "other's display. Optional on Claude Code 2.1.154+: when omitted "
-            "it is resolved from the CLAUDE_CODE_SESSION_ID this MCP "
-            "subprocess was spawned with. Pass explicitly for older Claude "
-            "Code or non-Claude clients that don't inject the env var."
+            description="Claude Code session ID; the pointer is per-session so "
+            "concurrent sessions don't clobber each other. "
+            + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
 ) -> dict:
@@ -155,9 +152,7 @@ async def clear_active_missioncache_tasks(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code (or other tool) session ID. Optional on "
-            "Claude Code 2.1.154+: resolved from the CLAUDE_CODE_SESSION_ID "
-            "this MCP subprocess was spawned with when omitted."
+            description="Claude Code session ID. " + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
 ) -> dict:

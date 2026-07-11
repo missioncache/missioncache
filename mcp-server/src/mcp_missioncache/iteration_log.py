@@ -223,11 +223,19 @@ def _task_id_to_display(task_id: str) -> str:
 
     "01" -> "1"
     "01-02" -> "1.2"
+
+    A task_id that is not purely numeric (a letter-suffixed "54a" matching
+    the checklist scheme, or a hand-authored "phase-1") is returned as-is
+    rather than raising, so one malformed prompt file's frontmatter does not
+    break get_prompts_status for the whole prompts dir.
     """
-    if "-" in task_id:
-        parts = task_id.split("-")
-        return f"{int(parts[0])}.{int(parts[1])}"
-    return str(int(task_id))
+    try:
+        if "-" in task_id:
+            parts = task_id.split("-")
+            return f"{int(parts[0])}.{int(parts[1])}"
+        return str(int(task_id))
+    except ValueError:
+        return task_id
 
 
 def _is_task_completed(tasks_file: Path, task_id: str) -> bool:

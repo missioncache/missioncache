@@ -17,7 +17,7 @@ import pathlib
 import pytest
 
 from mcp_missioncache import db as db_module
-from mcp_missioncache import tools_docs, tools_tracking
+from mcp_missioncache import tools_docs, tools_tasks, tools_tracking
 
 
 @pytest.fixture
@@ -247,3 +247,107 @@ class TestSetTaskRepoGitRootResolution:
         assert result["repo_path"] == str(sub_package)
         assert result["repo_id"] == sub_package_repo_id
         assert result["changed"] is True
+
+
+# ── list_active_tasks repo filter honesty ────────────────────────────────
+
+
+class TestListActiveTasksRepoFilter:
+    def test_subdir_of_registered_repo_matches_via_git_root(self, isolated_orbit):
+        """A cwd inside a registered repo resolves to the repo's git root and
+        returns that repo's tasks - not "no match, dump everything"."""
+        repo_root = _make_git_repo(isolated_orbit / "myrepo")
+        subdir = repo_root / "deep" / "nested"
+        subdir.mkdir(parents=True)
+
+        db = db_module.get_db()
+        repo_id = db.add_repo(str(repo_root))
+        db.create_task(name="in-repo", repo_id=repo_id)
+
+        result = asyncio.run(
+            tools_tasks.list_active_tasks(
+                repo_path=str(subdir), include_time=False
+            )
+        )
+
+        assert [t["name"] for t in result["tasks"]] == ["in-repo"]
+        assert "(not registered)" not in (result["filter_applied"] or "")
+
+    def test_unregistered_repo_returns_empty_not_all(self, isolated_orbit):
+        """repo_path that resolves to no registered repo yields an empty
+        repo-scoped list tagged '(not registered)', instead of returning
+        every project while claiming a repo filter was applied."""
+        db = db_module.get_db()
+        repo_id = db.add_repo(str(_make_git_repo(isolated_orbit / "repo-a")))
+        db.create_task(name="task-a", repo_id=repo_id)
+
+        unregistered = isolated_orbit / "plain_elsewhere"
+        unregistered.mkdir()
+
+        result = asyncio.run(
+            tools_tasks.list_active_tasks(
+                repo_path=str(unregistered), include_time=False
+            )
+        )
+
+        assert result["tasks"] == []
+        assert result["total_count"] == 0
+        assert "(not registered)" in result["filter_applied"]
+
+    def test_prioritize_unregistered_puts_everything_in_other(self, isolated_orbit):
+        """prioritize_by_repo with an unregistered repo_path returns an empty
+        primary list and all projects as other_tasks - the prioritization is
+        preserved instead of collapsing into an unfiltered dump."""
+        db = db_module.get_db()
+        repo_id = db.add_repo(str(_make_git_repo(isolated_orbit / "repo-a")))
+        db.create_task(name="task-a", repo_id=repo_id)
+
+        unregistered = isolated_orbit / "plain_elsewhere"
+        unregistered.mkdir()
+
+        result = asyncio.run(
+            tools_tasks.list_active_tasks(
+                repo_path=str(unregistered),
+                prioritize_by_repo=True,
+                include_time=False,
+            )
+        )
+
+        assert result["tasks"] == []
+        assert [t["name"] for t in (result["other_tasks"] or [])] == ["task-a"]
+        assert "(not registered)" in result["filter_applied"]
+
+
+# ── get_missioncache_progress on a completed (moved) project ──────────────────
+
+
+class TestGetMissionCacheProgressCompleted:
+    def test_progress_found_for_completed_top_level_task(self, isolated_orbit):
+        """complete_task moves active/<name> -> completed/<name> without
+        rewriting the full_path column. For a top-level task (parent_id
+        None) get_missioncache_progress must ignore that stale full_path and
+        run the active+completed search, finding the moved tasks.md instead
+        of returning a misleading VALIDATION_ERROR."""
+        from mcp_missioncache import config
+
+        # Files live under completed/<name>; the DB task's full_path does
+        # NOT point there (create_task stores "manual/<name>"), exactly the
+        # stale-pointer shape complete_task leaves behind.
+        done_dir = config.settings.root / "completed" / "done-project"
+        done_dir.mkdir(parents=True)
+        (done_dir / "done-project-tasks.md").write_text(
+            "## Tasks\n\n- [x] 1. First\n- [ ] 2. Second\n"
+        )
+
+        db = db_module.get_db()
+        repo_id = db.add_repo(str(_make_git_repo(isolated_orbit / "myrepo")))
+        task = db.create_task(name="done-project", repo_id=repo_id)
+        assert task.parent_id is None
+
+        result = asyncio.run(
+            tools_docs.get_missioncache_progress(task_id=task.id)
+        )
+
+        assert "error" not in result
+        assert result["progress"]["total_items"] == 2
+        assert "/completed/" in result["file"]

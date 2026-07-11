@@ -14,6 +14,7 @@ from .config import settings
 from .db import get_db
 from .errors import MissionCacheError, MissionCacheFileNotFoundError, TaskNotFoundError
 from .helpers import (
+    SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
     _notify_dashboard_task_created,
     _resolve_session_id,
@@ -66,13 +67,8 @@ async def create_missioncache_files(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code session ID (UUID). Binds this session to "
-            "the new project so the statusline picks it up immediately. On "
-            "Claude Code 2.1.154+ this is resolved automatically from the "
-            "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
-            "you can omit it. Pass explicitly for older Claude Code or "
-            "non-Claude clients; if it cannot be resolved, binding is skipped "
-            "(the user can recover via /missioncache:load)."
+            description="Claude Code session ID; binds this session to the new "
+            "project so the statusline shows it. " + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
 ) -> dict:
@@ -472,8 +468,19 @@ async def get_missioncache_progress(
             task = db.get_task(task_id)
             if not task:
                 raise TaskNotFoundError(task_id)
-            files = project_files.get_missioncache_files(task.name, full_path=task.full_path)
+            # Pass full_path only for subtasks. For a top-level task the
+            # column is stale after complete_task moves the dir to
+            # completed/<name> without rewriting it, so trusting it would
+            # search only the vanished active/<name> path. Letting
+            # get_missioncache_files run its active+completed search finds
+            # the tasks.md wherever the project now lives.
+            full_path = task.full_path if task.parent_id is not None else None
+            files = project_files.get_missioncache_files(task.name, full_path=full_path)
             file_path = files.tasks_file
+            if not file_path:
+                raise MissionCacheFileNotFoundError(
+                    task.name, f"No tasks.md found for task '{task.name}'"
+                )
 
         if not file_path:
             return {

@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 35 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 36 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -55,13 +55,13 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 | Module | Tools | Purpose |
 |--------|-------|---------|
 | `tools_tasks.py` | 11 | Task lifecycle: list, get, create, complete, reopen, rename, update fields and notes |
-| `tools_docs.py` | 5 | MissionCache files: create, get, update context, update tasks, get progress |
+| `tools_docs.py` | 6 | MissionCache files: create, get, update context, get digest, update tasks, get progress |
 | `tools_tracking.py` | 7 | Time tracking and repository management |
 | `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 7 | Parallel agent execution plans |
 | `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
 
-**Total: 35 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 35 times.
+**Total: 36 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 36 times.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
