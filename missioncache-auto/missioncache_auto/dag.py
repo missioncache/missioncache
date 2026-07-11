@@ -9,6 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from missioncache_auto.models import Task, TaskStatus
+from missioncache_auto.task_parser import parse_prompt_yaml
 
 
 class CycleDetectedError(Exception):
@@ -297,31 +298,52 @@ def _get_task_id(prompt_file: Path) -> str | None:
 
 
 def _get_dependencies(prompt_file: Path, task_id: str) -> list[str]:
-    """Extract dependencies from prompt file's YAML frontmatter."""
+    """Extract dependencies from prompt file's YAML frontmatter.
+
+    When a ``dependencies:`` field is present (inline ``["01", "02"]`` OR
+    multi-line block-list form) it is authoritative and used verbatim - both
+    forms are parsed via the shared ``parse_prompt_yaml`` so this stays in sync
+    with the plan validator. When the field is absent, falls back to an implicit
+    dependency on the previous task number, but only if that task actually
+    exists; a missing implicit predecessor raises rather than silently pointing
+    at a non-existent task.
+    """
     import re
 
     if not prompt_file.exists():
         return []
 
     content = prompt_file.read_text()
-    match = re.search(r"^dependencies:\s*\[(.*?)\]", content, re.MULTILINE)
 
-    if not match:
-        # No dependencies field - check for implicit dependency
-        num_match = re.match(r"^0*(\d+)$", task_id)
-        if num_match:
-            num = int(num_match.group(1))
-            if num > 1:
-                return [f"{num - 1:02d}"]
-        return []
+    # Detect a `dependencies:` field within the YAML frontmatter only.
+    frontmatter = ""
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            frontmatter = parts[1]
 
-    # Parse array: ["01", "03"] -> ["01", "03"]
-    deps_str = match.group(1)
-    if not deps_str.strip():
-        return []
+    if re.search(r"^\s*dependencies:", frontmatter, re.MULTILINE):
+        # Field present (any form) - delegate to the shared parser so inline and
+        # block-list deps are read identically and never silently dropped.
+        info = parse_prompt_yaml(prompt_file)
+        return list(info.dependencies) if info else []
 
-    deps = re.findall(r'["\']([^"\']+)["\']', deps_str)
-    return [d.strip() for d in deps if d.strip()]
+    # No dependencies field - fall back to an implicit dependency on the
+    # previous task, but only when that prompt actually exists.
+    num_match = re.match(r"^0*(\d+)$", task_id)
+    if num_match:
+        num = int(num_match.group(1))
+        if num > 1:
+            prev_id = f"{num - 1:02d}"
+            prev_file = prompt_file.parent / f"task-{prev_id}-prompt.md"
+            if prev_file.exists():
+                return [prev_id]
+            raise ValueError(
+                f"task-{task_id} has no 'dependencies' field and its implicit "
+                f"previous task '{prev_file.name}' does not exist. Add an "
+                f"explicit 'dependencies:' field to task-{task_id}."
+            )
+    return []
 
 
 def _get_task_title(prompt_file: Path) -> str | None:

@@ -8,6 +8,7 @@ while respecting dependencies between tasks.
 from __future__ import annotations
 
 import multiprocessing
+import subprocess
 import time
 from pathlib import Path
 
@@ -135,6 +136,12 @@ class ParallelRunner:
         # Calculate how many tasks remain (excluding blocked-by-inter)
         remaining_count = self.dag.task_count - len(pre_completed)
 
+        # Worktree isolation is the default so parallel workers don't share one
+        # checkout and race on `git add -A`/commit. It needs a git repo, so fall
+        # back to the shared directory when there isn't one.
+        is_git_repo = self._is_git_repo()
+        self._apply_worktree_fallback(is_git_repo)
+
         # Display header and plan
         self.display.header("MISSIONCACHE AUTO [PARALLEL]")
         info = {
@@ -170,6 +177,12 @@ class ParallelRunner:
         if dry_run:
             self.display.info("Dry run - not executing")
             return 0
+
+        # Refuse configurations that would silently lose or corrupt worker
+        # output before spawning anything.
+        refusal = self._preflight_refusals(is_git_repo)
+        if refusal is not None:
+            return refusal
 
         # If no runnable tasks but some are blocked by interactive, exit early
         if (
@@ -249,6 +262,99 @@ class ParallelRunner:
             return response in ("", "y", "yes")
         except (EOFError, KeyboardInterrupt):
             return False
+
+    def _is_git_repo(self) -> bool:
+        """Whether project_root is inside a git work tree (worktrees need one)."""
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def _apply_worktree_fallback(self, is_git_repo: bool) -> None:
+        """Disable worktree isolation when the project is not a git repo.
+
+        Worktrees need a git repository; without one, warn and run all workers
+        in the shared directory instead.
+        """
+        if self.config.use_worktrees and not is_git_repo:
+            self.display.warning(
+                "Worktree isolation unavailable (not a git repository) - "
+                "running workers in the shared directory."
+            )
+            self.config.use_worktrees = False
+
+    def _main_checkout_status(self) -> list[str]:
+        """Return `git status --porcelain` lines for the main checkout."""
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+        )
+        return [line for line in result.stdout.splitlines() if line.strip()]
+
+    def _preflight_refusals(self, is_git_repo: bool) -> int | None:
+        """Refuse worker configurations that would silently lose or corrupt work.
+
+        Returns exit code 3 to refuse, or None to proceed. May emit a warning
+        and still return None (untracked-only dirty checkout).
+        """
+        # Worktrees isolate each worker's output on its own branch. Without
+        # auto-commit there is nothing to merge back, and cleanup removes the
+        # worktrees with --force - so every worker's output is discarded.
+        if self.config.use_worktrees and not self.config.auto_commit:
+            self.display.error(
+                "Refusing to run worktree-isolated workers with --no-commit - "
+                "worker output lives only on per-worker worktree branches, and "
+                "with nothing committed it is destroyed when the worktrees are "
+                "removed. Drop --no-commit so work is committed and merged back, "
+                "or add --no-worktree (optionally with -w 1) to run in the "
+                "shared checkout."
+            )
+            return 3
+
+        # Worktrees branch from HEAD, so uncommitted work in the main checkout
+        # is invisible to workers. Refuse on tracked changes; warn on untracked.
+        if self.config.use_worktrees and is_git_repo:
+            dirty = self._main_checkout_status()
+            tracked = [line for line in dirty if not line.startswith("??")]
+            if tracked:
+                self.display.error(
+                    "Refusing to create worktrees with uncommitted changes in "
+                    "the main checkout - worktrees branch from HEAD, so these "
+                    "changes would not be visible to workers. Commit or stash "
+                    "your changes, or pass --no-worktree to run in the shared "
+                    "checkout."
+                )
+                return 3
+            if dirty:  # untracked files only
+                self.display.warning(
+                    "Untracked files in the main checkout will not be visible "
+                    "to worktree-isolated workers - proceeding anyway."
+                )
+
+        # Multiple auto-committing workers in one shared checkout race on
+        # `git add -A`/commit and can scramble or lose each other's work.
+        # Worktrees are the default guard; if the user opted out on a git repo,
+        # refuse rather than corrupt history.
+        if (
+            not self.config.use_worktrees
+            and self.config.auto_commit
+            and self.config.max_workers > 1
+            and is_git_repo
+        ):
+            self.display.error(
+                "Refusing to run multiple auto-committing workers in a shared "
+                "git checkout - they race on 'git add -A'/commit and can lose "
+                "work. Drop --no-worktree to isolate workers, pass --no-commit, "
+                "or run a single worker with -w 1."
+            )
+            return 3
+
+        return None
 
     def _get_pre_completed_tasks(self) -> set[str]:
         """
@@ -385,11 +491,15 @@ class ParallelRunner:
             return 1
 
         finally:
-            # Ensure all workers are stopped
+            # Ensure all workers are stopped, escalating to SIGKILL if a worker
+            # ignores SIGTERM.
             for p in workers:
                 if p.is_alive():
                     p.terminate()
                     p.join(timeout=5)
+                    if p.is_alive():
+                        p.kill()
+                        p.join(timeout=5)
 
             # Sync final state to tasks.md
             self.state_manager.sync_to_tasks_md(self.paths.tasks_file)
@@ -401,19 +511,31 @@ class ParallelRunner:
                 self._display_merge_results(merge_results)
                 self.worktree_manager.cleanup_with_results(merge_results)
 
+        # Re-read authoritative final state. The monitor loop can exit with
+        # tasks still PENDING/IN_PROGRESS (e.g. all workers died on a stuck
+        # dependency), which the last in-loop snapshot would not count as done
+        # or failed - reporting success in that case hides un-run work.
+        final_state = self.state_manager.read()
+        completed = {
+            tid for tid, t in final_state.tasks.items() if t.status == TaskStatus.COMPLETED
+        }
+        unfinished = {
+            tid for tid, t in final_state.tasks.items() if t.status != TaskStatus.COMPLETED
+        }
+
         # Print summary
-        self._print_summary(completed, failed)
+        self._print_summary(completed, unfinished)
 
         # Finish database logging
-        if failed:
+        if unfinished:
             self.logger.finish(
                 status="failed",
-                error_message=f"Failed tasks: {', '.join(sorted(failed))}",
+                error_message=f"Unfinished tasks: {', '.join(sorted(unfinished))}",
             )
         else:
             self.logger.finish(status="completed")
 
-        return 0 if not failed else 1
+        return 0 if not unfinished else 1
 
     def _display_merge_results(self, results: list[dict]) -> None:
         """Display merge results from worktree integration."""

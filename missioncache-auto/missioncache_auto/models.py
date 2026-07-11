@@ -113,7 +113,7 @@ class Config:
     fail_fast: bool = False
     visibility: Visibility = Visibility.VERBOSE
     dry_run: bool = False
-    use_worktrees: bool = False
+    use_worktrees: bool = True
     enable_review: bool = False
     spec_review_only: bool = False
     auto_commit: bool = True

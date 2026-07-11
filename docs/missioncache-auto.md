@@ -382,13 +382,13 @@ The dashboard's log viewer has a per-level filter, so sprinkling `debug` liberal
 
 ## Advanced features
 
-Parallel and sequential are the two core modes, but missioncache-auto has a handful of opt-in features that layer on top. They are all off by default.
+Parallel and sequential are the two core modes, but missioncache-auto has a handful of features that layer on top. Most are opt-in; worktree isolation is the exception - it is the default in parallel mode on a git repo (see below).
 
-### Worktree isolation (`--worktree`)
+### Worktree isolation (default in parallel mode; `--no-worktree` to opt out)
 
-By default, every worker executes Claude in the same directory - the project root from which you ran `missioncache-auto`. This is fine for tasks that touch non-overlapping files, but it breaks down when two workers edit the same file concurrently: whichever worker writes last wins, and you get lost changes.
+In parallel mode on a git repo, each worker gets its own git worktree by default, created under `.claude/worktrees/missioncache-auto-<project>-w<worker_id>`. Each worker runs in its own worktree with its own branch (`missioncache-auto/<project>/worker-<id>`), does its work in isolation, and when the run finishes, `WorktreeManager.merge_all()` merges every worker branch back into the original branch sequentially, in worker ID order. This is what keeps two workers from clobbering each other when they edit the same file - without isolation, whichever worker writes last wins and you lose changes.
 
-`--worktree` fixes this by creating one git worktree per worker under `.claude/worktrees/missioncache-auto-<project>-w<worker_id>`. Each worker runs in its own worktree with its own branch (`missioncache-auto/<project>/worker-<id>`), does its work in isolation, and when the run finishes, `WorktreeManager.merge_all()` merges every worker branch back into the original branch sequentially, in worker ID order.
+`--no-worktree` opts back into the shared checkout: every worker runs in the same directory - the project root you ran `missioncache-auto` from. That is fine for tasks that touch non-overlapping files, but concurrent edits to the same file will race. Sequential mode is unaffected either way: it has a single worker and always runs in the project root. Worktrees also require a git repo, so on a non-git directory missioncache-auto warns and falls back to the shared checkout automatically.
 
 Merge conflicts are reported but not auto-resolved. If a conflict happens, the worktree branch is preserved (not deleted) so you can resolve it manually with `git merge missioncache-auto/<project>/worker-3` and inspect the conflict in-repo. Successful merges clean up both the worktree and the branch.
 
@@ -398,7 +398,12 @@ Worktrees are cleaned up via `cleanup_with_results()`, which respects conflict b
 
 ### Auto-commit
 
-By default, missioncache-auto commits after each successful task with a message like `feat(03): Wire up the /api/users endpoint`. The title comes from the prompt's `task_title` frontmatter or, if missing, from the first markdown heading in the prompt body. `git add -A` is used, so every change in the working tree gets committed - this is fine inside a worktree, but without `--worktree` it means two workers may fight over the same commit. **If you are not using worktrees, consider `--no-commit` for parallel runs** and commit manually at the end.
+By default, missioncache-auto commits after each successful task with a message like `feat(03): Wire up the /api/users endpoint`. The title comes from the prompt's `task_title` frontmatter or, if missing, from the first markdown heading in the prompt body. Everything the task changed in the working tree is committed, except `.env*` files, which are excluded at any nesting depth so secrets are never committed. The commit fires whether the task produced tracked edits or brand-new untracked files - the detection is `git status --porcelain`, not `git diff --quiet`, so new-file-only output still commits.
+
+Because worktrees are the default in parallel mode, each worker commits into its own isolated branch and there is no commit race. The flag combinations that would produce lost or discarded work are refused up front with exit code 3, rather than run and corrupt the result:
+
+- **`--no-worktree` + auto-commit + more than one worker** on a git repo: refused, because all workers would commit into the same shared checkout and race on `git add`/commit. Drop `--no-worktree` to isolate workers, pass `--no-commit` and commit manually, or run a single worker with `-w 1`.
+- **worktrees + `--no-commit`**: refused, because a worker's output lives only on its worktree branch and reaches the main branch through the commit-then-merge; with `--no-commit` there is nothing to merge and the work would be discarded.
 
 Sequential mode also auto-commits, but with less fighting - there is only one worker. The commit happens in `_handle_result()` after `update_timestamps()` and `_process_heartbeats()`.
 
@@ -454,7 +459,8 @@ missioncache-auto status <project>                # show progress and blocking s
 | `--parallel, -p` | on | - | Force parallel mode (default) |
 | `--fail-fast` | off | parallel | Terminate all workers on first failure |
 | `--dry-run` | off | both | Plan only, do not execute |
-| `--worktree` | off | parallel | Per-worker git worktree isolation |
+| `--worktree` | on (parallel, git repo) | parallel | Per-worker git worktree isolation (the default on a git repo) |
+| `--no-worktree` | off | parallel | Opt out of worktrees; run all workers in the shared checkout |
 | `--no-commit` | off | both | Disable auto-commit after tasks |
 | `--enable-review` | off | both | Run spec + quality review after each task |
 | `--spec-review-only` | off | both | Run only spec compliance review |
@@ -476,9 +482,9 @@ missioncache-auto status <project>                # show progress and blocking s
 | Code | Meaning | When |
 |------|---------|------|
 | 0 | All tasks completed successfully | `<promise>COMPLETE</promise>` or every checkbox is `[x]` |
-| 1 | One or more tasks failed | Retry budget exhausted on at least one task |
+| 1 | One or more tasks failed, or the run ended with tasks unfinished | Retry budget exhausted on at least one task, or the run stopped before every task completed |
 | 2 | Blocked on `[WAIT]` task | Human input required to proceed |
-| 3 | Configuration / setup error | Missing files, invalid YAML, DAG validation failure |
+| 3 | Configuration / setup error, or a refused flag combination | Missing files, invalid YAML, DAG validation failure; or a pre-run refusal: `--no-worktree` + auto-commit + more than one worker on a git repo, worktrees + `--no-commit`, or worktrees + dirty tracked changes in the main checkout (commit/stash them, or pass `--no-worktree`) |
 
 These are documented in the CLI `--help` epilog too, so you do not need to open this doc when writing a wrapper script.
 
@@ -545,7 +551,7 @@ If you want to add a new display method, add it to the `Display` class and call 
 
 **Cause:** A worker crashed before releasing its task. The parent process should catch this via `release_orphaned_tasks()` in the monitoring loop, but if the parent itself died, no cleanup happened.
 
-**Fix:** Start a fresh `missioncache-auto` run. The new run's `init()` re-initializes the state file with tasks from tasks.md, and any old `in_progress` rows get discarded. If the old run left behind worktrees (`--worktree` was used), you may need to `git worktree list` and `git worktree remove` them manually - `WorktreeManager.create_worktrees()` does clean up stale worktrees for the same worker IDs, but only if you run with the same `--workers N` count.
+**Fix:** Start a fresh `missioncache-auto` run. The new run's `init()` re-initializes the state file with tasks from tasks.md, and any old `in_progress` rows get discarded. If the old run left behind worktrees (the default for parallel runs on a git repo, unless you passed `--no-worktree`), you may need to `git worktree list` and `git worktree remove` them manually - `WorktreeManager.create_worktrees()` does clean up stale worktrees for the same worker IDs, but only if you run with the same `--workers N` count.
 
 ### "Dashboard shows 'running' forever for an execution that finished"
 
