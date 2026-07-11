@@ -19,8 +19,10 @@ import logging
 import os
 import re
 
+import shutil
 import sqlite3
 import subprocess
+import tempfile
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -28,11 +30,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
+from starlette.background import BackgroundTask
 
 from .statusline import ADDON_COLOR_ALLOW
 
@@ -58,8 +61,14 @@ from missioncache_db import (
     FilesystemCollisionError,
     HOOKS_STATE_DB_PATH,
     NameCollisionError,
+    SubtasksExistError,
     TaskDB,
     init_hooks_state_db_schema,
+)
+from missioncache_db.portability import (
+    export_project,
+    format_report_lines,
+    import_bundle,
 )
 
 
@@ -182,12 +191,32 @@ app = FastAPI(title="MissionCache Dashboard", version="2.0.0", lifespan=lifespan
 # cross-origin (the 127.0.0.1 bind stops remote hosts, not the user's own
 # browser). Non-browser consumers (statusline, hooks, curl) are unaffected -
 # CORS only gates browser-initiated cross-origin requests.
+_ALLOWED_ORIGINS = ["http://localhost:8787", "http://127.0.0.1:8787"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8787", "http://127.0.0.1:8787"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _require_same_origin(request: Request) -> None:
+    """Reject a cross-origin browser request.
+
+    CORS gates preflight, but a ``multipart/form-data`` POST is a CORS
+    "simple request" and skips preflight, so the middleware never blocks it -
+    a page on any origin could drive it and the side effect would run even
+    though the browser hides the response. This closes that gap for the
+    mutating upload endpoint. ``Sec-Fetch-Site`` is sent by modern browsers;
+    ``Origin`` is the fallback. Non-browser callers (curl, hooks) send
+    neither and are allowed, matching how CORS already treats them.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site and site not in ("same-origin", "none"):
+        raise HTTPException(status_code=403, detail={"error": True, "code": "CROSS_ORIGIN", "message": "Cross-origin request rejected."})
+    origin = request.headers.get("origin")
+    if origin and origin not in _ALLOWED_ORIGINS:
+        raise HTTPException(status_code=403, detail={"error": True, "code": "CROSS_ORIGIN", "message": "Cross-origin request rejected."})
 
 # Paths
 CLAUDE_DIR = Path.home() / ".claude"
@@ -2865,6 +2894,197 @@ async def rename_task_endpoint(task_id: int, body: dict):
     response = {"success": True, "task_id": task_id, **result}
     response["warnings"] = warnings
     return response
+
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task_endpoint(task_id: int, delete_files: bool = False):
+    """Delete a project / task.
+
+    Delegates to ``missioncache_db.TaskDB.delete_task``. By default only the
+    database record is removed (child rows cascade via FK); the on-disk
+    MissionCache directory is kept unless ``?delete_files=true`` is passed.
+    Subtasks block the delete (409) so children are never silently orphaned.
+    """
+    sqlite_db = get_sqlite_db()
+    task = sqlite_db.get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "TASK_NOT_FOUND",
+                "message": f"No project found with id {task_id}.",
+            },
+        )
+
+    try:
+        result = sqlite_db.delete_task(task_id, delete_files=delete_files)
+    except SubtasksExistError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": True, "code": "HAS_SUBTASKS", "message": str(e)},
+        )
+    except AutoRunActiveError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": True, "code": "INVALID_STATE", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": True, "code": "VALIDATION_ERROR", "message": str(e)},
+        )
+
+    warnings = list(result.get("warnings", []))
+    sync_warning = _sync_read_path("delete")
+    if sync_warning:
+        warnings.append(sync_warning)
+    # The SQLite -> DuckDB sync is upsert-only, so the deleted row must be
+    # pruned from the read path explicitly or it lingers in the list.
+    try:
+        get_db().prune_task(task_id)
+    except Exception as e:
+        logger.warning("DuckDB prune after delete failed: %s", e)
+        warnings.append(
+            f"Dashboard list refresh failed ({type(e).__name__}); "
+            "the deleted project may show until the next periodic sync."
+        )
+
+    response = {"success": True, "task_id": task_id, **result}
+    response["warnings"] = warnings
+    return response
+
+
+@app.get("/api/tasks/{task_id}/export")
+async def export_task_endpoint(task_id: int):
+    """Export a project as a downloadable .tgz bundle.
+
+    Wraps ``missioncache_db.portability.export_project`` (the bundle holds the
+    markdown tree + a manifest; the DB itself never travels) and streams the
+    resulting tarball. The temp bundle is removed after the response is sent.
+    """
+    sqlite_db = get_sqlite_db()
+    task = sqlite_db.get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "TASK_NOT_FOUND",
+                "message": f"No project found with id {task_id}.",
+            },
+        )
+
+    tmp_dir = tempfile.mkdtemp(prefix="mc-export-")
+    try:
+        # include_time=False keeps this GET side-effect free. include_time=True
+        # runs process_heartbeats (a DB write), which a GET must not do - a
+        # prefetcher or a cross-origin <img src> could otherwise trigger writes.
+        # basename() defends the temp path against a legacy name predating the
+        # lowercase-hyphen validation.
+        safe = os.path.basename(task.name)
+        out_path = Path(tmp_dir) / f"{safe}.tgz"
+        report = export_project(
+            sqlite_db, task.name, out=str(out_path), include_time=False
+        )
+    except (ValueError, OSError) as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=400,
+            detail={"error": True, "code": "EXPORT_FAILED", "message": str(e)},
+        )
+    except Exception:
+        # An unexpected fault is a 500, but clean up the temp dir first so it
+        # doesn't leak (the success path cleans up via BackgroundTask).
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        logger.exception("export failed for task %s", task_id)
+        raise
+
+    return FileResponse(
+        report["bundle_path"],
+        media_type="application/gzip",
+        filename=f"{safe}.missioncache-bundle.tgz",
+        background=BackgroundTask(shutil.rmtree, tmp_dir, ignore_errors=True),
+    )
+
+
+# Cap the upload so a giant POST can't fill the temp filesystem before the
+# importer's own budget check runs. Matches the importer's declared-bytes budget.
+_IMPORT_MAX_BYTES = 512 * 1024 * 1024
+
+
+@app.post("/api/projects/import")
+async def import_project_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    rewrite_paths: bool = Form(False),
+    repo_override: str | None = Form(None),
+):
+    """Import a project bundle (.tgz or bundle dir) and return the report.
+
+    Wraps ``missioncache_db.portability.import_bundle``. The importer's exit
+    code drives the UI: 0 = fully resolved, 2 = imported but some references
+    (repo/vault paths) need mapping, 1 = hard failure (nothing committed).
+    """
+    # multipart/form-data skips CORS preflight, so this mutating route needs
+    # its own same-origin guard (see _require_same_origin).
+    _require_same_origin(request)
+
+    sqlite_db = get_sqlite_db()
+    tmp_dir = tempfile.mkdtemp(prefix="mc-import-")
+    try:
+        safe_name = Path(file.filename or "bundle").name
+        tmp_bundle = Path(tmp_dir) / safe_name
+        # Bounded copy: abort mid-stream if the upload exceeds the cap, rather
+        # than spooling an unbounded body to disk first.
+        written = 0
+        with open(tmp_bundle, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > _IMPORT_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={"error": True, "code": "UPLOAD_TOO_LARGE",
+                                "message": f"Bundle exceeds the {_IMPORT_MAX_BYTES // (1024*1024)} MiB limit."},
+                    )
+                out.write(chunk)
+        report = import_bundle(
+            sqlite_db,
+            str(tmp_bundle),
+            repo_override=repo_override or None,
+            rewrite=rewrite_paths,
+        )
+    except HTTPException:
+        raise
+    except (ValueError, OSError) as e:
+        # Expected user-facing failures (bad bundle, checksum mismatch, IO).
+        raise HTTPException(
+            status_code=400,
+            detail={"error": True, "code": "IMPORT_FAILED", "message": str(e)},
+        )
+    except Exception:
+        # An unexpected fault inside the importer is a server bug (500), not a
+        # bad-file (400). Log it so there is a trace to diagnose from.
+        logger.exception("import failed")
+        raise
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    warnings: list[str] = []
+    sync_warning = _sync_read_path("import")
+    if sync_warning:
+        warnings.append(sync_warning)
+
+    exit_code = report.get("exit_code", 1)
+    return {
+        "success": exit_code != 1,
+        "exit_code": exit_code,
+        "lines": format_report_lines(report),
+        "warnings": warnings,
+    }
 
 
 @app.put("/api/tasks/{task_id}/category")
