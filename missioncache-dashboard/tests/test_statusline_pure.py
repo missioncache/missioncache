@@ -16,8 +16,10 @@ from missioncache_dashboard.statusline import (
     COLORS,
     ICONS,
     RESET,
+    _SGR_RE,
     _apply_health_filters,
     _detect_subscription,
+    _format_last_action,
     _format_reset_time,
     _format_unix_reset,
     _health_link,
@@ -32,6 +34,7 @@ from missioncache_dashboard.statusline import (
     _parse_usage_response,
     _relative_time,
     _render_effort_field,
+    _truncate_to_width,
     display_width,
     parse_input,
 )
@@ -219,7 +222,9 @@ class TestParseInput:
         result = parse_input(json.dumps(data))
         assert result["model_name"] == "Opus"
         assert result["session_id"] == "test-session"
-        assert result["ctx_percent"] == 69  # 50 + 19
+        # used_percentage already reflects the full context fill (system prompt
+        # + tools are in current_usage), so it is used verbatim - no overhead add.
+        assert result["ctx_percent"] == 50
         assert result["ctx_estimated"] is False
         assert result["worktree"] == {"name": "feat-branch"}
 
@@ -227,7 +232,8 @@ class TestParseInput:
         result = parse_input("")
         assert result["model_name"] == "Claude"
         assert result["tokens_str"] == "\u21910/\u21930"
-        # Empty input still gets SYSTEM_OVERHEAD_PERCENT (19%) added
+        # Empty input has no used_percentage, so the estimated path adds the
+        # ctx_size * 0.19 overhead term to a zero token base -> 19%.
         assert result["ctx_percent"] == 19
         assert result["ctx_estimated"] is True
 
@@ -382,6 +388,25 @@ class TestDetectSubscription:
         name, icon, color = _detect_subscription(usage)
         assert name == "claude.ai"
         assert color == "mode_personal"
+
+    def test_empty_usage_dict_is_authenticated_not_free(self, monkeypatch):
+        # A stdin rate_limits payload with no window data parses to {}. The
+        # user is still authenticated, so they must get the personal styling,
+        # NOT the gray free-tier icon.
+        self._clear_env(monkeypatch)
+        name, icon, color = _detect_subscription({})
+        assert name == "claude.ai"
+        assert icon == "✨"
+        assert color == "mode_personal"
+
+    def test_none_usage_stays_free_tier(self, monkeypatch):
+        # No usage data at all (no OAuth token) still resolves to the free-tier
+        # icon - the fix only rescues the empty-dict "authenticated" case.
+        self._clear_env(monkeypatch)
+        name, icon, color = _detect_subscription(None)
+        assert name == "claude.ai"
+        assert icon == "\U0001f464"
+        assert color == "mode_free"
 
 
 # ============ _load_statusline_config (4 tests) ============
@@ -549,6 +574,77 @@ class TestJoinItemsPadLine:
         assert padded == "hello" + " " * 15
         # No padding needed when already at max
         assert _pad_line(line, 20, 20) == "hello"
+
+    def test_pad_line_truncates_when_wider_than_max(self):
+        # A line whose display width exceeds max_width is truncated (with an
+        # ellipsis) instead of emitted verbatim, so it never wraps a narrow
+        # terminal past the fixed-height status block.
+        result = _pad_line("hello world", 11, 6)
+        assert display_width(result) == 6
+        assert "hello" in result
+        assert "world" not in result
+
+
+# ============ _truncate_to_width (narrow-terminal content truncation) ============
+
+
+class TestTruncateToWidth:
+    def test_line_within_width_unchanged(self):
+        assert _truncate_to_width("hello", 10) == "hello"
+
+    def test_plain_line_truncated_with_ellipsis(self):
+        result = _truncate_to_width("hello world", 6)
+        # 5 visible chars + 1 ellipsis cell = 6.
+        assert display_width(result) == 6
+        assert result.startswith("hello")
+        assert result.endswith(RESET)
+        assert "…" in result
+
+    def test_ansi_codes_preserved_and_not_counted(self):
+        colored = "\033[31mhello world\033[0m"
+        result = _truncate_to_width(colored, 6)
+        # Color code passes through without consuming width.
+        assert "\033[31m" in result
+        assert display_width(result) == 6
+        assert "world" not in result
+
+    def test_emoji_counted_as_two_cells(self):
+        # Folder emoji (width 2) + text; truncating to 3 keeps the emoji (2)
+        # plus the ellipsis (1) and drops the trailing text.
+        result = _truncate_to_width("\U0001f4c1abcd", 3)
+        assert display_width(result) == 3
+        assert "\U0001f4c1" in result
+
+    def test_zero_width_returns_empty(self):
+        assert _truncate_to_width("anything", 0) == ""
+
+
+# ============ _format_last_action (session_state last-prompt formatting) ============
+
+
+class TestFormatLastAction:
+    def test_empty_returns_empty(self):
+        assert _format_last_action("") == ""
+
+    def test_valid_iso_formats_month_day_time(self):
+        assert _format_last_action("2025-01-02T14:05:00") == "Jan 2 14:05"
+
+    def test_garbage_returns_empty(self):
+        assert _format_last_action("not-a-timestamp") == ""
+
+
+# ============ _SGR_RE (NO_COLOR color stripping) ============
+
+
+class TestSgrColorStripping:
+    def test_strips_color_sequences(self):
+        colored = f"{COLORS['dir']}Dir: mydir{RESET}"
+        assert _SGR_RE.sub("", colored) == "Dir: mydir"
+
+    def test_leaves_osc8_hyperlinks_intact(self):
+        # NO_COLOR is about color only - clickable OSC 8 links must survive.
+        linked = _osc8_link("http://localhost:8787", "project")
+        assert _SGR_RE.sub("", linked) == linked
 
 
 # ============ _parse_task_progress (MissionCache project progress bracket) ============

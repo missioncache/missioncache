@@ -184,7 +184,6 @@ ICONS = {
 PIPE = f"  {COLORS['pipe']}\u2502{RESET}  "
 
 
-SYSTEM_OVERHEAD_PERCENT = 19
 CELL_WIDTH = 24
 
 STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
@@ -285,6 +284,16 @@ def _get_codex_model() -> str | None:
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mK]|\x1b\][^\x07]*\x07|\x1b\]8;[^\x1b]*\x1b\\")
 
+# SGR color/style sequences only (not OSC 8 hyperlinks, which are not color).
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# NO_COLOR (https://no-color.org): a non-empty value disables ANSI color. We
+# deliberately do NOT gate on sys.stdout.isatty() - the statusline's stdout is
+# always a pipe to Claude Code, which renders the ANSI itself, so an isatty()
+# check would wrongly strip color in normal use. Only the explicit NO_COLOR
+# opt-out disables it.
+USE_COLOR = not os.environ.get("NO_COLOR")
+
 _EMOJI_RANGES = [
     (0x1F300, 0x1F9FF),
     (0x2600, 0x26FF),
@@ -310,6 +319,28 @@ _EMOJI_SINGLES = frozenset({
 })
 
 
+def _codepoint_width(s: str, i: int, n: int) -> int:
+    """Display width of the codepoint at ``s[i]``: 0 for a ZWJ or variation
+    selector, 2 for emoji or wide/fullwidth CJK, else 1.
+
+    Shared by ``display_width`` and ``_truncate_to_width`` so the
+    emoji/ZWJ/VS16/east-asian classification lives in one place. ``n`` is
+    ``len(s)``; the VS16 lookahead at ``i + 1`` needs it.
+    """
+    cp = ord(s[i])
+    if cp == 0x200D or cp in (0xFE0E, 0xFE0F):
+        return 0
+    has_vs16 = i + 1 < n and ord(s[i + 1]) == 0xFE0F
+    is_emoji = (
+        any(lo <= cp <= hi for lo, hi in _EMOJI_RANGES)
+        or has_vs16
+        or cp in _EMOJI_SINGLES
+    )
+    if is_emoji or unicodedata.east_asian_width(s[i]) in ("W", "F"):
+        return 2
+    return 1
+
+
 def display_width(s: str) -> int:
     """Calculate display width accounting for ANSI codes, emoji, and CJK."""
     s = _ANSI_RE.sub("", s)
@@ -317,25 +348,7 @@ def display_width(s: str) -> int:
     i = 0
     n = len(s)
     while i < n:
-        cp = ord(s[i])
-        if cp == 0x200D:
-            i += 1
-            continue
-        has_vs16 = i + 1 < n and ord(s[i + 1]) == 0xFE0F
-        if cp in (0xFE0E, 0xFE0F):
-            i += 1
-            continue
-        is_emoji = (
-            any(lo <= cp <= hi for lo, hi in _EMOJI_RANGES)
-            or has_vs16
-            or cp in _EMOJI_SINGLES
-        )
-        if is_emoji:
-            width += 2
-        elif unicodedata.east_asian_width(s[i]) in ("W", "F"):
-            width += 2
-        else:
-            width += 1
+        width += _codepoint_width(s, i, n)
         i += 1
     return width
 
@@ -464,22 +477,34 @@ def parse_input(raw: str) -> dict:
     ctx = data.get("context_window", {})
     ctx_size = ctx.get("context_window_size", 200000)
 
-    # Debug log (matches existing bash behavior)
-    try:
-        debug_file = STATE_DIR / "statusline-ctx-debug.log"
-        debug_file.write_text(
-            f"context_window keys: {list(ctx.keys())}\n"
-            f"context_window: {json.dumps(ctx, indent=2)}\n"
-            f"\nmodel object: {json.dumps(data.get('model', {}), indent=2)}\n"
-            f"Full data keys: {list(data.keys())}\n"
-            f"\ncost object: {json.dumps(data.get('cost', {}), indent=2)}\n"
-        )
-    except OSError:
-        pass
+    # Debug log - off by default; the statusline runs on every render, so this
+    # synchronous serialize+write only happens when explicitly opted in.
+    if os.environ.get("MISSIONCACHE_STATUSLINE_DEBUG"):
+        try:
+            debug_file = STATE_DIR / "statusline-ctx-debug.log"
+            debug_file.write_text(
+                f"context_window keys: {list(ctx.keys())}\n"
+                f"context_window: {json.dumps(ctx, indent=2)}\n"
+                f"\nmodel object: {json.dumps(data.get('model', {}), indent=2)}\n"
+                f"Full data keys: {list(data.keys())}\n"
+                f"\ncost object: {json.dumps(data.get('cost', {}), indent=2)}\n"
+            )
+        except OSError:
+            pass
 
     ctx_estimated = False
     if ctx.get("used_percentage") is not None:
-        ctx_percent = min(int(ctx["used_percentage"]) + SYSTEM_OVERHEAD_PERCENT, 100)
+        # Claude Code's used_percentage already accounts for the full context
+        # fill, including the system prompt + tool definitions (they are part
+        # of current_usage's cached input tokens). A live payload confirms it:
+        # used_percentage=18 with current_usage summing to 179757/1000000 =
+        # 17.98%, so the reported percentage IS the raw token fraction and the
+        # ~170K cached tokens (system + tools + history) are already counted.
+        # Adding a flat overhead here would double-count and fire compact
+        # warnings early, so the direct path is used verbatim. The estimated
+        # fallback below still adds an overhead term because it works from the
+        # raw token base when Claude Code omits the percentage.
+        ctx_percent = min(int(ctx["used_percentage"]), 100)
     else:
         ctx_estimated = True
         cur = ctx.get("current_usage") or {}
@@ -526,11 +551,20 @@ def parse_input(raw: str) -> dict:
 
 # ============ SESSION STATE ============
 
-def update_session_state(session_id: str, ctx_percent: int, tokens_str: str) -> int:
-    """Update session state in hooks-state DB. Returns edit count."""
+def update_session_state(
+    session_id: str, ctx_percent: int, tokens_str: str
+) -> tuple[int, str, str]:
+    """Update session state in hooks-state DB.
+
+    Returns (edit_count, last_prompt_at, action) read back from the one
+    UPSERT+SELECT on the session_state row, so the render path does not open
+    extra connections to the same row for the last-action time and iTerm title.
+    """
     if not session_id:
-        return 0
+        return 0, "", "Claude Code"
     edit_count = 0
+    last_prompt_at = ""
+    action = "Claude Code"
     db = _get_hooks_db()
     if db:
         try:
@@ -545,15 +579,17 @@ def update_session_state(session_id: str, ctx_percent: int, tokens_str: str) -> 
             )
             db.commit()
             row = db.execute(
-                "SELECT edit_count FROM session_state WHERE session_id = ?",
+                "SELECT edit_count, last_prompt_at, action FROM session_state WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
             if row:
                 edit_count = row["edit_count"] or 0
+                last_prompt_at = row["last_prompt_at"] or ""
+                action = row["action"] or "Claude Code"
             db.close()
         except sqlite3.Error:
             pass
-    return edit_count
+    return edit_count, last_prompt_at, action
 
 
 def update_term_session(session_id: str) -> None:
@@ -626,6 +662,24 @@ class ProjectInfo(NamedTuple):
     progress: str = ""
 
 
+def _project_is_active_in_db(name: str) -> bool:
+    """True if a task named ``name`` is active in the tasks DB.
+
+    Non-coding tasks created via ``create_task`` intentionally have no
+    directory under ``~/.missioncache/active/``, so a missing directory does
+    not always mean the project is gone. Only queried in the dir-missing
+    branch of ``get_project_info`` - the hot path never touches
+    ``missioncache_db``. Any failure (package missing, migration guard, DB
+    error) is treated as 'not active' so the project drops off the statusline.
+    """
+    try:
+        from missioncache_db import TaskDB
+
+        return TaskDB().get_task_by_name(name, "active") is not None
+    except Exception:
+        return False
+
+
 def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
     """Return ProjectInfo(name, display, progress)."""
     if not session_id:
@@ -661,6 +715,19 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
                     project_dir = nested
                     break
 
+    # The project_state binding survives long after a project is completed
+    # (it is only removed by /missioncache:done, which can miss the stdin
+    # session_id). A missing directory usually means the project was
+    # archived/completed - but non-coding tasks created via create_task have
+    # no directory at all, so before dropping consult the tasks DB by name:
+    # keep showing a still-active directoryless project (no progress suffix),
+    # and drop everything else (completed/archived/not-found, or DB
+    # unavailable) so a finished project stops pinning to the statusline.
+    if not project_dir.is_dir():
+        if _project_is_active_in_db(name):
+            return ProjectInfo(name, display, "")
+        return ProjectInfo()
+
     tasks_content = _read_tasks_content(project_dir, name)
     if not tasks_content:
         return ProjectInfo(name, display, "")
@@ -670,24 +737,18 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
 
 # ============ LAST ACTION TIME ============
 
-def get_last_action_time(session_id: str) -> str:
-    """Return formatted time of last prompt for this session."""
-    if not session_id:
+def _format_last_action(last_prompt_at: str) -> str:
+    """Format an ISO last-prompt timestamp as 'Mon D HH:MM', or '' if unusable.
+
+    The timestamp is read back by update_session_state from the same
+    session_state row, so this is pure formatting with no DB access.
+    """
+    if not last_prompt_at:
         return ""
-    db = _get_hooks_db()
-    if db:
-        try:
-            row = db.execute(
-                "SELECT last_prompt_at FROM session_state WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-            db.close()
-            if row and row["last_prompt_at"]:
-                dt = datetime.fromisoformat(row["last_prompt_at"])
-                return dt.strftime("%b %-d %H:%M")
-        except (sqlite3.Error, KeyError, ValueError):
-            pass
-    return ""
+    try:
+        return datetime.fromisoformat(last_prompt_at).strftime("%b %-d %H:%M")
+    except (ValueError, TypeError):
+        return ""
 
 
 # ============ GIT INFO ============
@@ -916,7 +977,12 @@ def get_health_status() -> list[dict]:
                 if not affected:
                     continue
 
-                service = "Both" if len(affected) == 2 else affected[0]
+                if len(affected) == 1:
+                    service = affected[0]
+                elif len(affected) == 2:
+                    service = "Both"
+                else:
+                    service = ", ".join(affected)
                 status = inc.get("status", "")
                 resolved_at = inc.get("resolved_at")
 
@@ -1155,7 +1221,11 @@ def _detect_subscription(usage: dict | None) -> tuple[str, str, str]:
         return "API Key", "\U0001f511", "mode_work"
     # OAuth login - we know it's a claude.ai subscription but can't
     # reliably distinguish Pro/Max/Team/Enterprise from available data.
-    if usage:
+    # `usage is None` means no auth data at all (no OAuth token); an empty
+    # dict `{}` means we parsed stdin rate_limits but found no window data
+    # this render - the user is still authenticated, so keep the personal
+    # styling rather than falling through to the free-tier icon.
+    if usage is not None:
         if usage.get("is_oauth"):
             # OAuth token exists but usage API failed - show authenticated state
             return "claude.ai", "\u2728", "mode_personal"
@@ -1234,33 +1304,64 @@ def _join_items(items: list[str], widths: list[int], max_col1: int, max_col2: in
     return "".join(parts)
 
 
+def _truncate_to_width(line: str, max_width: int, line_width: int | None = None) -> str:
+    """Truncate a line to ``max_width`` display cells, preserving ANSI codes.
+
+    ANSI/OSC escape sequences pass through without consuming width; visible
+    cells are counted with the same emoji/CJK rules as ``display_width``. When
+    the line is cut, a single-cell ellipsis is appended and the line is reset
+    so nothing wraps past ``max_width`` and no color bleeds after the cut.
+
+    ``line_width`` lets a caller that already knows ``display_width(line)``
+    (e.g. ``_pad_line``) pass it in, skipping the redundant full-string pass
+    on entry.
+    """
+    if (line_width if line_width is not None else display_width(line)) <= max_width:
+        return line
+    if max_width <= 0:
+        return ""
+    limit = max_width - 1  # leave one cell for the ellipsis
+    out: list[str] = []
+    width = 0
+    i = 0
+    n = len(line)
+    while i < n:
+        m = _ANSI_RE.match(line, i)
+        if m:
+            out.append(m.group())
+            i = m.end()
+            continue
+        ch = line[i]
+        w = _codepoint_width(line, i, n)
+        if w == 0:
+            # ZWJ / variation selectors carry no width - keep, do not count.
+            out.append(ch)
+            i += 1
+            continue
+        if width + w > limit:
+            break
+        out.append(ch)
+        width += w
+        i += 1
+    return "".join(out) + "…" + RESET
+
+
 def _pad_line(line: str, line_width: int, max_width: int) -> str:
+    if line_width > max_width:
+        return _truncate_to_width(line, max_width, line_width)
     pad = max_width - line_width
     return line + (" " * pad) if pad > 0 else line
 
 
 # ============ iTERM TITLE ============
 
-def set_iterm_title(session_id: str, project_name: str, repo_name: str, branch: str, dir_name: str = "") -> None:
+def set_iterm_title(action: str, project_name: str, repo_name: str, branch: str, dir_name: str = "") -> None:
     try:
         tty = open("/dev/tty", "w")
     except OSError:
         return
 
-    action = "Claude Code"
-    db = _get_hooks_db()
-    if db:
-        try:
-            row = db.execute(
-                "SELECT action FROM session_state WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-            db.close()
-            if row and row["action"]:
-                action = row["action"]
-        except sqlite3.Error:
-            pass
-
+    action = action or "Claude Code"
     prefix = project_name or dir_name
     title = f"{prefix}: {action}" if prefix else action
     tty.write(f"\033]1;{title}\007")
@@ -1318,7 +1419,13 @@ def main() -> None:
     tokens_str = tokens_str or "0"
 
     update_term_session(session_id)
-    edit_count = update_session_state(session_id, info["ctx_percent"], tokens_str)
+    # One UPSERT+SELECT on the session_state row returns edit_count, the
+    # last-prompt timestamp, and the iTerm action, so nothing else re-reads
+    # that row this render.
+    edit_count, last_prompt_raw, action_title = update_session_state(
+        session_id, info["ctx_percent"], tokens_str
+    )
+    last_action_time = _format_last_action(last_prompt_raw)
 
     # Run slow operations (subprocesses + HTTP) concurrently to stay under
     # Claude Code's ~300ms debounce/cancel window on first render.
@@ -1335,7 +1442,6 @@ def main() -> None:
     # Always fetch extra_usage from API (300s cache) - stdin doesn't include it
     f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
-    f_last_time = pool.submit(get_last_action_time, session_id)
 
     _FUTURE_TIMEOUT = 3
     try:
@@ -1344,10 +1450,6 @@ def main() -> None:
         )
     except Exception:
         project_name, project_display, project_progress = "", "", ""
-    try:
-        last_action_time = f_last_time.result(timeout=_FUTURE_TIMEOUT)
-    except Exception:
-        last_action_time = ""
     try:
         repo_name, branch, git_dirty = f_git.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1477,9 +1579,11 @@ def main() -> None:
             st = inc.get("status", "")
             if st == "Investigating":
                 color, icon = COLORS["health_partial"], ICONS["health_partial"]
-            elif st == "Monitoring":
-                color, icon = COLORS["health_ok"], ICONS["health_degraded"]
             else:
+                # Monitoring/Identified are still open incidents - keep them
+                # yellow. Green (health_ok) is reserved for the OK all-clear
+                # and resolved states so a still-open incident never reads as
+                # "all good" at a glance.
                 color, icon = COLORS["health_degraded"], ICONS["health_degraded"]
             label = f"[{inc['service']}] {inc['name']} - {st}"
             if inc.get("body"):
@@ -1611,21 +1715,25 @@ def main() -> None:
     # 7 otherwise (health takes the codex slot, no blank gap).
     has_codex = CODEX_ENABLED and CODEX_AUTH_FILE.exists()
     blank = " " * max_width if max_width > 0 else ""
-    out = sys.stdout
-    out.write(RESET)
-    out.write(((_pad_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n"))
-    out.write(_pad_line(j_line1, w_line1, max_width) + RESET + "\n")
-    out.write(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
-    out.write(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
-    out.write(((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n"))
-    out.write(((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n"))
+    segments = [RESET]
+    segments.append((_pad_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n")
+    segments.append(_pad_line(j_line1, w_line1, max_width) + RESET + "\n")
+    segments.append(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
+    segments.append(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
+    segments.append((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n")
+    segments.append((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n")
     if has_codex:
-        out.write(((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n"))
-    out.write(((_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n"))
-    out.write(RESET)
+        segments.append((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n")
+    segments.append((_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n")
+    segments.append(RESET)
+    output = "".join(segments)
+    if not USE_COLOR:
+        output = _SGR_RE.sub("", output)
+    out = sys.stdout
+    out.write(output)
     out.flush()
 
-    set_iterm_title(session_id, project_name, repo_name, branch, dir_name)
+    set_iterm_title(action_title, project_name, repo_name, branch, dir_name)
 
 
 def _fallback_output() -> None:
