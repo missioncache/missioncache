@@ -9,12 +9,14 @@ real CLI tools and are covered by the end-to-end clean-VM verification in M10.6.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from missioncache_install import installers, settings, state
+from missioncache_install import subprocess_utils
 
 
 def _make_ctx(
@@ -517,3 +519,187 @@ def test_install_plugin_local_symlink_matches_marketplace_source(
         f"there - install/marketplace plugin names diverged"
     )
     assert symlink.readlink() == repo
+
+
+# ---------------------------------------------------------------------------
+# Uninstall/update honor the RECORDED install mode, not the CWD-derived mode
+# ---------------------------------------------------------------------------
+
+def test_uninstall_dashboard_uses_recorded_pypi_mode_over_ctx(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pypi-installed dashboard is pipx-uninstalled even when uninstall runs
+    from a clone (ctx.mode='local'). The recorded per-component mode wins."""
+    state.record_component("dashboard", {"mode": "pypi", "service": "none", "port": 8787})
+    captured: list[str] = []
+    monkeypatch.setattr(installers, "_pipx_uninstall", lambda pkg: captured.append(pkg))
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installers.uninstall_dashboard(_make_ctx(mode="local"))
+
+    assert captured == ["missioncache-dashboard"], (
+        "recorded pypi mode must drive the pipx uninstall despite ctx.mode='local'"
+    )
+
+
+def test_uninstall_dashboard_skips_pipx_for_recorded_local_mode(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An editable (local) install is never pipx-uninstalled even when uninstall
+    runs from outside the clone (ctx.mode='pypi')."""
+    state.record_component("dashboard", {"mode": "local", "service": "none", "port": 8787})
+    captured: list[str] = []
+    monkeypatch.setattr(installers, "_pipx_uninstall", lambda pkg: captured.append(pkg))
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: None)
+
+    installers.uninstall_dashboard(_make_ctx(mode="pypi"))
+
+    assert captured == [], (
+        "recorded local (editable) mode must not attempt a pipx uninstall "
+        "despite ctx.mode='pypi'"
+    )
+
+
+def test_update_all_reinstalls_in_recorded_mode(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """update run from a clone (ctx.mode='local') reinstalls a pypi install in
+    pypi mode - the recorded install mode is authoritative, not the CWD."""
+    state.set_mode("pypi")
+    state.record_component("dashboard", {"mode": "pypi"})
+    captured_modes: list[str] = []
+    monkeypatch.setattr(
+        installers,
+        "install_components",
+        lambda comps, ctx: captured_modes.append(ctx.mode) or [],
+    )
+
+    installers.update_all(_make_ctx(mode="local", repo_root=isolated_home))
+
+    assert captured_modes == ["pypi"], (
+        "update must reinstall in the recorded mode, not the CWD-derived mode"
+    )
+
+
+# ---------------------------------------------------------------------------
+# install_components: per-component error isolation
+# ---------------------------------------------------------------------------
+
+def test_install_components_isolates_failure_and_continues(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CommandFailed in one installer is reported; later independent components
+    still run. install_components returns the list of failed components."""
+    calls: list[str] = []
+
+    def make_ok(name: str):
+        def _inst(ctx: installers.InstallContext) -> None:
+            calls.append(name)
+        return _inst
+
+    def boom(ctx: installers.InstallContext) -> None:
+        calls.append("dashboard")
+        raise subprocess_utils.CommandFailed(["pipx", "install", "x"], 1, "", "boom")
+
+    monkeypatch.setattr(
+        installers,
+        "_INSTALLERS",
+        {"plugin": make_ok("plugin"), "dashboard": boom, "rules": make_ok("rules")},
+    )
+
+    failed = installers.install_components(["plugin", "dashboard", "rules"], _make_ctx())
+
+    assert failed == ["dashboard"]
+    assert calls == ["plugin", "dashboard", "rules"], (
+        "components after the failed one must still be installed"
+    )
+
+
+def test_install_components_propagates_non_command_errors(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only CommandFailed is isolated; a real bug (any other exception) still
+    surfaces so it is not silently swallowed."""
+    def boom(ctx: installers.InstallContext) -> None:
+        raise RuntimeError("programming bug")
+
+    monkeypatch.setattr(installers, "_INSTALLERS", {"plugin": boom})
+
+    with pytest.raises(RuntimeError):
+        installers.install_components(["plugin"], _make_ctx())
+
+
+# ---------------------------------------------------------------------------
+# Plugin: enable/record only after the CLI install actually succeeds
+# ---------------------------------------------------------------------------
+
+def test_install_plugin_pypi_enables_only_after_successful_install(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """settings.enable_plugin must run AFTER `claude plugins install` succeeds."""
+    events: list[tuple[str, object]] = []
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: "/usr/bin/claude")
+
+    def fake_run(cmd, **kwargs):
+        events.append(("run", tuple(cmd)))
+        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+
+    monkeypatch.setattr(installers.subprocess_utils, "run", fake_run)
+    monkeypatch.setattr(
+        installers.settings, "enable_plugin", lambda pid: events.append(("enable", pid))
+    )
+
+    installers._install_plugin_pypi()
+
+    install_idx = next(
+        i for i, e in enumerate(events) if e[0] == "run" and "install" in e[1]
+    )
+    enable_idx = next(i for i, e in enumerate(events) if e[0] == "enable")
+    assert enable_idx > install_idx, "enable must not precede the plugins-install command"
+
+
+def test_install_plugin_pypi_does_not_enable_on_failed_install(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing `claude plugins install` leaves no phantom enabledPlugins entry."""
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: "/usr/bin/claude")
+    enabled: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        if "install" in cmd:
+            raise subprocess_utils.CommandFailed(list(cmd), 1, "", "no such package")
+        return subprocess.CompletedProcess(list(cmd), 0, "", "")
+
+    monkeypatch.setattr(installers.subprocess_utils, "run", fake_run)
+    monkeypatch.setattr(installers.settings, "enable_plugin", lambda pid: enabled.append(pid))
+
+    with pytest.raises(subprocess_utils.CommandFailed):
+        installers._install_plugin_pypi()
+
+    assert enabled == [], "enable_plugin must not run when the install command fails"
+
+
+def test_install_plugin_local_failure_skips_enable_and_state(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failing local `claude plugins install` must not enable the plugin, must
+    not record it in state, and must not report success (propagates instead)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(installers, "MARKETPLACE_DIR", tmp_path / "mkt")
+    monkeypatch.setattr(installers.shutil, "which", lambda _name: "/usr/bin/claude")
+    enabled: list[str] = []
+    monkeypatch.setattr(installers.settings, "enable_plugin", lambda pid: enabled.append(pid))
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess_utils.CommandFailed(list(cmd), 1, "", "boom")
+
+    monkeypatch.setattr(installers.subprocess_utils, "run", fake_run)
+
+    with pytest.raises(subprocess_utils.CommandFailed):
+        installers.install_plugin(_make_ctx(mode="local", repo_root=repo))
+
+    assert enabled == [], "local plugin install failure must not enable the plugin"
+    assert "plugin" not in state.load().get("components", {}), (
+        "a failed plugin install must not be recorded as installed"
+    )

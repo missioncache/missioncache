@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from missioncache_install import command_clients, mcp_clients, settings, state
+from missioncache_install import command_clients, fs_utils, mcp_clients, settings, state
 
 
 @pytest.fixture
@@ -65,4 +65,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "CODEX_CONFIG_TOML",
         tmp_path / ".codex" / "config.toml",
     )
+    # The one-time-per-run backup tracker is process-global; clear it so each
+    # test starts with a clean "nothing backed up yet" slate.
+    fs_utils._backed_up.clear()
     return tmp_path

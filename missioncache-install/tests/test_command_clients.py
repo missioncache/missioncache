@@ -660,6 +660,31 @@ def test_strip_codex_plugin_stanza_strips_missioncache_subsections() -> None:
     assert '[other.section]\nk = "v"\n' in out
 
 
+def test_strip_codex_plugin_stanza_preserves_unrelated_blank_lines() -> None:
+    """Blank lines outside missioncache's stanza (e.g. inside a multi-line string
+    value) must be left byte-for-byte intact.
+
+    Bug: a global `re.sub(r"\\n{3,}", "\\n\\n", ...)` over the whole file collapsed
+    any run of 3+ newlines anywhere, corrupting user content like a prompt/
+    template value with internal blank lines.
+    """
+    text = (
+        'instructions = """\n'
+        'Paragraph one.\n'
+        '\n'
+        '\n'
+        'Paragraph two.\n'
+        '"""\n'
+        '\n'
+        '[plugins."missioncache@missioncache"]\n'
+    )
+    out = command_clients._strip_codex_plugin_stanza(text)
+    assert '[plugins."missioncache@missioncache"]' not in out, "missioncache stanza must be removed"
+    assert 'Paragraph one.\n\n\nParagraph two.' in out, (
+        "Blank lines inside a user string value must NOT be collapsed"
+    )
+
+
 def test_codex_already_registered_re_matches_only_intended_phrases() -> None:
     """Anchored regex must match canonical idempotency wordings - no broader.
 

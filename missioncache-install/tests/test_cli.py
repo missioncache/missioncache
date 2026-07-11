@@ -339,6 +339,59 @@ def test_statusline_with_no_dashboard_does_not_auto_add(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Install exit status: a partial install must surface as a non-zero exit code
+# so scripts / CI never read "some components failed" as success.
+# ---------------------------------------------------------------------------
+
+def test_flag_path_returns_1_on_partial_failure(isolated_home, monkeypatch) -> None:
+    """`--all` with a failed component exits non-zero (flag path)."""
+    def fake_install(components, ctx):
+        return ["dashboard"]  # one component reported as failed
+
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--all", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: 0)
+
+    rc = main()
+
+    assert rc == 1, "a failed component must make the flag path exit non-zero"
+
+
+def test_flag_path_returns_0_on_full_success(isolated_home, monkeypatch) -> None:
+    """`--all` with no failures exits zero (flag path)."""
+    def fake_install(components, ctx):
+        return []  # every component installed
+
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--all", "--yes"])
+    monkeypatch.setattr("missioncache_install.__main__.installers.install_components", fake_install)
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: 0)
+
+    rc = main()
+
+    assert rc == 0
+
+
+def test_main_propagates_wizard_failure_status(isolated_home, monkeypatch) -> None:
+    """The bare interactive path returns wizard.run's status (1 on failure)."""
+    monkeypatch.setattr("sys.argv", ["missioncache-install"])
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: 1)
+
+    rc = main()
+
+    assert rc == 1, "main() must propagate a non-zero wizard status, not swallow it"
+
+
+def test_main_propagates_wizard_success_status(isolated_home, monkeypatch) -> None:
+    """The bare interactive path returns 0 when wizard.run reports success."""
+    monkeypatch.setattr("sys.argv", ["missioncache-install"])
+    monkeypatch.setattr("missioncache_install.__main__.wizard.run", lambda ctx: 0)
+
+    rc = main()
+
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------------
 # _run_uninstall dispatch tests (end-to-end through main())
 #
 # Each test stubs `installers.uninstall_components` to capture the components

@@ -286,6 +286,44 @@ def test_install_opencode_idempotent_when_missioncache_already_set(
     )
 
 
+def test_install_opencode_merges_and_preserves_user_added_keys(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user's extra keys inside the missioncache entry survive an --update re-run.
+
+    A user who edits `mcp.missioncache` to add keys the installer does not own
+    (e.g. `"enabled": false` to temporarily disable it) must not have those keys
+    dropped - nor the server silently re-enabled - when the installer updates
+    its own owned keys. Only `type`/`command` are the installer's to set.
+    """
+    _set_opencode_detected(monkeypatch, True)
+    _set_mcp_missioncache_path_ok(monkeypatch)
+
+    mcp_clients.OPENCODE_CONFIG_PATH.parent.mkdir(parents=True)
+    mcp_clients.OPENCODE_CONFIG_PATH.write_text(
+        json.dumps(
+            {
+                "mcp": {
+                    "missioncache": {
+                        "type": "local",
+                        "command": ["stale-binary"],
+                        "enabled": False,
+                    }
+                }
+            },
+            indent=2,
+        )
+    )
+
+    mcp_clients.install_opencode(_make_ctx())
+
+    entry = json.loads(mcp_clients.OPENCODE_CONFIG_PATH.read_text())["mcp"]["missioncache"]
+    assert entry["command"] == ["mcp-missioncache"], "owned key must be refreshed"
+    assert entry["enabled"] is False, (
+        "user-added key must be preserved, not wiped by a wholesale overwrite"
+    )
+
+
 def test_install_opencode_preserves_tab_indent(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -411,6 +449,38 @@ def test_install_vscode_preserves_existing_servers(
     assert data["servers"]["missioncache"] == {"type": "stdio", "command": "mcp-missioncache"}
     assert data["inputs"] == [{"id": "github_token", "type": "promptString"}], (
         "Top-level keys other than `servers` must be preserved verbatim"
+    )
+
+
+def test_install_vscode_merges_and_preserves_user_added_keys(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user's extra keys inside the VSCode missioncache entry survive a re-run."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    _set_vscode_detected(monkeypatch, True)
+    _set_mcp_missioncache_path_ok(monkeypatch)
+
+    mcp_clients.VSCODE_USER_MCP_PATH.parent.mkdir(parents=True)
+    mcp_clients.VSCODE_USER_MCP_PATH.write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "missioncache": {
+                        "type": "stdio",
+                        "command": "stale-binary",
+                        "env": {"MISSIONCACHE_DEBUG": "1"},
+                    }
+                }
+            }
+        )
+    )
+
+    mcp_clients.install_vscode(_make_ctx())
+
+    entry = json.loads(mcp_clients.VSCODE_USER_MCP_PATH.read_text())["servers"]["missioncache"]
+    assert entry["command"] == "mcp-missioncache", "owned key must be refreshed"
+    assert entry["env"] == {"MISSIONCACHE_DEBUG": "1"}, (
+        "user-added key must be preserved, not wiped by a wholesale overwrite"
     )
 
 

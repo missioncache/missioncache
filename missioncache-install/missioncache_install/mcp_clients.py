@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import state, subprocess_utils, ui
+from . import fs_utils, state, subprocess_utils, ui
 
 if TYPE_CHECKING:
     from .installers import InstallContext
@@ -192,7 +192,10 @@ def install_opencode(ctx: "InstallContext") -> None:
         return
 
     mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else None
-    if mcp is not None and mcp.get("missioncache") == desired:
+    existing = mcp.get("missioncache") if mcp is not None else None
+    if isinstance(existing, dict) and {**existing, **desired} == existing:
+        # Our owned keys are already set to the desired values; any extra keys
+        # the user added (e.g. "enabled": false) are theirs to keep.
         ui.detail(f"MissionCache already configured in {OPENCODE_CONFIG_PATH}")
     elif used_jsonc:
         # File has comments or trailing commas. json.dumps would silently
@@ -208,8 +211,11 @@ def install_opencode(ctx: "InstallContext") -> None:
         if mcp is None:
             mcp = {}
             data["mcp"] = mcp
-        mcp["missioncache"] = desired
-        OPENCODE_CONFIG_PATH.write_text(json.dumps(data, indent=indent))
+        # Merge our owned keys into any existing entry rather than replacing it,
+        # so a user's custom keys survive an --update re-run.
+        base = existing if isinstance(existing, dict) else {}
+        mcp["missioncache"] = {**base, **desired}
+        fs_utils.write_config_text(OPENCODE_CONFIG_PATH, json.dumps(data, indent=indent))
 
     state.record_component("opencode", {"path": str(OPENCODE_CONFIG_PATH)})
     ui.success(f"OpenCode MCP integration installed ({OPENCODE_CONFIG_PATH})")
@@ -244,7 +250,7 @@ def uninstall_opencode(ctx: "InstallContext") -> None:
         state.remove_component("opencode")
         return
     mcp.pop("missioncache", None)
-    OPENCODE_CONFIG_PATH.write_text(json.dumps(data, indent=indent))
+    fs_utils.write_config_text(OPENCODE_CONFIG_PATH, json.dumps(data, indent=indent))
     ui.detail(f"Removed MissionCache from {OPENCODE_CONFIG_PATH}")
     state.remove_component("opencode")
 
@@ -293,7 +299,10 @@ def install_vscode(ctx: "InstallContext") -> None:
         return
 
     servers = data.get("servers") if isinstance(data.get("servers"), dict) else None
-    if servers is not None and servers.get("missioncache") == desired:
+    existing = servers.get("missioncache") if servers is not None else None
+    if isinstance(existing, dict) and {**existing, **desired} == existing:
+        # Our owned keys are already set to the desired values; any extra keys
+        # the user added (e.g. "env"/"envFile") are theirs to keep.
         ui.detail(f"MissionCache already configured in {VSCODE_USER_MCP_PATH}")
     elif used_jsonc:
         # File has comments or trailing commas; refuse auto-merge to avoid
@@ -309,8 +318,11 @@ def install_vscode(ctx: "InstallContext") -> None:
         if servers is None:
             servers = {}
             data["servers"] = servers
-        servers["missioncache"] = desired
-        VSCODE_USER_MCP_PATH.write_text(json.dumps(data, indent=indent))
+        # Merge our owned keys into any existing entry rather than replacing it,
+        # so a user's custom keys survive an --update re-run.
+        base = existing if isinstance(existing, dict) else {}
+        servers["missioncache"] = {**base, **desired}
+        fs_utils.write_config_text(VSCODE_USER_MCP_PATH, json.dumps(data, indent=indent))
 
     state.record_component("vscode", {"path": str(VSCODE_USER_MCP_PATH)})
     ui.success(f"VSCode MCP integration installed ({VSCODE_USER_MCP_PATH})")
@@ -343,7 +355,7 @@ def uninstall_vscode(ctx: "InstallContext") -> None:
         state.remove_component("vscode")
         return
     servers.pop("missioncache", None)
-    VSCODE_USER_MCP_PATH.write_text(json.dumps(data, indent=indent))
+    fs_utils.write_config_text(VSCODE_USER_MCP_PATH, json.dumps(data, indent=indent))
     ui.detail(f"Removed MissionCache from {VSCODE_USER_MCP_PATH}")
     state.remove_component("vscode")
 

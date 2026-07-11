@@ -11,6 +11,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from . import fs_utils
+
 
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 EDIT_COUNT_URL = "http://localhost:8787/api/hooks/edit-count"
@@ -25,9 +27,8 @@ def load() -> dict[str, Any]:
 
 
 def save(settings: dict[str, Any]) -> None:
-    """Write settings.json, creating parent dirs if needed."""
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
+    """Write settings.json atomically, backing up any pre-existing file once per run."""
+    fs_utils.write_config_text(SETTINGS_FILE, json.dumps(settings, indent=2))
 
 
 def backup() -> Path | None:

@@ -377,7 +377,6 @@ def main() -> int:
         ui.fail("--uninstall and --update cannot be combined (different verbs).")
         raise AssertionError("unreachable")  # ui.fail exits
     mode, repo_root = _resolve_mode_and_repo(args)
-    state.set_mode(mode)
     ctx = installers.InstallContext(
         mode=mode,
         repo_root=repo_root,
@@ -387,11 +386,18 @@ def main() -> int:
     )
 
     if args.uninstall is not None:
+        # Do NOT record mode here - uninstall re-derives mode from the CWD,
+        # which is not the install-time mode. Overwriting the recorded mode
+        # would corrupt the signal --update relies on.
         return _run_uninstall(args, ctx)
 
     if args.update:
         installers.update_all(ctx)
         return 0
+
+    # Install verbs record the install-time mode so a later --update/--uninstall
+    # run (which resolves mode from the CWD) can recover how we installed.
+    state.set_mode(mode)
 
     explicit = _explicit_components(args)
     excluded = _excluded_components(args)
@@ -411,13 +417,17 @@ def main() -> int:
             return 0
         ui.banner()
         ui.info(f"Installing: {', '.join(c.replace('_', '-') for c in selected)}")
-        installers.install_components(selected, ctx)
-        ui.success_banner(selected, dashboard_port=ctx.port)
-        return 0
+        failed = installers.install_components(selected, ctx) or []
+        succeeded = [c for c in selected if c not in failed]
+        if succeeded:
+            ui.success_banner(succeeded, dashboard_port=ctx.port)
+        # Any component failure must surface as a non-zero exit so scripts and
+        # CI don't read a partial install as success.
+        return 1 if failed else 0
 
-    # Default: interactive wizard.
-    wizard.run(ctx)
-    return 0
+    # Default: interactive wizard. Propagate its exit status (1 on any
+    # component failure) so the interactive path is not a silent success.
+    return wizard.run(ctx)
 
 
 if __name__ == "__main__":

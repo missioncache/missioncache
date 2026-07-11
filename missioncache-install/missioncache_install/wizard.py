@@ -98,8 +98,14 @@ _TOOL_DETECTORS = {
 }
 
 
-def run(ctx: installers.InstallContext) -> None:
-    """Run the interactive wizard and execute the chosen installers."""
+def run(ctx: installers.InstallContext) -> int:
+    """Run the interactive wizard and execute the chosen installers.
+
+    Returns a process exit status: 1 if any selected component failed to
+    install, else 0. Early exits before any install is attempted (missing
+    pip runner, no components selected) return 0 - nothing failed because
+    nothing ran.
+    """
     ui.banner()
 
     p = prereqs.detect()
@@ -109,19 +115,22 @@ def run(ctx: installers.InstallContext) -> None:
 
     if ctx.mode == "pypi" and not prereqs.ensure_pip_runner_or_prompt(p):
         ui.info("Aborting - pipx/uv is required for PyPI-mode installs.")
-        return
+        return 0
 
     selected = _select_components()
     if not selected:
         ui.warn("No components selected. Nothing to install.")
-        return
+        return 0
 
     print()
     ui.info(f"Installing: {', '.join(c.replace('_', '-') for c in selected)}")
-    installers.install_components(selected, ctx)
+    failed = installers.install_components(selected, ctx) or []
+    succeeded = [c for c in selected if c not in failed]
 
-    ui.success_banner(selected, dashboard_port=ctx.port)
+    if succeeded:
+        ui.success_banner(succeeded, dashboard_port=ctx.port)
     _print_next_steps(selected)
+    return 1 if failed else 0
 
 
 def _select_components() -> list[str]:

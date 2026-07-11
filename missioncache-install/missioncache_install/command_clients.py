@@ -47,7 +47,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import mcp_clients, state, subprocess_utils, ui
+from . import fs_utils, mcp_clients, state, subprocess_utils, ui
 from .mcp_clients import _load_json_object
 
 if TYPE_CHECKING:
@@ -380,7 +380,7 @@ def _register_vscode_prompts_location() -> str:
 
     if not VSCODE_USER_SETTINGS_PATH.exists():
         VSCODE_USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        VSCODE_USER_SETTINGS_PATH.write_text("{}\n")
+        fs_utils.write_config_text(VSCODE_USER_SETTINGS_PATH, "{}\n")
 
     try:
         data, indent, used_jsonc = _load_json_object(VSCODE_USER_SETTINGS_PATH)
@@ -415,7 +415,7 @@ def _register_vscode_prompts_location() -> str:
         locations = {}
         data["chat.promptFilesLocations"] = locations
     locations[location_key] = True
-    VSCODE_USER_SETTINGS_PATH.write_text(json.dumps(data, indent=indent))
+    fs_utils.write_config_text(VSCODE_USER_SETTINGS_PATH, json.dumps(data, indent=indent))
     ui.detail(f"Registered {VSCODE_PROMPTS_DIR} in chat.promptFilesLocations")
     return "registered"
 
@@ -446,7 +446,9 @@ def uninstall_vscode_commands(ctx: "InstallContext") -> None:
                     )
                 else:
                     locations.pop(location_key, None)
-                    VSCODE_USER_SETTINGS_PATH.write_text(json.dumps(data, indent=indent))
+                    fs_utils.write_config_text(
+                        VSCODE_USER_SETTINGS_PATH, json.dumps(data, indent=indent)
+                    )
                     ui.detail("Removed MissionCache entry from chat.promptFilesLocations")
         except json.JSONDecodeError as e:
             ui.warn(
@@ -656,7 +658,7 @@ def _enable_codex_plugin() -> None:
     """
     if not CODEX_CONFIG_TOML.exists():
         CODEX_CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
-        CODEX_CONFIG_TOML.write_text("")
+        fs_utils.write_config_text(CODEX_CONFIG_TOML, "")
 
     text = CODEX_CONFIG_TOML.read_text()
     stanza_header = '[plugins."missioncache@missioncache"]'
@@ -668,7 +670,7 @@ def _enable_codex_plugin() -> None:
     if text and not text.endswith("\n\n"):
         text += "\n"
     text += stanza_header + "\n"
-    CODEX_CONFIG_TOML.write_text(text)
+    fs_utils.write_config_text(CODEX_CONFIG_TOML, text)
     ui.detail('Added [plugins."missioncache@missioncache"] stanza to ~/.codex/config.toml')
 
 
@@ -694,7 +696,7 @@ def uninstall_codex_commands(ctx: "InstallContext") -> None:
         text = CODEX_CONFIG_TOML.read_text()
         new_text = _strip_codex_plugin_stanza(text)
         if new_text != text:
-            CODEX_CONFIG_TOML.write_text(new_text)
+            fs_utils.write_config_text(CODEX_CONFIG_TOML, new_text)
             ui.detail('Removed [plugins."missioncache@missioncache"] from config.toml')
 
     if CODEX_MARKETPLACE_DIR.exists():
@@ -724,8 +726,11 @@ def _strip_codex_plugin_stanza(text: str) -> str:
       manually. Documented rather than handled because adding tomllib here
       to cover a hypothetical hand-edit is over-engineering today.
 
-    After stripping, runs of 3+ blank lines collapse to 2 so the file does
-    not grow visual gaps with each install/uninstall cycle.
+    Only MissionCache's own stanza lines are dropped; the rest of the file is
+    left byte-for-byte intact. Since install adds exactly one blank line before
+    the stanza, removing it leaves no runaway blank-line growth across
+    install/uninstall cycles - so no global blank-line collapse is applied
+    (that would corrupt blank lines inside unrelated multi-line string values).
     """
     target = '[plugins."missioncache@missioncache"]'
     subsection_prefix = '[plugins."missioncache@missioncache".'
@@ -749,4 +754,4 @@ def _strip_codex_plugin_stanza(text: str) -> str:
                 continue
             continue
         out.append(line)
-    return re.sub(r"\n{3,}", "\n\n", "".join(out))
+    return "".join(out)

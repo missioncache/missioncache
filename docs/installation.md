@@ -270,7 +270,7 @@ Should print the help text. Inside Claude Code, the MCP server is invoked via `u
 uvx missioncache-install --uninstall
 ```
 
-Removes: plugin registration, pip packages, service units, settings.json entries, and any rule files still carrying the MissionCache ownership marker. Preserves: `~/.missioncache/` (project files), `~/.missioncache/tasks.db` (task history), rule files that you customized and edited past the marker, user-level slash commands other than the two MissionCache-shipped ones.
+Removes: plugin registration, pip packages, service units, settings.json entries, and any rule files still carrying the MissionCache ownership marker. Preserves: `~/.missioncache/` (project files), `~/.missioncache/tasks.db` (task history), rule files that you customized and edited past the marker, user-level slash commands other than the two MissionCache-shipped ones, and any `<config>.bak` backups the installer left next to a modified config file (each config write is atomic - temp file plus rename - and leaves a one-time `<config>.bak` per run, e.g. `settings.json.bak`; uninstall does not delete these).
 
 ### Plugin-only install
 

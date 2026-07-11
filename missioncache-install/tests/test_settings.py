@@ -29,6 +29,33 @@ def test_save_creates_parent_directories(tmp_path: Path, monkeypatch) -> None:
     assert json.loads(nested.read_text()) == {"key": "value"}
 
 
+def test_save_backs_up_pre_existing_file_once(isolated_home: Path) -> None:
+    """save() copies a pre-existing settings.json to .bak before the first write,
+    and never clobbers that backup on later writes in the same run."""
+    settings.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    settings.SETTINGS_FILE.write_text(json.dumps({"original": True}))
+
+    settings.save({"changed": 1})
+
+    bak = settings.SETTINGS_FILE.with_suffix(".json.bak")
+    assert bak.exists(), "save() must back up a pre-existing settings.json"
+    assert json.loads(bak.read_text()) == {"original": True}, \
+        "backup must hold the user's pre-existing content, not the new content"
+    assert json.loads(settings.SETTINGS_FILE.read_text()) == {"changed": 1}
+
+    settings.save({"changed": 2})
+    assert json.loads(bak.read_text()) == {"original": True}, \
+        "the one-time backup must not be overwritten by a later write this run"
+
+
+def test_save_no_backup_when_file_absent(isolated_home: Path) -> None:
+    """A fresh install (no pre-existing file) writes with no .bak - nothing to preserve."""
+    settings.save({"fresh": True})
+    assert not settings.SETTINGS_FILE.with_suffix(".json.bak").exists(), \
+        "there is no user content to back up on a first-ever write"
+    assert json.loads(settings.SETTINGS_FILE.read_text()) == {"fresh": True}
+
+
 def test_set_statusline_backs_up_existing_different_command(isolated_home: Path) -> None:
     """Overwriting a different command creates settings.json.bak with the original."""
     original = {"statusLine": {"type": "command", "command": "python ~/my-line.py"}}
