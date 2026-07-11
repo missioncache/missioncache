@@ -83,9 +83,10 @@ CWD_KEY=$(pwd | sed 's|/|-|g')
 POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
 # Primary: env var set by Claude Code 2.1.132+ in every Bash subprocess.
 SESSION_ID="$CLAUDE_CODE_SESSION_ID"
-# Fallback: cwd-session pointer written by the SessionStart hook.
-if [ -z "$SESSION_ID" ] && [ -r "$POINTER_FILE" ]; then
-  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+# Fallbacks for older Claude Code: cwd-session pointer (SessionStart hook), then transcript-mtime walk.
+if [ -z "$SESSION_ID" ]; then
+  [ -r "$POINTER_FILE" ] && SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+  [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
 echo "SESSION_ID=$SESSION_ID"
 ```
@@ -98,7 +99,7 @@ Capture the printed `SESSION_ID`. Then call `mcp__plugin_missioncache_pm__get_ta
 - File paths
 - `session_bound: true | false | <omitted>` indicating whether the session-to-project binding succeeded server-side. If the response includes `session_bound: true`, the statusline will reflect this project immediately - the Step 4 bash binding is still run as defense-in-depth and to refresh the dashboard list view, but it is no longer load-bearing.
 
-If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg and rely entirely on the Step 4 bash binding.
+If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg from `get_task`; Step 4 reuses this same value, so its binding is skipped too and the user can populate the statusline later by re-running `/missioncache:load`.
 
 ### Step 2: Get the Context Digest
 
@@ -189,31 +190,15 @@ Waiting on renders NEXT TO Next Steps by design - both are the "what now" surfac
 
 ### Step 4: Register Session for Time Tracking
 
-Register the project against the current Claude session so the statusline picks it up. Resolves the session ID from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), falling back to the missioncache cwd-session pointer and then a filesystem mtime walk for older versions. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
+Register the project against the current Claude session so the statusline picks it up, reusing the `SESSION_ID` resolved in Step 1. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
 
 This step is defense-in-depth: Step 1's `get_task(session_id=...)` already performs the server-side binding via the MCP tool. The bash block additionally hits the dashboard API so the dashboard list view refreshes immediately (instead of waiting for the next periodic SQLite -> DuckDB sync) and writes the per-session pointer in case the MCP binding raced.
 
-Replace `<project-name>` with the actual project name and `<repo-path>` with the repo path from project details, then run:
+Replace `<project-name>` with the actual project name and `<SESSION_ID from Step 1>` with the value captured in Step 1, then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
-REPO_PATH='<repo-path>'
-
-# Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
-SESSION_ID="$CLAUDE_CODE_SESSION_ID"
-
-# Fallback for older Claude Code versions. SessionStart hook writes the
-# authoritative current-session pointer at ~/.claude/hooks/state/cwd-session/
-# <sanitized-cwd>.json; transcript mtime walk catches sessions that started
-# before the pointer mechanism landed.
-if [ -z "$SESSION_ID" ]; then
-  CWD_KEY=$(pwd | sed 's|/|-|g')
-  POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-  if [ -r "$POINTER_FILE" ]; then
-    SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
-  fi
-  [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-fi
+SESSION_ID='<SESSION_ID from Step 1>'
 
 # Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
 if [ -n "$SESSION_ID" ]; then
@@ -268,7 +253,7 @@ statusline ``Task:`` field reflects the current focus.
 mcp__plugin_missioncache_pm__set_active_missioncache_tasks(
     project_name="<project-name>",
     task_numbers=["54a"],          # or ["56", "57"] for parallel work
-    session_id="<SESSION_ID from Step 4>"
+    session_id="<SESSION_ID from Step 1>"
 )
 ```
 

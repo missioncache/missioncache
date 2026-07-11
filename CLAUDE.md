@@ -27,7 +27,7 @@
 | `mcp-server/src/mcp_missioncache/tools_tracking.py` | Time tracking tools |
 | `mcp-server/src/mcp_missioncache/tools_iteration.py` | Iteration logging tools |
 | `mcp-server/src/mcp_missioncache/tools_planning.py` | Planning tools |
-| `missioncache-db/missioncache_db/__init__.py` | Core database layer (~3400 lines) |
+| `missioncache-db/missioncache_db/__init__.py` | Core database layer (~4600 lines) |
 | `missioncache-auto/missioncache_auto/cli.py` | MissionCache Auto CLI entry point |
 | `missioncache-dashboard/missioncache_dashboard/server.py` | FastAPI dashboard backend |
 | `hooks/hooks.json` | Hook definitions |
@@ -108,7 +108,7 @@ uvx --from . python -c "from mcp_missioncache.server import mcp; print('OK')"
 missioncache-dashboard serve
 
 # Test missioncache-auto
-missioncache-auto --dry-run my-project
+missioncache-auto my-project --dry-run
 ```
 
 ## Installation

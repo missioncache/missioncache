@@ -136,47 +136,7 @@ The statusline displays the active project name automatically when set correctly
 
 ### Setting Project in Statusline
 
-When creating, continuing, or resuming a MissionCache project, resolve the current Claude session ID and set the project. Claude Code 2.1.132+ exposes the session ID directly via the `CLAUDE_CODE_SESSION_ID` env var; older versions fall back to a filesystem mtime walk that works on any terminal (including Ghostty and cmux):
-
-```bash
-# Caller MUST set PROJECT_NAME (MissionCache project name, kebab-case recommended).
-PROJECT_NAME='<project-name>'
-
-# Primary: env var set by Claude Code 2.1.132+ in every Bash tool subprocess.
-SESSION_ID="$CLAUDE_CODE_SESSION_ID"
-
-# Fallback for older Claude Code versions: most-recently-modified transcript
-# in ~/.claude/projects/<sanitized-cwd>/ = current session. Session IDs are
-# UUIDs so ls|head is safe here.
-if [ -z "$SESSION_ID" ]; then
-  CWD_KEY=$(pwd | sed 's|/|-|g')
-  SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-fi
-
-# Write project_state. Dashboard API first (handles escaping via JSON), direct SQL fallback
-# uses Python parameter binding so single-quotes in project names never corrupt the query.
-if [ -n "$SESSION_ID" ]; then
-  PROJECT_JSON=$(python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
-  curl -s -X POST http://localhost:8787/api/hooks/project \
-    -H "Content-Type: application/json" \
-    -d "$PROJECT_JSON" \
-    --connect-timeout 1 --max-time 2 >/dev/null 2>&1 \
-  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-conn.execute(
-    "INSERT INTO project_state (session_id, project_name, updated_at) "
-    "VALUES (?, ?, datetime(\"now\", \"localtime\")) "
-    "ON CONFLICT(session_id) DO UPDATE SET project_name = excluded.project_name, "
-    "updated_at = datetime(\"now\", \"localtime\")",
-    (os.environ["SESSION_ID"], os.environ["PROJECT_NAME"]),
-)
-conn.commit()
-' 2>/dev/null
-fi
-```
-
-**How it works:** Session state is stored in `~/.claude/hooks-state.db` (SQLite). The statusline reads `project_state` keyed by session_id. On Claude Code 2.1.132+, `$CLAUDE_CODE_SESSION_ID` is set in every Bash subprocess and is the cheapest, most reliable resolver. On older versions we fall back to walking `~/.claude/projects/<cwd-sanitized>/*.jsonl` for the most-recently-modified transcript - the filename is the session ID, and that path works on any terminal (Ghostty, cmux, iTerm2, Windows Terminal, etc.).
+When creating, continuing, or resuming a MissionCache project, the `/missioncache:new` and `/missioncache:load` commands bind the current Claude session to the project so the statusline picks it up. They resolve the session id from `$CLAUDE_CODE_SESSION_ID` (Claude Code 2.1.132+), fall back to the cwd-session pointer then a transcript-mtime walk on older versions, and write `project_state` (keyed by session_id) to `~/.claude/hooks-state.db` via the dashboard API with a direct-SQL fallback. The canonical bash lives in `commands/load.md` (session-id resolution in Step 1, the `project_state` write in Step 4) - reproduce it from there rather than from memory.
 
 The statusline will automatically display:
 ```

@@ -217,7 +217,7 @@ missioncache-auto auth-refactor --sequential # one task at a time
 missioncache-auto auth-refactor --dry-run    # show execution plan without running
 ```
 
-Auto runs each task in a separate Claude Code invocation, respects task dependencies, and streams iteration events to the dashboard.
+Auto runs each task in a separate Claude Code invocation, respects task dependencies, and streams iteration events to the dashboard. On a git repo, parallel runs give each worker its own git worktree and branch by default (merged back when the run finishes); pass `--no-worktree` to share one checkout.
 
 ![MissionCache Auto dashboard showing the task dependency DAG and live execution log](assets/dashboard_auto_screenshot.jpg)
 
@@ -269,7 +269,7 @@ MissionCache's MCP server exposes tools across five categories: task lifecycle, 
 
 ### Lifecycle hooks
 
-Three Claude Code hooks tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. All three ship with the plugin.
+Five Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Two `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, the other reminds you when task tracking drifts. All five ship with the plugin.
 
 ## How MissionCache compares
 
@@ -367,10 +367,10 @@ MissionCache's load-bearing piece is the `mcp-missioncache` MCP server. Around i
 | Component | Purpose | Installs via |
 |---|---|---|
 | `mcp-missioncache` | MCP server (project state, file ops, time tracking, iteration logging) | Bundled with the Claude plugin; `pipx install mcp-missioncache` for other tools |
-| `missioncache` Claude plugin | Slash commands as `/missioncache:*`, lifecycle hooks (SessionStart, PreCompact, Stop), rules | Claude Code plugin marketplace |
-| `missioncache-db` | SQLite + DuckDB layer at `~/.missioncache/tasks.db` | `pip install missioncache-db` |
+| `missioncache` Claude plugin | Slash commands as `/missioncache:*`, lifecycle hooks (SessionStart, PreCompact, Stop, UserPromptSubmit), rules | Claude Code plugin marketplace |
+| `missioncache-db` | SQLite layer at `~/.missioncache/tasks.db` | `pip install missioncache-db` |
 | `missioncache-auto` | Autonomous execution CLI (Claude Code only) | `pip install missioncache-auto` |
-| `missioncache-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787` (Claude Code only) | Runs as a launchd/systemd service |
+| `missioncache-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787`, DuckDB analytics layer (Claude Code only) | Runs as a launchd/systemd service |
 | `missioncache-statusline` | Optional multi-line terminal display (Claude Code only) | Bundled with `missioncache-dashboard`, wired into `~/.claude/settings.json` |
 
 <!-- DIAGRAM: plugin + MCP server + db + auto + dashboard + statusline component graph -->
@@ -405,7 +405,7 @@ Deep dives for each component live in `docs/`:
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
-- [**MCP Tools**](docs/mcp-tools.md) - all 35 tools by module, error handling, extension patterns
+- [**MCP Tools**](docs/mcp-tools.md) - all 36 tools by module, error handling, extension patterns
 - [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks
