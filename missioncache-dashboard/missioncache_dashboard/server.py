@@ -26,13 +26,15 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from .statusline import ADDON_COLOR_ALLOW
 
 from missioncache_dashboard.lib import config
 from missioncache_dashboard.lib.analytics_db import (
@@ -2401,6 +2403,59 @@ class StatuslinePayload(BaseModel):
     model_suspensions: bool
 
 
+_ADDON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
+
+
+class AddonPlacement(BaseModel):
+    mode: Literal["row", "append"] = "row"
+    group: str | None = None
+    order: int = 0
+    target: str | None = None
+
+
+class Addon(BaseModel):
+    id: str
+    enabled: bool = True
+    label: str = ""
+    icon: str = ""
+    color: str = "version"
+    command: list[str]
+    ttl: int = 60
+    timeout: int = 5
+    placement: AddonPlacement = AddonPlacement()
+
+    @field_validator("id")
+    @classmethod
+    def _check_id(cls, v: str) -> str:
+        if not _ADDON_ID_RE.match(v):
+            raise ValueError("id must match ^[a-z0-9][a-z0-9-]{0,31}$")
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def _check_color(cls, v: str) -> str:
+        if v not in ADDON_COLOR_ALLOW:
+            raise ValueError("color must be one of the statusline palette keys")
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def _check_command(cls, v: list[str]) -> list[str]:
+        # Guardrail: an addon command is executed by the statusline, so require
+        # command[0] to be an existing absolute path (no PATH lookup, no typo
+        # silently running the wrong binary).
+        if not v:
+            raise ValueError("command must not be empty")
+        exe = v[0]
+        if not os.path.isabs(exe) or not os.path.exists(exe):
+            raise ValueError("command[0] must be an existing absolute path")
+        return v
+
+
+class StatuslineAddonsPayload(BaseModel):
+    addons: list[Addon]
+
+
 @app.get("/api/settings")
 async def get_settings():
     """Return all Tier 1 settings in one payload.
@@ -2414,6 +2469,8 @@ async def get_settings():
         "repos": config.get_repo_overrides(),
         "dashboard_url": config.get_dashboard_url(),
         "statusline": config.get_statusline_config(),
+        "statusline_addons": config.get_statusline_addons(),
+        "statusline_addon_colors": sorted(ADDON_COLOR_ALLOW),
     }
 
 
@@ -2443,6 +2500,18 @@ async def update_statusline_settings(payload: StatuslinePayload):
     """Replace the statusline visibility toggles and status service filter."""
     config.set_statusline_config(payload.model_dump())
     return {"ok": True, "statusline": config.get_statusline_config()}
+
+
+@app.put("/api/settings/statusline-addons")
+async def update_statusline_addons(payload: StatuslineAddonsPayload):
+    """Replace the user's statusline addons.
+
+    Writes its own top-level config key, so it never touches the `statusline`
+    section. Each addon's command[0] is validated as an existing absolute path
+    (see the Addon model) because the statusline executes it.
+    """
+    config.set_statusline_addons([a.model_dump() for a in payload.addons])
+    return {"ok": True, "statusline_addons": config.get_statusline_addons()}
 
 
 # =============================================================================

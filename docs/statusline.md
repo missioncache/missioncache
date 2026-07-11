@@ -229,9 +229,47 @@ Format is parallel to Line 6: plan label, session percentage with reset, weekly 
 
 ## Customization
 
+### User addons (no code, dashboard-managed)
+
+You can add your own cells to the statusline without editing this file, each filled by a command you choose. Addons are off by default, so a fresh install renders a clean statusline; you opt in per addon.
+
+Addons live in a `statusline_addons` list in `~/.claude/missioncache-dashboard-config.json` (a distinct top-level key from `statusline`, so the dashboard's statusline-visibility save never touches it). Manage them from the dashboard Settings page under "Statusline addons", which shows a built-in example you can inspect and copy into your own. You can also hand-edit the config file.
+
+One addon entry:
+
+```json
+{
+  "id": "stash",
+  "enabled": true,
+  "label": "Stash",
+  "icon": "📦",
+  "color": "version",
+  "command": ["/usr/bin/git", "stash", "list"],
+  "ttl": 60,
+  "timeout": 5,
+  "placement": { "mode": "row", "group": "git", "order": 50, "target": null }
+}
+```
+
+Fields:
+
+- `id` - unique, must match `^[a-z0-9][a-z0-9-]{0,31}$` (it is used in the addon's cache filename).
+- `label` / `icon` - shown as `{icon} {label}: {value}`. The command output can override them (see below).
+- `color` - a key into the statusline `COLORS` palette; the dashboard select lists the valid keys.
+- `command` - an argv list, run with no shell. `command[0]` must be an existing absolute path (a real binary or a script). It runs on your machine on each statusline refresh, throttled by the per-addon cache, so only add commands you trust.
+- `ttl` - seconds the cached value is reused before the command runs again (minimum 5).
+- `timeout` - per-run subprocess timeout, 1 to 30 seconds.
+- `placement.mode` - `"row"` gives the addon its own line. Addons that share a `group` name become columns on one line, in config order; a blank `group` defaults to the addon's `id`, so it gets its own line. When there is more than one addon row, `order` sets which line comes first (lowest first). `"append"` instead adds the cell to an existing row named by `target`, one of `location`, `project`, `metrics`, `session`, `context`, `usage`, `codex`, `vitals`.
+
+**Command output.** Plain text becomes the cell value. To control appearance, print a JSON object with any of `value`, `label`, `icon`, `color`, `hidden`, e.g. `{"value": "3", "color": "health_ok"}`. A missing or empty value, or `"hidden": true`, omits the cell (its line stays blank so the fixed height holds). String output is stripped of control characters, so a command cannot inject ANSI that breaks the grid.
+
+**Heavy data sources.** The command runs on the render path (bounded by `timeout` plus the cache), so keep it fast. For slow or multi-source data, have a separate scheduled job (cron or launchd) write a small data file and point the addon at it, e.g. `"command": ["/bin/cat", "/absolute/path/data.json"]` where the file already holds the JSON output shape above.
+
+**Safety.** An addon that errors, times out, or returns nothing renders a blank line and never crashes the statusline. One bad addon entry is skipped, and malformed config disables the feature rather than breaking the render. The dashboard endpoint that sets addon commands is localhost-only.
+
 ### Change what is shown
 
-The easiest customization is the two environment variables documented above. Beyond that, the script is a single flat file - the layout is determined by the order of `out.write()` calls in `main()`, and the contents of each line are built in the `# Build items per line` section of `main()`. To add, remove, or reorder lines:
+For your own fields, prefer the addon system above - it needs no code and survives package updates. To change the built-in lines, note that the two environment variables documented above are the easiest knob. Beyond that, the script is a single flat file - the layout is determined by the order of `out.write()` calls in `main()`, and the contents of each line are built in the `# Build items per line` section of `main()`. To add, remove, or reorder lines:
 
 1. Find the line-building block (`line1`, `line2`, `line3`, ..., `line_codex`) in `main()`.
 2. Modify or add an `_item(COLORS[...], ICONS[...], "Label", value)` call.
