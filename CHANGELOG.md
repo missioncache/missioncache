@@ -4,6 +4,49 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - missioncache-auto worktree-by-default and refusal guards (missioncache-auto)
+
+- Parallel runs on a git repo now give each worker its own git worktree and branch by default; `--no-worktree` opts back into the shared checkout, and sequential mode is unaffected. Non-git directories warn and fall back to the shared checkout.
+- Three pre-run refusals (exit code 3) prevent lost or discarded work: `--no-worktree` + auto-commit + more than one worker, worktrees + `--no-commit`, and worktrees + dirty tracked changes in the main checkout (untracked-only changes are a warning, the run proceeds).
+
+### Changed - dirty worktrees kept on cleanup (missioncache-auto)
+
+- A dirty worktree is left on disk with its branch and a warning so the work stays recoverable, instead of being force-removed.
+
+### Fixed - missioncache-auto auto-commit edge cases (missioncache-auto)
+
+- Auto-commit now detects untracked-only task output via `git status --porcelain` (was `git diff --quiet`, which missed brand-new files).
+- `.env*` files are excluded from auto-commits at any nesting depth.
+
+### Changed - statusline context percent, color, and debug handling (missioncache-dashboard)
+
+- Removed the `SYSTEM_OVERHEAD_PERCENT` (+19) add; ctx% now equals Claude Code's `used_percentage` when present (the overhead term remains only in the no-percentage estimated fallback).
+- `NO_COLOR` is honored (plain-text render), and the stdin debug log is written only when `MISSIONCACHE_STATUSLINE_DEBUG` is set (was every render).
+
+### Changed - installer writes configs atomically (missioncache-install)
+
+- Config writes are atomic (temp + rename) and leave a one-time `<file>.bak` next to each modified config per run; a partial component failure now exits 1, with components attempted independently.
+
+### Fixed - dashboard hardening (missioncache-dashboard)
+
+- Escaped remaining unescaped user-supplied values (XSS), added error and freshness states, and made interactive elements keyboard-accessible.
+
+### Fixed - hardcoded Asia/Jerusalem timezone removed (missioncache-dashboard)
+
+- Timestamps use the local timezone instead of a hardcoded `Asia/Jerusalem` zone.
+
+### Fixed - process_heartbeats concurrency claim and rollback (missioncache-db)
+
+- `process_heartbeats` rolls back on failure, and its docstring's concurrency claim is corrected to match actual behavior.
+
+### Removed - cleanup command hardcoded migration (missioncache plugin)
+
+- Dropped the hardcoded legacy-path migration step from the cleanup command.
+
+### Fixed - Stop hook edit detection (missioncache plugin)
+
+- The Stop hook now detects edited project files correctly before reminding you to run `/missioncache:save`.
+
 ### Added - context-file conventions: Waiting on, capped Recent Changes + journal, load digest, health check (missioncache-db 1.0.8, mcp-missioncache 1.0.11)
 
 Context files now share a canonical structure, and the pieces that made big files painful are automated:

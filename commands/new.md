@@ -267,19 +267,7 @@ Non-coding projects don't need prompts:
 
 1. Ask for project name and optional JIRA ticket
 
-2. Resolve the current session ID (same bash as Step 4 above):
-   ```bash
-   CWD_KEY=$(pwd | sed 's|/|-|g')
-   SESSION_ID="$CLAUDE_CODE_SESSION_ID"
-   if [ -z "$SESSION_ID" ]; then
-     POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-     if [ -r "$POINTER_FILE" ]; then
-       SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
-     fi
-     [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-   fi
-   echo "$SESSION_ID"
-   ```
+2. Resolve the current session ID using the same bash as Step 4 above, and capture the printed `SESSION_ID`.
 
 3. Create project, passing `session_id` so the statusline binds atomically. Non-coding projects default to `category="noncoding"` unless the description clearly fits another taxonomy value (e.g. a docs-writing project is `docs`):
    ```
