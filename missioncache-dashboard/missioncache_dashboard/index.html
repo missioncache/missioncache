@@ -4214,6 +4214,47 @@
             border-color: var(--accent-purple);
         }
 
+        .settings-addon-card {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 14px;
+            align-items: flex-end;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+        }
+
+        .settings-addon-card.readonly {
+            opacity: 0.85;
+            border-style: dashed;
+        }
+
+        .settings-addon-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .settings-addon-field input,
+        .settings-addon-field select {
+            font-size: 13px;
+        }
+
+        .settings-addon-field input[type="text"],
+        .settings-addon-field input[type="number"] {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: var(--text-primary);
+        }
+
+        .settings-addon-field.wide { flex: 1 1 260px; }
+
         .settings-save-status {
             font-size: 12px;
             color: var(--text-muted);
@@ -5180,6 +5221,21 @@
                             </div>
                         </div>
 
+                        <!-- Statusline addons -->
+                        <div class="settings-section">
+                            <h3>Statusline addons</h3>
+                            <p class="settings-hint">Add your own cells to the statusline, each filled by a command you choose. Nothing shows until you add one. The command output becomes the cell value (plain text, or a JSON object with value/label/icon/color to override). It runs on your machine on each statusline refresh (throttled by a per-addon cache), so command[0] must be an existing absolute path and you should only add commands you trust.</p>
+                            <p class="settings-hint">Example (not active) - inspect the fields to learn the format, then add an editable copy:</p>
+                            <div id="addonExampleContainer"></div>
+                            <p class="settings-hint" style="margin-top:12px">Your addons:</p>
+                            <div id="addonRowsContainer" class="settings-rows"></div>
+                            <div class="settings-row-actions">
+                                <button class="settings-btn-secondary" onclick="addAddonRow()">+ Add addon</button>
+                                <button class="settings-btn-primary" onclick="saveAddonSettings()">Save addons</button>
+                                <span id="addonSaveStatus" class="settings-save-status"></span>
+                            </div>
+                        </div>
+
                         <!-- Custom categories -->
                         <div class="settings-section">
                             <h3>Custom categories</h3>
@@ -5858,6 +5914,10 @@
                 renderEmailRows(settings.author_emails || []);
                 renderRepoRows(reposData.repositories || [], settings.repos || {});
                 renderStatuslineSettings(settings.statusline || {});
+                if (Array.isArray(settings.statusline_addon_colors) && settings.statusline_addon_colors.length) {
+                    ADDON_COLORS = settings.statusline_addon_colors;
+                }
+                renderAddonRows(settings.statusline_addons || []);
                 await fetchCustomCategories();
                 renderCustomCategorySettings();
             } catch (err) {
@@ -6047,6 +6107,226 @@
                 'Saved - applies on your next prompt in Claude',
                 4500,
             );
+        }
+
+        // ===== Statusline addons =====
+        let ADDON_COLORS = ['version'];
+        const ADDON_APPEND_TARGETS = ['location', 'project', 'metrics', 'session', 'context', 'usage', 'codex', 'vitals'];
+        const ADDON_EXAMPLE = {
+            id: 'stash', enabled: true, label: 'Stash', icon: '📦', color: 'version',
+            command: ['/usr/bin/git', 'stash', 'list'], ttl: 60, timeout: 5,
+            placement: { mode: 'row', group: 'git', order: 50, target: null },
+        };
+
+        function _addonField(labelText, inputEl, fieldName, wide) {
+            inputEl.dataset.addonField = fieldName;
+            const wrap = document.createElement('label');
+            wrap.className = 'settings-addon-field' + (wide ? ' wide' : '');
+            const span = document.createElement('span');
+            span.textContent = labelText;
+            wrap.appendChild(span);
+            wrap.appendChild(inputEl);
+            return wrap;
+        }
+
+        function _addonInput(type, value, placeholder) {
+            const el = document.createElement('input');
+            el.type = type;
+            if (type === 'checkbox') { el.checked = !!value; }
+            else { el.value = value; }
+            if (placeholder) el.placeholder = placeholder;
+            return el;
+        }
+
+        function _addonSelect(options, selected) {
+            const sel = document.createElement('select');
+            sel.className = 'filter-repo-select';
+            for (const o of options) {
+                const opt = document.createElement('option');
+                opt.value = o.value;
+                opt.textContent = o.text;
+                if (o.value === selected) opt.selected = true;
+                sel.appendChild(opt);
+            }
+            return sel;
+        }
+
+        function _addonCommandString(cmd) {
+            if (!Array.isArray(cmd) || cmd.length === 0) return '';
+            return cmd.some(x => /\s/.test(x)) ? JSON.stringify(cmd) : cmd.join(' ');
+        }
+
+        function createAddonRow(addon, opts) {
+            opts = opts || {};
+            const a = addon;
+            const card = document.createElement('div');
+            card.className = 'settings-addon-card' + (opts.readonly ? ' readonly' : '');
+
+            const idInput = _addonInput('text', a.id || '', 'my-field');
+            card.appendChild(_addonField('id', idInput, 'id'));
+            card.appendChild(_addonField('enabled', _addonInput('checkbox', a.enabled !== false), 'enabled'));
+            card.appendChild(_addonField('label', _addonInput('text', a.label || '', 'Label'), 'label'));
+            card.appendChild(_addonField('icon', _addonInput('text', a.icon || '', '📦'), 'icon'));
+
+            const colorSel = _addonSelect(ADDON_COLORS.map(c => ({ value: c, text: c })), a.color || ADDON_COLORS[0]);
+            card.appendChild(_addonField('color', colorSel, 'color'));
+
+            card.appendChild(_addonField('command (absolute path first; space-separated args, or a JSON array)',
+                _addonInput('text', _addonCommandString(a.command), '/usr/bin/git stash list'), 'command', true));
+
+            card.appendChild(_addonField('ttl (s)', _addonInput('number', a.ttl != null ? a.ttl : 60), 'ttl'));
+            card.appendChild(_addonField('timeout (s)', _addonInput('number', a.timeout != null ? a.timeout : 5), 'timeout'));
+
+            const p = a.placement || {};
+            const modeSel = _addonSelect([{ value: 'row', text: 'own row' }, { value: 'append', text: 'append to a row' }], p.mode || 'row');
+            card.appendChild(_addonField('placement', modeSel, 'mode'));
+            const groupInput = _addonInput('text', p.group || '', 'group');
+            const groupField = _addonField('group (row mode)', groupInput, 'group');
+            card.appendChild(groupField);
+            card.appendChild(_addonField('order', _addonInput('number', p.order != null ? p.order : 0), 'order'));
+            const targetSel = _addonSelect(
+                [{ value: '', text: '(none)' }].concat(ADDON_APPEND_TARGETS.map(t => ({ value: t, text: t }))),
+                p.target || '');
+            const targetField = _addonField('append target', targetSel, 'target');
+            card.appendChild(targetField);
+
+            // Placement mode gates which field applies: row mode uses group,
+            // append mode uses the append target. Disable and dim the other.
+            const syncPlacementMode = () => {
+                const append = modeSel.value === 'append';
+                groupInput.disabled = append;
+                groupField.style.opacity = append ? '0.4' : '';
+                targetSel.disabled = !append;
+                targetField.style.opacity = append ? '' : '0.4';
+            };
+            modeSel.addEventListener('change', syncPlacementMode);
+            syncPlacementMode();
+
+            card.setAttribute('role', 'group');
+            if (opts.readonly) {
+                card.setAttribute('aria-label', 'Example addon');
+                card.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
+                const addBtn = document.createElement('button');
+                addBtn.className = 'settings-btn-secondary';
+                addBtn.textContent = 'Add this example';
+                addBtn.addEventListener('click', () => {
+                    _clearAddonEmptyHint();
+                    document.getElementById('addonRowsContainer').appendChild(createAddonRow(ADDON_EXAMPLE));
+                });
+                card.appendChild(addBtn);
+            } else {
+                // Tie the shared field labels to a specific addon for screen readers.
+                const setCardLabel = () => {
+                    const v = idInput.value.trim();
+                    card.setAttribute('aria-label', v ? `Addon: ${v}` : 'New addon');
+                };
+                setCardLabel();
+                idInput.addEventListener('input', setCardLabel);
+                const del = document.createElement('button');
+                del.className = 'settings-row-delete';
+                del.textContent = 'Remove';
+                del.addEventListener('click', () => card.remove());
+                card.appendChild(del);
+            }
+            return card;
+        }
+
+        function _clearAddonEmptyHint() {
+            const hint = document.querySelector('#addonRowsContainer .settings-addon-empty');
+            if (hint) hint.remove();
+        }
+
+        function renderAddonRows(addons) {
+            const example = document.getElementById('addonExampleContainer');
+            example.replaceChildren();
+            example.appendChild(createAddonRow(ADDON_EXAMPLE, { readonly: true }));
+            const container = document.getElementById('addonRowsContainer');
+            container.replaceChildren();
+            const list = addons || [];
+            if (list.length === 0) {
+                const hint = document.createElement('div');
+                hint.className = 'settings-hint settings-addon-empty';
+                hint.textContent = 'No addons yet.';
+                container.appendChild(hint);
+                return;
+            }
+            for (const a of list) container.appendChild(createAddonRow(a));
+        }
+
+        function addAddonRow() {
+            _clearAddonEmptyHint();
+            document.getElementById('addonRowsContainer').appendChild(createAddonRow({
+                id: '', enabled: true, label: '', icon: '', color: ADDON_COLORS[0] || 'version',
+                command: [], ttl: 60, timeout: 5,
+                placement: { mode: 'row', group: '', order: 0, target: null },
+            }));
+        }
+
+        function _parseAddonCommand(raw) {
+            const s = (raw || '').trim();
+            if (!s) return [];
+            if (s.startsWith('[')) {
+                try {
+                    const v = JSON.parse(s);
+                    return Array.isArray(v) ? v.map(String) : [];
+                } catch (e) {
+                    return [];
+                }
+            }
+            return s.split(/\s+/).filter(Boolean);
+        }
+
+        async function saveAddonSettings() {
+            const cards = document.querySelectorAll('#addonRowsContainer .settings-addon-card');
+            const status = document.getElementById('addonSaveStatus');
+            const failAddonSave = (msg) => {
+                status.textContent = msg;
+                status.className = 'settings-save-status error';
+            };
+            const addons = [];
+            for (const card of cards) {
+                const g = (f) => card.querySelector(`[data-addon-field="${f}"]`);
+                const id = g('id').value.trim();
+                const commandRaw = g('command').value.trim();
+                if (!id) {
+                    // A card with content but no id would be dropped silently - flag it.
+                    // A fully-empty card is fine to skip.
+                    if (commandRaw || g('label').value.trim()) {
+                        failAddonSave('Each addon needs an id');
+                        return;
+                    }
+                    continue;
+                }
+                const command = _parseAddonCommand(commandRaw);
+                if (commandRaw.startsWith('[') && command.length === 0) {
+                    failAddonSave('Command is not valid JSON');
+                    return;
+                }
+                addons.push({
+                    id,
+                    enabled: g('enabled').checked,
+                    label: g('label').value,
+                    icon: g('icon').value,
+                    color: g('color').value,
+                    command,
+                    ttl: parseInt(g('ttl').value, 10) || 60,
+                    timeout: parseInt(g('timeout').value, 10) || 5,
+                    placement: {
+                        mode: g('mode').value,
+                        group: g('group').value.trim() || id,
+                        order: parseInt(g('order').value, 10) || 0,
+                        target: g('target').value || null,
+                    },
+                });
+            }
+            if (addons.some(a => a.command.length) &&
+                !confirm('Statusline addons run their command on your machine every time the statusline refreshes (throttled by a cache). Only save commands you trust. Continue?')) {
+                return;
+            }
+            await saveSettingsSection('/api/settings/statusline-addons', { addons }, 'addonSaveStatus',
+                'Saved - applies on your next prompt in Claude', 4500);
+            // Re-render from the saved payload so skipped/normalized state matches what persisted.
+            if (status.classList.contains('success')) renderAddonRows(addons);
         }
 
         async function ensureJiraUrlsLoaded() {
