@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MissionCache Dashboard</title>
-    <link rel="icon" type="image/png" href="/static/logo_icon.png">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <script>(function(){var p=localStorage.getItem('missioncache-theme')||'auto';var t=p==='auto'?(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):p;document.documentElement.setAttribute('data-theme-pref',p);if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -183,11 +183,13 @@
             background: rgba(0, 0, 0, 0.03);
         }
 
-        [data-theme="light"] .task-modal-tabs .tab-btn {
+        [data-theme="light"] .task-modal-tabs .tab-btn,
+        [data-theme="light"] .settings-tabs .tab-btn {
             color: #555570;
         }
 
-        [data-theme="light"] .task-modal-tabs .tab-btn:hover {
+        [data-theme="light"] .task-modal-tabs .tab-btn:hover,
+        [data-theme="light"] .settings-tabs .tab-btn:hover {
             background: rgba(0, 0, 0, 0.06);
             color: #1a1a2e;
         }
@@ -3529,6 +3531,63 @@
             border-color: var(--accent-blue, #4da6ff);
         }
 
+        .task-modal-delete-btn:hover {
+            background: rgba(255, 59, 48, 0.12);
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .task-modal-delete-form {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            border: 1px solid var(--accent-red);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+        }
+
+        .task-modal-delete-msg {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .task-modal-delete-form label,
+        .task-modal-delete-type {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .task-modal-delete-form input[type="text"] {
+            padding: 5px 8px;
+            font-size: 13px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+        }
+
+        .task-modal-delete-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .task-modal-delete-confirm {
+            background: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+
+        .task-modal-delete-confirm:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .task-modal-tabs {
             display: flex;
             gap: 4px;
@@ -3537,7 +3596,8 @@
             background: rgba(0, 0, 0, 0.2);
         }
 
-        .task-modal-tabs .tab-btn {
+        .task-modal-tabs .tab-btn,
+        .settings-tabs .tab-btn {
             padding: 8px 16px;
             background: transparent;
             border: none;
@@ -3549,12 +3609,14 @@
             transition: all 0.2s;
         }
 
-        .task-modal-tabs .tab-btn:hover {
+        .task-modal-tabs .tab-btn:hover,
+        .settings-tabs .tab-btn:hover {
             background: var(--border);
             color: var(--text-primary);
         }
 
-        .task-modal-tabs .tab-btn.active {
+        .task-modal-tabs .tab-btn.active,
+        .settings-tabs .tab-btn.active {
             background: var(--accent-purple);
             color: white;
         }
@@ -4214,46 +4276,137 @@
             border-color: var(--accent-purple);
         }
 
-        .settings-addon-card {
+        /* Settings tabs */
+        .settings-tabs {
             display: flex;
-            flex-wrap: wrap;
-            gap: 10px 14px;
-            align-items: flex-end;
-            padding: 12px;
-            margin-bottom: 10px;
+            gap: 4px;
+            margin: 4px 0 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .settings-tab-panel { display: none; }
+        .settings-tab-panel.active { display: block; }
+
+        /* Statusline addon summary list */
+        .addon-list-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
             border: 1px solid var(--border);
             border-radius: 8px;
             background: var(--bg-secondary);
         }
 
-        .settings-addon-card.readonly {
-            opacity: 0.85;
-            border-style: dashed;
+        .addon-list-icon { font-size: 15px; line-height: 1; }
+        .addon-list-name { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+        .addon-list-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+        .addon-list-off { font-size: 11px; color: var(--text-muted); font-style: italic; }
+        .addon-list-placement {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
         }
+        .addon-list-empty { padding: 16px; text-align: center; }
 
-        .settings-addon-field {
+        .addon-list-toggle {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .addon-list-toggle input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+
+        /* Addon editor modal (reuses .doc-edit-* shell, widened for the form) */
+        .doc-edit-content.addon-modal-content { max-width: 640px; }
+
+        .addon-form-group {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 14px 14px;
+            margin-bottom: 14px;
+        }
+        .addon-form-group legend {
+            padding: 0 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .addon-form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px 14px;
+        }
+        .addon-form-grid label {
             display: flex;
             flex-direction: column;
             gap: 4px;
             font-size: 11px;
             color: var(--text-muted);
+            text-transform: none;
+            letter-spacing: normal;
+            margin-bottom: 0;
         }
-
-        .settings-addon-field input,
-        .settings-addon-field select {
-            font-size: 13px;
+        .addon-form-grid label.addon-form-inline {
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
         }
-
-        .settings-addon-field input[type="text"],
-        .settings-addon-field input[type="number"] {
-            background: var(--bg-primary);
+        .addon-form-field-full {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        .addon-form-group input[type="text"],
+        .addon-form-group input[type="number"],
+        .addon-form-group select {
+            background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 4px;
             padding: 6px 10px;
             color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            width: 100%;
+        }
+        .addon-form-group input:focus,
+        .addon-form-group select:focus { border-color: var(--accent-purple); }
+        .addon-form-group input[type="checkbox"] { width: 14px; height: 14px; }
+        .addon-form-group .settings-hint { margin: 8px 0 10px; }
+
+        /* Import report block */
+        .settings-import-report {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            overflow-x: auto;
+            max-height: 260px;
+            overflow-y: auto;
         }
 
-        .settings-addon-field.wide { flex: 1 1 260px; }
+        /* Live preview chip */
+        .addon-preview-caption { font-size: 11px; color: var(--text-muted); margin: 2px 0 6px; }
+        .addon-preview {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-primary);
+            white-space: nowrap;
+            overflow-x: auto;
+        }
 
         .settings-save-status {
             font-size: 12px;
@@ -4266,6 +4419,10 @@
 
         .settings-save-status.error {
             color: var(--accent-red);
+        }
+
+        .settings-save-status.warn {
+            color: var(--accent-orange, #e0a030);
         }
 
         /* Learning Analytics */
@@ -5166,92 +5323,129 @@
                             <div class="card-subtitle">Stored in <code>~/.claude/missioncache-dashboard-config.json</code>. Changes take effect immediately.</div>
                         </div>
 
-                        <!-- JIRA URL mappings -->
-                        <div class="settings-section">
-                            <h3>JIRA URL mappings</h3>
-                            <p class="settings-hint">Map JIRA key prefixes to your tracker URL. Each entry turns keys like <code>PROJ-123</code> into clickable links in task lists, project modals, and rendered markdown.</p>
-                            <div id="jiraRowsContainer" class="settings-rows"></div>
-                            <div class="settings-row-actions">
-                                <button class="settings-btn-secondary" onclick="addJiraRow()">+ Add mapping</button>
-                                <button class="settings-btn-primary" onclick="saveJiraSettings()">Save JIRA mappings</button>
-                                <span id="jiraSaveStatus" class="settings-save-status"></span>
+                        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+                            <button class="tab-btn active" role="tab" id="settingsTabBtn-statusline"
+                                    aria-controls="settingsPanel-statusline" aria-selected="true"
+                                    data-tab="statusline" onclick="switchSettingsTab('statusline')">Statusline</button>
+                            <button class="tab-btn" role="tab" id="settingsTabBtn-repos"
+                                    aria-controls="settingsPanel-repos" aria-selected="false"
+                                    data-tab="repos" onclick="switchSettingsTab('repos')">Repos &amp; commits</button>
+                            <button class="tab-btn" role="tab" id="settingsTabBtn-projects"
+                                    aria-controls="settingsPanel-projects" aria-selected="false"
+                                    data-tab="projects" onclick="switchSettingsTab('projects')">Projects</button>
+                        </div>
+
+                        <!-- Statusline tab -->
+                        <div class="settings-tab-panel active" id="settingsPanel-statusline"
+                             role="tabpanel" aria-labelledby="settingsTabBtn-statusline">
+
+                            <!-- Statusline visibility -->
+                            <div class="settings-section">
+                                <h3>Statusline visibility</h3>
+                                <p class="settings-hint">Toggle which sections the statusline displays. Disabled sections also skip any background API calls they would otherwise make.</p>
+                                <div class="settings-statusline-toggles">
+                                    <label class="settings-toggle"><input type="checkbox" id="statuslineToggleCodex"><span>Codex usage</span></label>
+                                    <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubUsage"><span>Claude subscription usage</span></label>
+                                    <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubType"><span>Claude subscription type</span></label>
+                                    <label class="settings-toggle"><input type="checkbox" id="statuslineToggleStatus"><span>Claude status</span></label>
+                                </div>
+                                <p class="settings-hint" style="margin-top:12px">Claude status services to monitor (applies when Claude status is enabled):</p>
+                                <div class="settings-statusline-services" id="statuslineServicesCheckboxes"></div>
+                                <label class="settings-toggle" style="margin-top:12px"><input type="checkbox" id="statuslineToggleModelSuspensions"><span>Show model suspension / deprecation notices</span></label>
+                                <p class="settings-hint">Off by default. Model-access announcements (e.g. a suspended Fable or Mythos model) stay open on Claude's status page for weeks and would otherwise pin to the statusline. Genuine outages still show regardless of this setting.</p>
+                                <div class="settings-row-actions">
+                                    <button class="settings-btn-primary" onclick="saveStatuslineSettings()">Save statusline settings</button>
+                                    <span id="statuslineSaveStatus" class="settings-save-status"></span>
+                                </div>
+                            </div>
+
+                            <!-- Statusline addons -->
+                            <div class="settings-section">
+                                <h3>Statusline addons</h3>
+                                <p class="settings-hint">Add your own cells to the statusline, each filled by a command you choose. Nothing shows until you add one. The command output becomes the cell value (plain text, or a JSON object with value/label/icon/color to override). It runs on your machine on each statusline refresh (throttled by a per-addon cache), so command[0] must be an existing absolute path and you should only add commands you trust.</p>
+                                <div class="settings-row-actions" style="margin-bottom:12px">
+                                    <button class="settings-btn-primary" onclick="openAddonModal(-1)">+ Add addon</button>
+                                    <button class="settings-btn-secondary" onclick="openAddonExample()">+ Add example</button>
+                                    <span id="addonSaveStatus" class="settings-save-status" aria-live="polite"></span>
+                                </div>
+                                <div id="addonRowsContainer" class="settings-rows"></div>
                             </div>
                         </div>
 
-                        <!-- Author email allowlist -->
-                        <div class="settings-section">
-                            <h3>Author email allowlist</h3>
-                            <p class="settings-hint">List of email addresses treated as "me" when counting commits per repo. When this list is empty, the dashboard falls back to each repo's <code>git config user.email</code>.</p>
-                            <div id="emailRowsContainer" class="settings-rows"></div>
-                            <div class="settings-row-actions">
-                                <button class="settings-btn-secondary" onclick="addEmailRow()">+ Add email</button>
-                                <button class="settings-btn-primary" onclick="saveEmailSettings()">Save emails</button>
-                                <span id="emailSaveStatus" class="settings-save-status"></span>
+                        <!-- Repos & commits tab -->
+                        <div class="settings-tab-panel" id="settingsPanel-repos" hidden
+                             role="tabpanel" aria-labelledby="settingsTabBtn-repos">
+
+                            <!-- Repo display overrides -->
+                            <div class="settings-section">
+                                <h3>Repo display names and visibility</h3>
+                                <p class="settings-hint">Override the display name shown in task lists and hide repos you don't want to see in aggregations.</p>
+                                <div id="repoRowsContainer" class="settings-rows"></div>
+                                <div class="settings-row-actions">
+                                    <button class="settings-btn-primary" onclick="saveRepoSettings()">Save repo overrides</button>
+                                    <span id="repoSaveStatus" class="settings-save-status"></span>
+                                </div>
+                            </div>
+
+                            <!-- Author email allowlist -->
+                            <div class="settings-section">
+                                <h3>Author email allowlist</h3>
+                                <p class="settings-hint">List of email addresses treated as "me" when counting commits per repo. When this list is empty, the dashboard falls back to each repo's <code>git config user.email</code>.</p>
+                                <div id="emailRowsContainer" class="settings-rows"></div>
+                                <div class="settings-row-actions">
+                                    <button class="settings-btn-secondary" onclick="addEmailRow()">+ Add email</button>
+                                    <button class="settings-btn-primary" onclick="saveEmailSettings()">Save emails</button>
+                                    <span id="emailSaveStatus" class="settings-save-status"></span>
+                                </div>
+                            </div>
+
+                            <!-- JIRA URL mappings -->
+                            <div class="settings-section">
+                                <h3>JIRA URL mappings</h3>
+                                <p class="settings-hint">Map JIRA key prefixes to your tracker URL. Each entry turns keys like <code>PROJ-123</code> into clickable links in task lists, project modals, and rendered markdown.</p>
+                                <div id="jiraRowsContainer" class="settings-rows"></div>
+                                <div class="settings-row-actions">
+                                    <button class="settings-btn-secondary" onclick="addJiraRow()">+ Add mapping</button>
+                                    <button class="settings-btn-primary" onclick="saveJiraSettings()">Save JIRA mappings</button>
+                                    <span id="jiraSaveStatus" class="settings-save-status"></span>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Repo display overrides -->
-                        <div class="settings-section">
-                            <h3>Repo display names and visibility</h3>
-                            <p class="settings-hint">Override the display name shown in task lists and hide repos you don't want to see in aggregations.</p>
-                            <div id="repoRowsContainer" class="settings-rows"></div>
-                            <div class="settings-row-actions">
-                                <button class="settings-btn-primary" onclick="saveRepoSettings()">Save repo overrides</button>
-                                <span id="repoSaveStatus" class="settings-save-status"></span>
-                            </div>
-                        </div>
+                        <!-- Projects tab -->
+                        <div class="settings-tab-panel" id="settingsPanel-projects" hidden
+                             role="tabpanel" aria-labelledby="settingsTabBtn-projects">
 
-                        <!-- Statusline visibility -->
-                        <div class="settings-section">
-                            <h3>Statusline visibility</h3>
-                            <p class="settings-hint">Toggle which sections the statusline displays. Disabled sections also skip any background API calls they would otherwise make.</p>
-                            <div class="settings-statusline-toggles">
-                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleCodex"><span>Codex usage</span></label>
-                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubUsage"><span>Claude subscription usage</span></label>
-                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleSubType"><span>Claude subscription type</span></label>
-                                <label class="settings-toggle"><input type="checkbox" id="statuslineToggleStatus"><span>Claude status</span></label>
+                            <!-- Custom categories -->
+                            <div class="settings-section">
+                                <h3>Custom categories</h3>
+                                <p class="settings-hint">Extend the built-in project category taxonomy. Custom categories render as an emoji in the project tables, the filter bar, and the project modal's selector. Deleting one keeps the value on projects that still use it (shown with default styling) - re-adding the name restores the emoji and color.</p>
+                                <div id="customCategoryRows" class="settings-rows"></div>
+                                <div class="settings-row">
+                                    <input type="text" id="newCategoryName" placeholder="category-name"
+                                           maxlength="24" autocomplete="off" spellcheck="false"
+                                           aria-label="New category name"
+                                           onkeydown="if (event.key === 'Enter') addCustomCategory()">
+                                    <input type="text" id="newCategoryEmoji" placeholder="emoji" class="settings-emoji-input"
+                                           maxlength="16" autocomplete="off" aria-label="New category emoji"
+                                           onkeydown="if (event.key === 'Enter') addCustomCategory()">
+                                    <select id="newCategoryColor" class="filter-repo-select" aria-label="New category color"></select>
+                                    <button class="settings-btn-primary" onclick="addCustomCategory()">Add category</button>
+                                    <span id="categorySaveStatus" class="settings-save-status" aria-live="polite"></span>
+                                </div>
                             </div>
-                            <p class="settings-hint" style="margin-top:12px">Claude status services to monitor (applies when Claude status is enabled):</p>
-                            <div class="settings-statusline-services" id="statuslineServicesCheckboxes"></div>
-                            <label class="settings-toggle" style="margin-top:12px"><input type="checkbox" id="statuslineToggleModelSuspensions"><span>Show model suspension / deprecation notices</span></label>
-                            <p class="settings-hint">Off by default. Model-access announcements (e.g. a suspended Fable or Mythos model) stay open on Claude's status page for weeks and would otherwise pin to the statusline. Genuine outages still show regardless of this setting.</p>
-                            <div class="settings-row-actions">
-                                <button class="settings-btn-primary" onclick="saveStatuslineSettings()">Save statusline settings</button>
-                                <span id="statuslineSaveStatus" class="settings-save-status"></span>
-                            </div>
-                        </div>
 
-                        <!-- Statusline addons -->
-                        <div class="settings-section">
-                            <h3>Statusline addons</h3>
-                            <p class="settings-hint">Add your own cells to the statusline, each filled by a command you choose. Nothing shows until you add one. The command output becomes the cell value (plain text, or a JSON object with value/label/icon/color to override). It runs on your machine on each statusline refresh (throttled by a per-addon cache), so command[0] must be an existing absolute path and you should only add commands you trust.</p>
-                            <p class="settings-hint">Example (not active) - inspect the fields to learn the format, then add an editable copy:</p>
-                            <div id="addonExampleContainer"></div>
-                            <p class="settings-hint" style="margin-top:12px">Your addons:</p>
-                            <div id="addonRowsContainer" class="settings-rows"></div>
-                            <div class="settings-row-actions">
-                                <button class="settings-btn-secondary" onclick="addAddonRow()">+ Add addon</button>
-                                <button class="settings-btn-primary" onclick="saveAddonSettings()">Save addons</button>
-                                <span id="addonSaveStatus" class="settings-save-status"></span>
-                            </div>
-                        </div>
-
-                        <!-- Custom categories -->
-                        <div class="settings-section">
-                            <h3>Custom categories</h3>
-                            <p class="settings-hint">Extend the built-in project category taxonomy. Custom categories render as an emoji in the project tables, the filter bar, and the project modal's selector. Deleting one keeps the value on projects that still use it (shown with default styling) - re-adding the name restores the emoji and color.</p>
-                            <div id="customCategoryRows" class="settings-rows"></div>
-                            <div class="settings-row">
-                                <input type="text" id="newCategoryName" placeholder="category-name"
-                                       maxlength="24" autocomplete="off" spellcheck="false"
-                                       aria-label="New category name"
-                                       onkeydown="if (event.key === 'Enter') addCustomCategory()">
-                                <input type="text" id="newCategoryEmoji" placeholder="emoji" class="settings-emoji-input"
-                                       maxlength="16" autocomplete="off" aria-label="New category emoji"
-                                       onkeydown="if (event.key === 'Enter') addCustomCategory()">
-                                <select id="newCategoryColor" class="filter-repo-select" aria-label="New category color"></select>
-                                <button class="settings-btn-primary" onclick="addCustomCategory()">Add category</button>
-                                <span id="categorySaveStatus" class="settings-save-status" aria-live="polite"></span>
+                            <!-- Import a project -->
+                            <div class="settings-section">
+                                <h3>Import a project</h3>
+                                <p class="settings-hint">Bring in a project bundle from another machine (a <code>.tgz</code>, <code>.tar.gz</code>, or <code>.zip</code> holding the project's markdown files plus a manifest). To export a project, open it and use the Export button in its detail view. Tick "Rewrite embedded paths" when the bundle came from a different machine - it rewrites file paths inside the project's notes to match this machine.</p>
+                                <div class="settings-row-actions" style="flex-wrap:wrap">
+                                    <input type="file" id="importBundleInput" accept=".tgz,.tar.gz,.zip" aria-label="Project bundle file">
+                                    <label class="settings-toggle"><input type="checkbox" id="importRewritePaths"><span>Rewrite embedded paths</span></label>
+                                    <button class="settings-btn-primary" id="importBtn" onclick="importProject()">Import</button>
+                                    <span id="importStatus" class="settings-save-status" aria-live="polite"></span>
+                                </div>
+                                <pre id="importReport" class="settings-import-report" style="display:none;"></pre>
                             </div>
                         </div>
                     </div>
@@ -5331,6 +5525,13 @@
                     <button class="task-modal-rename-btn"
                             onclick="openRenameForm()"
                             title="Rename project">Rename</button>
+                    <button class="task-modal-rename-btn"
+                            onclick="exportProject()"
+                            title="Export project bundle">Export</button>
+                    <button class="task-modal-rename-btn task-modal-delete-btn"
+                            onclick="openDeleteForm()"
+                            title="Delete project">Delete</button>
+                    <span id="taskActionStatus" class="settings-save-status" aria-live="polite"></span>
                 </div>
                 <div class="task-modal-rename-form" id="taskModalRenameForm" style="display: none;">
                     <input type="text" id="taskRenameInput"
@@ -5340,6 +5541,22 @@
                     <button class="settings-btn-primary" onclick="submitRename()">Save</button>
                     <button class="settings-btn-secondary" onclick="closeRenameForm()">Cancel</button>
                     <span id="taskRenameStatus" class="settings-save-status"></span>
+                </div>
+                <div class="task-modal-delete-form" id="taskModalDeleteForm" style="display: none;">
+                    <div class="task-modal-delete-msg">Delete '<span id="taskDeleteName"></span>'? This permanently removes the project and its time history from the dashboard. Its files on disk are kept unless you tick the box below.</div>
+                    <label>
+                        <input type="checkbox" id="taskDeleteFiles" onchange="syncDeleteConfirm()">
+                        <span>Also delete its files on disk (permanent)</span>
+                    </label>
+                    <div class="task-modal-delete-type" id="taskDeleteTypeRow" style="display: none;">
+                        <span>Type <code id="taskDeleteTypeName"></code> to confirm:</span>
+                        <input type="text" id="taskDeleteConfirmInput" autocomplete="off" spellcheck="false" oninput="syncDeleteConfirm()">
+                    </div>
+                    <div class="task-modal-delete-actions">
+                        <button class="settings-btn-primary task-modal-delete-confirm" id="taskDeleteConfirmBtn" onclick="submitDelete()">Delete</button>
+                        <button class="settings-btn-secondary" onclick="closeDeleteForm()">Cancel</button>
+                        <span id="taskDeleteStatus" class="settings-save-status"></span>
+                    </div>
                 </div>
                 <button class="task-modal-close" onclick="closeTaskModal()">&times;</button>
             </div>
@@ -5358,6 +5575,55 @@
                 <div class="task-modal-content-area" id="taskModalContent">
                     <div id="taskModalMarkdown" class="md-rendered"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statusline Addon Editor Modal -->
+    <div class="doc-edit-modal addon-modal" id="addonModal" role="dialog" aria-modal="true" aria-labelledby="addonModalTitle">
+        <div class="doc-edit-content addon-modal-content">
+            <div class="doc-edit-header">
+                <h3 id="addonModalTitle">Add addon</h3>
+                <button class="doc-edit-close" onclick="closeAddonModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="doc-edit-body">
+                <fieldset class="addon-form-group">
+                    <legend>Basics</legend>
+                    <div class="addon-form-grid">
+                        <label>id<input type="text" id="addonFId" placeholder="my-field" autocomplete="off" spellcheck="false"></label>
+                        <label>label<input type="text" id="addonFLabel" placeholder="Label" autocomplete="off"></label>
+                        <label>icon<input type="text" id="addonFIcon" placeholder="📦" autocomplete="off"></label>
+                        <label>color<select id="addonFColor"></select></label>
+                        <label class="addon-form-inline"><input type="checkbox" id="addonFEnabled" checked>enabled</label>
+                    </div>
+                </fieldset>
+                <fieldset class="addon-form-group">
+                    <legend>Command</legend>
+                    <label class="addon-form-field-full">command (absolute path first; space-separated args, or a JSON array)
+                        <input type="text" id="addonFCommand" placeholder="/usr/bin/git stash list" autocomplete="off" spellcheck="false"></label>
+                    <p class="settings-hint">Runs on your machine on each statusline refresh (cached per addon). command[0] must be an existing absolute path. Only add commands you trust.</p>
+                    <div class="addon-form-grid">
+                        <label>ttl seconds (min 5)<input type="number" id="addonFTtl" value="60" min="5"></label>
+                        <label>timeout seconds (1-30)<input type="number" id="addonFTimeout" value="5" min="1" max="30"></label>
+                    </div>
+                </fieldset>
+                <fieldset class="addon-form-group">
+                    <legend>Placement</legend>
+                    <div class="addon-form-grid">
+                        <label>mode<select id="addonFMode"><option value="row">own row</option><option value="append">append to a row</option></select></label>
+                        <label id="addonFGroupField">group (row mode)<input type="text" id="addonFGroup" placeholder="group" autocomplete="off"></label>
+                        <label>order<input type="number" id="addonFOrder" value="0"></label>
+                        <label id="addonFTargetField">append target<select id="addonFTarget"></select></label>
+                    </div>
+                    <p class="settings-hint" id="addonPlacementHint"></p>
+                </fieldset>
+                <div class="addon-preview-caption">Preview - sample value shown; the real value comes from your command on your machine.</div>
+                <div class="addon-preview" id="addonPreview"></div>
+                <div class="settings-save-status error" id="addonModalError" style="margin-top:10px" aria-live="polite"></div>
+            </div>
+            <div class="doc-edit-footer">
+                <button class="doc-edit-btn-cancel" onclick="closeAddonModal()">Cancel</button>
+                <button class="doc-edit-btn-save" onclick="saveAddonFromModal()">Save addon</button>
             </div>
         </div>
     </div>
@@ -5791,6 +6057,10 @@
 
             switchView(hash);
 
+            if (hash === 'settings' && hashParams.tab) {
+                switchSettingsTab(hashParams.tab);
+            }
+
             if (hashParams.task) {
                 openTaskByName(hashParams.task, hashParams.tab || 'tasks');
             }
@@ -5917,7 +6187,7 @@
                 if (Array.isArray(settings.statusline_addon_colors) && settings.statusline_addon_colors.length) {
                     ADDON_COLORS = settings.statusline_addon_colors;
                 }
-                renderAddonRows(settings.statusline_addons || []);
+                renderAddonList(settings.statusline_addons || []);
                 await fetchCustomCategories();
                 renderCustomCategorySettings();
             } catch (err) {
@@ -6112,154 +6382,52 @@
         // ===== Statusline addons =====
         let ADDON_COLORS = ['version'];
         const ADDON_APPEND_TARGETS = ['location', 'project', 'metrics', 'session', 'context', 'usage', 'codex', 'vitals'];
+        // Human-readable hints for the append-target rows (what each statusline row shows).
+        // Only the display text changes; the posted value stays the friendly key the server validates.
+        const ADDON_TARGET_LABELS = {
+            location: 'working dir, git, PR',
+            project: 'MissionCache project, last action',
+            metrics: 'model, thinking effort, fast mode',
+            session: 'elapsed time, edits',
+            context: 'k8s context, tokens, context %',
+            usage: 'plan, session/weekly/opus %',
+            codex: 'Codex plan, session & weekly %',
+            vitals: 'CC version, Claude status',
+        };
         const ADDON_EXAMPLE = {
             id: 'stash', enabled: true, label: 'Stash', icon: '📦', color: 'version',
             command: ['/usr/bin/git', 'stash', 'list'], ttl: 60, timeout: 5,
             placement: { mode: 'row', group: 'git', order: 50, target: null },
         };
-
-        function _addonField(labelText, inputEl, fieldName, wide) {
-            inputEl.dataset.addonField = fieldName;
-            const wrap = document.createElement('label');
-            wrap.className = 'settings-addon-field' + (wide ? ' wide' : '');
-            const span = document.createElement('span');
-            span.textContent = labelText;
-            wrap.appendChild(span);
-            wrap.appendChild(inputEl);
-            return wrap;
-        }
-
-        function _addonInput(type, value, placeholder) {
-            const el = document.createElement('input');
-            el.type = type;
-            if (type === 'checkbox') { el.checked = !!value; }
-            else { el.value = value; }
-            if (placeholder) el.placeholder = placeholder;
-            return el;
-        }
-
-        function _addonSelect(options, selected) {
-            const sel = document.createElement('select');
-            sel.className = 'filter-repo-select';
-            for (const o of options) {
-                const opt = document.createElement('option');
-                opt.value = o.value;
-                opt.textContent = o.text;
-                if (o.value === selected) opt.selected = true;
-                sel.appendChild(opt);
-            }
-            return sel;
-        }
+        // The saved addon list, mirrored from disk on each loadSettingsData. Every
+        // mutation builds an immutable candidate, PUTs the whole list, and commits
+        // here only on success - so there is never staged-but-unsaved state.
+        let ADDON_LIST = [];
+        let addonEditIndex = -1;   // -1 = adding, else index into ADDON_LIST
+        const ADDON_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;   // mirrors statusline _ADDON_ID_RE
+        // key -> terminal RGB, mirrored from statusline.py COLORS so the live preview
+        // shows the real cell color. A missing key degrades to --text-primary; the
+        // dropdown still lists the full server allowlist.
+        const ADDON_COLOR_HEX = {
+            dir: 'rgb(180,140,100)', git_clean: 'rgb(80,200,120)', git_dirty: 'rgb(220,180,50)',
+            project: 'rgb(80,200,120)', k8s: 'rgb(150,120,180)', model: 'rgb(180,130,200)',
+            tokens: 'rgb(100,200,200)', ctx: 'rgb(160,170,190)', ctx_warn: 'rgb(220,180,50)',
+            ctx_urgent: 'rgb(255,109,0)', ctx_est: 'rgb(100,150,220)', time: 'rgb(100,180,180)',
+            edit: 'rgb(200,160,120)', datetime: 'rgb(160,160,180)', version: 'rgb(130,180,220)',
+            pipe: 'rgb(100,100,110)', session_usage: 'rgb(100,160,200)', weekly_usage: 'rgb(160,130,190)',
+            opus_usage: 'rgb(200,160,120)', reset_time: 'rgb(120,120,130)', mode_personal: 'rgb(80,200,120)',
+            mode_work: 'rgb(100,150,220)', mode_free: 'rgb(140,140,150)', health_ok: 'rgb(0,200,83)',
+            health_degraded: 'rgb(255,214,0)', health_partial: 'rgb(255,109,0)', health_resolved: 'rgb(100,180,100)',
+            codex_label: 'rgb(16,163,127)', codex_session: 'rgb(100,200,170)', codex_weekly: 'rgb(160,130,190)',
+            extra_usage: 'rgb(220,170,80)', fast_mode: 'rgb(255,120,20)', upgrade: 'rgb(255,180,60)',
+            effort_low: 'rgb(255,160,60)', effort_medium: 'rgb(100,200,120)', effort_high: 'rgb(170,180,235)',
+            effort_xhigh: 'rgb(180,140,220)', pr_approved: 'rgb(80,200,120)', pr_pending: 'rgb(220,180,50)',
+            pr_changes: 'rgb(255,109,0)', pr_draft: 'rgb(140,140,150)', pr: 'rgb(130,180,220)',
+        };
 
         function _addonCommandString(cmd) {
             if (!Array.isArray(cmd) || cmd.length === 0) return '';
             return cmd.some(x => /\s/.test(x)) ? JSON.stringify(cmd) : cmd.join(' ');
-        }
-
-        function createAddonRow(addon, opts) {
-            opts = opts || {};
-            const a = addon;
-            const card = document.createElement('div');
-            card.className = 'settings-addon-card' + (opts.readonly ? ' readonly' : '');
-
-            const idInput = _addonInput('text', a.id || '', 'my-field');
-            card.appendChild(_addonField('id', idInput, 'id'));
-            card.appendChild(_addonField('enabled', _addonInput('checkbox', a.enabled !== false), 'enabled'));
-            card.appendChild(_addonField('label', _addonInput('text', a.label || '', 'Label'), 'label'));
-            card.appendChild(_addonField('icon', _addonInput('text', a.icon || '', '📦'), 'icon'));
-
-            const colorSel = _addonSelect(ADDON_COLORS.map(c => ({ value: c, text: c })), a.color || ADDON_COLORS[0]);
-            card.appendChild(_addonField('color', colorSel, 'color'));
-
-            card.appendChild(_addonField('command (absolute path first; space-separated args, or a JSON array)',
-                _addonInput('text', _addonCommandString(a.command), '/usr/bin/git stash list'), 'command', true));
-
-            card.appendChild(_addonField('ttl (s)', _addonInput('number', a.ttl != null ? a.ttl : 60), 'ttl'));
-            card.appendChild(_addonField('timeout (s)', _addonInput('number', a.timeout != null ? a.timeout : 5), 'timeout'));
-
-            const p = a.placement || {};
-            const modeSel = _addonSelect([{ value: 'row', text: 'own row' }, { value: 'append', text: 'append to a row' }], p.mode || 'row');
-            card.appendChild(_addonField('placement', modeSel, 'mode'));
-            const groupInput = _addonInput('text', p.group || '', 'group');
-            const groupField = _addonField('group (row mode)', groupInput, 'group');
-            card.appendChild(groupField);
-            card.appendChild(_addonField('order', _addonInput('number', p.order != null ? p.order : 0), 'order'));
-            const targetSel = _addonSelect(
-                [{ value: '', text: '(none)' }].concat(ADDON_APPEND_TARGETS.map(t => ({ value: t, text: t }))),
-                p.target || '');
-            const targetField = _addonField('append target', targetSel, 'target');
-            card.appendChild(targetField);
-
-            // Placement mode gates which field applies: row mode uses group,
-            // append mode uses the append target. Disable and dim the other.
-            const syncPlacementMode = () => {
-                const append = modeSel.value === 'append';
-                groupInput.disabled = append;
-                groupField.style.opacity = append ? '0.4' : '';
-                targetSel.disabled = !append;
-                targetField.style.opacity = append ? '' : '0.4';
-            };
-            modeSel.addEventListener('change', syncPlacementMode);
-            syncPlacementMode();
-
-            card.setAttribute('role', 'group');
-            if (opts.readonly) {
-                card.setAttribute('aria-label', 'Example addon');
-                card.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
-                const addBtn = document.createElement('button');
-                addBtn.className = 'settings-btn-secondary';
-                addBtn.textContent = 'Add this example';
-                addBtn.addEventListener('click', () => {
-                    _clearAddonEmptyHint();
-                    document.getElementById('addonRowsContainer').appendChild(createAddonRow(ADDON_EXAMPLE));
-                });
-                card.appendChild(addBtn);
-            } else {
-                // Tie the shared field labels to a specific addon for screen readers.
-                const setCardLabel = () => {
-                    const v = idInput.value.trim();
-                    card.setAttribute('aria-label', v ? `Addon: ${v}` : 'New addon');
-                };
-                setCardLabel();
-                idInput.addEventListener('input', setCardLabel);
-                const del = document.createElement('button');
-                del.className = 'settings-row-delete';
-                del.textContent = 'Remove';
-                del.addEventListener('click', () => card.remove());
-                card.appendChild(del);
-            }
-            return card;
-        }
-
-        function _clearAddonEmptyHint() {
-            const hint = document.querySelector('#addonRowsContainer .settings-addon-empty');
-            if (hint) hint.remove();
-        }
-
-        function renderAddonRows(addons) {
-            const example = document.getElementById('addonExampleContainer');
-            example.replaceChildren();
-            example.appendChild(createAddonRow(ADDON_EXAMPLE, { readonly: true }));
-            const container = document.getElementById('addonRowsContainer');
-            container.replaceChildren();
-            const list = addons || [];
-            if (list.length === 0) {
-                const hint = document.createElement('div');
-                hint.className = 'settings-hint settings-addon-empty';
-                hint.textContent = 'No addons yet.';
-                container.appendChild(hint);
-                return;
-            }
-            for (const a of list) container.appendChild(createAddonRow(a));
-        }
-
-        function addAddonRow() {
-            _clearAddonEmptyHint();
-            document.getElementById('addonRowsContainer').appendChild(createAddonRow({
-                id: '', enabled: true, label: '', icon: '', color: ADDON_COLORS[0] || 'version',
-                command: [], ttl: 60, timeout: 5,
-                placement: { mode: 'row', group: '', order: 0, target: null },
-            }));
         }
 
         function _parseAddonCommand(raw) {
@@ -6276,57 +6444,299 @@
             return s.split(/\s+/).filter(Boolean);
         }
 
-        async function saveAddonSettings() {
-            const cards = document.querySelectorAll('#addonRowsContainer .settings-addon-card');
-            const status = document.getElementById('addonSaveStatus');
-            const failAddonSave = (msg) => {
-                status.textContent = msg;
-                status.className = 'settings-save-status error';
-            };
-            const addons = [];
-            for (const card of cards) {
-                const g = (f) => card.querySelector(`[data-addon-field="${f}"]`);
-                const id = g('id').value.trim();
-                const commandRaw = g('command').value.trim();
-                if (!id) {
-                    // A card with content but no id would be dropped silently - flag it.
-                    // A fully-empty card is fine to skip.
-                    if (commandRaw || g('label').value.trim()) {
-                        failAddonSave('Each addon needs an id');
-                        return;
-                    }
-                    continue;
-                }
-                const command = _parseAddonCommand(commandRaw);
-                if (commandRaw.startsWith('[') && command.length === 0) {
-                    failAddonSave('Command is not valid JSON');
-                    return;
-                }
-                addons.push({
-                    id,
-                    enabled: g('enabled').checked,
-                    label: g('label').value,
-                    icon: g('icon').value,
-                    color: g('color').value,
-                    command,
-                    ttl: parseInt(g('ttl').value, 10) || 60,
-                    timeout: parseInt(g('timeout').value, 10) || 5,
-                    placement: {
-                        mode: g('mode').value,
-                        group: g('group').value.trim() || id,
-                        order: parseInt(g('order').value, 10) || 0,
-                        target: g('target').value || null,
-                    },
-                });
-            }
-            if (addons.some(a => a.command.length) &&
-                !confirm('Statusline addons run their command on your machine every time the statusline refreshes (throttled by a cache). Only save commands you trust. Continue?')) {
+        function _addonPlacementSummary(a) {
+            const p = a.placement || {};
+            if (p.mode === 'append' && p.target) return `append → ${p.target} row`;
+            return `own row · ${(p.group && p.group.trim()) || a.id}`;
+        }
+
+        // ----- summary list (replaces the old per-addon inline card) -----
+        function renderAddonList(addons) {
+            ADDON_LIST = (addons || []).map(a => JSON.parse(JSON.stringify(a)));
+            const container = document.getElementById('addonRowsContainer');
+            container.replaceChildren();
+            if (!ADDON_LIST.length) {
+                const hint = document.createElement('div');
+                hint.className = 'settings-hint addon-list-empty';
+                hint.textContent = 'No addons yet. Add your own, or start from the git-stash example.';
+                container.appendChild(hint);
                 return;
             }
-            await saveSettingsSection('/api/settings/statusline-addons', { addons }, 'addonSaveStatus',
-                'Saved - applies on your next prompt in Claude', 4500);
-            // Re-render from the saved payload so skipped/normalized state matches what persisted.
-            if (status.classList.contains('success')) renderAddonRows(addons);
+            ADDON_LIST.forEach((a, i) => container.appendChild(_addonListRow(a, i)));
+        }
+
+        function _addonListRow(a, i) {
+            const row = document.createElement('div');
+            row.className = 'addon-list-row';
+
+            const icon = document.createElement('span');
+            icon.className = 'addon-list-icon';
+            icon.textContent = a.icon || '•';
+            row.appendChild(icon);
+
+            const name = document.createElement('span');
+            name.className = 'addon-list-name';
+            name.textContent = a.label || a.id;
+            row.appendChild(name);
+
+            const id = document.createElement('span');
+            id.className = 'addon-list-id';
+            id.textContent = a.id;
+            row.appendChild(id);
+
+            if (a.enabled === false) {
+                const off = document.createElement('span');
+                off.className = 'addon-list-off';
+                off.textContent = 'disabled';
+                row.appendChild(off);
+            }
+
+            const place = document.createElement('span');
+            place.className = 'addon-list-placement';
+            place.textContent = _addonPlacementSummary(a);
+            row.appendChild(place);
+
+            const toggle = document.createElement('label');
+            toggle.className = 'addon-list-toggle';
+            toggle.title = 'Enabled';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = a.enabled !== false;
+            cb.setAttribute('aria-label', `Enable ${a.id}`);
+            cb.addEventListener('change', () => toggleAddonEnabled(i, cb.checked));
+            toggle.appendChild(cb);
+            row.appendChild(toggle);
+
+            const edit = document.createElement('button');
+            edit.className = 'settings-btn-secondary';
+            edit.textContent = 'Edit';
+            edit.addEventListener('click', () => openAddonModal(i));
+            row.appendChild(edit);
+
+            const del = document.createElement('button');
+            del.className = 'settings-row-delete';
+            del.textContent = 'Remove';
+            del.addEventListener('click', () => removeAddon(i));
+            row.appendChild(del);
+
+            return row;
+        }
+
+        // ----- modal editor -----
+        function _populateAddonSelects() {
+            const colorSel = document.getElementById('addonFColor');
+            colorSel.replaceChildren();
+            for (const c of ADDON_COLORS) {
+                const o = document.createElement('option');
+                o.value = c; o.textContent = c;
+                colorSel.appendChild(o);
+            }
+            const targetSel = document.getElementById('addonFTarget');
+            targetSel.replaceChildren();
+            const none = document.createElement('option');
+            none.value = ''; none.textContent = '(none)';
+            targetSel.appendChild(none);
+            for (const t of ADDON_APPEND_TARGETS) {
+                const o = document.createElement('option');
+                o.value = t;
+                o.textContent = ADDON_TARGET_LABELS[t] ? `${t} (${ADDON_TARGET_LABELS[t]})` : t;
+                targetSel.appendChild(o);
+            }
+        }
+
+        function _fillAddonModal(a, title) {
+            _populateAddonSelects();
+            const p = a.placement || {};
+            document.getElementById('addonModalTitle').textContent = title;
+            document.getElementById('addonFId').value = a.id || '';
+            document.getElementById('addonFLabel').value = a.label || '';
+            document.getElementById('addonFIcon').value = a.icon || '';
+            document.getElementById('addonFColor').value = a.color || ADDON_COLORS[0] || 'version';
+            document.getElementById('addonFEnabled').checked = a.enabled !== false;
+            document.getElementById('addonFCommand').value = _addonCommandString(a.command);
+            document.getElementById('addonFTtl').value = a.ttl != null ? a.ttl : 60;
+            document.getElementById('addonFTimeout').value = a.timeout != null ? a.timeout : 5;
+            document.getElementById('addonFMode').value = p.mode || 'row';
+            document.getElementById('addonFGroup').value = p.group || '';
+            document.getElementById('addonFOrder').value = p.order != null ? p.order : 0;
+            document.getElementById('addonFTarget').value = p.target || '';
+            document.getElementById('addonModalError').textContent = '';
+            syncModalPlacementMode();
+            updateAddonPreview();
+            document.getElementById('addonModal').classList.add('open');
+            document.getElementById('addonFId').focus();
+        }
+
+        function openAddonModal(index) {
+            addonEditIndex = index;
+            const a = index >= 0 ? ADDON_LIST[index] : {
+                id: '', enabled: true, label: '', icon: '', color: ADDON_COLORS[0] || 'version',
+                command: [], ttl: 60, timeout: 5,
+                placement: { mode: 'row', group: '', order: 0, target: null },
+            };
+            _fillAddonModal(a, index >= 0 ? 'Edit addon' : 'Add addon');
+        }
+
+        function openAddonExample() {
+            addonEditIndex = -1;
+            _fillAddonModal(ADDON_EXAMPLE, 'Add addon');
+        }
+
+        function closeAddonModal() {
+            document.getElementById('addonModal').classList.remove('open');
+        }
+
+        // Placement mode gates which field applies: row mode uses group, append
+        // mode uses the append target. Disable and dim the other (port of the old
+        // inline syncPlacementMode).
+        function syncModalPlacementMode() {
+            const modeEl = document.getElementById('addonFMode');
+            if (!modeEl) return;
+            const append = modeEl.value === 'append';
+            const groupInput = document.getElementById('addonFGroup');
+            const groupField = document.getElementById('addonFGroupField');
+            const targetInput = document.getElementById('addonFTarget');
+            const targetField = document.getElementById('addonFTargetField');
+            groupInput.disabled = append;
+            groupField.style.opacity = append ? '0.4' : '';
+            targetInput.disabled = !append;
+            targetField.style.opacity = append ? '' : '0.4';
+            document.getElementById('addonPlacementHint').textContent = append
+                ? 'Appends to an existing statusline row. If no target is chosen, it falls back to its own row.'
+                : 'Gets its own row. An empty group defaults to the addon id.';
+        }
+
+        function updateAddonPreview() {
+            const el = document.getElementById('addonPreview');
+            if (!el) return;
+            const icon = document.getElementById('addonFIcon').value || '';
+            const label = document.getElementById('addonFLabel').value || '';
+            const color = document.getElementById('addonFColor').value;
+            el.style.color = ADDON_COLOR_HEX[color] || 'var(--text-primary)';
+            // Mirrors statusline.py _item: "{icon} {label}: {value}". Trim the leading
+            // space when there is no icon so the chip reads cleanly.
+            el.textContent = `${icon} ${label}: sample`.replace(/^\s+/, '');
+        }
+
+        // Live-update the preview + placement gating on any field edit. Delegated on
+        // the modal so it survives re-opens without stacking listeners.
+        (function initAddonModalListeners() {
+            const modal = document.getElementById('addonModal');
+            if (!modal) return;
+            const refresh = () => { syncModalPlacementMode(); updateAddonPreview(); };
+            modal.addEventListener('input', refresh);
+            modal.addEventListener('change', refresh);
+            modal.addEventListener('click', (e) => { if (e.target.id === 'addonModal') closeAddonModal(); });
+        })();
+
+        function _collectAddonFromModal() {
+            const err = document.getElementById('addonModalError');
+            err.textContent = '';
+            const id = document.getElementById('addonFId').value.trim();
+            if (!id) { err.textContent = 'id is required'; return null; }
+            if (!ADDON_ID_RE.test(id)) {
+                err.textContent = 'id must be lowercase letters, digits, or hyphens (max 32, starting with a letter or digit)';
+                return null;
+            }
+            const raw = document.getElementById('addonFCommand').value.trim();
+            const command = _parseAddonCommand(raw);
+            if (raw.startsWith('[') && command.length === 0) { err.textContent = 'Command is not valid JSON'; return null; }
+            const group = document.getElementById('addonFGroup').value.trim();
+            return {
+                id,
+                enabled: document.getElementById('addonFEnabled').checked,
+                label: document.getElementById('addonFLabel').value,
+                icon: document.getElementById('addonFIcon').value,
+                color: document.getElementById('addonFColor').value,
+                command,
+                ttl: parseInt(document.getElementById('addonFTtl').value, 10) || 60,
+                timeout: parseInt(document.getElementById('addonFTimeout').value, 10) || 5,
+                placement: {
+                    mode: document.getElementById('addonFMode').value,
+                    group: group || id,
+                    order: parseInt(document.getElementById('addonFOrder').value, 10) || 0,
+                    target: document.getElementById('addonFTarget').value || null,
+                },
+            };
+        }
+
+        // Persists the whole list (the endpoint replaces it) and surfaces the
+        // FastAPI error body - saveSettingsSection only shows "HTTP <status>", which
+        // would hide the 422 message (e.g. a relative command path).
+        async function _putAddons(nextList) {
+            try {
+                const res = await fetch(`${API_BASE}/api/settings/statusline-addons`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addons: nextList }),
+                });
+                if (res.ok) return { ok: true };
+                let msg = `HTTP ${res.status}`;
+                try {
+                    const d = (await res.json()).detail;
+                    if (Array.isArray(d)) msg = d.map(x => x.msg || JSON.stringify(x)).join('; ');
+                    else if (d) msg = d;
+                } catch (_) { /* non-JSON body */ }
+                return { ok: false, msg };
+            } catch (e) {
+                return { ok: false, msg: String(e) };
+            }
+        }
+
+        function _confirmAddonExec() {
+            return confirm('Statusline addons run their command on your machine every time the statusline refreshes (throttled by a cache). Only save commands you trust. Continue?');
+        }
+
+        function _addonSavedStatus() {
+            const s = document.getElementById('addonSaveStatus');
+            s.textContent = 'Saved - applies on your next prompt in Claude';
+            s.className = 'settings-save-status success';
+            setTimeout(() => { s.textContent = ''; s.className = 'settings-save-status'; }, 4500);
+        }
+
+        function _addonErrorStatus(msg) {
+            const s = document.getElementById('addonSaveStatus');
+            s.textContent = `Error: ${msg}`;
+            s.className = 'settings-save-status error';
+        }
+
+        async function saveAddonFromModal() {
+            const a = _collectAddonFromModal();
+            if (!a) return;
+            const dup = ADDON_LIST.some((x, i) => x.id === a.id && i !== addonEditIndex);
+            if (dup) { document.getElementById('addonModalError').textContent = `id "${a.id}" already exists`; return; }
+            const nextList = ADDON_LIST.slice();
+            if (addonEditIndex >= 0) nextList[addonEditIndex] = a;
+            else nextList.push(a);
+            // Confirm whenever we add or change a command that will run locally.
+            if (a.command.length && !_confirmAddonExec()) return;
+            const r = await _putAddons(nextList);
+            if (!r.ok) { document.getElementById('addonModalError').textContent = `Error: ${r.msg}`; return; }
+            ADDON_LIST = nextList;
+            closeAddonModal();
+            renderAddonList(ADDON_LIST);
+            _addonSavedStatus();
+        }
+
+        async function toggleAddonEnabled(index, enabled) {
+            if (index < 0 || index >= ADDON_LIST.length) return;
+            const nextList = ADDON_LIST.map((x, i) => i === index ? Object.assign({}, x, { enabled }) : x);
+            const r = await _putAddons(nextList);
+            if (!r.ok) { _addonErrorStatus(r.msg); renderAddonList(ADDON_LIST); return; }
+            ADDON_LIST = nextList;
+            renderAddonList(ADDON_LIST);
+            _addonSavedStatus();
+        }
+
+        async function removeAddon(index) {
+            if (index < 0 || index >= ADDON_LIST.length) return;
+            const nextList = ADDON_LIST.slice();
+            nextList.splice(index, 1);
+            const r = await _putAddons(nextList);
+            if (!r.ok) { _addonErrorStatus(r.msg); renderAddonList(ADDON_LIST); return; }
+            ADDON_LIST = nextList;
+            renderAddonList(ADDON_LIST);
+            _addonSavedStatus();
         }
 
         async function ensureJiraUrlsLoaded() {
@@ -6513,6 +6923,63 @@
             } catch (err) {
                 status.textContent = `Error: ${err.message}`;
                 status.className = 'settings-save-status error';
+            }
+        }
+
+        // Upload a project bundle. Not a saveSettingsSection caller - that helper is
+        // PUT+JSON only, and this is a multipart POST that returns the importer report.
+        async function importProject() {
+            const input = document.getElementById('importBundleInput');
+            const status = document.getElementById('importStatus');
+            const reportEl = document.getElementById('importReport');
+            const btn = document.getElementById('importBtn');
+            const file = input.files && input.files[0];
+            if (!file) {
+                status.textContent = 'Choose a bundle file first.';
+                status.className = 'settings-save-status error';
+                return;
+            }
+            status.textContent = 'Importing...';
+            status.className = 'settings-save-status';
+            reportEl.style.display = 'none';
+            if (btn) btn.disabled = true;   // block double-submit
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('rewrite_paths', document.getElementById('importRewritePaths').checked ? 'true' : 'false');
+            try {
+                const res = await fetch(`${API_BASE}/api/projects/import`, { method: 'POST', body: fd });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = body.detail || body;
+                    status.textContent = (detail && detail.message) || `HTTP ${res.status}`;
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+                const lines = Array.isArray(body.lines) ? body.lines : [];
+                reportEl.textContent = lines.join('\n');
+                reportEl.style.display = lines.length ? 'block' : 'none';
+                if (body.exit_code === 0) {
+                    status.textContent = 'Imported.';
+                    status.className = 'settings-save-status success';
+                } else if (body.exit_code === 2) {
+                    // Imported, but some references (repo/vault paths) still need
+                    // mapping - a partial success, not a failure. Amber, not red.
+                    status.textContent = 'Imported, but some references need mapping (see report).';
+                    status.className = 'settings-save-status warn';
+                } else {
+                    status.textContent = 'Import failed (see report).';
+                    status.className = 'settings-save-status error';
+                }
+                if (body.success) {
+                    // Clear the picked file so a second click can't re-import the same bundle.
+                    input.value = '';
+                    loadProjectsData();
+                }
+            } catch (err) {
+                status.textContent = `Error: ${err}`;
+                status.className = 'settings-save-status error';
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
@@ -7785,6 +8252,10 @@
             document.getElementById('taskModalName').textContent = taskName;
             document.getElementById('taskModalRepo').textContent = repoName || 'unknown';
 
+            // Reset any header sub-form left open from a previous project.
+            closeRenameForm();
+            closeDeleteForm();
+
             // Category selector reflects the STORED value (null shows as
             // "uncategorized" even when the row icon renders a heuristic
             // guess) - the selector edits what the DB holds, not the guess.
@@ -7886,6 +8357,133 @@
             titleView.style.display = '';
             status.textContent = '';
             input.classList.remove('invalid');
+        }
+
+        // Download the current project's bundle (.tgz) via a same-origin anchor.
+        // The server sets Content-Disposition, so the browser names the file.
+        // Fetch the bundle as a blob so a non-2xx response is visible (a plain
+        // <a download> silently saves the error body as a file). The filename
+        // comes from the server's Content-Disposition.
+        async function exportProject() {
+            if (currentTaskId == null) return;
+            const status = document.getElementById('taskActionStatus');
+            status.textContent = 'Preparing download...';
+            status.className = 'settings-save-status';
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${currentTaskId}/export`);
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try { const b = await res.json(); msg = (b.detail && b.detail.message) || b.message || msg; } catch (_) {}
+                    status.textContent = `Export failed: ${msg}`;
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+                const blob = await res.blob();
+                let filename = 'project.missioncache-bundle.tgz';
+                const m = (res.headers.get('content-disposition') || '').match(/filename="?([^"]+)"?/);
+                if (m) filename = m[1];
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                status.textContent = '';
+                status.className = 'settings-save-status';
+            } catch (err) {
+                status.textContent = `Export failed: ${err}`;
+                status.className = 'settings-save-status error';
+            }
+        }
+
+        let _deleteAcknowledge = false;   // true after a delete succeeded WITH warnings
+
+        function openDeleteForm() {
+            _deleteAcknowledge = false;
+            const name = document.getElementById('taskModalName').textContent;
+            document.getElementById('taskDeleteName').textContent = name;
+            document.getElementById('taskDeleteTypeName').textContent = name;
+            document.getElementById('taskDeleteFiles').checked = false;
+            document.getElementById('taskDeleteConfirmInput').value = '';
+            document.getElementById('taskDeleteTypeRow').style.display = 'none';
+            const status = document.getElementById('taskDeleteStatus');
+            status.textContent = '';
+            status.className = 'settings-save-status';
+            document.getElementById('taskModalTitleView').style.display = 'none';
+            closeRenameForm();
+            document.getElementById('taskModalDeleteForm').style.display = 'flex';
+            syncDeleteConfirm();
+        }
+
+        function closeDeleteForm() {
+            const form = document.getElementById('taskModalDeleteForm');
+            if (!form) return;
+            form.style.display = 'none';
+            document.getElementById('taskModalTitleView').style.display = '';
+        }
+
+        // Deleting the DB record only needs a click. Deleting the files on disk
+        // is gated behind the checkbox AND typing the exact project name.
+        function syncDeleteConfirm() {
+            const wantsFiles = document.getElementById('taskDeleteFiles').checked;
+            const typeRow = document.getElementById('taskDeleteTypeRow');
+            const typed = document.getElementById('taskDeleteConfirmInput').value;
+            const name = document.getElementById('taskModalName').textContent;
+            typeRow.style.display = wantsFiles ? 'flex' : 'none';
+            const btn = document.getElementById('taskDeleteConfirmBtn');
+            btn.disabled = wantsFiles && typed !== name;
+            btn.textContent = wantsFiles ? 'Delete project + files' : 'Delete';
+        }
+
+        async function submitDelete() {
+            if (currentTaskId == null) return;
+            const status = document.getElementById('taskDeleteStatus');
+            const btn = document.getElementById('taskDeleteConfirmBtn');
+            // Second click after a delete that returned warnings: acknowledge + close.
+            if (_deleteAcknowledge) {
+                _deleteAcknowledge = false;
+                closeTaskModal();
+                loadProjectsData();
+                return;
+            }
+            const wantsFiles = document.getElementById('taskDeleteFiles').checked;
+            status.textContent = 'Deleting...';
+            status.className = 'settings-save-status';
+            btn.disabled = true;   // block double-submit of a destructive action
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${currentTaskId}?delete_files=${wantsFiles}`, {
+                    method: 'DELETE',
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = body.detail || body;
+                    status.textContent = (detail && detail.message) || `HTTP ${res.status}`;
+                    status.className = 'settings-save-status error';
+                    syncDeleteConfirm();   // restore the correct enabled/label state
+                    return;
+                }
+                const warnings = Array.isArray(body.warnings) ? body.warnings.filter(Boolean) : [];
+                if (warnings.length) {
+                    // The record is deleted, but the file removal was refused or
+                    // only partial. Refresh the list behind the modal and make the
+                    // user acknowledge the warning before closing.
+                    loadProjectsData();
+                    status.textContent = 'Deleted, but: ' + warnings.join('; ');
+                    status.className = 'settings-save-status warn';
+                    btn.textContent = 'Close';
+                    btn.disabled = false;
+                    _deleteAcknowledge = true;
+                    return;
+                }
+                closeTaskModal();
+                loadProjectsData();
+            } catch (err) {
+                status.textContent = `Error: ${err}`;
+                status.className = 'settings-save-status error';
+                syncDeleteConfirm();
+            }
         }
 
         function _renameClientValidate(name) {
@@ -8086,6 +8684,23 @@
                 btn.classList.toggle('active', btn.dataset.tab === tab);
             });
             renderTaskTab(tab);
+        }
+
+        let currentSettingsTab = 'statusline';
+        function switchSettingsTab(name) {
+            const panel = document.getElementById('settingsPanel-' + name);
+            if (!panel) return;   // ignore unknown deep-link values
+            currentSettingsTab = name;
+            document.querySelectorAll('.settings-tabs .tab-btn').forEach(b => {
+                const on = b.dataset.tab === name;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            document.querySelectorAll('.settings-tab-panel').forEach(p => {
+                const on = p.id === 'settingsPanel-' + name;
+                p.classList.toggle('active', on);
+                p.hidden = !on;
+            });
         }
 
         async function renderTaskTab(tab) {
@@ -8544,6 +9159,11 @@
         // Close modal on ESC key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                const addonModal = document.getElementById('addonModal');
+                if (addonModal && addonModal.classList.contains('open')) {
+                    closeAddonModal();
+                    return;
+                }
                 const taskModal = document.getElementById('taskModal');
                 if (taskModal.classList.contains('open')) {
                     closeTaskModal();
