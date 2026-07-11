@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-install"
-version = "1.0.4"
+version = "1.0.5"
 description = "Bootstrap installer for MissionCache - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,18 +58,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["missioncache_install"]
 
-# Bundle the repo's rules/, user-commands/, and commands/ into the wheel so end
-# users can install them without cloning. Source of truth stays in the repo root;
-# hatchling pulls them in at build time. Maintainers using --local skip the bundle
-# and read from the clone directly.
+# Bundle the repo's rules/, user-commands/, and commands/ into the package so end
+# users get them without cloning. Source of truth stays in the repo root; the
+# hatch_build.py hook copies them into missioncache_install/bundled/ at build
+# time, for both the wheel and the sdist (so the two-stage sdist-then-wheel build
+# works). Maintainers using --local skip the bundle and read from the clone.
 #
 # `commands/` powers slash command parity in Codex/OpenCode/VSCode (via
 # command_clients.py - one source, three rendered destinations). Claude reads the
 # same files via its plugin manifest, not the bundle.
-[tool.hatch.build.targets.wheel.force-include]
-"../rules" = "missioncache_install/bundled/rules"
-"../user-commands" = "missioncache_install/bundled/user_commands"
-"../commands" = "missioncache_install/bundled/commands"
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+# bundled/ is gitignored (a build artifact), so force its inclusion in the built
+# distributions.
+[tool.hatch.build]
+artifacts = ["missioncache_install/bundled/"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
