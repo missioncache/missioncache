@@ -1,6 +1,6 @@
 [project]
 name = "mcp-missioncache"
-version = "1.0.12"
+version = "1.0.13"
 description = "MCP server for the MissionCache Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "missioncache-db>=1.0.9",
+    "missioncache-db>=1.0.10",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

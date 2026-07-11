@@ -545,8 +545,12 @@ def _mark_task_checked_by_number(content: str, number: str) -> str:
     re-completing a done item is a safe no-op (and stays out of the
     pre/post transition diff).
     """
+    # The trailing (?!\d) disqualifies a following digit so completing
+    # parent "1" matches "- [ ] 1. Parent" but not the "1." prefix of a
+    # subtask line "- [ ] 1.2. Child" (and completing "1.2" won't match
+    # "1.2.3."). Without it, sub() would flip every child too.
     pattern = re.compile(
-        rf"^(\s*[-*]\s*)\[\s*\](\s*{re.escape(number)}\.)",
+        rf"^(\s*[-*]\s*)\[\s*\](\s*{re.escape(number)}\.)(?!\d)",
         re.MULTILINE,
     )
     return pattern.sub(r"\1[x]\2", content)
@@ -621,12 +625,15 @@ def update_tasks_file(
                     content = _mark_task_checked_by_number(content, number)
                     updates_made.append(f"Completed: {task_desc[:50]}...")
                     continue
-                # Fallback: literal substring of an unchecked line.
+                # Fallback: literal substring of an unchecked line. Only
+                # the FIRST match is flipped (count=1) - a bare word can
+                # appear in several task lines, and marking every one of
+                # them done would silently complete unfinished siblings.
                 escaped = re.escape(task_desc)
                 pattern = rf"- \[\s*\]([^\n]*{escaped}[^\n]*)"
                 if re.search(pattern, content, re.IGNORECASE):
                     content = re.sub(
-                        pattern, r"- [x]\1", content, flags=re.IGNORECASE
+                        pattern, r"- [x]\1", content, count=1, flags=re.IGNORECASE
                     )
                     updates_made.append(f"Completed: {task_desc[:50]}...")
                 else:
@@ -704,7 +711,14 @@ def update_tasks_file(
 
 
 def parse_task_progress(content: str) -> TaskProgress:
-    """Parse progress from tasks.md content."""
+    """Parse progress from tasks.md content.
+
+    Only leaf checklist items count toward the totals. A parent line (a
+    numbered item that has dotted children, e.g. ``1.`` when ``1.1``/``1.2``
+    exist) is a structural heading, not a work item - counting it would keep
+    a project with subtasks from ever reaching 100% and disagree with the
+    ``format_tasks_markdown`` count that seeds the "N tasks pending" header.
+    """
     # Match markdown checklist items: - [ ] or - [x]
     completed_pattern = r"^\s*[-*]\s*\[x\]"
     pending_pattern = r"^\s*[-*]\s*\[\s*\]"
@@ -713,6 +727,19 @@ def parse_task_progress(content: str) -> TaskProgress:
         re.findall(completed_pattern, content, re.MULTILINE | re.IGNORECASE)
     )
     pending = len(re.findall(pending_pattern, content, re.MULTILINE))
+
+    # Drop parent lines from the counts: a number is a parent iff another
+    # item's number extends it with a "." (so "1" is a parent of "1.1").
+    # max(0, ...) guards against a hand-edited checkbox the line regex and
+    # parse_tasks_md classify differently (e.g. "- [ x ]").
+    items = parse_tasks_md(content)
+    numbers = [item.number for item in items]
+    for item in items:
+        if any(other.startswith(item.number + ".") for other in numbers):
+            if item.checked:
+                completed = max(0, completed - 1)
+            else:
+                pending = max(0, pending - 1)
 
     total = completed + pending
     pct = int((completed / total * 100) if total > 0 else 0)

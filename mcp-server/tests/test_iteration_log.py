@@ -23,6 +23,15 @@ class TestTaskIdToDisplay:
         """'01-02' converts to '1.2' (dot-separated)."""
         assert _task_id_to_display("01-02") == "1.2"
 
+    def test_letter_suffixed_id_returned_as_is(self):
+        """A non-numeric id like '54a' (the letter-suffixed checklist scheme)
+        is returned unchanged instead of raising ValueError on int()."""
+        assert _task_id_to_display("54a") == "54a"
+
+    def test_non_numeric_hyphenated_id_returned_as_is(self):
+        """A hand-authored id like 'phase-1' does not crash the conversion."""
+        assert _task_id_to_display("phase-1") == "phase-1"
+
 
 # --- get_iteration_status ---
 
@@ -105,6 +114,26 @@ class TestGetPromptsStatus:
         assert result["completed"] == 1
         assert result["remaining"] == 0
         assert result["next_prompt"] is None
+
+    def test_non_numeric_task_id_does_not_crash(self, tmp_path):
+        """A prompt whose frontmatter carries a letter-suffixed task_id
+        ('54a') must be counted, not raise ValueError out of the tool. The
+        '54a' checklist item is unchecked in tasks.md, so it counts as
+        remaining."""
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "task-54a-prompt.md").write_text(
+            '---\ntask_id: "54a"\ntitle: Letter-suffixed task\n---\n\n# Task 54a\n'
+        )
+        (tmp_path / "my-task-tasks.md").write_text(
+            "## Tasks\n\n- [ ] 54a. Letter-suffixed task\n"
+        )
+
+        result = get_prompts_status(tmp_path, "my-task")
+        assert result["exists"] is True
+        assert result["total"] == 1
+        assert result["completed"] == 0
+        assert result["remaining"] == 1
 
 
 # --- get_iteration_log_path ---

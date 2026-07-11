@@ -98,6 +98,30 @@ class TestParseTaskProgress:
         assert "Write tests" in progress.remaining_summary
         assert "Add documentation" in progress.remaining_summary
 
+    def test_parent_lines_excluded_from_totals(self, sample_tasks_md_hierarchical):
+        """Parent checklist lines (numbers with dotted children) are
+        structural headings, not work items, so only the 4 leaf subtasks
+        count - 1 done (1.1) of 4 = 25%. Counting the parents would give
+        2/6 and a project with subtasks could never reach 100%."""
+        progress = parse_task_progress(sample_tasks_md_hierarchical)
+        assert progress.total_items == 4
+        assert progress.completed_items == 1
+        assert progress.completion_pct == 25
+
+    def test_completing_all_leaves_reaches_100(self):
+        """Once every leaf is checked the project is 100%, even while the
+        parent heading line stays unchecked."""
+        content = (
+            "## Tasks\n\n"
+            "- [ ] 1. Parent\n"
+            "  - [x] 1.1. Child A\n"
+            "  - [x] 1.2. Child B\n"
+        )
+        progress = parse_task_progress(content)
+        assert progress.total_items == 2
+        assert progress.completed_items == 2
+        assert progress.completion_pct == 100
+
 
 # --- _update_section ---
 

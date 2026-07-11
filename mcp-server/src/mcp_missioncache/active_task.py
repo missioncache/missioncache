@@ -25,10 +25,11 @@ pattern. Concurrent sessions on the same project don't clobber each other.
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime
 from pathlib import Path
+
+import missioncache_db  # type: ignore[import-not-found]
 
 # Lives under ``~/.claude/`` (Claude Code's state dir), not ``~/.missioncache/``,
 # because session-scoped state is keyed by Claude Code session ids and
@@ -88,9 +89,12 @@ def write_pointer(
         "task_numbers": list(task_numbers),
         "updated": datetime.now().astimezone().isoformat(),
     }
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2))
-    os.replace(tmp, path)
+    # atomic_write_json does the tmp-then-os.replace with a pid-suffixed tmp
+    # file, so concurrent writers (e.g. another session's
+    # remove_task_numbers_everywhere sweep rewriting THIS sid's pointer at the
+    # same moment) never interleave into a torn file - the worst case is a
+    # clean last-writer-wins, never a corrupt pointer.
+    missioncache_db.atomic_write_json(path, payload)
     return path
 
 

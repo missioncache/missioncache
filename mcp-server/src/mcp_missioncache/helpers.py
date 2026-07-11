@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 # pointer write against path traversal.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
+# Shared tail for the session_id Field descriptions across the binding
+# tools. The tool schema is paid on every session, so the auto-resolve
+# clause lives here once instead of being restated ~100 tokens at a time in
+# each tool. Compose it after a one-line, tool-specific lead sentence.
+SESSION_ID_RESOLVE_HINT = (
+    "Auto-resolved from CLAUDE_CODE_SESSION_ID on Claude Code 2.1.154+; "
+    "pass explicitly for older or non-Claude clients."
+)
+
 
 def _resolve_session_id(session_id: str | None) -> str | None:
     """Resolve the effective Claude session id for a binding tool.

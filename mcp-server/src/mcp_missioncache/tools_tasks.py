@@ -25,9 +25,11 @@ from .errors import (
     ValidationError,
 )
 from .helpers import (
+    SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
     _notify_dashboard_task_created,
     _resolve_session_id,
+    _resolve_to_git_root,
     _task_to_detail,
     _task_to_summary,
     _validate_path,
@@ -152,6 +154,12 @@ async def list_active_tasks(
     - tasks: projects belonging to the given repo (shown first)
     - other_tasks: all other active projects
 
+    repo_path is looked up as given first, then falls back to its containing
+    git root, so a cwd inside a repo matches the repo registered at its root.
+    If repo_path resolves to no registered repo, filter_applied is tagged
+    "(not registered)" and the repo-scoped list is empty rather than
+    silently returning every project as if it were repo-scoped.
+
     Display: the response includes a `display` field with a pre-rendered
     plain-text table of `tasks`. When showing this output to a user in a
     chat UI, render the `display` string verbatim - it reads cleanly in
@@ -163,35 +171,61 @@ async def list_active_tasks(
     try:
         repo_id = None
         if repo_path:
-            repo = db.get_repo_by_path(repo_path)
+            # Try the path as given (covers a monorepo sub-package
+            # registered with resolve_git_root=False), then its git root
+            # (covers a cwd that is a subdir of a normally-registered repo).
+            repo = db.get_repo_by_path(repo_path) or db.get_repo_by_path(
+                _resolve_to_git_root(repo_path)
+            )
             if repo:
                 repo_id = repo.id
 
-        if prioritize_by_repo and repo_id:
-            # Two-tier: fetch all tasks, split by repo membership
+        if prioritize_by_repo and repo_path:
+            # Two-tier: fetch all tasks, split by repo membership. When
+            # repo_path resolves to no registered repo (repo_id is None),
+            # nothing is "in" the repo, so every task falls to other_tasks -
+            # the intended prioritization for a cwd with no tracked projects.
             all_tasks = db.get_active_tasks(None)
 
             if task_type:
                 all_tasks = [t for t in all_tasks if t.task_type == task_type]
 
-            repo_tasks = [t for t in all_tasks if t.repo_id == repo_id]
-            other_tasks = [t for t in all_tasks if t.repo_id != repo_id]
+            repo_tasks = [
+                t
+                for t in all_tasks
+                if repo_id is not None and t.repo_id == repo_id
+            ]
+            other_tasks = [
+                t
+                for t in all_tasks
+                if not (repo_id is not None and t.repo_id == repo_id)
+            ]
 
             repo_summaries = _build_summaries(repo_tasks, db, include_time)
             other_summaries = _build_summaries(other_tasks, db, include_time)
 
+            filter_applied = f"prioritized repo={repo_path}"
+            if repo_id is None:
+                filter_applied += " (not registered)"
+
             return ListTasksResult(
                 tasks=repo_summaries,
                 total_count=len(repo_summaries) + len(other_summaries),
-                filter_applied=f"prioritized repo={repo_path}",
+                filter_applied=filter_applied,
                 other_tasks=other_summaries if other_summaries else None,
                 display=_format_prioritized_display(
                     repo_summaries, other_summaries, repo_path or ""
                 ),
             ).model_dump()
         else:
-            # Original behavior: filter by repo or return all
-            tasks = db.get_active_tasks(repo_id)
+            # Filter by repo or return all. A repo_path that resolved to no
+            # registered repo yields an empty repo-scoped list, not every
+            # project - the filter_applied says so instead of claiming a
+            # filter that was never applied.
+            if repo_path and repo_id is None:
+                tasks = []
+            else:
+                tasks = db.get_active_tasks(repo_id)
 
             if task_type:
                 tasks = [t for t in tasks if t.task_type == task_type]
@@ -200,7 +234,10 @@ async def list_active_tasks(
 
             filter_desc = []
             if repo_path:
-                filter_desc.append(f"repo={repo_path}")
+                if repo_id is None:
+                    filter_desc.append(f"repo={repo_path} (not registered)")
+                else:
+                    filter_desc.append(f"repo={repo_path}")
             if task_type:
                 filter_desc.append(f"type={task_type}")
 
@@ -261,14 +298,8 @@ async def get_task(
         str | None,
         Field(
             description=(
-                "Claude Code session ID. Binds the session to this project "
-                "(writes project_state + the per-session pointer) so the "
-                "statusline picks it up without relying on /missioncache:load's "
-                "slash-command bash step. On Claude Code 2.1.154+ this is "
-                "resolved automatically from the CLAUDE_CODE_SESSION_ID this "
-                "MCP subprocess was spawned with, so you can omit it. Pass "
-                "explicitly for older Claude Code or non-Claude clients; if "
-                "it cannot be resolved, binding is skipped."
+                "Claude Code session ID; binds this session to the project so "
+                "the statusline shows it. " + SESSION_ID_RESOLVE_HINT
             )
         ),
     ] = None,
@@ -405,13 +436,8 @@ async def create_task(
     session_id: Annotated[
         str | None,
         Field(
-            description="Claude Code session ID (UUID). Binds this session to "
-            "the new task so the statusline picks it up immediately. On Claude "
-            "Code 2.1.154+ this is resolved automatically from the "
-            "CLAUDE_CODE_SESSION_ID this MCP subprocess was spawned with, so "
-            "you can omit it. Pass explicitly for older Claude Code or "
-            "non-Claude clients; if it cannot be resolved, binding is skipped "
-            "(the user can recover via /missioncache:load)."
+            description="Claude Code session ID; binds this session to the new "
+            "task so the statusline shows it. " + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
 ) -> dict:

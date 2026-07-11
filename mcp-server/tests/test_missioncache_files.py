@@ -501,6 +501,62 @@ class TestUpdateTasksFile:
         assert result["completed_numbers"] == ["4"]
         assert result["unmatched"] == []
 
+    def test_completing_parent_by_number_leaves_subtasks_unchecked(self, tmp_path):
+        """Completing parent "1" must flip only the parent line, not the
+        "1." prefix of its subtasks "1.1"/"1.2" (the prefix-match bug)."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(
+            "# Tasks\n\n**Last Updated:** 2026-04-01 10:00\n\n## Tasks\n\n"
+            "- [ ] 1. Parent\n"
+            "  - [ ] 1.1. Child A\n"
+            "  - [ ] 1.2. Child B\n"
+            "- [ ] 2. Sibling\n"
+        )
+
+        result = update_tasks_file(str(tasks_file), completed_tasks=["1. Parent"])
+
+        content = tasks_file.read_text()
+        assert re.search(r"- \[x\] 1\. Parent", content)
+        assert re.search(r"- \[ \] 1\.1\. Child A", content)
+        assert re.search(r"- \[ \] 1\.2\. Child B", content)
+        # Only the parent transitioned - subtasks are untouched.
+        assert result["completed_numbers"] == ["1"]
+
+    def test_completing_subtask_by_number_leaves_deeper_nesting(self, tmp_path):
+        """Completing "1.2" must not also flip "1.2.3" via the prefix match."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(
+            "# Tasks\n\n**Last Updated:** 2026-04-01 10:00\n\n## Tasks\n\n"
+            "- [ ] 1. Parent\n"
+            "  - [ ] 1.2. Child\n"
+            "    - [ ] 1.2.3. Grandchild\n"
+        )
+
+        result = update_tasks_file(str(tasks_file), completed_tasks=["1.2"])
+
+        content = tasks_file.read_text()
+        assert re.search(r"- \[x\] 1\.2\. Child", content)
+        assert re.search(r"- \[ \] 1\.2\.3\. Grandchild", content)
+        assert result["completed_numbers"] == ["1.2"]
+
+    def test_substring_fallback_marks_only_first_match(self, tmp_path):
+        """A bare-word entry that appears in several task lines flips only
+        the first, never every sibling that shares the phrase."""
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(
+            "# Tasks\n\n**Last Updated:** 2026-04-01 10:00\n\n## Tasks\n\n"
+            "- [ ] 3. Set up database\n"
+            "- [ ] 4. Set up API\n"
+            "- [ ] 5. Tear down\n"
+        )
+
+        result = update_tasks_file(str(tasks_file), completed_tasks=["Set up"])
+
+        content = tasks_file.read_text()
+        assert re.search(r"- \[x\] 3\. Set up database", content)
+        assert re.search(r"- \[ \] 4\. Set up API", content)
+        assert result["completed_numbers"] == ["3"]
+
 
 # ── atomic write semantics (MAJOR-12) ────────────────────────────────────
 
