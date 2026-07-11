@@ -737,6 +737,33 @@ class AnalyticsDB:
 
         return result
 
+    def prune_task(self, task_id: int) -> None:
+        """Remove a task and its dependent rows from the DuckDB read path.
+
+        ``sync_from_sqlite`` is upsert-only (INSERT ... ON CONFLICT DO UPDATE);
+        it never removes rows deleted from SQLite. So a deleted project would
+        otherwise linger in the dashboard's read path until a full rebuild.
+        The delete endpoint calls this right after removing the row from the
+        SQLite source of truth so the project disappears from the list at once.
+
+        Mirrors the SQLite ``ON DELETE CASCADE`` set (task_updates, heartbeats,
+        sessions, shadow_commits, plans) so no child rows are orphaned, and
+        wraps every delete in one transaction so a mid-way failure rolls back
+        rather than leaving a half-pruned read path. Table names are fixed
+        literals, not input, so the f-string is safe.
+        """
+        child_tables = ("task_updates", "heartbeats", "sessions", "shadow_commits", "plans")
+        with self.connection() as conn:
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                for table in child_tables:
+                    conn.execute(f"DELETE FROM {table} WHERE task_id = ?", (task_id,))
+                conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
     def _sync_tasks_from_sqlite(self, sqlite_conn) -> tuple[int, int]:
         """Sync tasks from SQLite to DuckDB. Returns (synced, failed).
 
