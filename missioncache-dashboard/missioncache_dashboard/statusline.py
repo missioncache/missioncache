@@ -1393,6 +1393,226 @@ def set_iterm_title(action: str, project_name: str, repo_name: str, branch: str,
 
 # ============ MAIN ============
 
+# ============ USER ADDONS ============
+# Users add their own statusline cells without editing this file: each addon is
+# an entry in the `statusline_addons` list of the dashboard config
+# (~/.claude/missioncache-dashboard-config.json), a distinct top-level key from
+# `statusline` so the dashboard's statusline-settings save never touches it. An
+# addon's `command` is run - throttled by a per-addon TTL cache, bounded by a
+# timeout, fail-closed - and its output becomes a cell. The addon line count is
+# derived only from config, never from fetch results, so height stays fixed.
+
+ADDON_COLOR_ALLOW = frozenset(COLORS)
+ADDON_DEFAULT_COLOR = "version"
+# \Z (not $) so a trailing newline in the id can't slip through - the id is
+# used in the cache filename.
+_ADDON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
+_ADDON_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ADDON_OVERRIDE_KEYS = ("value", "label", "icon", "color", "hidden")
+
+# Friendly append-target name -> the internal line list it injects a cell into.
+_ADDON_APPEND_TARGETS = {
+    "location": "line1",
+    "project": "line2",
+    "metrics": "line3",
+    "session": "line4",
+    "context": "line_k8s",
+    "usage": "line_usage",
+    "codex": "line_codex",
+    "vitals": "line_health",
+}
+
+
+def _normalize_addon(raw: object) -> dict | None:
+    """Validate + normalize one addon config entry, or None if invalid."""
+    if not isinstance(raw, dict):
+        return None
+    addon_id = raw.get("id")
+    if not isinstance(addon_id, str) or not _ADDON_ID_RE.match(addon_id):
+        return None
+    command = raw.get("command")
+    if not isinstance(command, list) or not command:
+        return None
+    if not all(isinstance(c, str) for c in command):
+        return None
+    color = raw.get("color")
+    if color not in ADDON_COLOR_ALLOW:
+        color = ADDON_DEFAULT_COLOR
+    try:
+        ttl = max(5, int(raw.get("ttl", 60)))
+    except (TypeError, ValueError):
+        ttl = 60
+    try:
+        timeout = min(30, max(1, int(raw.get("timeout", 5))))
+    except (TypeError, ValueError):
+        timeout = 5
+    placement = raw.get("placement")
+    if not isinstance(placement, dict):
+        placement = {}
+    mode = placement.get("mode")
+    if mode not in ("row", "append"):
+        mode = "row"
+    group = placement.get("group")
+    if not isinstance(group, str) or not group:
+        group = addon_id
+    try:
+        order = int(placement.get("order", 0))
+    except (TypeError, ValueError):
+        order = 0
+    target = placement.get("target")
+    if target not in _ADDON_APPEND_TARGETS:
+        target = None
+    # An append-mode addon with no valid target has nowhere to go and would
+    # otherwise render nothing; fall back to giving it its own row.
+    if mode == "append" and target is None:
+        mode = "row"
+    return {
+        "id": addon_id,
+        "enabled": bool(raw.get("enabled", True)),
+        # Strip control chars from static label/icon too (command output is
+        # already stripped in _parse_addon_output) so neither path can inject
+        # ANSI that breaks the grid.
+        "label": _ADDON_CTRL_RE.sub("", str(raw.get("label", ""))),
+        "icon": _ADDON_CTRL_RE.sub("", str(raw.get("icon", ""))),
+        "color": color,
+        "command": list(command),
+        "ttl": ttl,
+        "timeout": timeout,
+        "placement": {"mode": mode, "group": group, "order": order, "target": target},
+    }
+
+
+def _load_addons(cfg_path: Path = _DASHBOARD_CONFIG_FILE) -> list[dict]:
+    """Load enabled, validated addons from the config file. Fail-closed to []."""
+    try:
+        data = json.loads(cfg_path.read_text())
+    except Exception:
+        return []
+    raw_list = data.get("statusline_addons") if isinstance(data, dict) else None
+    if not isinstance(raw_list, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for raw in raw_list:
+        addon = _normalize_addon(raw)
+        if addon is None or not addon["enabled"] or addon["id"] in seen:
+            continue
+        seen.add(addon["id"])
+        out.append(addon)
+    return out
+
+
+def _addon_row_groups(addons: list[dict]) -> list[str]:
+    """Ordered distinct row-group names among row-mode addons. Sets the number
+    and order of addon lines. Depends only on config, so height is stable."""
+    order_by_group: dict[str, int] = {}
+    for a in addons:
+        p = a["placement"]
+        if p["mode"] != "row":
+            continue
+        g = p["group"]
+        if g not in order_by_group or p["order"] < order_by_group[g]:
+            order_by_group[g] = p["order"]
+    return sorted(order_by_group, key=lambda g: (order_by_group[g], g))
+
+
+def _parse_addon_output(raw: str | None) -> dict | None:
+    """Command stdout -> a normalized data dict, or None when empty.
+
+    Plain text becomes {"value": text}. A JSON object is read as overrides,
+    keeping only value/label/icon/color/hidden. A JSON non-object (number,
+    array, string) is treated as plain text. String fields are stripped of
+    control chars so a command cannot inject ANSI that breaks the grid.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    data: dict | None = None
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                data = {k: parsed[k] for k in _ADDON_OVERRIDE_KEYS if k in parsed}
+        except Exception:
+            data = None
+    if data is None:
+        data = {"value": text}
+    for k in ("value", "label", "icon", "color"):
+        if isinstance(data.get(k), str):
+            data[k] = _ADDON_CTRL_RE.sub("", data[k])
+    return data
+
+
+def _render_addon_cell(addon: dict, data: dict | None) -> str | None:
+    """Pure: (addon config, parsed data) -> a cell string, or None to omit."""
+    if not data or data.get("hidden"):
+        return None
+    value = data.get("value")
+    if not isinstance(value, str) or not value:
+        return None
+    label = data["label"] if isinstance(data.get("label"), str) else addon["label"]
+    icon = data["icon"] if isinstance(data.get("icon"), str) else addon["icon"]
+    color = data.get("color")
+    if color not in ADDON_COLOR_ALLOW:
+        color = addon["color"]
+    return _item(COLORS[color], icon, label, value)
+
+
+def get_addon_value(addon: dict) -> dict | None:
+    """Run an addon's command with a per-id TTL cache + stale fallback."""
+    cache = SCRIPTS_DIR / f"addon-{addon['id']}-cache.json"
+    try:
+        cached = json.loads(cache.read_text())
+    except Exception:
+        cached = None
+    if isinstance(cached, dict):
+        try:
+            cached_at = datetime.fromisoformat(cached["cached_at"])
+            if (datetime.now(timezone.utc) - cached_at).total_seconds() < addon["ttl"]:
+                return cached.get("parsed")
+        except Exception:
+            pass
+    stale = cached.get("parsed") if isinstance(cached, dict) else None
+    try:
+        out = run_cmd(addon["command"], timeout=addon["timeout"])
+    except Exception:
+        return stale
+    parsed = _parse_addon_output(out)
+    if parsed is None:
+        return stale
+    try:
+        _atomic_write_json(cache, {
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "parsed": parsed,
+        })
+    except Exception:
+        pass
+    return parsed
+
+
+def _assemble_addon_cells(addons: list[dict], values_by_id: dict) -> tuple[dict, dict]:
+    """-> (row_items {group: [cells]}, append_items {internal_row: [cells]})."""
+    row_items: dict[str, list[str]] = {}
+    append_items: dict[str, list[str]] = {}
+    for a in addons:
+        cell = _render_addon_cell(a, values_by_id.get(a["id"]))
+        if cell is None:
+            continue
+        p = a["placement"]
+        if p["mode"] == "append" and p["target"]:
+            append_items.setdefault(_ADDON_APPEND_TARGETS[p["target"]], []).append(cell)
+        else:
+            row_items.setdefault(p["group"], []).append(cell)
+    return row_items, append_items
+
+
+ADDONS = _load_addons()
+ADDON_ROW_GROUPS = _addon_row_groups(ADDONS)
+ADDON_LINE_COUNT = len(ADDON_ROW_GROUPS)
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -1443,6 +1663,10 @@ def main() -> None:
     f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
 
+    # User addons run on their own pool so they never starve the 6 core workers.
+    addon_pool = ThreadPoolExecutor(max_workers=min(8, len(ADDONS))) if ADDONS else None
+    f_addons = {a["id"]: addon_pool.submit(get_addon_value, a) for a in ADDONS} if addon_pool else {}
+
     _FUTURE_TIMEOUT = 3
     try:
         project_name, project_display, project_progress = (
@@ -1484,9 +1708,18 @@ def main() -> None:
     except Exception:
         codex_usage = None
 
+    values_by_id: dict = {}
+    for _aid, _fut in f_addons.items():
+        try:
+            values_by_id[_aid] = _fut.result(timeout=_FUTURE_TIMEOUT)
+        except Exception:
+            values_by_id[_aid] = None
+
     # Release stragglers without blocking; workers self-terminate
     # via their own internal timeouts (HTTP: 2-3s, subprocess: 2-5s).
     pool.shutdown(wait=False, cancel_futures=True)
+    if addon_pool is not None:
+        addon_pool.shutdown(wait=False, cancel_futures=True)
 
     dir_name = Path.cwd().name
     if dir_name == os.environ.get("USER", ""):
@@ -1677,6 +1910,18 @@ def main() -> None:
                 line_codex.append(
                     f"{COLORS['codex_weekly']}{ICONS['week']} Weekly: {wp:>3}%{RESET}")
 
+    # --- User addons: assemble cells, inject append-mode into existing rows ---
+    addon_row_items, addon_append_items = _assemble_addon_cells(ADDONS, values_by_id)
+    if addon_append_items:
+        _rows_by_name = {
+            "line1": line1, "line2": line2, "line3": line3, "line4": line4,
+            "line_k8s": line_k8s, "line_usage": line_usage,
+            "line_codex": line_codex, "line_health": line_health,
+        }
+        for _row_name, _cells in addon_append_items.items():
+            _rows_by_name[_row_name].extend(_cells)
+    addon_lines = [addon_row_items.get(g, []) for g in ADDON_ROW_GROUPS]
+
     # --- Column alignment ---
     all_lines = [line1, line2, line3, line4, line_k8s, line_usage, line_codex, line_health]
     all_widths = [[display_width(item) for item in items] for items in all_lines]
@@ -1698,10 +1943,21 @@ def main() -> None:
         if len(widths) > 1 and not is_line2:
             max_col2 = max(max_col2, widths[1])
 
+    # Addon rows contribute their first cell to col1 (like line2) so labels
+    # align with the grid, but not to col2, so a wide addon value can't stretch
+    # every other row.
+    addon_widths = [[display_width(item) for item in items] for items in addon_lines]
+    for widths in addon_widths:
+        if widths:
+            max_col1 = max(max_col1, widths[0])
+
     joined = [_join_items(items, widths, max_col1, max_col2)
               for items, widths in zip(all_lines, all_widths)]
+    addon_joined = [_join_items(items, widths, max_col1, max_col2)
+                    for items, widths in zip(addon_lines, addon_widths)]
     line_widths = [display_width(j) for j in joined]
-    max_width = max(line_widths) if line_widths else 0
+    addon_line_widths = [display_width(j) for j in addon_joined]
+    max_width = max(line_widths + addon_line_widths) if (line_widths or addon_line_widths) else 0
     if term_cols is not None:
         max_width = min(max_width, term_cols)
 
@@ -1724,6 +1980,8 @@ def main() -> None:
     segments.append((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n")
     if has_codex:
         segments.append((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n")
+    for _j, _w in zip(addon_joined, addon_line_widths):
+        segments.append((_pad_line(_j, _w, max_width) if _j else blank) + RESET + "\n")
     segments.append((_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n")
     segments.append(RESET)
     output = "".join(segments)
@@ -1738,7 +1996,7 @@ def main() -> None:
 
 def _fallback_output() -> None:
     """Print minimal output so the statusline area stays allocated."""
-    lines = 8 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 7
+    lines = (8 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 7) + ADDON_LINE_COUNT
     for _ in range(lines):
         sys.stdout.write(" \n")
     sys.stdout.flush()

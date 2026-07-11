@@ -49,6 +49,10 @@ DEFAULTS: dict[str, Any] = {
     "repos": {},
     "dashboard_url": "http://localhost:8787",
     "statusline": _DEFAULT_STATUSLINE,
+    # User statusline addons. Empty by default so a fresh install renders a
+    # clean statusline; a distinct top-level key from `statusline` so the
+    # statusline-settings save (which fully replaces that section) never wipes it.
+    "statusline_addons": [],
 }
 
 
@@ -166,3 +170,18 @@ def get_statusline_config() -> dict[str, Any]:
 def set_statusline_config(cfg: dict[str, Any]) -> None:
     """Replace the statusline config and persist to disk."""
     _update("statusline", dict(cfg))
+
+
+def get_statusline_addons() -> list[dict[str, Any]]:
+    """Return the user's statusline addon list (empty by default)."""
+    raw = _read().get("statusline_addons")
+    return list(raw) if isinstance(raw, list) else []
+
+
+def set_statusline_addons(addons: list[dict[str, Any]]) -> None:
+    """Replace the statusline addon list and persist to disk.
+
+    Writes its own top-level key via _update, so it never rewrites the
+    `statusline` section (and vice versa).
+    """
+    _update("statusline_addons", list(addons))

@@ -829,3 +829,224 @@ class TestParseInputEffortThinking:
     def test_thinking_disabled_explicit_false(self):
         info = parse_input(self._stdin(thinking={"enabled": False}))
         assert info["thinking_enabled"] is False
+
+
+# ── user addons ──────────────────────────────────────────────────────────
+
+
+class TestParseAddonOutput:
+    def test_plain_text(self):
+        assert statusline._parse_addon_output("hello") == {"value": "hello"}
+
+    def test_plain_text_stripped(self):
+        assert statusline._parse_addon_output("  hi \n") == {"value": "hi"}
+
+    def test_empty_and_none(self):
+        assert statusline._parse_addon_output("") is None
+        assert statusline._parse_addon_output("   ") is None
+        assert statusline._parse_addon_output(None) is None
+
+    def test_json_object_overrides(self):
+        out = statusline._parse_addon_output(
+            '{"value":"v","label":"L","icon":"I","color":"ctx","hidden":false}'
+        )
+        assert out == {"value": "v", "label": "L", "icon": "I", "color": "ctx", "hidden": False}
+
+    def test_json_object_keeps_only_allowed_keys(self):
+        out = statusline._parse_addon_output('{"value":"v","evil":"x"}')
+        assert out == {"value": "v"}
+
+    def test_non_brace_prefixed_output_is_plain_text(self):
+        # Only {-prefixed output is parsed as JSON; a bare number/array is text.
+        assert statusline._parse_addon_output("42") == {"value": "42"}
+        assert statusline._parse_addon_output("[1,2]") == {"value": "[1,2]"}
+
+    def test_ansi_and_control_chars_stripped(self):
+        out = statusline._parse_addon_output("a\x1b[31mb\x07c")
+        assert "\x1b" not in out["value"] and "\x07" not in out["value"]
+
+    def test_invalid_json_object_falls_back_to_text(self):
+        out = statusline._parse_addon_output('{not json')
+        assert out == {"value": "{not json"}
+
+
+def _addon(**kw):
+    base = {"id": "a", "enabled": True, "label": "Lbl", "icon": ">",
+            "color": "version", "command": ["echo", "x"], "ttl": 60, "timeout": 5,
+            "placement": {"mode": "row", "group": "g", "order": 0, "target": None}}
+    base.update(kw)
+    return base
+
+
+class TestRenderAddonCell:
+    def test_value_renders_label_and_value(self):
+        cell = statusline._render_addon_cell(_addon(), {"value": "3"})
+        assert "Lbl: 3" in cell
+        assert cell.endswith(RESET)
+
+    def test_none_data_returns_none(self):
+        assert statusline._render_addon_cell(_addon(), None) is None
+
+    def test_hidden_returns_none(self):
+        assert statusline._render_addon_cell(_addon(), {"value": "x", "hidden": True}) is None
+
+    def test_empty_value_returns_none(self):
+        assert statusline._render_addon_cell(_addon(), {"value": ""}) is None
+
+    def test_label_icon_override(self):
+        cell = statusline._render_addon_cell(_addon(), {"value": "v", "label": "New", "icon": "*"})
+        assert "New: v" in cell and "*" in cell
+
+    def test_disallowed_color_falls_back_to_addon_color(self):
+        # override color not in the allowlist -> addon's own color-key is used
+        cell = statusline._render_addon_cell(_addon(color="ctx"), {"value": "v", "color": "not-a-color"})
+        assert cell.startswith(COLORS["ctx"])
+
+    def test_control_chars_in_value_do_not_reach_rendered_cell(self):
+        # Values reach _render_addon_cell already stripped by _parse_addon_output;
+        # feed a real escape through the parse+render pipeline and confirm the
+        # rendered cell carries only the framing color + RESET, no injected ESC.
+        data = statusline._parse_addon_output("val\x1b[31;5mue")
+        cell = statusline._render_addon_cell(_addon(color="version"), data)
+        # The injected ESC byte is stripped; only the printable residue remains,
+        # so the value can't start a real ANSI sequence.
+        assert "val[31;5mue" in cell
+        assert "\x1b[31" not in cell
+        # Exactly the two framing escapes (the color prefix + RESET), no third.
+        assert cell.count("\x1b") == 2
+        assert cell.startswith(COLORS["version"]) and cell.endswith(RESET)
+
+
+class TestLoadAddons:
+    def _write(self, tmp_path, obj):
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(obj))
+        return p
+
+    def test_valid_enabled_only(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [
+            _addon(id="one"),
+            _addon(id="two", enabled=False),
+        ]})
+        addons = statusline._load_addons(p)
+        assert [a["id"] for a in addons] == ["one"]
+
+    def test_bad_id_rejected(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [
+            {"id": "../evil", "command": ["echo", "x"]},
+            {"id": "OK-no", "command": ["echo", "x"]},  # uppercase -> rejected
+            _addon(id="good"),
+        ]})
+        assert [a["id"] for a in statusline._load_addons(p)] == ["good"]
+
+    def test_empty_or_nonlist_command_rejected(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [
+            {"id": "empty", "command": []},
+            {"id": "nolist", "command": "echo x"},
+            _addon(id="good"),
+        ]})
+        assert [a["id"] for a in statusline._load_addons(p)] == ["good"]
+
+    def test_duplicate_ids_first_wins(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [
+            _addon(id="dup", command=["echo", "1"]),
+            _addon(id="dup", command=["echo", "2"]),
+        ]})
+        addons = statusline._load_addons(p)
+        assert len(addons) == 1 and addons[0]["command"] == ["echo", "1"]
+
+    def test_ttl_timeout_bounded(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [
+            _addon(id="a", ttl=1, timeout=999),
+        ]})
+        a = statusline._load_addons(p)[0]
+        assert a["ttl"] == 5 and a["timeout"] == 30
+
+    def test_disallowed_color_defaults(self, tmp_path):
+        p = self._write(tmp_path, {"statusline_addons": [_addon(id="a", color="bogus")]})
+        assert statusline._load_addons(p)[0]["color"] == statusline.ADDON_DEFAULT_COLOR
+
+    def test_malformed_file_returns_empty(self, tmp_path):
+        p = tmp_path / "bad.json"
+        p.write_text("{not json")
+        assert statusline._load_addons(p) == []
+
+    def test_missing_key_returns_empty(self, tmp_path):
+        p = self._write(tmp_path, {"other": 1})
+        assert statusline._load_addons(p) == []
+
+
+class TestAddonPlacement:
+    def test_row_groups_distinct_and_ordered(self):
+        addons = [
+            _addon(id="a", placement={"mode": "row", "group": "z", "order": 10, "target": None}),
+            _addon(id="b", placement={"mode": "row", "group": "a", "order": 5, "target": None}),
+            _addon(id="c", placement={"mode": "row", "group": "z", "order": 1, "target": None}),
+        ]
+        # sorted by (min order in group, name): 'z' min order 1, 'a' order 5 -> z before a
+        assert statusline._addon_row_groups(addons) == ["z", "a"]
+
+    def test_append_only_yields_no_rows(self):
+        addons = [_addon(id="a", placement={"mode": "append", "group": "a", "order": 0, "target": "vitals"})]
+        assert statusline._addon_row_groups(addons) == []
+
+    def test_groups_determined_by_config_not_data(self):
+        # group list is identical whether or not fetch data is provided
+        addons = [_addon(id="a", placement={"mode": "row", "group": "g", "order": 0, "target": None})]
+        assert statusline._addon_row_groups(addons) == ["g"]
+
+    def test_assemble_routes_row_and_append(self):
+        addons = [
+            _addon(id="r", label="R", placement={"mode": "row", "group": "g", "order": 0, "target": None}),
+            _addon(id="ap", label="A", placement={"mode": "append", "group": "ap", "order": 0, "target": "vitals"}),
+        ]
+        values = {"r": {"value": "1"}, "ap": {"value": "2"}}
+        rows, appends = statusline._assemble_addon_cells(addons, values)
+        assert "g" in rows and len(rows["g"]) == 1
+        assert appends["line_health"] and len(appends["line_health"]) == 1
+
+    def test_assemble_omits_none_cells_but_group_survives(self):
+        addons = [_addon(id="r", placement={"mode": "row", "group": "g", "order": 0, "target": None})]
+        rows, appends = statusline._assemble_addon_cells(addons, {"r": None})
+        # cell omitted from row_items ...
+        assert rows == {}
+        # ... but the group still counts as a line (height stays stable)
+        assert statusline._addon_row_groups(addons) == ["g"]
+
+
+class TestAddonReviewFixes:
+    """Regression tests for the review-round hardening fixes."""
+
+    def _write(self, tmp_path, addons):
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps({"statusline_addons": addons}))
+        return p
+
+    def test_append_without_target_downgrades_to_row(self, tmp_path):
+        # append + no/invalid target would render nothing; must fall back to row.
+        p = self._write(tmp_path, [_addon(id="a", placement={"mode": "append", "target": "typo"})])
+        a = statusline._load_addons(p)[0]
+        assert a["placement"]["mode"] == "row"
+        # and it now produces a row group so it actually renders
+        assert statusline._addon_row_groups([a]) == [a["placement"]["group"]]
+
+    def test_append_with_valid_target_stays_append(self, tmp_path):
+        p = self._write(tmp_path, [_addon(id="a", placement={"mode": "append", "target": "vitals"})])
+        a = statusline._load_addons(p)[0]
+        assert a["placement"]["mode"] == "append" and a["placement"]["target"] == "vitals"
+
+    def test_control_chars_stripped_from_static_label_icon(self, tmp_path):
+        p = self._write(tmp_path, [_addon(id="a", label="L\x1b[31mX", icon="i\x07")])
+        a = statusline._load_addons(p)[0]
+        assert "\x1b" not in a["label"] and "\x07" not in a["icon"]
+        # and the strip carries through to the rendered cell (plain-text output
+        # uses the static label/icon)
+        cell = statusline._render_addon_cell(a, {"value": "v"})
+        assert "\x1b[31m" not in cell
+
+    def test_trailing_newline_id_rejected(self, tmp_path):
+        p = self._write(tmp_path, [
+            {"id": "abc\n", "command": ["echo", "x"]},
+            _addon(id="good"),
+        ])
+        assert [a["id"] for a in statusline._load_addons(p)] == ["good"]
