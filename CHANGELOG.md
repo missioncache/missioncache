@@ -4,6 +4,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-11
+
+Published package versions: missioncache-db 1.0.10, mcp-missioncache 1.0.13, missioncache-auto 1.0.2, missioncache-dashboard 1.0.3, missioncache-install 1.0.4.
+
 ### Added - missioncache-auto worktree-by-default and refusal guards (missioncache-auto)
 
 - Parallel runs on a git repo now give each worker its own git worktree and branch by default; `--no-worktree` opts back into the shared checkout, and sequential mode is unaffected. Non-git directories warn and fall back to the shared checkout.
