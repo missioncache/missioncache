@@ -7004,7 +7004,7 @@
                                 <div class="progress-bar">
                                     <div class="progress-fill ${progressColor}" style="width: ${progress}%"></div>
                                 </div>
-                                <span class="progress-text">${remaining}</span>
+                                <span class="progress-text">${escapeHtml(remaining)}</span>
                             </div>
                         </td>
                         <td>${task.time_spent_formatted || '0m'}</td>
@@ -7540,7 +7540,7 @@
                     document.getElementById('taskModalMarkdown').innerHTML =
                         `<div style="color: var(--text-secondary); text-align: center; padding: 40px;">
                             No MissionCache files found for this task.<br>
-                            <small style="opacity: 0.6">${currentTaskFiles.error}</small>
+                            <small style="opacity: 0.6">${escapeHtml(currentTaskFiles.error)}</small>
                         </div>`;
                 } else {
                     renderTaskTab(currentTaskTab);
@@ -7556,7 +7556,7 @@
                 console.error('Error loading task files:', error);
                 document.getElementById('taskModalMarkdown').innerHTML =
                     `<div style="color: var(--accent-red); text-align: center; padding: 40px;">
-                        Failed to load task details: ${error.message}
+                        Failed to load task details: ${escapeHtml(error.message)}
                     </div>`;
                 loading.classList.add('hidden');
                 content.style.display = 'block';
@@ -7891,7 +7891,7 @@
                 const data = await response.json();
 
                 if (data.error) {
-                    container.innerHTML = `<div style="color: var(--text-secondary); text-align: center; padding: 40px;">${data.message}</div>`;
+                    container.innerHTML = `<div style="color: var(--text-secondary); text-align: center; padding: 40px;">${escapeHtml(data.message)}</div>`;
                     return;
                 }
 
@@ -8041,7 +8041,7 @@
                         ${blockingSummaryHtml}
                         ${data.project_mode !== 'interactive' && runnableCount > 0 ? `
                             <div class="structure-command">
-                                <code>missioncache-auto ${data.task_name} -w ${Math.min(runnableCount, 8)}</code>
+                                <code>missioncache-auto ${escapeHtml(data.task_name)} -w ${Math.min(runnableCount, 8)}</code>
                             </div>
                         ` : ''}
                     </div>
@@ -8722,8 +8722,8 @@
             }
 
             tooltip.innerHTML = `
-                <div class="node-tooltip-title">Task ${d.id}: ${d.title}</div>
-                <div class="node-tooltip-status">Status: ${d.status}</div>
+                <div class="node-tooltip-title">Task ${d.id}: ${escapeHtml(d.title)}</div>
+                <div class="node-tooltip-status">Status: ${escapeHtml(d.status)}</div>
             `;
             tooltip.style.display = 'block';
             moveNodeTooltip(event);
@@ -8788,7 +8788,7 @@
                     <button class="auto-execution-chip ${selectedAutoExecution === exec.id ? 'active' : ''}"
                             onclick="selectAutoExecution(${exec.id})">
                         <span class="exec-status ${exec.status}"></span>
-                        ${exec.task_name || '#' + exec.id} (${time})
+                        ${escapeHtml(exec.task_name || '#' + exec.id)} (${time})
                     </button>
                 `;
             }).join('');
@@ -8897,7 +8897,7 @@
                         <span class="auto-log-time">${time}</span>
                         ${log.worker_id !== null ? `<span class="auto-log-worker">W${log.worker_id}</span>` : ''}
                         <span class="auto-log-level ${log.level}"></span>
-                        ${log.subtask_id ? `<span class="auto-log-subtask">${log.subtask_id}</span>` : ''}
+                        ${log.subtask_id ? `<span class="auto-log-subtask">${escapeHtml(log.subtask_id)}</span>` : ''}
                         <span class="auto-log-message">${escapeHtml(log.message)}</span>
                     </div>
                 `;
