@@ -764,6 +764,10 @@
             text-align: right;
         }
 
+        .last-refresh.stale {
+            color: var(--accent-yellow);
+        }
+
         .dashboard-toolbar {
             display: flex;
             justify-content: flex-end;
@@ -843,6 +847,15 @@
 
         .task-item.clickable {
             cursor: pointer;
+        }
+
+        /* Keyboard focus affordance mirrors :hover so tab-navigating to a task
+           item is visible (a11y), with a clear accent border as the focus ring. */
+        .task-item.clickable:focus-visible {
+            outline: none;
+            border-color: var(--accent-purple);
+            transform: translateX(4px);
+            background: linear-gradient(135deg, rgba(30, 30, 50, 0.7) 0%, rgba(22, 22, 38, 0.7) 100%);
         }
 
         .task-item.completed {
@@ -1725,6 +1738,14 @@
             background: rgba(177, 140, 255, 0.15);
         }
 
+        /* Keyboard focus affordance for project rows mirrors :hover/:active and
+           adds a clear inset focus ring (a11y). */
+        tr.clickable-row:focus-visible {
+            outline: 2px solid var(--accent-purple);
+            outline-offset: -2px;
+            background: rgba(177, 140, 255, 0.15);
+        }
+
         .progress-bar {
             width: 140px;
             height: 8px;
@@ -1836,8 +1857,7 @@
             color: var(--text-secondary);
             font-size: 12px;
             line-height: 1.4;
-            /* Show full description without truncation */
-            white-space: pre-wrap;
+            /* Full text stays in the title tooltip; inner .desc-clamp caps height */
             word-wrap: break-word;
             max-width: none;
         }
@@ -1903,10 +1923,51 @@
             font-size: 12px;
             font-style: italic;
             line-height: 1.4;
-            /* Show full summary without truncation */
-            white-space: pre-wrap;
+            /* Full text stays in the title tooltip; inner .desc-clamp caps height */
             word-wrap: break-word;
             max-width: none;
+        }
+
+        /* Clamp long descriptions/summaries to 2 lines so one verbose project
+           can't balloon its table row; full text remains in the cell's title. */
+        .desc-clamp {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            overflow: hidden;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        /* Inline per-card failure state (replaces a misleading empty state). */
+        .card-error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 16px;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .card-error-icon {
+            font-size: 16px;
+        }
+
+        .card-error-retry {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .card-error-retry:hover {
+            color: var(--text-primary);
         }
 
         /* ============================================
@@ -4893,6 +4954,8 @@
                             </div>
                         </div>
 
+                        <div id="historyError"></div>
+
                         <!-- Row 1: Period Comparison (horizontal) -->
                         <div class="period-comparison-row">
                             <div class="trend-comparison" id="trendComparison">
@@ -5276,6 +5339,7 @@
         let taskColorMap = {};
         let nextColorIndex = 0;
         let lastRefreshTime = null;
+        let refreshFailed = false;
         let dailyTotalsViewMode = 'aggregated'; // 'aggregated' or 'byDate'
         let cachedDailyByDate = null;
 
@@ -5302,12 +5366,44 @@
             }
         };
 
+        function formatRefreshAge(ms) {
+            const sec = Math.round(ms / 1000);
+            if (sec < 10) return 'just now';
+            if (sec < 60) return `${sec}s ago`;
+            const min = Math.floor(sec / 60);
+            if (min < 60) return `${min}m ago`;
+            const hr = Math.floor(min / 60);
+            return `${hr}h ago`;
+        }
+
+        // Re-render the freshness label from lastRefreshTime. Called on refresh
+        // and on a short timer so the relative age ("updated 3m ago") keeps
+        // ticking and turns stale-styled once past the refresh interval.
+        function renderLastRefresh() {
+            const el = document.getElementById('lastRefresh');
+            if (!el) return;
+            if (refreshFailed) {
+                el.classList.add('stale');
+                el.textContent = lastRefreshTime
+                    ? `Update failed - data from ${lastRefreshTime.toLocaleTimeString()}`
+                    : 'Update failed';
+                return;
+            }
+            if (!lastRefreshTime) return;
+            const age = Date.now() - lastRefreshTime.getTime();
+            el.classList.toggle('stale', age > REFRESH_INTERVAL);
+            el.textContent = `Updated ${formatRefreshAge(age)}`;
+        }
+
         function updateLastRefresh() {
             lastRefreshTime = new Date();
-            const el = document.getElementById('lastRefresh');
-            if (el) {
-                el.textContent = `Last updated: ${lastRefreshTime.toLocaleTimeString()}`;
-            }
+            refreshFailed = false;
+            renderLastRefresh();
+        }
+
+        function markRefreshStale() {
+            refreshFailed = true;
+            renderLastRefresh();
         }
 
         async function manualRefresh() {
@@ -5317,14 +5413,16 @@
             btn.classList.add('refreshing');
 
             const currentView = getCurrentView();
+            let ok = true;
             if (currentView === 'projects') {
                 dataLoaded.projects = false;
-                await loadProjectsData();
+                ok = await loadProjectsData();
             } else if (currentView === 'activity') {
                 dataLoaded.activity = false;
-                await loadActivityData();
+                ok = await loadActivityData();
             }
-            updateLastRefresh();
+            if (ok) updateLastRefresh();
+            else markRefreshStale();
 
             btn.classList.remove('refreshing');
         }
@@ -5443,8 +5541,9 @@
         }
 
         // Copy task name to clipboard
-        async function copyTaskName(event, icon, taskName) {
+        async function copyTaskName(event, icon) {
             event.stopPropagation(); // Prevent row click from triggering
+            const taskName = icon.dataset.copyName || '';
             try {
                 await navigator.clipboard.writeText(taskName);
                 const tooltip = icon.parentElement.querySelector('.copy-tooltip');
@@ -5477,8 +5576,12 @@
 
         // Wrap task name with copy icon
         function wrapWithCopyIcon(displayName, fullName, extraClass = '') {
-            const escapedName = (fullName || displayName).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            return `<span class="copyable-name ${extraClass}"><span>${displayName}</span><span class="copy-icon" onclick="copyTaskName(event, this, '${escapedName}')" title="Copy task name">${COPY_ICON_SVG}</span><span class="copy-tooltip">Copied!</span></span>`;
+            // extraClass is a trusted literal from the call site ('', 'task-name'),
+            // never user data, so it is not escaped. displayName/fullName are
+            // server-provided task names and go through escapeHtml. The copy name
+            // travels in a data-* attribute read by the delegated click handler.
+            const copyName = fullName || displayName;
+            return `<span class="copyable-name ${extraClass}"><span>${escapeHtml(displayName)}</span><span class="copy-icon" data-copy-name="${escapeHtml(copyName)}" title="Copy task name">${COPY_ICON_SVG}</span><span class="copy-tooltip">Copied!</span></span>`;
         }
 
         // Timeline tooltip functions
@@ -5691,11 +5794,13 @@
             // Lazy load data for each view
             if (viewId === 'projects' && !dataLoaded.projects) {
                 if (LoadingManager.isInitialLoad) LoadingManager.reset('projects');
-                loadProjectsData();
+                // Set the freshness label only after the first load resolves (or mark
+                // stale on failure) - same contract as manualRefresh().
+                loadProjectsData().then(ok => ok ? updateLastRefresh() : markRefreshStale());
             }
             if (viewId === 'activity' && !dataLoaded.activity) {
                 if (LoadingManager.isInitialLoad) LoadingManager.reset('activity');
-                loadActivityData();
+                loadActivityData().then(ok => ok ? updateLastRefresh() : markRefreshStale());
             }
             if (viewId === 'auto' && !autoDataLoaded) {
                 showViewLoading('autoView', 'Loading auto projects...');
@@ -5711,21 +5816,23 @@
         async function loadProjectsData() {
             CardLoader.show('tasks');
             CardLoader.show('completed');
-            await Promise.all([
+            const results = await Promise.all([
                 fetchActiveTasks(),
                 fetchCompletedTasks()
             ]);
             dataLoaded.projects = true;
+            return results.every(Boolean);
         }
 
         async function loadActivityData() {
             CardLoader.show('today');
             CardLoader.show('history');
-            await Promise.all([
+            const results = await Promise.all([
                 fetchTodayStats(),
                 fetchHistory(historyDays)
             ]);
             dataLoaded.activity = true;
+            return results.every(Boolean);
         }
 
         // =============================================================================
@@ -6160,6 +6267,48 @@
         // =============================================================================
         // API Calls
         // =============================================================================
+        // Render a visible, retryable error into a card so a backend failure is
+        // not mistaken for a genuine empty/zero state. Pass colspan for tables.
+        function showCardError(targetId, message, retryCall, colspan) {
+            const el = document.getElementById(targetId);
+            if (!el) return;
+            // Build via DOM so `message` is inserted as text, never markup - a future
+            // dynamic caller cannot inject. `retryCall` is a developer-supplied literal
+            // (never server data), so it stays an inline handler string.
+            const card = document.createElement('div');
+            card.className = 'card-error';
+            const icon = document.createElement('span');
+            icon.className = 'card-error-icon';
+            icon.textContent = '⚠️';
+            const text = document.createElement('span');
+            text.className = 'card-error-text';
+            text.textContent = message;
+            const btn = document.createElement('button');
+            btn.className = 'card-error-retry';
+            btn.textContent = 'Retry';
+            btn.setAttribute('onclick', retryCall);
+            card.append(icon, text, btn);
+            if (colspan) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = colspan;
+                td.appendChild(card);
+                tr.appendChild(td);
+                el.replaceChildren(tr);
+            } else {
+                el.replaceChildren(card);
+            }
+        }
+
+        // Retry a failed card fetch. The per-card fetchers only repaint their own
+        // card, so on success we also clear the global "Update failed" banner (and
+        // re-mark stale if the retry fails) - same contract as manualRefresh().
+        async function retryCardFetch(fetcher) {
+            const ok = await fetcher();
+            if (ok) updateLastRefresh();
+            else markRefreshStale();
+        }
+
         async function fetchTodayStats() {
             CardLoader.show('today');
             try {
@@ -6169,13 +6318,17 @@
                     : `/api/stats/day?date=${dateStr}`;
 
                 const response = await fetch(API_BASE + endpoint);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
 
                 renderTodayStats(data);
                 LoadingManager.stepCompleted('today');
+                return true;
             } catch (error) {
                 console.error('Error fetching today stats:', error);
+                showCardError('taskList', "Couldn't load today's activity.", 'retryCardFetch(fetchTodayStats)');
                 LoadingManager.stepFailed('today', error);
+                return false;
             } finally {
                 CardLoader.hide('today');
             }
@@ -6185,12 +6338,16 @@
             CardLoader.show('tasks');
             try {
                 const response = await fetch(API_BASE + '/api/tasks/active');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 renderActiveTasks(data.tasks || []);
                 LoadingManager.stepCompleted('tasks');
+                return true;
             } catch (error) {
                 console.error('Error fetching active tasks:', error);
+                showCardError('activeTasksBody', "Couldn't load active projects.", 'retryCardFetch(fetchActiveTasks)', 5);
                 LoadingManager.stepFailed('tasks', error);
+                return false;
             } finally {
                 CardLoader.hide('tasks');
             }
@@ -6200,12 +6357,16 @@
             CardLoader.show('completed');
             try {
                 const response = await fetch(API_BASE + '/api/tasks/completed?days=30');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 renderCompletedTasks(data.tasks || []);
                 LoadingManager.stepCompleted('completed');
+                return true;
             } catch (error) {
                 console.error('Error fetching completed tasks:', error);
+                showCardError('completedTasksBody', "Couldn't load completed projects.", 'retryCardFetch(fetchCompletedTasks)', 5);
                 LoadingManager.stepFailed('completed', error);
+                return false;
             } finally {
                 CardLoader.hide('completed');
             }
@@ -6215,12 +6376,16 @@
             CardLoader.show('history');
             try {
                 const response = await fetch(API_BASE + `/api/stats/history?days=${days}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 cachedHistoryData = await response.json();
                 renderHistory(cachedHistoryData);
                 LoadingManager.stepCompleted('history');
+                return true;
             } catch (error) {
                 console.error('Error fetching history:', error);
+                showCardError('historyError', "Couldn't load activity history.", 'retryCardFetch(() => fetchHistory(historyDays))');
                 LoadingManager.stepFailed('history', error);
+                return false;
             } finally {
                 CardLoader.hide('history');
             }
@@ -6307,20 +6472,20 @@
             const escapedRepo = escapeHtml(task.repo_name || '');
 
             return `
-                <div class="task-item ${statusClass} clickable" onclick="openTaskModal(${task.id}, '${escapedName.replace(/'/g, "\\'")}', '${escapedRepo.replace(/'/g, "\\'")}')">
+                <div class="task-item ${statusClass} clickable" tabindex="0" role="button" aria-label="Open details for ${escapedName}" data-task-id="${task.id}" data-task-name="${escapedName}" data-repo-name="${escapedRepo}">
                     <div class="task-info">
                         <div class="task-name-row">
                             ${taskIcon}
                             <span class="status-badge ${statusClass}">${statusLabel}</span>
                             ${wrapWithCopyIcon(task.name, task.name, 'task-name')}
-                            ${task.parent_name ? `<span class="task-parent">/ ${task.parent_name}</span>` : ''}
+                            ${task.parent_name ? `<span class="task-parent">/ ${escapeHtml(task.parent_name)}</span>` : ''}
                         </div>
                         <div class="task-meta">
-                            ${task.repo_name ? `<span class="repo-badge">${task.repo_name}</span>` : ''}
+                            ${task.repo_name ? `<span class="repo-badge">${escapedRepo}</span>` : ''}
                             ${task.jira_key ? (task.jira_url ? `<a href="${escapeHtml(task.jira_url)}" class="jira-link" target="_blank" onclick="event.stopPropagation()">${escapeHtml(task.jira_key)}</a>` : `<span class="jira-link jira-link-plain">${escapeHtml(task.jira_key)}</span>`) : ''}
                             ${task.tags && task.tags.length > 0 ? `
                                 <div class="task-tags">
-                                    ${task.tags.slice(0, 2).map(t => `<span class="task-tag">${t}</span>`).join('')}
+                                    ${task.tags.slice(0, 2).map(t => `<span class="task-tag">${escapeHtml(t)}</span>`).join('')}
                                 </div>
                             ` : ''}
                         </div>
@@ -6794,16 +6959,21 @@
                 let taskNameHTML;
                 // Mode badge
                 const modeBadge = getModeBadge(task.project_mode);
-                const repoBadge = task.repo_name ? `<span class="repo-badge">${task.repo_name}</span>` : '';
+                const repoBadge = task.repo_name ? `<span class="repo-badge">${escapeHtml(task.repo_name)}</span>` : '';
 
                 if (task.parent_name) {
                     // Subtask: show parent label above (clickable), then subtask with tree indicator
-                    const parentClickHandler = task.parent_id
-                        ? `onclick="event.stopPropagation(); openTaskModal(${task.parent_id}, '${task.parent_name.replace(/'/g, "\\'")}', '${(task.parent_repo_name || '').replace(/'/g, "\\'")}')"`
+                    // Parent label opens the parent task's modal. The id/name/repo
+                    // travel in escaped data-* attributes read by the delegated click
+                    // listener; they are only emitted when a parent_id exists, so a
+                    // parentless label falls through to the subtask row's handler
+                    // (matching the old no-onclick behavior).
+                    const parentDataAttrs = task.parent_id
+                        ? ` data-task-id="${task.parent_id}" data-task-name="${escapeHtml(task.parent_name)}" data-repo-name="${escapeHtml(task.parent_repo_name || '')}"`
                         : '';
                     taskNameHTML = `
                         <div class="task-name-cell">
-                            <div class="task-parent-label clickable-parent" ${parentClickHandler} title="Click to view parent task">${task.parent_name}</div>
+                            <div class="task-parent-label clickable-parent"${parentDataAttrs} title="Click to view parent task">${escapeHtml(task.parent_name)}</div>
                             <div class="task-name-main">
                                 <span class="subtask-indicator">└─</span>
                                 ${taskIcon}
@@ -6826,9 +6996,9 @@
                 }
 
                 return `
-                    <tr class="clickable-row" onclick="openTaskModal(${task.id}, '${task.name.replace(/'/g, "\\'")}', '${(task.repo_name || '').replace(/'/g, "\\'")}')">
+                    <tr class="clickable-row" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(task.name)}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
                         <td>${taskNameHTML}</td>
-                        <td class="description-cell" title="${task.description || ''}">${description || '-'}</td>
+                        <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
                         <td>
                             <div class="progress-cell">
                                 <div class="progress-bar">
@@ -6889,7 +7059,7 @@
 
                 const taskIcon = getTaskIconHTML(task);
 
-                const repoBadge = task.repo_name ? `<span class="repo-badge">${task.repo_name}</span>` : '';
+                const repoBadge = task.repo_name ? `<span class="repo-badge">${escapeHtml(task.repo_name)}</span>` : '';
 
                 // Build task name cell with better subtask hierarchy display
                 let taskNameHTML;
@@ -6897,7 +7067,7 @@
                     // Subtask: show parent label above, then subtask with tree indicator
                     taskNameHTML = `
                         <div class="task-name-cell">
-                            <div class="task-parent-label">${task.parent_name}</div>
+                            <div class="task-parent-label">${escapeHtml(task.parent_name)}</div>
                             <div class="task-name-main">
                                 <span class="subtask-indicator">└─</span>
                                 ${taskIcon}
@@ -6922,10 +7092,10 @@
                 }
 
                 return `
-                    <tr class="clickable-row" onclick="openTaskModal(${task.id}, '${task.name.replace(/'/g, "\\'")}', '${(task.repo_name || '').replace(/'/g, "\\'")}')">
+                    <tr class="clickable-row" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(task.name)}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
                         <td>${taskNameHTML}</td>
-                        <td class="description-cell" title="${task.description || ''}">${description || '-'}</td>
-                        <td class="summary-cell" title="${task.summary || ''}">${summary || '-'}</td>
+                        <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
+                        <td class="summary-cell" title="${escapeHtml(task.summary || '')}"><div class="desc-clamp">${escapeHtml(summary) || '-'}</div></td>
                         <td>${task.time_spent_formatted || '0m'}</td>
                         <td style="color: var(--text-muted);">${task.completed_ago || '-'}</td>
                     </tr>
@@ -6934,6 +7104,9 @@
         }
 
         function renderHistory(data) {
+            // Clear any prior "couldn't load history" banner now that we have data.
+            const histErr = document.getElementById('historyError');
+            if (histErr) histErr.innerHTML = '';
             // Render hourly heatmap (7×24 grid)
             renderHourlyHeatmap(data.hourly_heatmap || []);
 
@@ -6956,7 +7129,7 @@
                     const timeFormatted = formatDuration(repo.total_seconds || 0);
                     return `
                         <div class="repo-bar-row">
-                            <span class="repo-bar-label">${repo.repo_name || repo.short_name}</span>
+                            <span class="repo-bar-label">${escapeHtml(repo.repo_name || repo.short_name)}</span>
                             <div class="repo-bar-track">
                                 <div class="repo-bar-fill" style="width: ${percent}%; background: ${color}"></div>
                             </div>
@@ -8090,6 +8263,56 @@
             }
         });
 
+        // Delegated activation for clickable project rows / task items. The inline
+        // onclick handlers were removed to close a stored-XSS hole (task name/repo
+        // were interpolated straight into the onclick string); the id/name/repo now
+        // travel in escaped data-* attributes read here. Inner interactive elements
+        // are matched first and short-circuit so a row click never double-fires: the
+        // copy icon copies without opening the modal, and a parent label opens the
+        // PARENT task's modal instead of the row's. The JIRA link still uses an
+        // inline stopPropagation() (a literal, no interpolation) so its clicks never
+        // reach this listener.
+        document.addEventListener('click', (e) => {
+            const copyIcon = e.target.closest?.('.copy-icon');
+            if (copyIcon) {
+                copyTaskName(e, copyIcon);
+                return;
+            }
+            // Only a parent label carrying a parent id opens the parent modal; a
+            // parentless label falls through to the subtask row below it.
+            const parentLabel = e.target.closest?.('.clickable-parent');
+            if (parentLabel && parentLabel.dataset.taskId) {
+                openTaskModal(Number(parentLabel.dataset.taskId), parentLabel.dataset.taskName || '', parentLabel.dataset.repoName || '');
+                return;
+            }
+            const el = e.target.closest?.('.clickable-row, .task-item.clickable');
+            if (!el) return;
+            openTaskModal(Number(el.dataset.taskId), el.dataset.taskName || '', el.dataset.repoName || '');
+        });
+
+        // Keyboard activation for clickable project rows / task items (Enter or
+        // Space) so the drill-down modal is reachable without a pointer. Only
+        // fires when the row/item itself has focus, so inner links still work.
+        // Dispatches a click, which the delegated listener above handles.
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (!e.target.matches?.('.clickable-row, .task-item.clickable')) return;
+            e.preventDefault();
+            e.target.click();
+        });
+
+        // Delegated selection for MissionCache Auto project cards. Like the row
+        // handler above, the inline onclick was removed to close an XSS hole (the
+        // project name was interpolated into the handler string); the name now
+        // travels in an escaped data-* attribute read here. escapeHtml guards the
+        // attribute and the browser decodes the entities, so dataset.projectName
+        // is the original name for selectAutoProject's p.name === projectName match.
+        document.addEventListener('click', (e) => {
+            const card = e.target.closest?.('.auto-project-card');
+            if (!card) return;
+            selectAutoProject(card.dataset.projectName || '');
+        });
+
         // Close modal on backdrop click
         document.getElementById('taskModal').addEventListener('click', (e) => {
             if (e.target.id === 'taskModal') {
@@ -8325,8 +8548,10 @@
             }
 
             initNavigation();
-            // Initial data load is handled by initNavigation() -> handleHashChange() -> switchView()
-            updateLastRefresh();
+            // Initial data load is handled by initNavigation() -> handleHashChange() ->
+            // switchView(), which sets the freshness label only after the first load
+            // resolves (or marks it stale on failure). We deliberately do NOT set it
+            // here, so the header never claims "just now" before any data has arrived.
 
             // Warm the JIRA-mapping cache so renderMarkdown() can turn bare
             // JIRA keys into clickable links on the first modal open.
@@ -8341,20 +8566,25 @@
             setInterval(async () => {
                 if (!LoadingManager.isInitialLoad) {
                     const view = getCurrentView();
+                    let ok = true;
                     if (view === 'projects') {
                         // Categories too: another tab/machine/CLI may have
                         // added one since load - without this, its tasks
                         // would paint with the generic fallback icon.
                         await fetchCustomCategories();
                         dataLoaded.projects = false;
-                        await loadProjectsData();
+                        ok = await loadProjectsData();
                     } else if (view === 'activity') {
                         dataLoaded.activity = false;
-                        await loadActivityData();
+                        ok = await loadActivityData();
                     }
-                    updateLastRefresh();
+                    if (ok) updateLastRefresh();
+                    else markRefreshStale();
                 }
             }, REFRESH_INTERVAL);
+
+            // Keep the relative "updated Nm ago" label ticking between refreshes.
+            setInterval(renderLastRefresh, 30000);
 
             // Daily totals view mode toggle
             document.getElementById('dailyTotalsAggregated')?.addEventListener('click', () => {
@@ -8425,9 +8655,9 @@
 
             container.innerHTML = autoProjects.map(project => `
                 <div class="auto-project-card ${selectedAutoProject === project.name ? 'selected' : ''}"
-                     onclick="selectAutoProject('${project.name}')">
-                    <div class="auto-project-name">${project.name}</div>
-                    <div class="auto-project-repo">${project.repo_name || ''}</div>
+                     data-project-name="${escapeHtml(project.name)}">
+                    <div class="auto-project-name">${escapeHtml(project.name)}</div>
+                    <div class="auto-project-repo">${escapeHtml(project.repo_name || '')}</div>
                     <div class="auto-project-progress">
                         <div class="auto-progress-bar">
                             <div class="auto-progress-fill" style="width: ${project.progress.percent}%"></div>
