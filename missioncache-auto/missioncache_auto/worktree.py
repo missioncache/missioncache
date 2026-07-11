@@ -188,9 +188,43 @@ class WorktreeManager:
         conflict_branches = {r["branch"] for r in merge_results if r["status"] == "conflict"}
 
         for info in self.worktrees.values():
+            # Removing a worktree uses --force, which discards uncommitted work.
+            # If a worker left real changes behind (e.g. auto-commit failed),
+            # preserve the worktree and its branch so the work can be recovered.
+            if self._is_worktree_dirty(info.path):
+                print(
+                    f"Warning: worktree '{info.path}' has uncommitted changes - "
+                    f"skipping removal and preserving branch '{info.branch}' so "
+                    f"the work can be recovered.",
+                    file=sys.stderr,
+                )
+                continue
             self._remove_worktree(info.path)
             if info.branch not in conflict_branches:
                 self._delete_branch(info.branch)
+
+    def _is_worktree_dirty(self, path: Path) -> bool:
+        """Whether a worktree has uncommitted changes, ignoring copied .env* files.
+
+        Worktree setup copies the project's .env* files into each worktree and
+        they are intentionally never committed, so they must not count as work
+        that needs preserving.
+        """
+        result = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain",
+                "--",
+                ":/",
+                ":(exclude,glob).env*",
+                ":(exclude,glob)**/.env*",
+            ],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        return bool(result.stdout.strip())
 
     def _remove_worktree(self, path: Path) -> None:
         """Remove a git worktree."""

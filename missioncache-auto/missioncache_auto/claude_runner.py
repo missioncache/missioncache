@@ -8,6 +8,7 @@ and extracting structured results from responses.
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -15,6 +16,62 @@ from pathlib import Path
 from typing import Callable
 
 from missioncache_auto.models import ExecutionResult, Visibility
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """SIGKILL the claude process and every child it spawned.
+
+    ``run`` launches claude with ``start_new_session=True``, so the whole
+    subtree shares a process group whose id equals claude's pid. Killing the
+    group reaps grandchildren (sub-agents, tools) that a plain
+    ``process.kill()`` would orphan.
+    """
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        # Already gone, or no permission - nothing to reap.
+        pass
+
+
+def _install_termination_handlers(
+    process: subprocess.Popen,
+) -> dict[int, object]:
+    """Install SIGTERM/SIGINT handlers that reap the claude group then exit.
+
+    Returns the previous handlers keyed by signal number so ``run`` can restore
+    them once claude finishes. Without this, the parallel orchestrator's
+    ``terminate()`` (SIGTERM) kills the worker but leaves its detached claude
+    child running, still consuming tokens.
+    """
+    previous: dict[int, object] = {}
+
+    def handler(signum: int, frame: object) -> None:
+        _kill_process_group(process)
+        # Restore the default disposition and re-raise so the worker actually
+        # stops (preserves fail-fast / Ctrl-C semantics).
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous[sig] = signal.signal(sig, handler)
+        except (ValueError, OSError):
+            # Not on the main thread - can't set a handler here; skip.
+            pass
+    return previous
+
+
+def _restore_termination_handlers(previous: dict[int, object]) -> None:
+    """Restore signal handlers captured by ``_install_termination_handlers``."""
+    for sig, old in previous.items():
+        if old is None:
+            # No prior Python handler to restore (rare); leave ours in place -
+            # it only reaps an already-dead group and re-raises, so it's benign.
+            continue
+        try:
+            signal.signal(sig, old)  # type: ignore[arg-type]
+        except (ValueError, OSError):
+            pass
 
 
 @dataclass
@@ -89,7 +146,8 @@ class ClaudeRunner:
         env["MISSIONCACHE_AUTO_MODE"] = "1"
         env["CLAUDE_CODE_HIDE_CWD"] = "1"
 
-        # Run Claude
+        # Run Claude in its own session/process group so we can reap the whole
+        # subtree (claude + any children it spawns) on timeout or termination.
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -98,13 +156,17 @@ class ClaudeRunner:
             cwd=working_dir,
             text=True,
             env=env,
+            start_new_session=True,
         )
 
-        # Send prompt (with optional timeout)
+        # Send prompt (with optional timeout). While claude runs, catch
+        # SIGTERM/SIGINT so a worker teardown reaps the claude group instead of
+        # orphaning it.
+        previous_handlers = _install_termination_handlers(process)
         try:
             stdout, stderr = process.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
+            _kill_process_group(process)
             stdout, stderr = process.communicate()  # drain pipes after kill
             result = ExecutionResult(
                 task_id="",
@@ -123,6 +185,8 @@ class ClaudeRunner:
                     start_time,
                 )
             return result
+        finally:
+            _restore_termination_handlers(previous_handlers)
 
         # Process output
         result = self._process_output(stdout, ctx, print_output)

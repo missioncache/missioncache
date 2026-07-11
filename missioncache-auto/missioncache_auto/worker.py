@@ -49,17 +49,34 @@ def git_commit_task(task_id: str, prompt_file: Path, project_root: Path) -> tupl
     commit_msg = f"feat({task_id}): {title}"
     cwd = str(project_root)
 
-    try:
-        # Check for unstaged or staged changes
-        unstaged = subprocess.run(["git", "diff", "--quiet"], cwd=cwd, capture_output=True)
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"], cwd=cwd, capture_output=True
-        )
+    # Stage everything except .env* files. Worktree setup copies the project's
+    # .env* (which may hold secrets) into each worker's checkout, and a bare
+    # `git add -A` would commit them. The root-anchored ':(exclude,glob).env*'
+    # only matches .env* at the repo top, so nested paths like sub/.env still
+    # get staged - the '**/.env*' glob is paired with it to catch those. The
+    # same exclusion is applied to the pre-check so an .env-only working tree
+    # counts as "nothing to commit".
+    env_exclude = [":/", ":(exclude,glob).env*", ":(exclude,glob)**/.env*"]
 
-        if unstaged.returncode == 0 and staged.returncode == 0:
+    try:
+        # `git status --porcelain` reports untracked files too, unlike
+        # `git diff --quiet`, so a task that produces only new files is still
+        # committed instead of being silently skipped.
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", *env_exclude],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if not status.stdout.strip():
             return False, ""
 
-        subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "add", "-A", "--", *env_exclude],
+            cwd=cwd,
+            capture_output=True,
+            check=True,
+        )
         subprocess.run(
             ["git", "commit", "-m", commit_msg],
             cwd=cwd,

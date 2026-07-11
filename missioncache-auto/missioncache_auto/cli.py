@@ -163,10 +163,16 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Show execution plan without running",
     )
-    parser.add_argument(
+    worktree_group = parser.add_mutually_exclusive_group()
+    worktree_group.add_argument(
         "--worktree",
         action="store_true",
-        help="Isolate each worker in its own git worktree (prevents file conflicts)",
+        help="Isolate each worker in its own git worktree (default on git repos)",
+    )
+    worktree_group.add_argument(
+        "--no-worktree",
+        action="store_true",
+        help="Run all workers in the shared checkout instead of per-worker worktrees",
     )
 
     parser.add_argument(
@@ -194,12 +200,9 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    """Run missioncache-auto on a task."""
-    project_root = find_project_root()
-    display = create_display(use_color=not args.no_color)
-
-    config = Config(
+def _config_from_args(args: argparse.Namespace) -> Config:
+    """Build the execution Config from parsed CLI arguments."""
+    return Config(
         max_workers=args.workers,
         max_retries=args.retries,
         pause_seconds=args.pause,
@@ -207,12 +210,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         fail_fast=args.fail_fast,
         visibility=Visibility(args.visibility),
         dry_run=args.dry_run,
-        use_worktrees=getattr(args, "worktree", False),
+        use_worktrees=not getattr(args, "no_worktree", False),
         enable_review=getattr(args, "enable_review", False),
         spec_review_only=getattr(args, "spec_review_only", False),
         auto_commit=not getattr(args, "no_commit", False),
         tdd_mode=getattr(args, "tdd", False),
     )
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Run missioncache-auto on a task."""
+    project_root = find_project_root()
+    display = create_display(use_color=not args.no_color)
+
+    config = _config_from_args(args)
 
     if args.sequential:
         return run_sequential(args.task_name, project_root, config)

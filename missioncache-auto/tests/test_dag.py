@@ -5,6 +5,54 @@ import pytest
 from missioncache_auto.dag import DAG, CycleDetectedError
 
 
+def _write_prompt(directory, task_id, deps_block, title="Task"):
+    """Write a prompt file with the given (already-formatted) deps block."""
+    body = f'---\ntask_id: "{task_id}"\ntask_title: "{title}"\n{deps_block}---\nBody\n'
+    (directory / f"task-{task_id}-prompt.md").write_text(body)
+
+
+class TestBuildFromPromptsDependencies:
+    def test_inline_array_deps(self, tmp_path):
+        _write_prompt(tmp_path, "01", "dependencies: []\n")
+        _write_prompt(tmp_path, "02", 'dependencies: ["01"]\n')
+        dag = DAG.build_from_prompts(tmp_path)
+        assert dag.get_dependencies("02") == ["01"]
+
+    def test_block_list_deps_are_read_not_dropped(self, tmp_path):
+        # Regression: the DAG previously only matched the inline [..] form and
+        # silently replaced block-list deps with an implicit previous-task dep.
+        _write_prompt(tmp_path, "01", "dependencies: []\n")
+        _write_prompt(tmp_path, "02", "dependencies:\n  - \"01\"\n")
+        _write_prompt(tmp_path, "03", "dependencies:\n  - \"01\"\n  - \"02\"\n")
+        dag = DAG.build_from_prompts(tmp_path)
+        assert dag.get_dependencies("02") == ["01"]
+        # The bug would have yielded ["02"] (implicit prev) here.
+        assert dag.get_dependencies("03") == ["01", "02"]
+
+    def test_empty_deps_field_overrides_implicit_prev(self, tmp_path):
+        # An explicit (empty) dependencies field is authoritative - no implicit
+        # previous-task dependency is fabricated.
+        _write_prompt(tmp_path, "01", "dependencies: []\n")
+        _write_prompt(tmp_path, "02", "dependencies: []\n")
+        dag = DAG.build_from_prompts(tmp_path)
+        assert dag.get_dependencies("02") == []
+
+    def test_missing_field_uses_implicit_prev_when_it_exists(self, tmp_path):
+        _write_prompt(tmp_path, "01", "")
+        _write_prompt(tmp_path, "02", "")
+        dag = DAG.build_from_prompts(tmp_path)
+        assert dag.get_dependencies("01") == []
+        assert dag.get_dependencies("02") == ["01"]
+
+    def test_missing_implicit_predecessor_raises(self, tmp_path):
+        # task-04 has no deps field and task-03 does not exist (numbering gap).
+        _write_prompt(tmp_path, "01", "dependencies: []\n")
+        _write_prompt(tmp_path, "02", 'dependencies: ["01"]\n')
+        _write_prompt(tmp_path, "04", "")
+        with pytest.raises(ValueError, match="task-04"):
+            DAG.build_from_prompts(tmp_path)
+
+
 class TestAddTaskAndProperties:
     def test_add_task_stores_task(self):
         dag = DAG()

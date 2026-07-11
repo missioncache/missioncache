@@ -24,6 +24,7 @@ from missioncache_auto.task_parser import (
     get_first_uncompleted_task,
     get_prompt_for_task,
     get_task_progress,
+    mark_task_completed,
     update_timestamps,
     validate_prompts_exist,
 )
@@ -335,6 +336,11 @@ class SequentialRunner:
                 result.what_worked or result.learnings,
             )
             self.current_task_attempts = 0
+
+            # Mark the checkbox complete so the loop advances to the next task.
+            # Without this, get_first_uncompleted_task keeps returning this same
+            # task and it re-runs forever.
+            mark_task_completed(self.paths.tasks_file, task_number)
 
             # Log task completion
             self.logger.log_task_completed(
