@@ -4,6 +4,14 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Security - pinned the markdown renderer with Subresource Integrity (missioncache-dashboard)
+
+- The dashboard now loads `marked` at a pinned version (15.0.12) with an SRI hash, matching how DOMPurify is loaded, so a compromised CDN cannot swap the markdown renderer. Behavior is unchanged from the previously floating latest.
+
+### Fixed - missioncache-install ships a rebuildable sdist (missioncache-install)
+
+- The bundled `rules/`, `user-commands/`, and `commands/` dirs now flow through the sdist via a build hook, so `uv build` produces a working wheel and sdist (previously the two-stage build failed and only a direct wheel could be built).
+
 ## 2026-07-11
 
 Published package versions: missioncache-db 1.0.10, mcp-missioncache 1.0.13, missioncache-auto 1.0.2, missioncache-dashboard 1.0.3, missioncache-install 1.0.4.
