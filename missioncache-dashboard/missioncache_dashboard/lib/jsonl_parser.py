@@ -321,13 +321,15 @@ def get_jsonl_files_for_date(
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    # Calculate cutoff timestamp
+    # A session file for `date` is last written when the session ends, so its mtime
+    # is on or after that date's midnight. The requested date is the lower bound;
+    # max_age_days only bounds the scan ABOVE (date + max_age_days) so requesting an
+    # old date doesn't parse every newer file. Never raise the lower bound to
+    # now() - max_age_days: that would hide the target day's own (un-retouched) files
+    # whenever the requested date is older than max_age_days.
     cutoff_date = datetime.strptime(date, "%Y-%m-%d")
-    cutoff_ts = cutoff_date.timestamp()
-
-    # Also limit to recent files for performance
-    max_age_cutoff = (datetime.now() - timedelta(days=max_age_days)).timestamp()
-    effective_cutoff = max(cutoff_ts, max_age_cutoff)
+    lower_cutoff = cutoff_date.timestamp()
+    upper_cutoff = (cutoff_date + timedelta(days=max_age_days)).timestamp()
 
     for project_dir in PROJECTS_DIR.iterdir():
         if not project_dir.is_dir():
@@ -336,7 +338,7 @@ def get_jsonl_files_for_date(
         for jsonl_file in project_dir.glob("*.jsonl"):
             try:
                 mtime = jsonl_file.stat().st_mtime
-                if mtime >= effective_cutoff:
+                if lower_cutoff <= mtime <= upper_cutoff:
                     yield jsonl_file
             except OSError:
                 continue

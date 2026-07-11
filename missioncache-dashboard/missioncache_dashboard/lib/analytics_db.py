@@ -320,9 +320,11 @@ class AnalyticsDB:
         """Context manager for database connection."""
         if self._connection is None:
             self._connection = duckdb.connect(str(self.db_path), read_only=False)
-            # Set timezone to Israel for correct date comparisons
-            # Sessions are stored in UTC, CURRENT_DATE returns local date
-            self._connection.execute("SET timezone = 'Asia/Jerusalem'")
+            # Sessions are stored as naive LOCAL wall-clock strings (missioncache-db
+            # writes datetime.now()), so DATE()/EXTRACT() read them directly. DuckDB's
+            # bundled ICU already defaults TimeZone to the host's local zone, which is
+            # what CURRENT_DATE and now() comparisons must resolve against - so we leave
+            # it unset rather than hardcoding one region.
             # Ensure core tables exist (required for sync)
             self._ensure_core_tables(self._connection)
             # Ensure feeds tables exist
@@ -1333,12 +1335,12 @@ class AnalyticsDB:
         """Get total time spent on a task in seconds."""
         with self.connection() as conn:
             if period == "today":
-                # Convert UTC timestamp to local timezone before comparing dates
+                # start_time is naive local wall-clock, so DATE() is the local date
                 result = conn.execute(
                     """SELECT COALESCE(SUM(duration_seconds), 0) as total
                        FROM sessions
                        WHERE task_id = ?
-                         AND DATE(start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem') = CURRENT_DATE""",
+                         AND DATE(start_time) = CURRENT_DATE""",
                     (task_id,),
                 ).fetchone()
             elif period == "week":
@@ -1380,12 +1382,12 @@ class AnalyticsDB:
             placeholders = ",".join(["?"] * len(task_ids))
 
             if period == "today":
-                # Convert UTC timestamp to local timezone before comparing dates
+                # start_time is naive local wall-clock, so DATE() is the local date
                 query = f"""
                     SELECT task_id, COALESCE(SUM(duration_seconds), 0) as total
                     FROM sessions
                     WHERE task_id IN ({placeholders})
-                      AND DATE(start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem') = CURRENT_DATE
+                      AND DATE(start_time) = CURRENT_DATE
                     GROUP BY task_id
                 """
             elif period == "week":
@@ -1442,8 +1444,8 @@ class AnalyticsDB:
     def get_hourly_activity(self, date: str | None = None) -> list[dict]:
         """Get hourly activity breakdown for a specific date."""
         with self.connection() as conn:
-            # Convert UTC to local time for both date filtering and hour extraction
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; read date/hour directly
+            local_ts = "start_time"
             if date:
                 rows = conn.execute(
                     f"""SELECT
@@ -1507,8 +1509,8 @@ class AnalyticsDB:
     def get_today_stats(self) -> dict:
         """Get summary statistics for today."""
         with self.connection() as conn:
-            # Convert UTC timestamp to local timezone before comparing dates
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; DATE() is the local date
+            local_ts = "start_time"
             result = conn.execute(
                 f"""SELECT
                        COALESCE(SUM(duration_seconds), 0) as total_seconds,
@@ -1527,8 +1529,8 @@ class AnalyticsDB:
     def get_date_stats(self, date: str) -> dict:
         """Get summary statistics for a specific date."""
         with self.connection() as conn:
-            # Convert UTC timestamp to local timezone before comparing dates
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; DATE() is the local date
+            local_ts = "start_time"
             result = conn.execute(
                 f"""SELECT
                        COALESCE(SUM(duration_seconds), 0) as total_seconds,
@@ -1557,8 +1559,8 @@ class AnalyticsDB:
         bars on a 24-hour timeline.
         """
         with self.connection() as conn:
-            # Convert UTC to local time for date filtering
-            local_ts = "s.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; DATE() is the local date
+            local_ts = "s.start_time"
             if date:
                 rows = conn.execute(
                     f"""SELECT
@@ -1642,8 +1644,8 @@ class AnalyticsDB:
         Day of week: 0=Sunday (Israel week start), 6=Saturday
         """
         with self.connection() as conn:
-            # Convert UTC to local time for accurate day-of-week and hour extraction
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; read day-of-week/hour directly
+            local_ts = "start_time"
             rows = conn.execute(
                 f"""SELECT
                        EXTRACT(DOW FROM {local_ts}) as dow,
@@ -1679,8 +1681,8 @@ class AnalyticsDB:
         Day of week: 0=Sunday (Israel week start), 6=Saturday
         """
         with self.connection() as conn:
-            # Convert UTC to local time for accurate day-of-week extraction
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; read day-of-week directly
+            local_ts = "start_time"
             rows = conn.execute(
                 f"""SELECT
                        EXTRACT(DOW FROM {local_ts}) as dow,
@@ -1712,8 +1714,8 @@ class AnalyticsDB:
         Useful for viewing work patterns over time without DOW aggregation.
         """
         with self.connection() as conn:
-            # Convert UTC to local time for accurate date extraction
-            local_ts = "start_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jerusalem'"
+            # start_time is naive local wall-clock; read date/day-of-week directly
+            local_ts = "start_time"
             rows = conn.execute(
                 f"""SELECT
                        DATE({local_ts}) as work_date,

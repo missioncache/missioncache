@@ -32,10 +32,10 @@ open http://localhost:8787
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `server.py` | ~4000 | FastAPI backend with all APIs |
-| `index.html` | ~7700 | Single-page app (embedded CSS/JS) |
-| `lib/analytics_db.py` | ~1100 | DuckDB operations layer |
-| `migrate_to_duckdb.py` | ~600 | SQLite -> DuckDB migration |
+| `server.py` | ~3000 | FastAPI backend with all APIs |
+| `index.html` | ~8800 | Single-page app (embedded CSS/JS) |
+| `lib/analytics_db.py` | ~3800 | DuckDB operations layer |
+| `migrate_to_duckdb.py` | ~700 | SQLite -> DuckDB migration |
 
 ### Deployment
 

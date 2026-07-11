@@ -124,7 +124,7 @@ async def background_sync():
             await asyncio.sleep(SYNC_INTERVAL_SECONDS)
             db = get_db()
             result = db.sync_from_sqlite()
-            if result.get("sessions", 0) > 0 or result.get("heartbeats", 0) > 0:
+            if result.get("sessions_synced", 0) > 0 or result.get("tasks_synced", 0) > 0:
                 print(f"[Sync] Synced from SQLite: {result}")
         except asyncio.CancelledError:
             break
