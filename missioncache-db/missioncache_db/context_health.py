@@ -62,7 +62,10 @@ RECENT_CHANGES_POINTER = "Older entries live in `{journal_name}` (oldest first).
 
 _H2_RE = re.compile(r"^## (.+?)\s*$", re.MULTILINE)
 _H2_LINE_RE = re.compile(r"^## ", re.MULTILINE)
-_H3_LINE_RE = re.compile(r"^### ", re.MULTILINE)
+# A Recent Changes subsection boundary is a DATED ``### <timestamp>`` heading
+# (the shape both live writers emit). A bare ``### `` sub-heading inside an
+# entry body is NOT a boundary - it stays with its entry.
+_DATED_H3_RE = re.compile(r"^### \d{4}-\d{2}-\d{2}", re.MULTILINE)
 _LAST_UPDATED_RE = re.compile(r"\*\*Last Updated:\*\*\s*(.+)")
 _ISO_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -77,24 +80,33 @@ def mask_fences(content: str) -> str:
     spaces (newlines preserved), so regex offsets computed on the masked
     text are valid indices into the original. Every structure scan in this
     module goes through this, keeping code samples invisible to heading /
-    subsection / table detection. Tolerant closer: any fence of the same
-    character type closes the block.
+    subsection / table detection. Closer rule follows CommonMark: a fence
+    closes only on a fence of the SAME character whose length is >= the
+    opener's, so a shorter inner fence (e.g. ``` inside a ```` block) is
+    content, not a closer.
     """
     if "```" not in content and "~~~" not in content:
         return content
     lines = content.split("\n")
     fence_char: Optional[str] = None
+    fence_len = 0
     for i, line in enumerate(lines):
         match = _FENCE_RE.match(line)
         if fence_char is None:
             if match:
                 fence_char = match.group(1)[0]
+                fence_len = len(match.group(1))
                 lines[i] = " " * len(line)
         else:
-            closes = match is not None and match.group(1)[0] == fence_char
+            closes = (
+                match is not None
+                and match.group(1)[0] == fence_char
+                and len(match.group(1)) >= fence_len
+            )
             lines[i] = " " * len(line)
             if closes:
                 fence_char = None
+                fence_len = 0
     return "\n".join(lines)
 
 
@@ -203,8 +215,8 @@ def append_to_section_body(
 
 
 def _subsection_starts(masked_body: str) -> list[int]:
-    """Offsets of ``### `` subsection starts within a fence-masked body."""
-    return [m.start() for m in _H3_LINE_RE.finditer(masked_body)]
+    """Offsets of dated ``### `` subsection starts within a fence-masked body."""
+    return [m.start() for m in _DATED_H3_RE.finditer(masked_body)]
 
 
 def parse_recent_changes_subsections(content: str) -> list[tuple[str, str]]:

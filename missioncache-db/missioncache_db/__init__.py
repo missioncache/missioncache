@@ -917,8 +917,21 @@ class TaskDB:
             self._connection.commit()
         try:
             yield self._connection
-        finally:
-            pass  # Keep connection open for reuse
+        except Exception:
+            # An error may have left an open write transaction on the cached,
+            # reused connection (e.g. process_heartbeats' BEGIN IMMEDIATE with
+            # an exception before its commit). Without a rollback the WAL write
+            # lock stays held, blocking other processes, and every later
+            # BEGIN IMMEDIATE on this connection fails "cannot start a
+            # transaction within a transaction" until the process restarts.
+            # Roll back before re-raising; guard the rollback so it can never
+            # mask the original error.
+            try:
+                self._connection.rollback()
+            except Exception:
+                pass
+            raise
+        # Connection is intentionally kept open for reuse on the success path.
 
     def close(self):
         """Close the database connection."""
@@ -2191,7 +2204,7 @@ class TaskDB:
         """Find the active task that matches the current working directory.
 
         Only returns a task when explicitly working on one:
-        1. Check pending-project.json for explicitly registered project (from /missioncache:orbit-project-continue)
+        1. Check pending-project.json for explicitly registered project (from /missioncache:load)
         2. Check per-session project file (written by statusline after consuming pending-project.json)
         3. Check if cwd is in dev/active/<task>/<subtask> directory
 
@@ -2239,8 +2252,10 @@ class TaskDB:
                 except (json.JSONDecodeError, IOError):
                     pass  # Fall through to other methods
 
-        # Priority 3: Check if cwd is under centralized MissionCache root
-        orbit_active = MISSIONCACHE_ROOT / "active"
+        # Priority 3: Check if cwd is under centralized MissionCache root.
+        # Resolve the root the same way as cwd so a symlinked MISSIONCACHE_ROOT
+        # (e.g. /tmp -> /private/tmp on macOS) still matches the resolved cwd.
+        orbit_active = (MISSIONCACHE_ROOT / "active").resolve()
         try:
             relative = cwd_path.relative_to(orbit_active)
             parts = relative.parts
@@ -2431,6 +2446,13 @@ class TaskDB:
         processed_count = 0
 
         with self.connection() as conn:
+            # Claim the write lock up-front so the read below happens inside
+            # the write transaction. A concurrent process_heartbeats run then
+            # blocks here on the WAL lock and, once it proceeds, its own read
+            # sees these rows already marked processed - preventing the same
+            # heartbeats being aggregated twice into duplicate sessions.
+            conn.execute("BEGIN IMMEDIATE")
+
             # Get unprocessed heartbeats (skip orphaned task_ids)
             heartbeats = conn.execute(
                 """SELECT h.* FROM heartbeats h
@@ -2447,6 +2469,7 @@ class TaskDB:
             )
 
             if not heartbeats:
+                conn.commit()
                 return 0
 
             current_task_id = None
@@ -2478,7 +2501,12 @@ class TaskDB:
                     session_start_time = hb_time
                     last_heartbeat_time = hb_time
                 else:
-                    # Check gap since last heartbeat
+                    # Check gap since last heartbeat. Timestamps are naive
+                    # local-time strings (intentionally kept - see the storage
+                    # note in get_task_time); across a DST transition this
+                    # wall-clock delta can misstate true elapsed seconds. A
+                    # precise fix would require UTC-epoch storage; the twice-a-
+                    # year edge is accepted rather than migrate the schema.
                     gap = (hb_time - last_heartbeat_time).total_seconds()
 
                     if gap > idle_timeout:
@@ -2502,10 +2530,21 @@ class TaskDB:
                 )
                 processed_count += 1
 
-            # Close any remaining open session
+            # Close the trailing open session. Only credit the assumed_work
+            # tail when it is genuinely idle-terminated (last heartbeat older
+            # than idle_timeout). If the last heartbeat is recent, work is
+            # likely still ongoing and a later call aggregates its own batch;
+            # adding a full tail on every call would inflate time (each
+            # save/complete/pre-compact call re-padding the tail).
+            # Tradeoff: a session processed while still warm that then truly
+            # ends never gets its final assumed_work tail credited - an
+            # accepted bounded under-count (the alternative was per-call
+            # inflation).
             if current_session_id and last_heartbeat_time:
+                idle_seconds = (datetime.now() - last_heartbeat_time).total_seconds()
+                tail = assumed_work if idle_seconds > idle_timeout else 0
                 self._close_session(
-                    conn, current_session_id, last_heartbeat_time, assumed_work
+                    conn, current_session_id, last_heartbeat_time, tail
                 )
 
             conn.commit()
@@ -2571,7 +2610,7 @@ class TaskDB:
             elif period == "week":
                 row = conn.execute(
                     """SELECT COALESCE(SUM(duration_seconds), 0) as total FROM sessions
-                       WHERE task_id = ? AND start_time >= datetime('now', 'localtime', '-7 days')""",
+                       WHERE task_id = ? AND datetime(start_time) >= datetime('now', 'localtime', '-7 days')""",
                     (task_id,),
                 ).fetchone()
             elif period == "today":
@@ -2643,7 +2682,7 @@ class TaskDB:
                 query = f"""
                     SELECT task_id, COALESCE(SUM(duration_seconds), 0) as total
                     FROM sessions
-                    WHERE task_id IN ({placeholders}) AND start_time >= datetime('now', 'localtime', '-7 days')
+                    WHERE task_id IN ({placeholders}) AND datetime(start_time) >= datetime('now', 'localtime', '-7 days')
                     GROUP BY task_id
                 """
             else:  # all
@@ -2722,6 +2761,8 @@ class TaskDB:
             for hb in heartbeats:
                 hb_time = datetime.fromisoformat(hb["timestamp"])
                 if last_time:
+                    # Naive local-time delta (see process_heartbeats): accepted
+                    # to misstate elapsed time only across a DST transition.
                     gap = (hb_time - last_time).total_seconds()
                     if gap > idle_timeout:
                         # Idle gap - reset current session, keep only recent
@@ -3111,7 +3152,7 @@ class TaskDB:
                     current_phase = phases[i - 1]
                 phases_remaining += 1
 
-        # Parse **Remaining:** field from task file (written by Claude via /update-orbit)
+        # Parse **Remaining:** field from task file (written by Claude via /missioncache:save)
         remaining_summary = self._parse_summary_field(content, "Remaining")
         if not remaining_summary:
             # Fallback to simple progress indicator
@@ -3229,7 +3270,7 @@ class TaskDB:
                 total_items = len(subtask_dirs)
                 remaining_summary = f"Parent task with {total_items} subtasks"
 
-        # Parse **Summary:** field from task file (written by Claude via /update-orbit)
+        # Parse **Summary:** field from task file (written by Claude via /missioncache:save)
         completed_summary = self._parse_summary_field(content, "Summary")
         if not completed_summary:
             # Fallback to simple completion indicator
@@ -4171,8 +4212,6 @@ def main():
 
             dry_run = "--dry-run" in sys.argv
             prefix = "DRY RUN: " if dry_run else ""
-            archived_count = 0
-            merged_count = 0
 
             # --- B1: Archive orphaned active tasks (no files, no/minimal work) ---
             print("=== B1: Archive orphaned active tasks ===")
@@ -4183,6 +4222,11 @@ def main():
                     "WHERE status = 'active' AND type = 'coding'"
                 ).fetchall()
                 for row in rows:
+                    # 'manual/*' tasks (created via create-task) never have an
+                    # on-disk directory, so a missing dir is expected, not an
+                    # orphan - skip them or every manual coding task is archived.
+                    if row["full_path"].startswith("manual/"):
+                        continue
                     task_dir = MISSIONCACHE_ROOT / row["full_path"]
                     has_files = (
                         task_dir.exists()
@@ -4190,13 +4234,14 @@ def main():
                         and any(task_dir.iterdir())
                     )
                     if not has_files:
-                        # Check if it's a duplicate (handled in B3)
+                        # Leave duplicate-named tasks alone - don't archive a
+                        # live sibling that shares this name.
                         dupes = conn.execute(
                             "SELECT COUNT(*) FROM tasks WHERE name = ?",
                             (row["name"],),
                         ).fetchone()[0]
                         if dupes > 1:
-                            continue  # handled in B3
+                            continue
                         orphan_ids.append(row["id"])
                         print(f"  {prefix}Archive ID={row['id']} name={row['name']}")
 
@@ -4209,7 +4254,6 @@ def main():
                         orphan_ids,
                     )
                     conn.commit()
-                archived_count += len(orphan_ids)
             print(f"  {prefix}{len(orphan_ids)} tasks archived\n")
 
             # --- B2: Move orphaned repo-local files ---
@@ -4243,122 +4287,7 @@ def main():
                     shutil.rmtree(pw_dir)
                     print(f"  Removed {pw_dir}")
 
-            # Remove empty dev/ subdirs
-            for subdir_name in ["active", "completed"]:
-                subdir = dev_dir / subdir_name
-                if subdir.exists():
-                    # Remove .DS_Store files
-                    ds_store = subdir / ".DS_Store"
-                    if ds_store.exists() and not dry_run:
-                        ds_store.unlink()
-                    remaining = [f for f in subdir.iterdir() if f.name != ".DS_Store"]
-                    if not remaining:
-                        if dry_run:
-                            print(f"  {prefix}Remove empty {subdir}")
-                        else:
-                            shutil.rmtree(subdir)
-                            print(f"  Removed empty {subdir}")
-
-            # Remove dev/ itself if empty
-            if dev_dir.exists() and not dry_run:
-                ds_store = dev_dir / ".DS_Store"
-                if ds_store.exists():
-                    ds_store.unlink()
-                remaining = [f for f in dev_dir.iterdir() if f.name != ".DS_Store"]
-                if not remaining:
-                    dev_dir.rmdir()
-                    print(f"  Removed empty {dev_dir}")
-
             print(f"  {prefix}{files_moved} files moved\n")
-
-            # --- B3: Resolve duplicates ---
-            print("=== B3: Resolve duplicate task names ===")
-            # Each entry: (keep_id, archive_ids)
-            # Determined by: has files > recent work > more time
-            duplicates = [
-                # 05-module-aware-env-defaults: 69 active+files, 68 completed manual/
-                (69, [68]),
-                # 06-cicd-image-builds: 71 has more time (4182s vs 972s)
-                (71, [73]),
-                # 07-argo-workflow-server-nightly: 74 active+files+recent, 72 manual/ 75 empty
-                (74, [72, 75]),
-                # claude-activity-timezone-fix: 50 active+files, 48 manual/
-                (50, [48]),
-                # dynamic-workflow-registration: 60 completed+time, 62 active/no files
-                (60, [62]),
-                # eval-graders-system: 35 has last_worked, 28 manual/
-                (35, [28]),
-                # fix-ddc-lldc-test-failures: 16 completed+33h, 29 active/0 time
-                (16, [29]),
-                # orbit-loop-test: 40 more time (2674s vs 300s), 41
-                (40, [41]),
-            ]
-
-            with db.connection() as conn:
-                for keep_id, archive_ids in duplicates:
-                    keep = conn.execute(
-                        "SELECT id, name, status FROM tasks WHERE id = ?",
-                        (keep_id,),
-                    ).fetchone()
-                    if not keep:
-                        continue
-
-                    for aid in archive_ids:
-                        victim = conn.execute(
-                            "SELECT id, name, status FROM tasks WHERE id = ?",
-                            (aid,),
-                        ).fetchone()
-                        if not victim:
-                            continue
-
-                        # Migrate time data (sessions + heartbeats)
-                        session_count = conn.execute(
-                            "SELECT COUNT(*) FROM sessions WHERE task_id = ?",
-                            (aid,),
-                        ).fetchone()[0]
-                        hb_count = conn.execute(
-                            "SELECT COUNT(*) FROM heartbeats WHERE task_id = ?",
-                            (aid,),
-                        ).fetchone()[0]
-
-                        if session_count > 0 or hb_count > 0:
-                            print(
-                                f"  {prefix}Merge ID={aid} -> ID={keep_id} "
-                                f"({keep['name']}): "
-                                f"{session_count} sessions, {hb_count} heartbeats"
-                            )
-                            if not dry_run:
-                                conn.execute(
-                                    "UPDATE sessions SET task_id = ? WHERE task_id = ?",
-                                    (keep_id, aid),
-                                )
-                                conn.execute(
-                                    "UPDATE heartbeats SET task_id = ? "
-                                    "WHERE task_id = ?",
-                                    (keep_id, aid),
-                                )
-                            merged_count += 1
-
-                        print(
-                            f"  {prefix}Archive ID={aid} "
-                            f"name={victim['name']} "
-                            f"(keeping ID={keep_id})"
-                        )
-                        if not dry_run:
-                            conn.execute(
-                                "UPDATE tasks SET status = 'archived', "
-                                "archived_at = datetime('now') "
-                                "WHERE id = ?",
-                                (aid,),
-                            )
-                        archived_count += 1
-
-                if not dry_run:
-                    conn.commit()
-            print(
-                f"  {prefix}{merged_count} time merges, "
-                f"{archived_count - len(orphan_ids)} duplicates archived\n"
-            )
 
             # --- B4: Normalize non-standard paths ---
             print("=== B4: Normalize non-standard paths ===")
@@ -4408,8 +4337,6 @@ def main():
             # --- Summary ---
             print("=== Summary ===")
             print(f"  Orphans archived: {len(orphan_ids)}")
-            print(f"  Duplicates resolved: {len(duplicates)}")
-            print(f"  Time merges: {merged_count}")
             print(f"  Paths normalized: {normalized}")
             print(f"  Files moved: {files_moved}")
             if dry_run:
