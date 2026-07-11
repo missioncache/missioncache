@@ -98,6 +98,8 @@ The statusline has a small but useful set of environment-variable knobs, documen
 | `STATUSLINE_CODEX` | `true` | Show the Codex usage line. Set to `false` to hide it even if Codex is installed. |
 | `STATUSLINE_HEALTH_SERVICES` | `Code,Claude API` | Comma-separated list of Anthropic services to monitor. Available values: `Code`, `Claude API`, `claude.ai`, `platform.claude.com`, `Claude for Government`, `Claude Cowork`. Only incidents affecting services in this list are shown. |
 | `MISSIONCACHE_DASHBOARD_URL` | `http://localhost:8787` | Base URL used for the OSC 8 clickable hyperlinks on the project name and progress bracket. Change if your dashboard runs on a non-default port or a remote host. |
+| `NO_COLOR` | unset | When set to any non-empty value, disables ANSI colors and renders the statusline as plain text, honoring the [NO_COLOR](https://no-color.org/) convention. |
+| `MISSIONCACHE_STATUSLINE_DEBUG` | unset | When set, dumps Claude Code's raw stdin JSON to `~/.claude/hooks/state/statusline-ctx-debug.log` on each render. Off by default; turn it on only to debug display issues. |
 
 Auth-provider detection also respects Claude Code's own environment variables (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) to display the correct subscription label on the Usage line. You do not need to set these for MissionCache - the statusline reads them because Claude Code already uses them.
 
@@ -167,7 +169,7 @@ These writes go to `/dev/tty` directly because Claude Code's statusline stdout i
 
 ### Debug log
 
-`parse_input()` writes a JSON debug dump of Claude Code's stdin to `~/.claude/hooks/state/statusline-ctx-debug.log` on every render. This overwrites on each call, so the file always contains the most recent input payload. It is there because the `context_window` shape in Claude Code's statusline JSON changed multiple times during Claude Code's development and the easiest way to debug display issues was to `cat` the log and see exactly what shape arrived. The file is also tiny and hidden, so nobody has asked to make it conditional.
+When `MISSIONCACHE_STATUSLINE_DEBUG` is set, `parse_input()` writes a JSON debug dump of Claude Code's stdin to `~/.claude/hooks/state/statusline-ctx-debug.log` on each render. It overwrites on each call, so the file always contains the most recent input payload. This is opt-in because the `context_window` shape in Claude Code's statusline JSON has changed multiple times, and dumping the payload is the quickest way to debug a display issue - but writing a file on every render is not something you want on by default. Leave the variable unset and no debug file is written.
 
 ## Lines one by one
 
@@ -191,11 +193,11 @@ Always renders dir; git cell is only shown inside a git repo.
 
 - **Model** - from `model.display_name` in stdin.
 - **Tokens** - sum of `input_tokens + cache_creation_input_tokens + cache_read_input_tokens + output_tokens` from `current_usage`, formatted as `N`, `N.NK`, or `N.NM`.
-- **Ctx** - context window percentage, plus a `SYSTEM_OVERHEAD_PERCENT = 19%` baseline add when the API returns a percentage directly. Uses colors:
+- **Ctx** - context window percentage. When Claude Code's stdin includes `used_percentage`, the statusline shows that value directly, with no baseline add - `used_percentage` already accounts for the full context fill (system prompt + tool definitions are part of the cached input tokens it counts), so adding an overhead term would double-count and fire compact warnings early. Uses colors:
   - Green/gray under 65%
   - Yellow 65-79% with "Compact recommended"
   - Red 80%+ with "Compact now!"
-  - Blue "(Estimated)" when stdin does not include `used_percentage` and the statusline has to compute it from token counts
+  - Blue "(Estimated)" when stdin does not include `used_percentage` and the statusline has to compute it from token counts; this fallback folds a system-overhead allowance into the estimate, since it works from the raw token base
 
 ### Line 4: Time
 
@@ -290,7 +292,7 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 **Cause:** Most likely a slow future timed out, a DB read failed, or the relevant data source is unavailable. Each line has its own timeout and try/except, so a failed line just renders empty.
 
-**Fix:** Run the script with `-v` equivalent by printing debug info inside the future you suspect. Check `~/.claude/hooks/state/statusline-ctx-debug.log` to see what Claude Code's stdin looked like on the last render. For the Usage line specifically, check `~/.claude/scripts/usage-cache.json` - if the file is stale or corrupted, delete it and the next render will hit the API.
+**Fix:** Run the script with `-v` equivalent by printing debug info inside the future you suspect. Set `MISSIONCACHE_STATUSLINE_DEBUG=1` and trigger another render, then check `~/.claude/hooks/state/statusline-ctx-debug.log` to see what Claude Code's stdin looked like. For the Usage line specifically, check `~/.claude/scripts/usage-cache.json` - if the file is stale or corrupted, delete it and the next render will hit the API.
 
 ### "Project name doesn't appear even though I'm in a MissionCache project"
 
@@ -302,7 +304,7 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 **Cause:** Claude Code did not include `used_percentage` in the statusline JSON, so the statusline falls back to computing the percentage from raw token counts. This is expected early in a session when the context field is sparse, and it should switch to the non-estimated path on subsequent turns.
 
-**Fix:** Not a bug. If it stays in "Estimated" mode the whole session, that is a Claude Code stdin shape issue - check the debug log to see what `context_window` looked like, and file an issue if it looks like Claude Code changed the payload shape.
+**Fix:** Not a bug. If it stays in "Estimated" mode the whole session, that is a Claude Code stdin shape issue - set `MISSIONCACHE_STATUSLINE_DEBUG=1`, trigger a render, and check the debug log to see what `context_window` looked like; file an issue if it looks like Claude Code changed the payload shape.
 
 ### "Version label shows `v1.0.50 (3d)` in yellow even though I know about this version"
 

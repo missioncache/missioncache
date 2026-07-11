@@ -179,6 +179,48 @@ class TestGetHealthStatusCache:
 
         assert mod.get_health_status() == incidents
 
+    def test_incident_affecting_three_services_labels_all(self, tmp_path, monkeypatch):
+        """When 3+ monitored services are affected, the label lists every one
+        instead of collapsing to just the first service."""
+        monkeypatch.setattr(mod, "HEALTH_CACHE", tmp_path / "no-cache.json")
+        monkeypatch.setattr(mod, "HEALTH_COMPONENTS", {
+            "yyzkbfz2thpt": "Code",
+            "k8w3r06qmzrp": "Claude API",
+            "rwppv331jlwc": "claude.ai",
+        })
+        monkeypatch.setitem(mod.STATUSLINE_CONFIG, "claude_status", True)
+        payload = {
+            "incidents": [{
+                "name": "Big outage",
+                "status": "investigating",
+                "components": [
+                    {"id": "yyzkbfz2thpt"},
+                    {"id": "k8w3r06qmzrp"},
+                    {"id": "rwppv331jlwc"},
+                ],
+                "incident_updates": [
+                    {"status": "investigating", "body": "looking into it",
+                     "created_at": "2025-01-02T11:00:00Z"},
+                ],
+            }]
+        }
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return json.dumps(payload).encode()
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda *a, **kw: _Resp())
+
+        result = mod.get_health_status()
+        assert len(result) == 1
+        assert result[0]["service"] == "Code, Claude API, claude.ai"
+
 
 # ── _atomic_write_json ────────────────────────────────────────────────────
 
@@ -404,6 +446,36 @@ class TestGetProjectInfo:
             conn.close()
         return orbit_active
 
+    @staticmethod
+    def _install_fake_taskdb(monkeypatch, *, task_status=None, raises=False):
+        """Inject a fake ``missioncache_db`` module so the dir-missing branch's
+        lazy ``from missioncache_db import TaskDB`` resolves to a controllable
+        stub instead of the user's real tasks DB.
+
+        ``task_status`` is the status the DB reports for the queried name
+        (None means no such active task). ``raises=True`` makes ``TaskDB()``
+        construction fail, modeling an unavailable DB.
+        """
+        import sys
+        import types
+
+        fake = types.ModuleType("missioncache_db")
+
+        class FakeTaskDB:
+            def __init__(self, *args, **kwargs):
+                if raises:
+                    raise RuntimeError("db unavailable")
+
+            def get_task_by_name(self, name, status=None):
+                if task_status is None:
+                    return None
+                if status is not None and status != task_status:
+                    return None
+                return types.SimpleNamespace(status=task_status)
+
+        fake.TaskDB = FakeTaskDB
+        monkeypatch.setitem(sys.modules, "missioncache_db", fake)
+
     def test_binding_plus_tasks_file_yields_name_and_progress(
         self, tmp_path, monkeypatch
     ):
@@ -461,3 +533,145 @@ class TestGetProjectInfo:
 
         assert info.name == ""
         assert info.progress == ""
+
+    def test_completed_project_dir_missing_yields_empty_projectinfo(
+        self, tmp_path, monkeypatch
+    ):
+        """A project_state binding survives after a project is archived (only
+        /missioncache:done removes it, and it can miss the stdin session_id).
+        When the bound project no longer has an active directory,
+        get_project_info must drop it instead of pinning a bare name for the
+        rest of the session."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-done", "archived-feature"
+        )
+        # Active dir exists and holds other projects, but the bound project's
+        # directory has moved to completed/ (not present here).
+        orbit_active.mkdir(parents=True)
+        (orbit_active / "some-other-project").mkdir()
+        # DB reports no active task by that name (it was archived), so the
+        # dir-missing branch drops it.
+        self._install_fake_taskdb(monkeypatch, task_status=None)
+
+        info = mod.get_project_info("sess-done", duration_sec=120)
+
+        assert info.name == ""
+        assert info.progress == ""
+
+    def test_directoryless_active_project_still_shown(
+        self, tmp_path, monkeypatch
+    ):
+        """A non-coding task created via create_task has no directory under
+        ~/.missioncache/active/, yet it is a live project. When the tasks DB
+        reports it active, the statusline keeps showing the name - with no
+        progress suffix, since there is no tasks.md to count."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-noncoding", "quick-chore"
+        )
+        # active/ exists and holds other (coding) projects, but the bound
+        # project has no directory of its own.
+        orbit_active.mkdir(parents=True)
+        (orbit_active / "some-coding-project").mkdir()
+        self._install_fake_taskdb(monkeypatch, task_status="active")
+
+        info = mod.get_project_info("sess-noncoding", duration_sec=120)
+
+        assert info.name == "quick-chore"
+        assert info.progress == ""
+
+    def test_directoryless_completed_project_dropped(
+        self, tmp_path, monkeypatch
+    ):
+        """A directoryless project the DB reports completed is dropped, so a
+        finished non-coding task stops pinning the statusline."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-noncoding-done", "old-chore"
+        )
+        orbit_active.mkdir(parents=True)
+        self._install_fake_taskdb(monkeypatch, task_status="completed")
+
+        info = mod.get_project_info("sess-noncoding-done", duration_sec=120)
+
+        assert info.name == ""
+        assert info.progress == ""
+
+    def test_directoryless_db_unavailable_dropped(
+        self, tmp_path, monkeypatch
+    ):
+        """When the tasks DB is unavailable, a directoryless binding is dropped
+        - the safe default: never pin a bare name we cannot confirm is
+        active."""
+        orbit_active = self._seed_binding(
+            tmp_path, monkeypatch, "sess-nodb", "mystery"
+        )
+        orbit_active.mkdir(parents=True)
+        self._install_fake_taskdb(monkeypatch, raises=True)
+
+        info = mod.get_project_info("sess-nodb", duration_sec=120)
+
+        assert info.name == ""
+        assert info.progress == ""
+
+
+# ── update_session_state (single-row read consolidation) ───────────────────
+
+
+class TestUpdateSessionState:
+    """One UPSERT+SELECT on the session_state row now returns edit_count, the
+    last-prompt timestamp, and the iTerm action together, so the render path
+    stops opening extra connections to the same row."""
+
+    @staticmethod
+    def _make_db(tmp_path, monkeypatch):
+        import sqlite3
+
+        db_path = tmp_path / "hooks-state.db"
+        monkeypatch.setattr(mod, "HOOKS_STATE_DB", db_path)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "CREATE TABLE session_state ("
+                "session_id TEXT PRIMARY KEY, context_percent INTEGER, "
+                "context_tokens TEXT, edit_count INTEGER, last_prompt_at TEXT, "
+                "action TEXT, updated_at TEXT)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return db_path
+
+    def test_returns_edit_count_last_prompt_and_action(self, tmp_path, monkeypatch):
+        import sqlite3
+
+        db_path = self._make_db(tmp_path, monkeypatch)
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                "INSERT INTO session_state "
+                "(session_id, edit_count, last_prompt_at, action) VALUES (?, ?, ?, ?)",
+                ("sess-1", 7, "2025-01-02T14:05:00", "Editing foo.py"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        edit_count, last_prompt_at, action = mod.update_session_state(
+            "sess-1", 42, "↑1/↓2"
+        )
+
+        assert edit_count == 7
+        assert last_prompt_at == "2025-01-02T14:05:00"
+        assert action == "Editing foo.py"
+
+    def test_new_session_gets_safe_defaults(self, tmp_path, monkeypatch):
+        self._make_db(tmp_path, monkeypatch)
+        edit_count, last_prompt_at, action = mod.update_session_state(
+            "brand-new", 10, "0"
+        )
+        assert edit_count == 0
+        assert last_prompt_at == ""
+        assert action == "Claude Code"
+
+    def test_no_session_id_returns_defaults(self, tmp_path, monkeypatch):
+        self._make_db(tmp_path, monkeypatch)
+        assert mod.update_session_state("", 0, "0") == (0, "", "Claude Code")
