@@ -1,9 +1,11 @@
 """Tests for JSONL parser functions and SessionMetrics."""
 
+import os
 from datetime import datetime, timedelta
 
 import pytest
 
+from missioncache_dashboard.lib import jsonl_parser
 from missioncache_dashboard.lib.jsonl_parser import (
     SessionMetrics,
     decode_project_path,
@@ -151,3 +153,70 @@ class TestSessionMetrics:
             output_tokens=500,
         )
         assert metrics.total_tokens == 1500
+
+
+# --- get_jsonl_files_for_date (mtime window) ---
+
+
+class TestGetJsonlFilesForDate:
+    """The mtime window must key off the REQUESTED date, not now()-max_age_days.
+
+    A file for a date older than max_age_days is not re-touched after the session
+    ends, so keying the lower bound to now()-max_age_days hid those files and zeroed
+    the history view's Claude columns for older days.
+    """
+
+    def _make_file(self, projects_dir, name, mtime):
+        proj = projects_dir / "-Users-alice-demo"
+        proj.mkdir(parents=True, exist_ok=True)
+        f = proj / f"{name}.jsonl"
+        f.write_text("{}\n")
+        os.utime(f, (mtime, mtime))
+        return f
+
+    def test_old_date_file_is_yielded(self, tmp_path, monkeypatch):
+        """A file whose mtime is on a date older than max_age_days is still yielded
+        when that older date is explicitly requested (the regression)."""
+        monkeypatch.setattr(jsonl_parser, "PROJECTS_DIR", tmp_path)
+        old_day = datetime.now() - timedelta(days=5)
+        f = self._make_file(
+            tmp_path, "old", old_day.replace(hour=12, minute=0, second=0).timestamp()
+        )
+        got = list(
+            jsonl_parser.get_jsonl_files_for_date(
+                old_day.strftime("%Y-%m-%d"), max_age_days=2
+            )
+        )
+        assert f in got
+
+    def test_file_before_requested_date_excluded(self, tmp_path, monkeypatch):
+        """A file older than the requested date's midnight is excluded (lower bound)."""
+        monkeypatch.setattr(jsonl_parser, "PROJECTS_DIR", tmp_path)
+        requested = datetime.now() - timedelta(days=5)
+        before = requested - timedelta(days=1)
+        f = self._make_file(tmp_path, "before", before.replace(hour=12).timestamp())
+        got = list(
+            jsonl_parser.get_jsonl_files_for_date(
+                requested.strftime("%Y-%m-%d"), max_age_days=2
+            )
+        )
+        assert f not in got
+
+    def test_file_after_upper_bound_excluded(self, tmp_path, monkeypatch):
+        """A file newer than requested date + max_age_days is excluded (upper bound)."""
+        monkeypatch.setattr(jsonl_parser, "PROJECTS_DIR", tmp_path)
+        requested = datetime.now() - timedelta(days=5)
+        f = self._make_file(tmp_path, "after", datetime.now().timestamp())
+        got = list(
+            jsonl_parser.get_jsonl_files_for_date(
+                requested.strftime("%Y-%m-%d"), max_age_days=2
+            )
+        )
+        assert f not in got
+
+    def test_today_file_yielded_by_default(self, tmp_path, monkeypatch):
+        """Today's file is yielded for a today (default) request."""
+        monkeypatch.setattr(jsonl_parser, "PROJECTS_DIR", tmp_path)
+        f = self._make_file(tmp_path, "today", datetime.now().timestamp())
+        got = list(jsonl_parser.get_jsonl_files_for_date(max_age_days=2))
+        assert f in got
