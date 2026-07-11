@@ -675,3 +675,134 @@ class TestUpdateSessionState:
     def test_no_session_id_returns_defaults(self, tmp_path, monkeypatch):
         self._make_db(tmp_path, monkeypatch)
         assert mod.update_session_state("", 0, "0") == (0, "", "Claude Code")
+
+
+# ── get_addon_value (cache + run_cmd) ────────────────────────────────────
+
+
+class TestGetAddonValue:
+    def _addon(self, **kw):
+        base = {"id": "demo", "enabled": True, "label": "L", "icon": ">",
+                "color": "version", "command": ["echo", "x"], "ttl": 60, "timeout": 5,
+                "placement": {"mode": "row", "group": "g", "order": 0, "target": None}}
+        base.update(kw)
+        return base
+
+    def test_fresh_cache_returns_without_running(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        cache = tmp_path / "addon-demo-cache.json"
+        cache.write_text(json.dumps({
+            "cached_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc).isoformat(),
+            "parsed": {"value": "cached"},
+        }))
+        # Track whether the command ran with a flag + a distinguishable
+        # sentinel: a throwing stub would be swallowed and return the same
+        # stale value, hiding a missing short-circuit.
+        ran = []
+        monkeypatch.setattr(mod, "run_cmd", lambda *a, **k: ran.append(1) or '{"value":"SENTINEL"}')
+        assert mod.get_addon_value(self._addon()) == {"value": "cached"}
+        assert not ran, "fresh cache must short-circuit before running the command"
+
+    def test_expired_reruns_and_rewrites(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        cache = tmp_path / "addon-demo-cache.json"
+        old = __import__("datetime").datetime(2000, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+        cache.write_text(json.dumps({"cached_at": old.isoformat(), "parsed": {"value": "old"}}))
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: "fresh")
+        assert mod.get_addon_value(self._addon()) == {"value": "fresh"}
+        # cache rewritten with the fresh value
+        assert json.loads(cache.read_text())["parsed"] == {"value": "fresh"}
+
+    def test_command_failure_returns_stale(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        cache = tmp_path / "addon-demo-cache.json"
+        old = __import__("datetime").datetime(2000, 1, 1, tzinfo=__import__("datetime").timezone.utc)
+        cache.write_text(json.dumps({"cached_at": old.isoformat(), "parsed": {"value": "stale"}}))
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: None)  # command failed
+        assert mod.get_addon_value(self._addon()) == {"value": "stale"}
+
+    def test_no_cache_and_failure_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: None)
+        assert mod.get_addon_value(self._addon()) is None
+
+    def test_no_cache_success_writes_and_returns(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: '{"value":"v","color":"ctx"}')
+        assert mod.get_addon_value(self._addon()) == {"value": "v", "color": "ctx"}
+        assert (tmp_path / "addon-demo-cache.json").exists()
+
+
+class TestGetAddonValueCorruptCache:
+    def _addon(self, **kw):
+        base = {"id": "demo", "enabled": True, "label": "L", "icon": ">",
+                "color": "version", "command": ["echo", "x"], "ttl": 60, "timeout": 5,
+                "placement": {"mode": "row", "group": "g", "order": 0, "target": None}}
+        base.update(kw)
+        return base
+
+    def test_non_dict_cache_file_does_not_crash(self, tmp_path, monkeypatch):
+        # A cache file holding a JSON scalar/array must not raise AttributeError;
+        # get_addon_value should ignore it and run the command instead.
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        (tmp_path / "addon-demo-cache.json").write_text("42")  # valid JSON, not a dict
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: "fresh")
+        assert mod.get_addon_value(self._addon()) == {"value": "fresh"}
+
+    def test_non_dict_cache_and_command_failure_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "SCRIPTS_DIR", tmp_path)
+        (tmp_path / "addon-demo-cache.json").write_text("[1,2,3]")
+        monkeypatch.setattr(mod, "run_cmd", lambda cmd, timeout=5: None)
+        assert mod.get_addon_value(self._addon()) is None
+
+
+class TestAddonRenderHeight:
+    """End-to-end: the statusline emits a deterministic line count regardless
+    of addon fetch results (the fixed-height invariant), driven via a real
+    subprocess so ADDONS binds from a controlled config."""
+
+    STDIN = json.dumps({
+        "session_id": "t", "model": {"display_name": "Opus"},
+        "workspace": {"current_dir": os.getcwd()},
+        "cost": {"total_duration_ms": 1000},
+        "context": {"used_percentage": 10},
+    })
+
+    def _render(self, tmp_path, addons):
+        import subprocess
+        import sys
+        home = tmp_path / f"home-{len(addons)}-{abs(hash(json.dumps(addons)))}"
+        (home / ".claude").mkdir(parents=True)
+        (home / ".claude" / "missioncache-dashboard-config.json").write_text(
+            json.dumps({"statusline_addons": addons}))
+        env = dict(os.environ, HOME=str(home), NO_COLOR="1")
+        code = "import missioncache_dashboard.statusline as s; s.main()"
+        # sys.executable is the interpreter running the suite, which has the
+        # package importable - robust regardless of how pytest was invoked.
+        r = subprocess.run([sys.executable, "-c", code],
+                           input=self.STDIN, capture_output=True, text=True, env=env)
+        return r.stdout, r.stderr
+
+    def _addon(self, **kw):
+        base = {"id": "a", "label": "A", "icon": ">", "color": "version",
+                "command": ["/bin/echo", "hi"],
+                "placement": {"mode": "row", "group": "g", "order": 1}}
+        base.update(kw)
+        return base
+
+    def test_clean_default_line_count(self, tmp_path):
+        out, _ = self._render(tmp_path, [])
+        assert out.count("\n") == 7  # no codex on the test HOME
+
+    def test_one_row_addon_adds_exactly_one_line_and_shows_cell(self, tmp_path):
+        base, _ = self._render(tmp_path, [])
+        one, _ = self._render(tmp_path, [self._addon()])
+        assert one.count("\n") == base.count("\n") + 1
+        assert "A: hi" in one and "A: hi" not in base
+
+    def test_broken_addon_keeps_blank_line_and_does_not_crash(self, tmp_path):
+        base, _ = self._render(tmp_path, [])
+        brk, err = self._render(tmp_path, [self._addon(command=["/nonexistent/xyz"])])
+        assert brk.count("\n") == base.count("\n") + 1  # blank line still emitted
+        assert "Traceback" not in err
