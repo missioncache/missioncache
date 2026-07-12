@@ -1,0 +1,3 @@
+# Build-time only. The published site ships zero third-party JavaScript;
+# markdown is rendered to static HTML here at build time.
+markdown-it-py>=3,<5

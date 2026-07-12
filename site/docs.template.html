@@ -1,0 +1,201 @@
+<title>{{DOC_TITLE}} - MissionCache Docs</title>
+<meta name="description" content="MissionCache documentation: installation, architecture, dashboard, autonomous execution, MCP tools, CLI, statusline, and hooks.">
+<link rel="icon" type="image/png" href="{{IMG_MARK}}">
+<script>(function(){try{var t=localStorage.getItem('missioncache-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})()</script>
+
+<style>
+  /* ============================================================
+     MissionCache docs - static, one page per doc.
+     Markdown is rendered to HTML at build time (build_site.py);
+     this page ships no client-side rendering and no fetch.
+     Same mission-control design system as the landing page.
+     ============================================================ */
+  :root {
+    --ground:#F1F1F8; --ground-2:#E8E8F2; --surface:#FFFFFF; --surface-2:#F8F8FC;
+    --border:rgba(24,20,52,0.10); --border-2:rgba(24,20,52,0.16);
+    --ink:#14131C; --ink-2:#45435A; --ink-3:#6E6C85;
+    --signal:#5A56F0; --signal-2:#7A50E8;
+    --grad-a:#A855F7; --grad-b:#3B82F6;
+    --ok:#0E9E58; --warn:#A9690A; --glow:rgba(122,80,232,0.18);
+    --con-bg:#0A0B12; --con-bg-2:#10111C; --con-border:rgba(150,150,200,0.16);
+    --con-ink:#E8E8F4; --con-ink-2:#9E9EBC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#08090F; --ground-2:#0B0C15; --surface:#101120; --surface-2:#16172A;
+      --border:rgba(150,150,205,0.13); --border-2:rgba(150,150,205,0.22);
+      --ink:#E9E9F4; --ink-2:#ADACC7; --ink-3:#79788F;
+      --signal:#8F8BFF; --signal-2:#A98BFF;
+      --ok:#3AD48E; --warn:#F0B44E; --glow:rgba(139,120,255,0.22);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground:#F1F1F8; --ground-2:#E8E8F2; --surface:#FFFFFF; --surface-2:#F8F8FC;
+    --border:rgba(24,20,52,0.10); --border-2:rgba(24,20,52,0.16);
+    --ink:#14131C; --ink-2:#45435A; --ink-3:#6E6C85;
+    --signal:#5A56F0; --signal-2:#7A50E8;
+    --ok:#0E9E58; --warn:#A9690A; --glow:rgba(122,80,232,0.18);
+  }
+  :root[data-theme="dark"] {
+    --ground:#08090F; --ground-2:#0B0C15; --surface:#101120; --surface-2:#16172A;
+    --border:rgba(150,150,205,0.13); --border-2:rgba(150,150,205,0.22);
+    --ink:#E9E9F4; --ink-2:#ADACC7; --ink-3:#79788F;
+    --signal:#8F8BFF; --signal-2:#A98BFF;
+    --ok:#3AD48E; --warn:#F0B44E; --glow:rgba(139,120,255,0.22);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size: 16.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; }
+  ::selection { background: var(--signal); color: #fff; }
+
+  .mono, code, pre, kbd { font-family: "SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; }
+
+  .wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+  .skip { position: absolute; left: -9999px; top: 0; background: var(--signal); color: #fff; padding: 10px 16px; border-radius: 0 0 8px 0; z-index: 100; }
+  .skip:focus { left: 0; }
+
+  /* ---- Nav ---- */
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--ground);
+    background: color-mix(in srgb, var(--ground) 82%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-in { display: flex; align-items: center; gap: 18px; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-weight: 600; font-size: 1.02rem; letter-spacing: -0.01em; }
+  .nav-links { display: flex; gap: 18px; margin-left: 8px; }
+  .nav-links a { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.83rem; color: var(--ink-2); }
+  .nav-links a:hover, .nav-links a.on { color: var(--ink); }
+  .grad { background: linear-gradient(100deg,var(--grad-a),var(--grad-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .icon-btn { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--border-2); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+  .icon-btn:hover { color: var(--ink); border-color: var(--signal); }
+  .icon-btn:focus-visible, .btn:focus-visible, .side-link:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  .btn { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.9rem; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; background: linear-gradient(100deg,var(--grad-a),var(--grad-b)); color: #fff; box-shadow: 0 6px 22px -8px var(--glow); }
+  @media (max-width: 560px) { .nav-links { display: none; } .btn { display: none; } }
+
+  /* ---- Layout ---- */
+  .docs-grid { display: grid; grid-template-columns: 230px 1fr; gap: 44px; padding: 40px 0 90px; align-items: start; }
+  @media (max-width: 880px) { .docs-grid { grid-template-columns: 1fr; gap: 20px; } }
+
+  /* sidebar */
+  .side { position: sticky; top: 86px; }
+  @media (max-width: 880px) { .side { position: static; } }
+  .side .sl { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; }
+  .side nav { display: flex; flex-direction: column; gap: 2px; }
+  @media (max-width: 880px) { .side nav { flex-direction: row; flex-wrap: wrap; gap: 8px; } }
+  .side-link {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.88rem;
+    color: var(--ink-2); padding: 8px 12px; border-radius: 8px; border-left: 2px solid transparent;
+  }
+  .side-link:hover { color: var(--ink); background: var(--surface); }
+  .side-link.on { color: var(--ink); background: var(--surface); border-left-color: var(--signal); }
+  @media (max-width: 880px) { .side-link { border-left: 0; border: 1px solid var(--border); background: var(--surface); } .side-link.on { border-color: var(--signal); } }
+  .src-note { margin-top: 22px; font-size: 0.72rem; color: var(--ink-3); font-family: "SF Mono",ui-monospace,Menlo,monospace; line-height: 1.8; }
+  .src-note a { color: var(--signal); }
+
+  /* ---- Markdown prose ---- */
+  .md { min-width: 0; max-width: 78ch; }
+  .md > :first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4 { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; scroll-margin-top: 84px; }
+  .md h1 { font-size: 2rem; margin: 0 0 18px; }
+  .md h2 { font-size: 1.35rem; margin: 44px 0 14px; padding-top: 22px; border-top: 1px solid var(--border); }
+  .md h3 { font-size: 1.05rem; margin: 30px 0 10px; }
+  .md h4 { font-size: 0.92rem; margin: 24px 0 8px; color: var(--ink-2); }
+  .md p { margin: 0 0 14px; color: var(--ink-2); }
+  .md li { color: var(--ink-2); margin: 5px 0; }
+  .md ul, .md ol { padding-left: 24px; margin: 0 0 14px; }
+  .md strong { color: var(--ink); font-weight: 650; }
+  .md a { color: var(--signal); }
+  .md a:hover { text-decoration: underline; }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 30px 0; }
+  .md blockquote { margin: 0 0 14px; padding: 10px 16px; border-left: 2px solid var(--signal); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+  .md blockquote p { margin: 0; }
+  .md code { font-size: 0.85em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 1.5px 6px; color: var(--ink); overflow-wrap: anywhere; }
+  .md pre { background: var(--con-bg); border: 1px solid var(--con-border); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 0 0 16px; }
+  .md pre code { background: none; border: 0; padding: 0; color: var(--con-ink); font-size: 0.84rem; line-height: 1.65; }
+  .md .tbl { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 10px; }
+  .md table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .md thead th { text-align: left; font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); padding: 11px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .md tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--ink-2); vertical-align: top; }
+  .md tbody tr:last-child td { border-bottom: 0; }
+  .md h2 .hlink, .md h3 .hlink { opacity: 0; margin-left: 8px; color: var(--signal); font-weight: 400; text-decoration: none; }
+  .md h2:hover .hlink, .md h3:hover .hlink, .md .hlink:focus-visible { opacity: 1; }
+
+  /* ---- Footer ---- */
+  footer { border-top: 1px solid var(--border); padding: 34px 0 46px; color: var(--ink-3); font-size: 0.8rem; }
+  .foot-in { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: center; }
+  .foot-in .links { display: flex; gap: 18px; }
+  .foot-in .links a { font-family: "SF Mono",ui-monospace,Menlo,monospace; color: var(--ink-2); }
+  .foot-in .links a:hover { color: var(--ink); }
+</style>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="{{HOME_URL}}" aria-label="MissionCache home">
+      <img src="{{IMG_MARK}}" width="26" height="26" alt="">
+      <span>Mission<span class="grad">Cache</span></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="{{HOME_URL}}docs/" class="on" aria-current="page">Docs</a>
+      <a href="{{CHANGELOG_URL}}">Changelog</a>
+      <a href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div class="nav-right">
+      <button class="icon-btn" id="theme" aria-label="Toggle light and dark theme" title="Toggle theme">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
+      </button>
+      <a class="btn" href="{{HOME_URL}}#install">Install</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap docs-grid">
+  <aside class="side">
+    <div class="sl">Documentation</div>
+    <nav aria-label="Documentation">
+{{SIDEBAR}}
+    </nav>
+    <p class="src-note">Source: <a href="https://github.com/missioncache/missioncache/tree/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>.</p>
+  </aside>
+  <main class="md" id="content">
+{{CONTENT}}
+  </main>
+</div>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>MissionCache &middot; MIT licensed &middot; missioncache.dev</span>
+    <span class="links">
+      <a href="{{HOME_URL}}">Home</a>
+      <a href="{{CHANGELOG_URL}}">Changelog</a>
+      <a href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">GitHub</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    'use strict';
+    var root = document.documentElement;
+    var btn = document.getElementById('theme');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      if (!cur) { try { cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e) { cur = 'dark'; } }
+      var next = cur === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('missioncache-theme', next); } catch (e) {}
+    });
+  })();
+</script>
