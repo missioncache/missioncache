@@ -4,6 +4,33 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-13
+
+Published package versions: missioncache-db 1.0.11, missioncache-dashboard 1.0.5.
+
+### Added - user-configurable statusline addons (missioncache-dashboard)
+
+- The statusline can now carry your own cells. An addon names a command to run, and its output renders as a cell; addons are declared in a `statusline_addons` list in the dashboard config and managed from a Settings panel. They are off by default, so the statusline is unchanged unless you add one.
+- Each addon either takes its own row (addons sharing a row become columns) or appends to a named existing row. The rendered line count comes from the config rather than from command results, so the statusline keeps a fixed height.
+- Addons fail closed: a command that breaks, times out, or is slow renders a blank cell instead of taking down the statusline. Commands run without a shell, must be an existing absolute path, are subject to a per-run timeout plus a TTL cache, and their output is stripped of control characters.
+
+### Added - delete, export, and import projects from the dashboard (missioncache-dashboard, missioncache-db)
+
+- Projects can now be deleted, exported, and imported from the dashboard instead of only from the CLI.
+- Delete removes the database record, with heartbeats, sessions, updates, and auto-run logs cascading with it. The on-disk project directory is kept unless you explicitly ask for the files too. Deleting is refused when the project has subtasks (they would be orphaned) or while a missioncache-auto run is in progress.
+- Export streams a `.tgz` bundle holding the markdown tree and a manifest; the database itself never travels. Import accepts that bundle and reports whether any repo or vault paths still need mapping to the local machine.
+- `TaskDB.delete_task` is new in missioncache-db. The dashboard now requires missioncache-db 1.0.11 or later.
+
+### Changed - dashboard Settings and project assets (missioncache-dashboard)
+
+- The Settings screen was reorganized, and the Projects view gained the delete, export, and import controls.
+- The dashboard ships a favicon and a web app manifest with icons, so it can be installed as a standalone app rather than only used in a browser tab.
+- Bundled logos and repository screenshots were re-compressed. Smaller download, no visual change.
+
+## 2026-07-11.1
+
+Published package versions: missioncache-dashboard 1.0.4, missioncache-install 1.0.5.
+
 ### Security - pinned the markdown renderer with Subresource Integrity (missioncache-dashboard)
 
 - The dashboard now loads `marked` at a pinned version (15.0.12) with an SRI hash, matching how DOMPurify is loaded, so a compromised CDN cannot swap the markdown renderer. Behavior is unchanged from the previously floating latest.
