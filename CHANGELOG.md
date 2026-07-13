@@ -4,6 +4,13 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - project forks: a shared context layer under a parent project (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
+
+- A project can now be created as a fork of an existing parent (`/missioncache:fork`, or `create_missioncache_files(fork_of=...)`). The child carries a `**Fork of:** <parent>` line in its context header, and the parent's context file becomes the shared knowledge layer every child reads. Only context is shared: the parent keeps its own tasks, and each child gets its own new task list.
+- The header is the durable source of truth: the repo scan links it into the task hierarchy, re-heals a lost link, and clears the link when the header is removed. Resolution refuses ambiguous name matches and cyclic links rather than guessing.
+- Parallel-session freshness: each session keeps a shared-seen marker, `get_context_digest` on a fork returns a `parent_digest` block with `changed_since_seen`, `/missioncache:load` banners when a sibling session updated the shared layer, and the statusline marks the fork ("Fork of <parent>", linked to both projects) with a dot when the shared context is newer than the session's last sync.
+- Completing a parent with active forks is allowed and warns; the parent's context stays readable and shared from `completed/`, and its children now surface top-level in the dashboard instead of disappearing with it.
+
 ### Added - page headers on every dashboard screen and a Structure-to-Auto link (missioncache-dashboard)
 
 - All four dashboard screens (Projects, Activity, Auto, Settings) now open with the same title-plus-description header, so every view explains itself the way the Auto page already did. The Auto description now names its dual role: the task dependency graph for every active project, and live execution tracking when one runs with missioncache-auto.

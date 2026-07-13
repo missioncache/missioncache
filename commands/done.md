@@ -40,6 +40,8 @@ Call `mcp__plugin_missioncache_pm__complete_task` which:
 2. Moves files from `~/.missioncache/active/<name>/` to `~/.missioncache/completed/<name>/`
 3. Records completion timestamp
 
+If the response carries `active_children_count > 0` and a `warning`, surface it to the user verbatim: this project has active forks, and its context file stays readable and shared for them from `completed/` - completing the parent does not cut the children off.
+
 ### Step 4: Process Time Tracking
 
 Call `mcp__plugin_missioncache_pm__process_heartbeats()` to finalize time tracking.
