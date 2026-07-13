@@ -1,8 +1,8 @@
 <title>MissionCache - One workbench for your AI coding projects</title>
-<meta name="description" content="The project layer for AI coding assistants. Plan, execute, track, and resume across Claude Code, Codex, OpenCode, and VSCode Copilot - with a local dashboard and rich statusline. Never lose your state.">
+<meta name="description" content="Mission control for AI-assisted coding. Project memory, a time-analytics dashboard, autonomous execution, and a rich statusline - one system across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <link rel="icon" type="image/png" href="{{IMG_MARK}}">
 <meta property="og:title" content="MissionCache - One workbench for your AI coding projects">
-<meta property="og:description" content="Plan, execute, track, and resume - without losing state. A project layer, local dashboard, and rich statusline across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<meta property="og:description" content="Mission control for AI-assisted coding. Project memory, a time-analytics dashboard, autonomous execution, and a rich statusline - one system across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -210,8 +210,18 @@
   }
   canvas.net { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
   .hero .wrap { position: relative; z-index: 2; }
-  .hero-grid { display: grid; grid-template-columns: 1.12fr 0.88fr; gap: 48px; align-items: center; }
-  @media (max-width: 940px) { .hero-grid { grid-template-columns: 1fr; gap: 44px; } }
+  /* full-width install bar under the hero text - the one command, unmissable */
+  .install-hero { margin-top: clamp(34px, 5vw, 52px); }
+  .install-hero .term {
+    border: 2px solid transparent;
+    background: linear-gradient(var(--con-bg), var(--con-bg)) padding-box,
+                linear-gradient(100deg, var(--grad-a), var(--grad-b)) border-box;
+    box-shadow: 0 0 0 1px var(--glow), 0 18px 64px -14px var(--glow), 0 24px 60px -30px rgba(0,0,0,.6);
+  }
+  .install-hero .term-body { padding: 22px 22px 24px; }
+  .install-hero .term-cmd { font-size: 1.12rem; overflow-x: auto; }
+  .install-hero .term-out { font-size: 0.9rem; }
+  @media (max-width: 480px) { .install-hero .term-cmd { font-size: 0.98rem; } }
   /* full-width product shot below the hero text */
   .hero-shot { margin-top: clamp(44px, 6vw, 72px); }
   .hero h1 { font-size: clamp(2.3rem, 5.4vw, 3.7rem); line-height: 1.04; margin: 18px 0 0; }
@@ -220,7 +230,7 @@
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
 
   /* brand logo above the headline - swaps black/white with the theme */
-  .hero-logo { width: clamp(210px, 44%, 288px); height: auto; margin-bottom: 20px; }
+  .hero-logo { width: clamp(260px, 50%, 560px); height: auto; margin-bottom: 24px; }
   .hero-logo.on-dark { display: none; }
   .hero-logo.on-light { display: block; }
   @media (prefers-color-scheme: dark) {
@@ -377,11 +387,21 @@
   .feat-list li { font-size: 0.93rem; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
   .feat-list li::before { content: "\25B8"; color: var(--signal); flex: none; }
 
-  /* ---- Statusline capture (stacked full-width feature) ---- */
+  /* ---- Statusline section ---- */
   .sl-img { display: block; width: 100%; }
-  .feat-stack { margin-top: clamp(56px, 8vw, 92px); }
-  .feat-stack .feat-txt { max-width: 62ch; }
-  .feat-stack .term { margin-top: 30px; }
+  .sl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 28px; }
+  @media (max-width: 900px) { .sl-grid { grid-template-columns: 1fr; } }
+  .wn {
+    margin-top: 18px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  }
+  .wn .wn-cmd {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+    font-size: 0.85rem; font-weight: 650; color: #fff;
+    background: linear-gradient(100deg, var(--grad-a), var(--grad-b));
+    padding: 4px 10px; border-radius: 7px; flex: none;
+  }
+  .wn p { color: var(--ink-2); font-size: 0.95rem; max-width: 75ch; flex: 1 1 40ch; }
 
   /* ---- Tools table ---- */
   .tbl-wrap { margin-top: 40px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
@@ -473,6 +493,7 @@
     <nav class="nav-links">
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
+      <a href="#statusline">Statusline</a>
       <a href="#compare">Compare</a>
       <a href="{{DOCS_URL}}">Docs</a>
       <a href="{{CHANGELOG_URL}}">Changelog</a>
@@ -489,6 +510,7 @@
     <div class="nav-drop" id="drop">
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
+      <a href="#statusline">Statusline</a>
       <a href="#compare">Compare</a>
       <a href="#install">Install</a>
       <a href="{{DOCS_URL}}">Docs</a>
@@ -504,40 +526,40 @@
 <section class="hero">
   <canvas class="net" aria-hidden="true"></canvas>
   <div class="wrap">
-    <div class="hero-grid">
-      <div>
-        <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="288" height="52" alt="MissionCache">
-        <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="288" height="58" alt="MissionCache">
-        <span class="eyebrow">Project layer for AI coding assistants</span>
-        <h1>One workbench for your <span class="grad">AI coding</span> projects.</h1>
-        <p class="sub">Plan, execute, track, and resume - <strong>without losing state</strong>.</p>
-        <p class="sub">One project layer, a <strong>local dashboard</strong>, and a <strong>rich statusline</strong> - across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
+    <div>
+      <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="560" height="100" alt="MissionCache">
+      <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="560" height="113" alt="MissionCache">
+      <span class="eyebrow">Mission control for AI-assisted coding</span>
+      <h1>One workbench for your <span class="grad">AI coding</span> projects.</h1>
+      <p class="sub">Plan, execute, track, and resume - <strong>without losing state</strong>.</p>
+      <p class="sub">Project memory, a <strong>time-analytics dashboard</strong>, <strong>autonomous execution</strong>, and a <strong>rich statusline</strong> - one system across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
 
-        <div class="hero-cta">
-          <a class="btn btn-primary" href="#install">Get started</a>
-          <a class="btn" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            Star on GitHub
-          </a>
-        </div>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#install">Get started</a>
+        <a class="btn" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
 
-        <div class="works">
-          <span class="wl">Works with</span>
-          <div class="tools">
-            <span class="tool-chip"><span class="td"></span>Claude Code</span>
-            <span class="tool-chip"><span class="td"></span>Codex</span>
-            <span class="tool-chip"><span class="td"></span>OpenCode</span>
-            <span class="tool-chip"><span class="td"></span>VSCode Copilot</span>
-          </div>
-        </div>
-
-        <div class="chips">
-          <span class="chip"><span class="dot"></span>MIT licensed</span>
-          <span class="chip"><span class="dot"></span>Python 3.11+</span>
-          <span class="chip sig"><span class="dot"></span>MCP-compatible</span>
+      <div class="works">
+        <span class="wl">Works with</span>
+        <div class="tools">
+          <span class="tool-chip"><span class="td"></span>Claude Code</span>
+          <span class="tool-chip"><span class="td"></span>Codex</span>
+          <span class="tool-chip"><span class="td"></span>OpenCode</span>
+          <span class="tool-chip"><span class="td"></span>VSCode Copilot</span>
         </div>
       </div>
 
+      <div class="chips">
+        <span class="chip"><span class="dot"></span>MIT licensed</span>
+        <span class="chip"><span class="dot"></span>Python 3.11+</span>
+        <span class="chip sig"><span class="dot"></span>MCP-compatible</span>
+      </div>
+    </div>
+
+    <div class="install-hero rv">
       <div class="term">
         <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">bash</span></div>
         <div class="term-body">
@@ -657,6 +679,56 @@
 
 <hr class="rule">
 
+<!-- ============ STATUSLINE ============ -->
+<section id="statusline">
+  <div class="wrap">
+    <div class="head rv">
+      <span class="eyebrow">Rich statusline</span>
+      <h2>Your whole session, one glance up.</h2>
+      <p class="lede">A live mission readout above your prompt: <strong>usage limits, Claude health, version, context, project progress</strong> - linked into the dashboard, and fully yours to shape.</p>
+    </div>
+
+    <div class="term rv" style="margin-top:38px">
+      <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">missioncache-statusline</span><span class="live-dot"><i></i>live</span></div>
+      <img class="sl-img" src="{{IMG_STATUSLINE}}" alt="MissionCache statusline in a real terminal: project with progress, git branch, model, tokens, context usage, Claude and Codex session limits with reset times, and Claude service status">
+    </div>
+
+    <div class="sl-grid rv">
+      <div class="card">
+        <h3>Limits, with reset times</h3>
+        <p>Claude session and weekly usage as percentages, each with its <strong>reset time</strong>. Opus tracked separately, unlimited plans show &infin;, and Codex gets its own line when installed.</p>
+      </div>
+      <div class="card">
+        <h3>Live Claude health</h3>
+        <p>Open incidents from <span class="mono" style="font-size:.85em">status.claude.com</span> surface <strong>right in the line</strong>, linked to the status page. All clear reads "Claude Status: OK".</p>
+      </div>
+      <div class="card">
+        <h3>Version watch</h3>
+        <p>Your Claude Code version, how old it is, and an <strong>upgrade arrow</strong> the moment a newer release ships.</p>
+      </div>
+      <div class="card">
+        <h3>Compact before it hurts</h3>
+        <p>Context usage with tiered warnings: <strong>"Compact recommended" at 65%, "Compact now!" at 80%</strong> - so you save state on your terms, not the window's.</p>
+      </div>
+      <div class="card">
+        <h3>Project telemetry</h3>
+        <p>Your project's progress as <span class="mono" style="font-size:.85em">[5/12]</span> linked into the dashboard, plus git branch, model, tokens, and when your last action happened.</p>
+      </div>
+      <div class="card">
+        <h3>Make it yours</h3>
+        <p><strong>Toggle every field</strong> from the dashboard Settings, and <strong>add your own cells</strong> - any command's output can become part of the line.</p>
+      </div>
+    </div>
+
+    <div class="wn rv">
+      <span class="wn-cmd">/whats-new</span>
+      <p>The installer also sets up <strong>/whats-new</strong>: run it and it reads everything that changed in Claude Code since you last checked, summarizes what matters, and proposes tailored upgrades to your own setup - with before/after diffs. The statusline's version cell stays yellow until you review, then flips green.</p>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
 <!-- ============ FEATURES ============ -->
 <section id="features">
   <div class="wrap">
@@ -699,22 +771,6 @@
       </div>
     </div>
 
-    <div class="feat-stack rv">
-      <div class="feat-txt">
-        <span class="eyebrow">Rich statusline</span>
-        <h3>Your whole session, one glance.</h3>
-        <p>An optional multi-line terminal display: the active project with its progress fraction, git branch, Claude model, context usage, tokens, session limits, and last action. OSC 8 hyperlinks jump straight into the dashboard from your terminal.</p>
-        <ul class="feat-list">
-          <li>Fully customizable: toggle every cell on or off from the dashboard Settings screen</li>
-          <li>Add your own cells - any command's output can become a statusline cell (off by default)</li>
-          <li>Claude and Codex session limits side by side, with reset times</li>
-        </ul>
-      </div>
-      <div class="term">
-        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">missioncache-statusline</span><span class="live-dot"><i></i>live</span></div>
-        <img class="sl-img" src="{{IMG_STATUSLINE}}" alt="MissionCache statusline in a real terminal: project with progress, git branch, model, tokens, context usage, Claude and Codex session limits with reset times, and Claude service status">
-      </div>
-    </div>
   </div>
 </section>
 
@@ -775,7 +831,7 @@
     <div class="stats rv" id="stats">
       <div class="stat"><div class="v" data-n="36">36</div><div class="k">MCP tools</div></div>
       <div class="stat"><div class="v" data-n="4">4</div><div class="k">AI tools supported</div></div>
-      <div class="stat"><div class="v" data-n="6">6</div><div class="k">slash commands</div></div>
+      <div class="stat"><div class="v" data-n="7">7</div><div class="k">slash commands</div></div>
       <div class="stat"><div class="v">MIT</div><div class="k">open source</div></div>
     </div>
     <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Live GitHub stars and PyPI installs wire in here at launch.</p>
