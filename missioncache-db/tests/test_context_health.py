@@ -303,9 +303,9 @@ class TestBuildDigest:
         f.write_text(content)
         digest = ch.build_digest(content, f)
         assert set(digest) == {
-            "last_updated", "hub", "related_projects", "waiting_on", "next_steps",
-            "recent_changes_last3", "section_index", "file_size_bytes",
-            "health_warnings",
+            "last_updated", "hub", "fork_of", "related_projects", "waiting_on",
+            "next_steps", "recent_changes_last3", "section_index",
+            "file_size_bytes", "health_warnings",
         }
         assert digest["last_updated"] == "2026-07-10 12:00"
         assert digest["file_size_bytes"] == f.stat().st_size
@@ -622,3 +622,35 @@ class TestTemplateInvariants:
         assert ch.WAITING_ON_TABLE_HEADER in content
         for name in ch.CORE_SECTIONS:
             assert f"## {name}" in content
+
+
+# ── fork header in the digest ─────────────────────────────────────────────
+
+
+class TestForkOfDigest:
+    def test_fork_of_extracted_from_header(self, tmp_path):
+        """A **Fork of:** line in the header region surfaces in the digest."""
+        content = (
+            "# child - Context\n"
+            "**Last Updated:** 2026-07-14 10:00\n"
+            "**Fork of:** parent-proj\n"
+            "\n## Description\nBody.\n"
+        )
+        digest = ch.build_digest(content, tmp_path / "x.md")
+        assert digest["fork_of"] == "**Fork of:** parent-proj"
+
+    def test_fork_of_absent(self, tmp_path):
+        """No header line -> fork_of is None."""
+        content = "# solo - Context\n**Last Updated:** now\n\n## Description\nBody.\n"
+        digest = ch.build_digest(content, tmp_path / "x.md")
+        assert digest["fork_of"] is None
+
+    def test_fork_of_below_first_section_ignored(self, tmp_path):
+        """The contract reads Fork of only from the header region; a mention
+        inside the body (e.g. quoted in a code fence) does not count."""
+        content = (
+            "# solo - Context\n**Last Updated:** now\n\n"
+            "## Description\n```\n**Fork of:** not-really\n```\n"
+        )
+        digest = ch.build_digest(content, tmp_path / "x.md")
+        assert digest["fork_of"] is None

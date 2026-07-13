@@ -486,6 +486,27 @@ def _header_line(content: str, prefix: str) -> Optional[str]:
     return None
 
 
+_FORK_NAME_RE = re.compile(
+    r"^\*\*Fork of:\*\*\s*(?:\[\[([A-Za-z0-9][A-Za-z0-9._-]*)\]\]|([A-Za-z0-9][A-Za-z0-9._-]*))\s*$"
+)
+
+
+def parse_fork_parent(content: str) -> Optional[str]:
+    """The parent project name from a ``**Fork of:**`` header line, or None.
+
+    Reads ONLY the header region (before the first ``##``), so a "Fork of"
+    mention in the body or a fenced example never counts. Accepts the plain
+    name or a balanced ``[[wikilink]]``; malformed half-links are rejected.
+    """
+    line = _header_line(content, "**Fork of:**")
+    if not line:
+        return None
+    match = _FORK_NAME_RE.match(line)
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
+
+
 def build_digest(content: str, path: Path) -> dict[str, Any]:
     """The /missioncache:load digest: resume-critical slices, not the file.
 
@@ -502,6 +523,7 @@ def build_digest(content: str, path: Path) -> dict[str, Any]:
     return {
         "last_updated": last_updated_match.group(1).strip() if last_updated_match else None,
         "hub": _header_line(content, "Hub:"),
+        "fork_of": _header_line(content, "**Fork of:**"),
         "related_projects": _header_line(content, "**Related projects:**"),
         "waiting_on": extract_section(content, "Waiting on"),
         "next_steps": extract_section(content, "Next Steps"),

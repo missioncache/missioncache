@@ -485,3 +485,92 @@ class TestConfig:
     def test_config_get_default(self, db):
         """get_config returns default when key doesn't exist."""
         assert db.get_config("nonexistent", "fallback") == "fallback"
+
+
+# ── fork parent linkage ───────────────────────────────────────────────────
+
+
+class TestSetTaskParent:
+    def test_set_and_clear_parent(self, db):
+        """set_task_parent links a child to a parent and None clears it."""
+        parent = db.create_task("parent-proj")
+        child = db.create_task("child-proj")
+
+        linked = db.set_task_parent(child.id, parent.id)
+        assert linked.parent_id == parent.id
+
+        cleared = db.set_task_parent(child.id, None)
+        assert cleared.parent_id is None
+
+    def test_idempotent(self, db):
+        """Setting the same parent twice is a no-op, not an error."""
+        parent = db.create_task("parent-proj")
+        child = db.create_task("child-proj")
+        db.set_task_parent(child.id, parent.id)
+        again = db.set_task_parent(child.id, parent.id)
+        assert again.parent_id == parent.id
+
+    def test_self_parent_rejected(self, db):
+        """A task cannot be its own parent."""
+        task = db.create_task("loner")
+        with pytest.raises(ValueError):
+            db.set_task_parent(task.id, task.id)
+
+    def test_missing_parent_rejected(self, db):
+        """Linking to a nonexistent parent raises."""
+        child = db.create_task("child-proj")
+        with pytest.raises(ValueError):
+            db.set_task_parent(child.id, 99999)
+
+    def test_missing_child_rejected(self, db):
+        """Linking a nonexistent child raises."""
+        parent = db.create_task("parent-proj")
+        with pytest.raises(ValueError):
+            db.set_task_parent(99999, parent.id)
+
+
+class TestHierarchicalOrphans:
+    def test_child_of_completed_parent_surfaces_top_level(self, db):
+        """A completed parent must not swallow its active children: they
+        surface in top_level so every caller still sees them."""
+        parent = db.create_task("parent-proj")
+        child = db.create_task("child-proj")
+        db.set_task_parent(child.id, parent.id)
+
+        db.update_task_status(parent.id, "completed")
+
+        hierarchy = db.get_active_tasks_hierarchical()
+        top_names = {t.name for t in hierarchy["top_level"]}
+        assert "child-proj" in top_names
+        assert parent.id not in hierarchy["children"]
+
+    def test_child_of_active_parent_stays_grouped(self, db):
+        """While the parent is active the child groups under it."""
+        parent = db.create_task("parent-proj")
+        child = db.create_task("child-proj")
+        db.set_task_parent(child.id, parent.id)
+
+        hierarchy = db.get_active_tasks_hierarchical()
+        top_names = {t.name for t in hierarchy["top_level"]}
+        assert "child-proj" not in top_names
+        assert [t.name for t in hierarchy["children"][parent.id]] == ["child-proj"]
+
+
+class TestSetTaskParentCycles:
+    def test_two_node_cycle_rejected(self, db):
+        """A -> B then B -> A must raise."""
+        a = db.create_task("aaa")
+        b = db.create_task("bbb")
+        db.set_task_parent(a.id, b.id)
+        with pytest.raises(ValueError):
+            db.set_task_parent(b.id, a.id)
+
+    def test_three_node_cycle_rejected(self, db):
+        """A -> B -> C then C -> A must raise."""
+        a = db.create_task("aaa")
+        b = db.create_task("bbb")
+        c = db.create_task("ccc")
+        db.set_task_parent(a.id, b.id)
+        db.set_task_parent(b.id, c.id)
+        with pytest.raises(ValueError):
+            db.set_task_parent(c.id, a.id)
