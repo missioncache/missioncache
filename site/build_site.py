@@ -55,6 +55,8 @@ DOC_SLUGS = {slug for slug, _ in DOCS}
 
 LANDING_IMAGES = {
     "{{IMG_MARK}}":       ("img/mark64.png", "image/png"),
+    "{{IMG_LOGO_LIGHT}}": ("img/logo_black.png", "image/png"),
+    "{{IMG_LOGO_DARK}}":  ("img/logo_white.png", "image/png"),
     "{{IMG_PROJECTS}}":   ("img/demo_projects.jpg", "image/jpeg"),
     "{{IMG_ACTIVITY}}":   ("img/demo_activity.jpg", "image/jpeg"),
     "{{IMG_AUTO}}":       ("img/demo_auto.jpg", "image/jpeg"),
