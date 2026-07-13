@@ -3912,6 +3912,17 @@
             gap: 10px;
         }
 
+        .structure-open-auto {
+            font-size: 13px;
+            color: var(--accent-cyan);
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .structure-open-auto:hover {
+            text-decoration: underline;
+        }
+
         .structure-graph-section {
             background: var(--bg-secondary);
             border-radius: 8px;
@@ -4463,13 +4474,13 @@
         }
 
         /* ============================================
-           Auto View Styles
+           Shared Page Header (all views)
            ============================================ */
-        .auto-header {
+        .page-header {
             margin-bottom: 24px;
         }
 
-        .auto-header h2 {
+        .page-header h2 {
             font-size: 24px;
             font-weight: 600;
             margin-bottom: 8px;
@@ -4479,10 +4490,14 @@
             background-clip: text;
         }
 
-        .auto-subtitle {
+        .page-subtitle {
             color: var(--text-secondary);
             font-size: 14px;
         }
+
+        /* ============================================
+           Auto View Styles
+           ============================================ */
 
         .auto-projects {
             display: grid;
@@ -5012,6 +5027,11 @@
             <div class="view active" id="projectsView">
                 <div class="container">
 
+                    <div class="page-header">
+                        <h2>Projects</h2>
+                        <p class="page-subtitle">All your MissionCache projects: active work with progress and time, plus the completed archive. Click a row for details.</p>
+                    </div>
+
                     <!-- Filter Bar (applies to both tables below) -->
                     <div class="filter-bar" id="projectsFilterBar">
                         <input type="text" id="projectsSearchInput" class="filter-search"
@@ -5072,6 +5092,11 @@
             <!-- Activity View -->
             <div class="view" id="activityView">
                 <div class="container">
+
+                    <div class="page-header">
+                        <h2>Activity</h2>
+                        <p class="page-subtitle">Where your time goes: today's sessions, hourly breakdown, and history trends.</p>
+                    </div>
 
                     <!-- Header Stats -->
                     <div class="stats-header">
@@ -5249,9 +5274,9 @@
             <div class="view" id="autoView">
                 <div class="container">
                     <!-- Auto Header -->
-                    <div class="auto-header">
+                    <div class="page-header">
                         <h2>MissionCache Auto</h2>
-                        <p class="auto-subtitle">Task dependency graphs for autonomous execution</p>
+                        <p class="page-subtitle">The task dependency graph for every active project, and live execution tracking when you run one with missioncache-auto.</p>
                     </div>
 
                     <!-- Project Cards -->
@@ -5319,12 +5344,11 @@
             <!-- Settings View -->
             <div class="view" id="settingsView">
                 <div class="container">
+                    <div class="page-header">
+                        <h2>Settings</h2>
+                        <p class="page-subtitle">Statusline, repos and commits, and project options. Stored in <code>~/.claude/missioncache-dashboard-config.json</code> - changes apply immediately.</p>
+                    </div>
                     <div class="glass-card settings-card">
-                        <div class="card-header">
-                            <h2>Settings</h2>
-                            <div class="card-subtitle">Stored in <code>~/.claude/missioncache-dashboard-config.json</code>. Changes take effect immediately.</div>
-                        </div>
-
                         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
                             <button class="tab-btn active" role="tab" id="settingsTabBtn-statusline"
                                     aria-controls="settingsPanel-statusline" aria-selected="true"
@@ -6065,9 +6089,30 @@
                 switchSettingsTab(hashParams.tab);
             }
 
+            if (hash === 'auto' && hashParams.project) {
+                openAutoProject(hashParams.project);
+            }
+
             if (hashParams.task) {
                 openTaskByName(hashParams.task, hashParams.tab || 'tasks');
             }
+        }
+
+        async function openAutoProject(projectName) {
+            if (!autoDataLoaded) {
+                try { await fetchAutoData(); } catch (e) { return; }
+            }
+            selectAutoProject(projectName);
+            const graph = document.getElementById('autoGraphContainer');
+            if (graph && graph.style.display !== 'none') {
+                graph.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        function openStructureInAuto() {
+            const name = document.getElementById('taskModalName').textContent;
+            closeTaskModal();
+            window.location.hash = '#auto?project=' + encodeURIComponent(name);
         }
 
         async function openTaskByName(taskName, defaultTab) {
@@ -8901,6 +8946,7 @@
                     <div class="task-structure-container">
                         <div class="structure-header">
                             <h3>Project Structure ${classificationBadge}</h3>
+                            <a class="structure-open-auto" href="#" onclick="openStructureInAuto(); return false;" title="Open this project's graph on the Auto page">Open in Auto &rarr;</a>
                         </div>
                         <div class="structure-summary">
                             <span>${data.completed_count}/${data.total_count} tasks complete</span>
