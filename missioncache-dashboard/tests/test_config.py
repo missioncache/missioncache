@@ -122,6 +122,14 @@ class TestStatuslineConfig:
         assert cfg["subscription_type"] is False
         assert cfg["claude_status_services"] == ["Code"]
 
+    def test_partial_set_preserves_unset_keys(self, tmp_config):
+        """set merges, so a call that omits a key keeps its stored value."""
+        config.set_statusline_config({"codex": True, "addons_after_status": True})
+        config.set_statusline_config({"codex": False})
+        cfg = config.get_statusline_config()
+        assert cfg["codex"] is False              # updated by the second call
+        assert cfg["addons_after_status"] is True  # preserved though omitted
+
     def test_partial_config_fills_defaults(self, tmp_config):
         """An older dashboard may have written only a subset of keys."""
         tmp_config.write_text(json.dumps({"statusline": {"codex": False}}))
@@ -141,6 +149,7 @@ class TestStatuslineConfig:
             "claude_status": True,
             "claude_status_services": ["Code", "Claude API"],
             "model_suspensions": False,
+            "addons_after_status": False,
         }
 
 

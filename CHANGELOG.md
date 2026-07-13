@@ -4,6 +4,11 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - place statusline addon rows below the Claude status line (missioncache-dashboard)
+
+- New `addons_after_status` statusline setting, with a toggle in the dashboard Settings panel. Off by default, so Claude status stays the footer and existing statuslines are unchanged. Turn it on when your addon rows carry what you scan for first and the status line is the afterthought.
+- Previously the row order was fixed: addon rows always rendered above the health line, and no combination of `mode`, `group`, or `order` could move them below it, since `order` only sorts row groups relative to each other.
+
 ## 2026-07-13
 
 Published package versions: missioncache-db 1.0.11, missioncache-dashboard 1.0.5.

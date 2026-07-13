@@ -26,6 +26,7 @@ from missioncache_dashboard.statusline import (
     _is_model_notice,
     _item,
     _load_statusline_config,
+    _order_status_rows,
     _osc8_link,
     _join_items,
     _pad_line,
@@ -423,6 +424,7 @@ class TestLoadStatuslineConfig:
             "claude_status": True,
             "claude_status_services": ["Code", "Claude API"],
             "model_suspensions": False,
+            "addons_after_status": False,
         }
 
     def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
@@ -447,6 +449,27 @@ class TestLoadStatuslineConfig:
         monkeypatch.setattr('missioncache_dashboard.statusline._DASHBOARD_CONFIG_FILE', f)
         cfg = _load_statusline_config()
         assert cfg["codex"] is True
+
+
+# ============ _order_status_rows (addon / status ordering) ============
+
+
+class TestOrderStatusRows:
+    def test_default_puts_status_last(self):
+        assert _order_status_rows(["a\n", "b\n"], "health\n", False) == ["a\n", "b\n", "health\n"]
+
+    def test_flag_puts_status_first(self):
+        assert _order_status_rows(["a\n", "b\n"], "health\n", True) == ["health\n", "a\n", "b\n"]
+
+    def test_line_count_preserved_in_both_orders(self):
+        addon_rows = ["a\n", "b\n", "c\n"]
+        off = _order_status_rows(addon_rows, "health\n", False)
+        on = _order_status_rows(addon_rows, "health\n", True)
+        assert len(off) == len(on) == len(addon_rows) + 1
+
+    def test_no_addons_is_just_the_status_row(self):
+        assert _order_status_rows([], "health\n", False) == ["health\n"]
+        assert _order_status_rows([], "health\n", True) == ["health\n"]
 
 
 # ============ _is_model_notice (model suspension classifier) ============

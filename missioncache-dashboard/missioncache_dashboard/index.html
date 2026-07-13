@@ -5355,6 +5355,8 @@
                                 <div class="settings-statusline-services" id="statuslineServicesCheckboxes"></div>
                                 <label class="settings-toggle" style="margin-top:12px"><input type="checkbox" id="statuslineToggleModelSuspensions"><span>Show model suspension / deprecation notices</span></label>
                                 <p class="settings-hint">Off by default. Model-access announcements (e.g. a suspended Fable or Mythos model) stay open on Claude's status page for weeks and would otherwise pin to the statusline. Genuine outages still show regardless of this setting.</p>
+                                <label class="settings-toggle" style="margin-top:12px"><input type="checkbox" id="statuslineToggleAddonsAfterStatus"><span>Put addon rows below the Claude status line</span></label>
+                                <p class="settings-hint">Off by default, so Claude status stays the last line. Turn on when your addon rows carry what you scan for first and status is the afterthought.</p>
                                 <div class="settings-row-actions">
                                     <button class="settings-btn-primary" onclick="saveStatuslineSettings()">Save statusline settings</button>
                                     <span id="statuslineSaveStatus" class="settings-save-status"></span>
@@ -6336,6 +6338,7 @@
             document.getElementById('statuslineToggleStatus').checked = cfg.claude_status !== false;
             // Defaults OFF: only checked when explicitly enabled in config.
             document.getElementById('statuslineToggleModelSuspensions').checked = cfg.model_suspensions === true;
+            document.getElementById('statuslineToggleAddonsAfterStatus').checked = cfg.addons_after_status === true;
 
             const container = document.getElementById('statuslineServicesCheckboxes');
             const selected = new Set(cfg.claude_status_services || ['Code', 'Claude API']);
@@ -6374,6 +6377,7 @@
                     claude_status: document.getElementById('statuslineToggleStatus').checked,
                     claude_status_services: services,
                     model_suspensions: document.getElementById('statuslineToggleModelSuspensions').checked,
+                    addons_after_status: document.getElementById('statuslineToggleAddonsAfterStatus').checked,
                 },
                 'statuslineSaveStatus',
                 'Saved - applies on your next prompt in Claude',

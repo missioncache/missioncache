@@ -228,6 +228,10 @@ _DEFAULT_STATUSLINE_CONFIG = {
     # posted as long-lived status.claude.com incidents that pin to the health
     # field for weeks. Hidden by default; opt in via the dashboard Settings.
     "model_suspensions": False,
+    # Addon rows normally sit above the health line, which keeps Claude status
+    # as the footer. Opt in to push them below it when the addons carry the
+    # information you scan for first and status is the afterthought.
+    "addons_after_status": False,
 }
 
 
@@ -1353,6 +1357,18 @@ def _pad_line(line: str, line_width: int, max_width: int) -> str:
     return line + (" " * pad) if pad > 0 else line
 
 
+def _order_status_rows(addon_rows: list[str], health_row: str, addons_after_status: bool) -> list[str]:
+    """Order the addon rows and the Claude status/health line.
+
+    Both orderings emit the same number of lines, so the statusline keeps a
+    fixed height and Claude Code's status allocation does not jump when the
+    flag flips.
+    """
+    if addons_after_status:
+        return [health_row, *addon_rows]
+    return [*addon_rows, health_row]
+
+
 # ============ iTERM TITLE ============
 
 def set_iterm_title(action: str, project_name: str, repo_name: str, branch: str, dir_name: str = "") -> None:
@@ -1965,10 +1981,11 @@ def main() -> None:
     w_line1, w_line2, w_line3, w_line4, w_line_k8s, w_line_usage, w_line_codex, w_line_health = line_widths
 
     # --- Output ---
-    # Output a fixed number of lines so Claude Code allocates
-    # the full status area height from the very first render.
-    # 8 lines if Codex is installed (health goes after codex),
-    # 7 otherwise (health takes the codex slot, no blank gap).
+    # Output a fixed number of lines so Claude Code allocates the full status
+    # area height from the very first render: 8 with Codex installed, 7 without
+    # (health takes the codex slot, no blank gap). The addon rows and the health
+    # line always sum to the same count, so the addons_after_status flag reorders
+    # them (see _order_status_rows) without changing the height.
     has_codex = CODEX_ENABLED and CODEX_AUTH_FILE.exists()
     blank = " " * max_width if max_width > 0 else ""
     segments = [RESET]
@@ -1980,9 +1997,10 @@ def main() -> None:
     segments.append((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n")
     if has_codex:
         segments.append((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n")
-    for _j, _w in zip(addon_joined, addon_line_widths):
-        segments.append((_pad_line(_j, _w, max_width) if _j else blank) + RESET + "\n")
-    segments.append((_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n")
+    addon_rows = [(_pad_line(_j, _w, max_width) if _j else blank) + RESET + "\n"
+                  for _j, _w in zip(addon_joined, addon_line_widths)]
+    health_row = (_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n"
+    segments.extend(_order_status_rows(addon_rows, health_row, STATUSLINE_CONFIG["addons_after_status"]))
     segments.append(RESET)
     output = "".join(segments)
     if not USE_COLOR:

@@ -18,7 +18,8 @@ Schema (all keys optional; missing keys use defaults):
           "subscription_type":      true,
           "claude_status":          true,
           "claude_status_services": ["Code", "Claude API"],
-          "model_suspensions":      false
+          "model_suspensions":      false,
+          "addons_after_status":    false
       }
     }
 
@@ -41,6 +42,7 @@ _DEFAULT_STATUSLINE: dict[str, Any] = {
     "claude_status": True,
     "claude_status_services": ["Code", "Claude API"],
     "model_suspensions": False,
+    "addons_after_status": False,
 }
 
 DEFAULTS: dict[str, Any] = {
@@ -168,8 +170,16 @@ def get_statusline_config() -> dict[str, Any]:
 
 
 def set_statusline_config(cfg: dict[str, Any]) -> None:
-    """Replace the statusline config and persist to disk."""
-    _update("statusline", dict(cfg))
+    """Merge the given keys into the statusline config and persist to disk.
+
+    Merges over the on-disk section rather than replacing it, so a client that
+    omits a key (an older dashboard tab that predates it) leaves that key's
+    stored value untouched instead of resetting it to the field default.
+    """
+    current = _read().get("statusline")
+    merged = dict(current) if isinstance(current, dict) else {}
+    merged.update(cfg)
+    _update("statusline", merged)
 
 
 def get_statusline_addons() -> list[dict[str, Any]]:
