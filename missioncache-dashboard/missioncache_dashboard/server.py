@@ -2430,6 +2430,11 @@ class StatuslinePayload(BaseModel):
     claude_status: bool
     claude_status_services: list[str]
     model_suspensions: bool
+    # Defaulted so an older dashboard tab that predates this key can still save
+    # without a 422. The endpoint dumps with exclude_unset=True and
+    # set_statusline_config merges, so a tab that omits the key leaves the stored
+    # value untouched rather than resetting it to False.
+    addons_after_status: bool = False
 
 
 _ADDON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
@@ -2526,8 +2531,12 @@ async def update_repo_overrides(payload: RepoOverridesPayload):
 
 @app.put("/api/settings/statusline")
 async def update_statusline_settings(payload: StatuslinePayload):
-    """Replace the statusline visibility toggles and status service filter."""
-    config.set_statusline_config(payload.model_dump())
+    """Update the statusline visibility toggles and status service filter.
+
+    Dumps with exclude_unset so a client that omits a key does not reset it;
+    set_statusline_config merges the sent keys over the stored section.
+    """
+    config.set_statusline_config(payload.model_dump(exclude_unset=True))
     return {"ok": True, "statusline": config.get_statusline_config()}
 
 
