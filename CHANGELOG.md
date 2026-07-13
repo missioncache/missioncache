@@ -4,6 +4,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-14
+
+Published package versions: missioncache-db 1.0.12, mcp-missioncache 1.0.14, missioncache-dashboard 1.0.6.
+
 ### Added - project forks: a shared context layer under a parent project (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
 
 - A project can now be created as a fork of an existing parent (`/missioncache:fork`, or `create_missioncache_files(fork_of=...)`). The child carries a `**Fork of:** <parent>` line in its context header, and the parent's context file becomes the shared knowledge layer every child reads. Only context is shared: the parent keeps its own tasks, and each child gets its own new task list.
