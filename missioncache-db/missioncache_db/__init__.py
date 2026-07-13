@@ -1190,6 +1190,15 @@ class TaskDB:
                                     if subtask:
                                         discovered_tasks.append(subtask)
 
+        # Reconcile fork links AFTER all dirs are synced (a parent may be
+        # discovered later than its child). The "**Fork of:**" header in the
+        # child's context file is the durable source of truth: it re-heals a
+        # parent_id nulled by ON DELETE SET NULL or lost on import, and its
+        # VALID ABSENCE clears a stale link. A file that cannot be read
+        # preserves the current link (absence of evidence, not evidence).
+        for task in discovered_tasks:
+            self._reconcile_fork_link(task)
+
         # Update last scanned timestamp
         with self.connection() as conn:
             conn.execute(
@@ -1534,6 +1543,120 @@ class TaskDB:
             conn.commit()
             return self.get_task(cursor.lastrowid)
 
+    def set_task_parent(self, child_id: int, parent_id: Optional[int]) -> Task:
+        """Set (or clear, with None) a task's fork parent.
+
+        Idempotent; refuses self-parenting and any link that would create a
+        cycle (the proposed parent's ancestor chain must not reach the child).
+        """
+        if parent_id == child_id:
+            raise ValueError("A task cannot be its own parent")
+        with self.connection() as conn:
+            if parent_id is not None:
+                parent_row = conn.execute(
+                    "SELECT id FROM tasks WHERE id = ?", (parent_id,)
+                ).fetchone()
+                if not parent_row:
+                    raise ValueError(f"Parent task {parent_id} not found")
+                # Walk the proposed parent's ancestor chain inside the same
+                # connection; reaching the child means a cycle.
+                seen = set()
+                cursor_id = parent_id
+                while cursor_id is not None and cursor_id not in seen:
+                    seen.add(cursor_id)
+                    row = conn.execute(
+                        "SELECT parent_id FROM tasks WHERE id = ?", (cursor_id,)
+                    ).fetchone()
+                    cursor_id = row["parent_id"] if row else None
+                    if cursor_id == child_id:
+                        raise ValueError(
+                            f"Linking task {child_id} under {parent_id} would create a cycle"
+                        )
+            cursor = conn.execute(
+                "UPDATE tasks SET parent_id = ? WHERE id = ?", (parent_id, child_id)
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Task {child_id} not found")
+            conn.commit()
+        return self.get_task(child_id)
+
+    @staticmethod
+    def _is_flat_fork_path(full_path: str) -> bool:
+        """Flat fork projects live at active/<name> (or manual/global/<name>);
+        legacy nested subtasks live at active/<parent>/<name>. Only flat
+        tasks participate in fork-header reconciliation."""
+        return full_path.count("/") <= 1
+
+    def _reconcile_fork_link(self, task: Task) -> None:
+        """Sync one task's parent_id with its "**Fork of:**" context header.
+
+        Header present -> link (unless unresolvable/ambiguous/cyclic: preserve).
+        Header validly absent -> clear a stale link (flat forks only; legacy
+        nested subtasks never carry the header and are never touched).
+        Context file unreadable -> preserve.
+        """
+        from missioncache_db import context_health
+
+        if not self._is_flat_fork_path(task.full_path):
+            return
+        task_dir = MISSIONCACHE_ROOT / task.full_path
+        content = None
+        for filename in ("context.md", f"{task.name}-context.md"):
+            filepath = task_dir / filename
+            if filepath.exists():
+                try:
+                    content = filepath.read_text()
+                except OSError:
+                    return  # unreadable: preserve the current link
+                break
+        if content is None:
+            return  # no context file: preserve
+        fork_name = context_health.parse_fork_parent(content)
+        if fork_name is None:
+            if task.parent_id is not None:
+                self.set_task_parent(task.id, None)
+            return
+        if fork_name == task.name:
+            return
+        parent = self._resolve_task_by_name(fork_name, prefer_repo_id=task.repo_id)
+        if parent is None or parent.id == task.id or task.parent_id == parent.id:
+            return
+        try:
+            self.set_task_parent(task.id, parent.id)
+        except ValueError:
+            # cycle or race: preserve the current link rather than corrupt
+            return
+
+    def _resolve_task_by_name(
+        self, name: str, prefer_repo_id: Optional[int] = None
+    ) -> Optional[Task]:
+        """Resolve a "**Fork of:**" name to its parent task.
+
+        Ranking: the canonical project row (full_path active/<name>) first,
+        then the preferred repo, then active/paused over completed. Archived
+        rows are excluded. If the two best candidates tie on all ranks the
+        resolution is AMBIGUOUS and returns None - never guess a parent."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE name = ? AND status != 'archived'",
+                (name,),
+            ).fetchall()
+        if not rows:
+            return None
+        tasks = [Task.from_row(r) for r in rows]
+
+        def rank(t: Task) -> tuple:
+            return (
+                0 if t.full_path == f"active/{name}" else 1,
+                0 if (prefer_repo_id is not None and t.repo_id == prefer_repo_id) else 1,
+                0 if t.status in ("active", "paused") else 1,
+            )
+
+        tasks.sort(key=rank)
+        if len(tasks) > 1 and rank(tasks[0]) == rank(tasks[1]):
+            return None
+        return tasks[0]
+
     def set_task_category(self, task_id: int, category: Optional[str]) -> Task:
         """Set (or clear) a task's category.
 
@@ -1771,11 +1894,15 @@ class TaskDB:
             }
         """
         all_tasks = self.get_active_tasks(repo_id)
+        active_ids = {task.id for task in all_tasks}
         top_level = []
         children: Dict[int, List[Task]] = {}
 
         for task in all_tasks:
-            if task.parent_id is None:
+            # A child whose parent is not in the active set (completed or
+            # deleted parent) surfaces top-level instead of being orphaned
+            # under a key no caller will look up.
+            if task.parent_id is None or task.parent_id not in active_ids:
                 top_level.append(task)
             else:
                 children.setdefault(task.parent_id, []).append(task)
@@ -1900,7 +2027,9 @@ class TaskDB:
         task = self.get_task(task_id)
         if not task:
             raise ValueError(f"No project found with id {task_id}.")
-        if task.parent_id is not None:
+        if task.parent_id is not None and not self._is_flat_fork_path(task.full_path):
+            # Nested legacy subtasks stay rename-blocked; flat FORK children
+            # are full projects and rename like any other.
             raise ValueError(
                 "Subtask rename is not supported. Rename the parent project instead."
             )
