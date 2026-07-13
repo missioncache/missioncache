@@ -17,3 +17,4 @@ CLAUDE.local.md
 .serena/
 .playwright-mcp/
 missioncache-install/missioncache_install/bundled/
+uv.lock
