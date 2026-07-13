@@ -590,7 +590,7 @@ async def complete_task(
         # Get final time
         time_total = db.get_task_time(task.id)
 
-        return CompleteTaskResult(
+        result = CompleteTaskResult(
             task_id=task.id,
             task_name=task.name,
             previous_status=previous_status,
@@ -598,6 +598,33 @@ async def complete_task(
             completed_at=updated_task.completed_at or "",
             time_total_formatted=db.format_duration(time_total),
         ).model_dump()
+
+        # Fork awareness: completing a parent with active children is allowed
+        # (the shared context stays readable from completed/), but the caller
+        # should surface it. Strictly advisory - the completion is already
+        # committed above, so a failure here must NOT flip the result to an
+        # error (a retry would then see "already completed" and skip cleanup).
+        try:
+            active_children = [
+                t for t in db.get_active_tasks() if t.parent_id == task.id
+            ]
+            result["active_children_count"] = len(active_children)
+            if active_children:
+                names = ", ".join(t.name for t in active_children)
+                result["warning"] = (
+                    f"This project has {len(active_children)} active fork(s) "
+                    f"({names}). Its context file stays readable and shared for "
+                    "them from completed/."
+                )
+        except Exception:
+            logger.warning(
+                "Active-children lookup failed after completing %s; "
+                "completion succeeded, fork warning unavailable",
+                task.name,
+                exc_info=True,
+            )
+            result["active_children_count"] = None
+        return result
 
     except MissionCacheError as e:
         return e.to_dict()
