@@ -1,8 +1,8 @@
 <title>MissionCache - One workbench for your AI coding projects</title>
-<meta name="description" content="MissionCache is the project layer for AI coding tools. Plan, execute, track, and resume your Claude Code, Codex, OpenCode, and VSCode projects without losing state.">
+<meta name="description" content="The project layer for AI coding assistants. Plan, execute, track, and resume across Claude Code, Codex, OpenCode, and VSCode Copilot - with a local dashboard and rich statusline. Never lose your state.">
 <link rel="icon" type="image/png" href="{{IMG_MARK}}">
 <meta property="og:title" content="MissionCache - One workbench for your AI coding projects">
-<meta property="og:description" content="Plan, execute, track, and resume - without losing state. Works with Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<meta property="og:description" content="Plan, execute, track, and resume - without losing state. A project layer, local dashboard, and rich statusline across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -216,7 +216,21 @@
   .hero-shot { margin-top: clamp(44px, 6vw, 72px); }
   .hero h1 { font-size: clamp(2.3rem, 5.4vw, 3.7rem); line-height: 1.04; margin: 18px 0 0; }
   .hero .sub { margin-top: 18px; font-size: 1.14rem; color: var(--ink-2); max-width: 40ch; }
+  .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 44ch; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+
+  /* brand logo above the headline - swaps black/white with the theme */
+  .hero-logo { width: clamp(210px, 44%, 288px); height: auto; margin-bottom: 20px; }
+  .hero-logo.on-dark { display: none; }
+  .hero-logo.on-light { display: block; }
+  @media (prefers-color-scheme: dark) {
+    .hero-logo.on-light { display: none; }
+    .hero-logo.on-dark { display: block; }
+  }
+  :root[data-theme="light"] .hero-logo.on-light { display: block; }
+  :root[data-theme="light"] .hero-logo.on-dark { display: none; }
+  :root[data-theme="dark"]  .hero-logo.on-light { display: none; }
+  :root[data-theme="dark"]  .hero-logo.on-dark { display: block; }
 
   /* prose emphasis (the four bolded themes) */
   p strong, li strong, .lede strong, .sub strong { color: var(--ink); font-weight: 650; }
@@ -492,9 +506,12 @@
   <div class="wrap">
     <div class="hero-grid">
       <div>
-        <span class="eyebrow">Project layer for AI coding tools</span>
+        <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="288" height="52" alt="MissionCache">
+        <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="288" height="58" alt="MissionCache">
+        <span class="eyebrow">Project layer for AI coding assistants</span>
         <h1>One workbench for your <span class="grad">AI coding</span> projects.</h1>
         <p class="sub">Plan, execute, track, and resume - <strong>without losing state</strong>.</p>
+        <p class="sub">One project layer, a <strong>local dashboard</strong>, and a <strong>rich statusline</strong> - across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
 
         <div class="hero-cta">
           <a class="btn btn-primary" href="#install">Get started</a>
@@ -708,7 +725,7 @@
   <div class="wrap">
     <div class="head rv">
       <span class="eyebrow">Works everywhere</span>
-      <h2>One MCP server. Four AI coding tools.</h2>
+      <h2>One MCP server. Four AI coding assistants.</h2>
       <p class="lede">The installer detects which tools you have and asks per tool whether to register MissionCache. The project state and MCP tools are identical across all of them.</p>
     </div>
     <div class="tbl-wrap rv tbl-scroll">
