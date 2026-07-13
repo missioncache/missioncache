@@ -1,8 +1,8 @@
-<title>MissionCache - The workbench that remembers your AI coding projects</title>
-<meta name="description" content="Mission control for AI-assisted coding. One workbench that remembers every project you build with AI: project memory, time analytics, and autonomous execution across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<title>MissionCache - Mission control for your AI coding projects</title>
+<meta name="description" content="Mission control for every project you build with AI. MCP tools, hooks, commands, a statusline, a dashboard, and autonomous runs - working even when you don't. Across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <link rel="icon" type="image/png" href="{{IMG_MARK}}">
-<meta property="og:title" content="MissionCache - The workbench that remembers your AI coding projects">
-<meta property="og:description" content="Mission control for AI-assisted coding. One workbench that remembers every project you build with AI: project memory, time analytics, and autonomous execution across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<meta property="og:title" content="MissionCache - Mission control for your AI coding projects">
+<meta property="og:description" content="Mission control for every project you build with AI. MCP tools, hooks, commands, a statusline, a dashboard, and autonomous runs - working even when you don't. Across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -241,6 +241,56 @@
   .meta-band .works { margin-top: 0; }
   .meta-band .works .tools { justify-content: center; }
   .meta-band .chips { justify-content: center; margin-top: 14px; }
+
+  /* ---- kit line: interactive chips + explainer panel ---- */
+  .kit-line {
+    position: relative; display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+    gap: 4px 10px;
+  }
+  .kit-line::before, .kit-line::after { content: ""; width: 22px; height: 1px; background: var(--signal); opacity: .7; }
+  @media (max-width: 420px) { .kit-line::before, .kit-line::after { display: none; } }
+  .kit-chip {
+    font-family: "SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--signal); background: none; border: 0; padding: 2px 1px; cursor: pointer;
+    border-bottom: 1px dotted color-mix(in srgb, var(--signal) 60%, transparent);
+    transition: color .15s, border-color .15s;
+  }
+  .kit-chip:hover, .kit-chip[aria-expanded="true"] { color: var(--signal-2); border-bottom-color: var(--signal-2); }
+  .kit-chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+  .kit-sep { color: var(--ink-3); font-size: 0.72rem; }
+  .kit-panel {
+    position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%);
+    width: min(560px, 92vw); z-index: 30; text-align: left;
+    background: var(--surface); border: 1px solid var(--border-2); border-radius: 14px;
+    padding: 18px 20px 20px;
+    box-shadow: 0 24px 60px -24px rgba(0,0,0,.5), 0 10px 34px -12px var(--glow);
+  }
+  .kit-pane { display: none; }
+  .kit-pane.on { display: block; }
+  .kit-pane h4 {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink); margin: 0 26px 8px 0;
+  }
+  .kit-pane p { font-size: 0.92rem; color: var(--ink-2); }
+  .kit-pane .wired {
+    margin-top: 10px; font-family: "SF Mono",ui-monospace,Menlo,monospace;
+    font-size: 0.76rem; color: var(--signal);
+  }
+  .kit-snip {
+    margin-top: 12px; background: var(--con-bg); border: 1px solid var(--con-border); border-radius: 8px;
+    padding: 10px 12px; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+    font-size: 0.76rem; color: var(--con-ink-2); line-height: 1.7; white-space: pre; overflow-x: auto;
+  }
+  .kit-snip b { color: var(--con-ok); font-weight: 600; }
+  .kit-img { margin-top: 12px; border-radius: 8px; border: 1px solid var(--border); width: 100%; }
+  .kit-close {
+    position: absolute; top: 10px; right: 12px; width: 26px; height: 26px;
+    display: grid; place-items: center; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--ink-2); cursor: pointer; font-size: 0.9rem; line-height: 1;
+  }
+  .kit-close:hover { color: var(--ink); border-color: var(--signal); }
   /* full-width product shot below the hero text */
   .hero-shot { margin-top: clamp(44px, 6vw, 72px); }
   /* centered hero column: text capped for reading, h1 allowed wider for drama */
@@ -254,7 +304,7 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .hero h1 .grad { filter: drop-shadow(0 0 18px rgba(168,85,247,.35)); }
   }
-  .hero .sub { margin: 20px auto 0; font-size: 1.15rem; color: var(--ink-2); max-width: 46ch; }
+  .hero .sub { margin: 20px auto 0; font-size: 1.12rem; color: var(--ink-2); max-width: 62ch; }
   .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 56ch; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; justify-content: center; }
 
@@ -587,12 +637,63 @@
         <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="380" height="68" alt="MissionCache">
         <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="380" height="77" alt="MissionCache">
       </div>
-      <div>
-        <span class="eyebrow rv d1">Mission control for AI-assisted coding</span>
+      <div class="kit-line rv d1" role="group" aria-label="What is in the kit - hover or tap each piece">
+        <button class="kit-chip" data-kit="mcp" aria-expanded="false" aria-controls="kit-panel">MCP tools</button><span class="kit-sep" aria-hidden="true">&middot;</span>
+        <button class="kit-chip" data-kit="hooks" aria-expanded="false" aria-controls="kit-panel">Hooks</button><span class="kit-sep" aria-hidden="true">&middot;</span>
+        <button class="kit-chip" data-kit="commands" aria-expanded="false" aria-controls="kit-panel">Commands</button><span class="kit-sep" aria-hidden="true">&middot;</span>
+        <button class="kit-chip" data-kit="statusline" aria-expanded="false" aria-controls="kit-panel">Statusline</button><span class="kit-sep" aria-hidden="true">&middot;</span>
+        <button class="kit-chip" data-kit="dashboard" aria-expanded="false" aria-controls="kit-panel">Dashboard</button><span class="kit-sep" aria-hidden="true">&middot;</span>
+        <button class="kit-chip" data-kit="auto" aria-expanded="false" aria-controls="kit-panel">Autonomous runs</button>
+
+        <div class="kit-panel" id="kit-panel" hidden>
+          <button class="kit-close" type="button" aria-label="Close">&times;</button>
+          <div class="kit-pane" data-kit="mcp">
+            <h4>MCP tools</h4>
+            <p>36 tools your agent calls directly: create and load projects, save state, update tasks, log runs, record time.</p>
+            <p class="wired">wired: they write the same project files the dashboard and statusline read</p>
+            <div class="kit-snip">create_missioncache_files   get_context_digest
+update_context_file       complete_task
+record_heartbeat          log_iteration   <b>+30 more</b></div>
+          </div>
+          <div class="kit-pane" data-kit="hooks">
+            <h4>Hooks</h4>
+            <p>Lifecycle hooks that act without being asked. The PreCompact hook snapshots your project state right before the context window compacts; session hooks track activity in the background.</p>
+            <p class="wired">wired: what the hooks save is exactly what /missioncache:load restores</p>
+            <div class="kit-snip">&#9888; context window at 94% - compacting
+<b>&#10003; PreCompact hook fired &middot; state saved</b></div>
+          </div>
+          <div class="kit-pane" data-kit="commands">
+            <h4>Commands</h4>
+            <p>Seven lifecycle slash commands, plus /whats-new installed alongside them.</p>
+            <p class="wired">wired: each command reads and writes the same three project files</p>
+            <div class="kit-snip">/missioncache:new       plan it
+/missioncache:load      resume exactly there
+/missioncache:save      snapshot decisions
+/missioncache:done      archive with stats   <b>+3 more</b></div>
+          </div>
+          <div class="kit-pane" data-kit="statusline">
+            <h4>Statusline</h4>
+            <p>Usage limits with reset times, live Claude health, compact warnings, and your project's progress - one glance above the prompt.</p>
+            <p class="wired">wired: configured from the dashboard Settings, deep-links back into it</p>
+            <img class="kit-img" src="{{IMG_THUMB_STATUSLINE}}" alt="The MissionCache statusline in a terminal" loading="lazy">
+          </div>
+          <div class="kit-pane" data-kit="dashboard">
+            <h4>Dashboard</h4>
+            <p>Projects, progress, per-repo time, and run history - local, at localhost:8787.</p>
+            <p class="wired">wired: fed by the hooks' heartbeats and Claude's own session logs</p>
+            <img class="kit-img" src="{{IMG_THUMB_PROJECTS}}" alt="The MissionCache dashboard projects view" loading="lazy">
+          </div>
+          <div class="kit-pane" data-kit="auto">
+            <h4>Autonomous runs</h4>
+            <p>missioncache-auto runs a project's tasks in parallel with dependency-aware DAG scheduling.</p>
+            <p class="wired">wired: streams live into the dashboard; progress lands in the same tasks file</p>
+            <img class="kit-img" src="{{IMG_THUMB_AUTO}}" alt="A task dependency graph during an autonomous run" loading="lazy">
+          </div>
+        </div>
       </div>
-      <h1 class="rv d2">One workbench that <span class="grad">remembers</span> every project you build with AI.</h1>
-      <p class="sub rv d3">Every project keeps a plan, context, and task list that <strong>survive context compaction and session end</strong>. One command reloads the full state and you <strong>pick up exactly where you left off</strong>.</p>
-      <p class="sub rv d3">A task manager, a memory layer, and an execution runner usually mean three separate tools. MissionCache is <strong>one workbench with all three</strong> - across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
+      <h1 class="rv d2"><span class="grad">Mission control</span> for every project you build with AI.</h1>
+      <p class="sub rv d3">MissionCache wires <strong>a complete system</strong> around your agent - and it <strong>works even when you don't</strong>: hooks save state before every compaction, the tracker clocks time while you argue with your agent, the statusline warns before the context window fills.</p>
+      <p class="sub rv d3">One workbench across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
 
       <div class="install-hero rv d4">
         <div class="term">
@@ -602,10 +703,10 @@
               <span class="pr">$</span><code>uvx missioncache-install</code><span class="cursor"></span>
               <button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button>
             </div>
-            <div class="term-out"><strong>One command.</strong> Picks your components, wires the dashboard, and registers MissionCache in every AI tool it finds. <span class="ok">Under 3 minutes to first value.</span></div>
+            <div class="term-out"><strong>One command.</strong> Picks your components, wires the dashboard, and registers MissionCache in every AI tool it finds. <span class="ok">Under 3 minutes to first value.</span> Houston not required.</div>
           </div>
         </div>
-        <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere.</p>
+        <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere - not even to us.</p>
       </div>
 
       <div class="hero-cta rv d5">
@@ -641,7 +742,7 @@
         <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787</span></div>
         <img src="{{IMG_PROJECTS}}" alt="MissionCache dashboard showing active and completed projects with progress bars and per-project time tracking">
       </div>
-      <div class="chip-float"><span class="ok-mark">&#10003;</span> PreCompact hook &middot; state saved</div>
+      <div class="chip-float"><span class="ok-mark">&#10003;</span> state saved &middot; nothing lost in re-entry</div>
     </div>
   </div>
 </section>
@@ -655,7 +756,7 @@
       <div class="rv">
         <span class="eyebrow">The problem</span>
         <h2 style="margin-top:16px;">Your AI coding sessions have amnesia.</h2>
-        <p class="lede">The context window compacts. The session ends. Tomorrow you rebuild the whole mental model - the plan, the decisions, what is left - from scratch. Every time.</p>
+        <p class="lede">The context window compacts. The session ends. Tomorrow your agent greets you like a stranger, and you rebuild the whole mental model - the plan, the decisions, what is left - from scratch. Every time.</p>
         <p class="lede" style="margin-top:14px;">A CLAUDE.md file holds static rules. This is <strong>living project state</strong> - the plan, the decisions, the gotchas, and what is left - that updates as you work and reloads on command.</p>
         <p class="lede" style="margin-top:14px;">MissionCache gives each project a durable home. Watch the loop on the right: <strong>state saved before compaction, restored the next morning</strong>.</p>
       </div>
@@ -1078,6 +1179,43 @@
         }
       });
     });
+
+    /* ---------- kit panels (hover + click + keyboard) ---------- */
+    var kitLine = document.querySelector('.kit-line');
+    if (kitLine) {
+      var kitChips = Array.prototype.slice.call(kitLine.querySelectorAll('.kit-chip'));
+      var kitPanel = document.getElementById('kit-panel');
+      var kitPanes = Array.prototype.slice.call(kitPanel.querySelectorAll('.kit-pane'));
+      var kitCloseBtn = kitPanel.querySelector('.kit-close');
+      var kitTimer = null;
+      function kitOpen(key) {
+        clearTimeout(kitTimer);
+        kitPanel.hidden = false;
+        kitPanes.forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-kit') === key); });
+        kitChips.forEach(function (c) { c.setAttribute('aria-expanded', String(c.getAttribute('data-kit') === key)); });
+      }
+      function kitClose() {
+        clearTimeout(kitTimer);
+        kitPanel.hidden = true;
+        kitChips.forEach(function (c) { c.setAttribute('aria-expanded', 'false'); });
+      }
+      function kitDelayClose() { clearTimeout(kitTimer); kitTimer = setTimeout(kitClose, 160); }
+      kitChips.forEach(function (c) {
+        var key = c.getAttribute('data-kit');
+        c.addEventListener('mouseenter', function () { kitOpen(key); });
+        c.addEventListener('mouseleave', kitDelayClose);
+        c.addEventListener('focus', function () { kitOpen(key); });
+        /* click always opens (hover may have opened already; a click should never surprise-close) */
+        c.addEventListener('click', function (e) { e.preventDefault(); kitOpen(key); });
+      });
+      kitPanel.addEventListener('mouseenter', function () { clearTimeout(kitTimer); });
+      kitPanel.addEventListener('mouseleave', kitDelayClose);
+      kitCloseBtn.addEventListener('click', kitClose);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') kitClose(); });
+      document.addEventListener('click', function (e) {
+        if (!kitPanel.hidden && !kitLine.contains(e.target)) kitClose();
+      });
+    }
 
     /* ---------- install tabs (ARIA tab pattern with roving tabindex) ---------- */
     var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
