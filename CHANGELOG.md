@@ -4,6 +4,11 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - page headers on every dashboard screen and a Structure-to-Auto link (missioncache-dashboard)
+
+- All four dashboard screens (Projects, Activity, Auto, Settings) now open with the same title-plus-description header, so every view explains itself the way the Auto page already did. The Auto description now names its dual role: the task dependency graph for every active project, and live execution tracking when one runs with missioncache-auto.
+- The task modal's Structure tab gained an "Open in Auto" link that jumps to the Auto page with that project's graph pre-selected, via the new `#auto?project=<name>` deep link.
+
 ### Added - place statusline addon rows below the Claude status line (missioncache-dashboard)
 
 - New `addons_after_status` statusline setting, with a toggle in the dashboard Settings panel. Off by default, so Claude status stays the footer and existing statuslines are unchanged. Turn it on when your addon rows carry what you scan for first and the status line is the afterthought.
