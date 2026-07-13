@@ -146,7 +146,7 @@ Non-coding tasks do not get a directory - they exist only as DB rows and use `ad
 - `task_id: int | None = None` or `project_name: str | None = None` - Provide exactly one.
 - `move_files: bool = True` - Whether to physically move the MissionCache directory to `completed/`. Set to `False` if you want to keep files in `active/` while marking the DB status as completed (rare - mostly useful for recovery scenarios).
 
-**Returns:** `CompleteTaskResult` with `task_id`, `task_name`, `previous_status`, `new_status="completed"`, `completed_at`, `time_total_formatted`.
+**Returns:** `CompleteTaskResult` with `task_id`, `task_name`, `previous_status`, `new_status="completed"`, `completed_at`, `time_total_formatted`. Plus `active_children_count` (the number of active forks that fork from this project) and, when that is non-zero, a `warning` string. Completing a parent that still has active forks is allowed - its context file stays readable and shared for them from `completed/` - and the warning surfaces so it is not a surprise. The children lookup is advisory: it never fails the completion (`active_children_count` is `None` if the lookup itself errors after the completion committed).
 
 If the task is already completed, it raises `InvalidStateError` with `current_state="completed"`. No-op completions are surfaced rather than silently tolerated.
 
@@ -192,7 +192,7 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 
 **Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, and `warnings`.
 
-Refuses with `ALREADY_EXISTS` when another project holds the target name (in the DB or on disk), with `INVALID_STATE` while a missioncache-auto run is in progress, and with `VALIDATION_ERROR` for subtasks (rename the parent instead).
+Refuses with `ALREADY_EXISTS` when another project holds the target name (in the DB or on disk), with `INVALID_STATE` while a missioncache-auto run is in progress, and with `VALIDATION_ERROR` for legacy nested subtasks (rename the parent instead). Fork children are full projects and rename normally - only nested `active/<parent>/<subtask>/` directories are refused.
 
 ### `update_task`
 
@@ -224,14 +224,15 @@ These tools operate on the `-tasks.md`, `-context.md`, `-plan.md` files under `~
 - `category: str | None = None` - Project category, one of the 13 `CATEGORIES` values or an existing custom category. Derived from the project description at creation time by `/missioncache:new`. Validated before any file is written; set on the task row after the registration scan.
 - `tasks: list[str] | None = None` - Initial task list to seed `<project>-tasks.md` with. Each string becomes a `- [ ]` line.
 - `plan: dict | None = None` - Plan content dict with keys like `summary`, `goals`, `approach`. Structure is flexible - the template renderer picks up what it finds.
+- `fork_of: str | None = None` - Parent project name to fork from. Writes a `**Fork of:** <parent>` line into the new context header; the registration scan reconciles that header into the DB parent link, and the parent's context file becomes this project's shared knowledge layer. `/missioncache:fork` sets this. The parent should already exist (active or completed).
 
-**Returns:** `{"success": True, "task_id": int, "task_name": str, "category": str | None, "files": MissionCacheFiles}` where `MissionCacheFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`.
+**Returns:** `{"success": True, "task_id": int, "task_name": str, "category": str | None, "files": MissionCacheFiles}` where `MissionCacheFiles` has `task_dir`, `plan_file`, `context_file`, `tasks_file`, `prompts_dir`. When `fork_of` was passed, also `fork_of`, `fork_linked` (whether the DB link now points at the requested parent - `False` if the parent did not resolve unambiguously yet), and, when not linked, `fork_warning`.
 
 Internally this is a four-step dance:
 
 1. Ensure the repo is registered (`db.add_repo` if new).
-2. Call `project_files.create_missioncache_files()` to generate the files from templates.
-3. Call `db.scan_all_repos()` to register the task row in the DB.
+2. Call `project_files.create_missioncache_files()` to generate the files from templates (injecting the `**Fork of:**` header when `fork_of` is set).
+3. Call `db.scan_all_repos()` to register the task row in the DB - its reconcile pass also links the `**Fork of:**` header into `parent_id`.
 4. Reconcile the task's `repo_id` via `db.find_task_by_full_path` / `db.update_task_repo` - this is the fix for the gotcha where `scan_all_repos` can assign the task to the wrong repo when multiple repos share a prefix.
 
 The reconciliation step is the load-bearing part. Without it, the task would appear under the wrong repo in the dashboard's per-repo view.
@@ -275,10 +276,13 @@ The underlying writer (`project_files.update_context_file`) updates the "Last Up
 
 **Parameters:**
 - `project_name: str` - Resolved via `get_missioncache_files` (active first, then completed).
+- `seen_mtime: float | None = None` - For forks: the parent-context mtime this session last saw (from its shared-seen marker). When passed, `parent_digest.changed_since_seen` reports whether a parallel session updated the shared layer since.
 
-**Returns:** `{"success": True, "file": str, "last_updated": str | None, "hub": str | None, "related_projects": str | None, "waiting_on": str | None, "next_steps": str | None, "recent_changes_last3": list[str], "section_index": list[{"name", "line"}], "file_size_bytes": int, "health_warnings": list[str]}`.
+**Returns:** `{"success": True, "file": str, "last_updated": str | None, "hub": str | None, "fork_of": str | None, "related_projects": str | None, "waiting_on": str | None, "next_steps": str | None, "recent_changes_last3": list[str], "section_index": list[{"name", "line"}], "file_size_bytes": int, "health_warnings": list[str], "is_fork": bool, "parent_digest": dict | None, "fork_parent_error": str | None}`.
 
 `waiting_on` and `next_steps` are the verbatim section bodies. `section_index` gives every `## ` heading with its 1-based line number, so a follow-up targeted Read (offset/limit) can fetch one specific section without loading the file. `health_warnings` carries the same per-project findings as `missioncache-db health`.
+
+For a **fork** (its context header carries `**Fork of:** <parent>`), `is_fork` is `True` and `parent_digest` describes the parent's shared context: `{"name", "context_file", "last_updated", "context_mtime", "changed_since_seen"}`. The parent is resolved from `active/` then `completed/`, so a completed parent's shared layer stays reachable. If the parent cannot be read, `parent_digest` is `None` and `fork_parent_error` explains why - `is_fork` stays `True` so the caller can still show the fork and prompt a manual re-read rather than silently downgrading to a plain resume. `changed_since_seen` is `True`/`False` when `seen_mtime` was passed, else `None`.
 
 ### `update_tasks_file`
 

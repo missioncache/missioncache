@@ -5,7 +5,7 @@
 - **MCP Server**: Primary interface (`mcp-server/src/mcp_missioncache/`)
 - **Database**: `missioncache-db/` package (SQLite at `~/.missioncache/tasks.db`)
 - **Hooks**: Auto-save on compaction, detect active project on start
-- **Commands**: Slash commands (`/missioncache:new`, `/missioncache:load`, `/missioncache:save`, `/missioncache:done`, `/missioncache:prompts`, `/missioncache:mode`)
+- **Commands**: Slash commands (`/missioncache:new`, `/missioncache:fork`, `/missioncache:load`, `/missioncache:save`, `/missioncache:done`, `/missioncache:prompts`, `/missioncache:mode`)
 - **MissionCache Auto**: Autonomous execution CLI (`missioncache-auto/`)
 - **MissionCache Dashboard**: Web UI at localhost:8787 (`missioncache-dashboard/`)
 - **Statusline**: Optional terminal status display (bundled in `missioncache-dashboard/missioncache_dashboard/statusline.py`, installed via the `missioncache-statusline` pip entry point)

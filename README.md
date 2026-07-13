@@ -391,6 +391,7 @@ The MCP server plus `missioncache-db` is the minimum viable install (and the onl
 | Command | Description |
 |---------|-------------|
 | `/missioncache:new` | Create a new project with plan, context, and task files |
+| `/missioncache:fork` | Create a project as a fork of an existing parent, sharing the parent's context as a common knowledge layer |
 | `/missioncache:load` | Resume work on an active project |
 | `/missioncache:save` | Persist progress before session end or compaction |
 | `/missioncache:done` | Mark a project as completed and archive |

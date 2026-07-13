@@ -1,6 +1,6 @@
 {
   "name": "missioncache",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Fast MissionCache project management with time tracking, file operations, and MissionCache Auto loop integration. Replaces 5-10+ tool calls with single MCP calls.",
   "author": {
     "name": "Tomer Brami"

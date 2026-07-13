@@ -22,6 +22,8 @@ There are no pages beyond these three. All data is fetched lazily on first view 
 
 The Projects view is built from two API calls: `GET /api/tasks/active` and `GET /api/tasks/completed`. Both return a tree of parent projects with optional subtasks. The active table includes a remaining-tasks summary and a completion percentage parsed live from the project's `-tasks.md` file, so editing the checklist in another editor and refreshing the dashboard gives you immediate feedback.
 
+A fork whose parent has left the active set (the parent was completed or deleted) surfaces top-level in this view rather than disappearing under its now-absent parent - so an active fork is always visible even after its parent is done. (Note "orphan" is overloaded here: this parent-left-the-set case is distinct from a task whose DB status is active but whose files were moved to `completed/`.)
+
 Clicking a row opens a modal with four tabs:
 
 - **Tasks** - rendered markdown of `<project>-tasks.md`, with the checklist styled as aligned checkboxes.

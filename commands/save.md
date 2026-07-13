@@ -140,6 +140,30 @@ mcp__plugin_missioncache_pm__update_tasks_file(
 )
 ```
 
+**Fork branch - restamp your own shared-seen marker if you wrote the SHARED (parent) layer.** When this project is a fork and this save updated the PARENT's context (the shared layer that siblings read), restamp this session's marker to the parent's new mtime. Without this, your own write reads back as a parallel-session update on your next `/missioncache:load` and the statusline dot stays lit over your own edit. Skip it when you only updated this project's own context. Resolve the parent's context path + fresh mtime from the parent itself, then run:
+
+```bash
+PARENT='<parent-name>'
+SESSION_ID='<SESSION_ID from Step 1>'
+PARENT_CTX=$(ls "$HOME/.missioncache/active/$PARENT/$PARENT-context.md" "$HOME/.missioncache/completed/$PARENT/$PARENT-context.md" 2>/dev/null | head -1)
+if [ -n "$SESSION_ID" ] && [ -n "$PARENT_CTX" ]; then
+  mkdir -p "$HOME/.claude/hooks/state/shared-seen"
+  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SESSION_ID="$SESSION_ID" python3 -c '
+import json, os, pathlib, datetime
+ctx = pathlib.Path(os.environ["PARENT_CTX"])
+marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")
+marker.write_text(json.dumps({
+    "parent": os.environ["PARENT"],
+    "parent_context_path": str(ctx),
+    "seen_mtime": ctx.stat().st_mtime,
+    "seen_at": datetime.datetime.now().astimezone().isoformat(),
+}))
+'
+fi
+```
+
+This is the one place restamping from a fresh `stat()` is correct: this session just wrote the file, so its on-disk mtime IS the version this session has seen. (The read paths, load/fork, stamp from the digest's snapshot-coupled mtime instead, because they did not write it.)
+
 ### Step 4: Finalize Time Tracking
 
 Call `mcp__plugin_missioncache_pm__process_heartbeats()` to aggregate time.

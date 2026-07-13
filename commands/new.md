@@ -9,6 +9,8 @@ Create development documentation for a new feature or project. This command crea
 
 `/missioncache:prompts` is a separate, optional step that generates per-subtask prompts optimized for autonomous parallel execution via `missioncache-auto`. Most interactive workflows do not need it.
 
+To create a project UNDER an existing one - sharing the parent's context as a common knowledge layer while keeping its own tasks - use `/missioncache:fork` instead.
+
 ## Workflow
 
 ### Step 1: Gather Information

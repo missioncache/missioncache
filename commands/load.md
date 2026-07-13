@@ -117,6 +117,12 @@ Read the FULL context file (or a specific section via the `section_index` line n
 
 If `get_context_digest` returns an error (older MCP server without the tool), fall back to reading `<project-name>-context.md` and `<project-name>-tasks.md` directly.
 
+**Fork branch (when the digest returns a non-null `parent_digest`):** this project is a fork and the parent's context file is its shared knowledge layer.
+
+1. BEFORE calling the digest, read this session's shared-seen marker if it exists (`~/.claude/hooks/state/shared-seen/<SESSION_ID>.json`) and pass its `seen_mtime` to the digest call: `get_context_digest(project_name="<name>", seen_mtime=<marker seen_mtime>)`. No marker -> call without `seen_mtime`.
+2. If `parent_digest.changed_since_seen` is `true`, OR there was no marker (first fork resume in this session), actually READ the shared layer before stamping anything: call `get_context_digest(project_name="<parent>")` and fold its Next Steps / newest Recent Changes into the resume summary. The marker means "this session consumed the shared layer at this version" - never stamp what was not read.
+3. Step 4's bash block then stamps the marker with `parent_digest.context_mtime` FROM THE DIGEST RESPONSE (the snapshot-coupled value), never a fresh stat of the file - a sibling write between the digest read and the stamp must not be silently baselined.
+
 ### Step 3: Display Resume Summary
 
 Before rendering the summary, probe the dashboard so the output can include a deep link, and check for a sticky PreCompact error from a previous session that needs surfacing. The PreCompact hook writes `~/.claude/hooks/state/last-precompact-error.json` when its snapshot run fails (e.g. SQLite lock contention); /missioncache:load is the natural place to tell the user since they are about to act on stale context.
@@ -166,6 +172,7 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 **PreCompact warning:** <from PRECOMPACT_WARNING line> *(only if surfaced)*
 
 **Hub:** <digest hub line, if any>
+**Fork of:** <parent name> - shared context [up to date | UPDATED by a parallel session since your last sync - re-read before continuing] *(only when parent_digest is non-null)*
 **Related projects:** <digest related_projects line, if any>
 
 **Progress:** <X/Y tasks complete (Z%)>
@@ -241,6 +248,30 @@ Then record initial heartbeat:
 ```
 mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ```
+
+**Fork marker stamp (forks only):** when Step 2 found a `parent_digest` AND the shared layer was actually consumed (it was fresh, or you read the parent digest per the fork branch), stamp this session's shared-seen marker with the mtime FROM the digest response. Do not stat the file here - `parent_digest.context_mtime` is coupled to the bytes the digest actually read, and a fresh stat could silently baseline a sibling's newer write. Replace the values, then run:
+
+```bash
+PARENT='<parent name from parent_digest>'
+PARENT_CTX='<parent_digest.context_file>'
+SEEN_MTIME='<parent_digest.context_mtime, verbatim from the digest response>'
+SESSION_ID='<SESSION_ID from Step 1>'
+if [ -n "$SESSION_ID" ] && [ -n "$SEEN_MTIME" ]; then
+  mkdir -p "$HOME/.claude/hooks/state/shared-seen"
+  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" python3 -c '
+import json, os, pathlib, datetime
+marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")
+marker.write_text(json.dumps({
+    "parent": os.environ["PARENT"],
+    "parent_context_path": os.environ["PARENT_CTX"],
+    "seen_mtime": float(os.environ["SEEN_MTIME"]),
+    "seen_at": datetime.datetime.now().astimezone().isoformat(),
+}))
+'
+fi
+```
+
+The marker stamp does not suppress stderr (matching `/missioncache:fork` and `/missioncache:save`): a persistently failing stamp - e.g. a non-float `SEEN_MTIME` - should surface, not silently disable freshness tracking. A single dropped stamp is self-correcting anyway (the next load finds no marker and re-reads the shared layer).
 
 ### Step 5: Track the Active Checklist Task (when known)
 
