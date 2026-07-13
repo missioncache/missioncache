@@ -1552,6 +1552,12 @@ class TaskDB:
         if parent_id == child_id:
             raise ValueError("A task cannot be its own parent")
         with self.connection() as conn:
+            # The cycle walk reads the ancestor chain, then the UPDATE writes.
+            # BEGIN IMMEDIATE takes the write lock up front so a concurrent
+            # scan_repo on another process cannot slip a mutual link between the
+            # check and the write and form a cross-process cycle (which would
+            # re-hide both nodes from the hierarchy). Matches process_heartbeats.
+            conn.execute("BEGIN IMMEDIATE")
             if parent_id is not None:
                 parent_row = conn.execute(
                     "SELECT id FROM tasks WHERE id = ?", (parent_id,)
@@ -1601,7 +1607,13 @@ class TaskDB:
             return
         task_dir = MISSIONCACHE_ROOT / task.full_path
         content = None
-        for filename in ("context.md", f"{task.name}-context.md"):
+        # Prefixed name FIRST, matching every reader (get_missioncache_files,
+        # statusline _resolve_parent_context / get_project_info). The reconcile
+        # is the only path that can null parent_id, so it must certify off the
+        # exact file the digest and statusline render from - reading the legacy
+        # context.md first would let a stale unprefixed file silently de-link a
+        # live fork nobody can see is unlinked.
+        for filename in (f"{task.name}-context.md", "context.md"):
             filepath = task_dir / filename
             if filepath.exists():
                 try:
@@ -1614,17 +1626,37 @@ class TaskDB:
         fork_name = context_health.parse_fork_parent(content)
         if fork_name is None:
             if task.parent_id is not None:
+                logger.warning(
+                    "Fork reconcile: clearing parent link on %r - its context "
+                    "header no longer names a parent (moved below the first "
+                    "section, or edited to an unparseable form?)",
+                    task.name,
+                )
                 self.set_task_parent(task.id, None)
             return
         if fork_name == task.name:
             return
         parent = self._resolve_task_by_name(fork_name, prefer_repo_id=task.repo_id)
-        if parent is None or parent.id == task.id or task.parent_id == parent.id:
+        if parent is None:
+            logger.warning(
+                "Fork reconcile: %r declares '**Fork of:** %s' but no "
+                "unambiguous parent resolved; link preserved as-is",
+                task.name,
+                fork_name,
+            )
+            return
+        if parent.id == task.id or task.parent_id == parent.id:
             return
         try:
             self.set_task_parent(task.id, parent.id)
         except ValueError:
             # cycle or race: preserve the current link rather than corrupt
+            logger.warning(
+                "Fork reconcile: linking %r under %r rejected (cycle or "
+                "concurrent scan); link preserved",
+                task.name,
+                fork_name,
+            )
             return
 
     def _resolve_task_by_name(
@@ -2309,10 +2341,24 @@ class TaskDB:
         # a single-user tool; a BEGIN IMMEDIATE would be needed to fully close it.
         with self.connection() as conn:
             children = conn.execute(
-                "SELECT id FROM tasks WHERE parent_id = ?",
+                "SELECT id, name, full_path FROM tasks WHERE parent_id = ?",
                 (task_id,),
             ).fetchall()
             if children:
+                # A flat fork child is a full project, not a nested subtask.
+                # Give it an accurate message and a real remedy (the child's
+                # own **Fork of:** header, removed then re-scanned, unlinks it)
+                # rather than the legacy "delete or reassign subtasks" text
+                # that names no existing reassign tool.
+                forks = [c for c in children if self._is_flat_fork_path(c["full_path"])]
+                if forks and len(forks) == len(children):
+                    names = ", ".join(c["name"] for c in forks)
+                    raise SubtasksExistError(
+                        f"'{task.name}' still has {len(forks)} fork(s) that share "
+                        f"its context: {names}. Complete or delete them first, or "
+                        f"remove the '**Fork of:** {task.name}' line from each "
+                        f"fork's context and re-scan to unlink."
+                    )
                 raise SubtasksExistError(
                     f"'{task.name}' has {len(children)} subtask(s). "
                     f"Delete or reassign them before deleting the project."

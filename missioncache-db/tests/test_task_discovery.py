@@ -5,6 +5,7 @@ Tests use a real SQLite database and tmp_path for MissionCache directory structu
 
 import json
 import os
+import pathlib
 
 import pytest
 
@@ -343,3 +344,121 @@ class TestForkReconcileAdversarial:
 
         result = db.rename_task(child.id, "renamed-child")
         assert result["full_path"] == "active/renamed-child"
+
+
+class TestForkReconcileFileOrder:
+    """The reconcile must certify the parent link off the SAME context file
+    the readers (digest, statusline) render from - the prefixed name - so a
+    stale legacy context.md cannot silently de-link a live fork."""
+
+    def _repo(self, db, tmp_path):
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir(exist_ok=True)
+        return db.add_repo(repo_dir)
+
+    def test_prefixed_file_wins_when_both_present(self, db, orbit_root, tmp_path):
+        """Both context.md (no header) and <name>-context.md (with header)
+        exist: the link is read off the prefixed file and set, NOT nulled."""
+        (orbit_root / "active" / "parent-proj").mkdir(parents=True)
+        (orbit_root / "active" / "parent-proj" / "parent-proj-context.md").write_text("# p")
+        child = orbit_root / "active" / "child-proj"
+        child.mkdir(parents=True)
+        # Legacy unprefixed file has NO fork header...
+        (child / "context.md").write_text("# child-proj - Context\n\n## Description\n")
+        # ...the canonical prefixed file DOES.
+        (child / "child-proj-context.md").write_text(
+            "# child-proj - Context\n**Fork of:** parent-proj\n\n## Description\n"
+        )
+        repo_id = self._repo(db, tmp_path)
+        db.scan_repo(repo_id)
+
+        c = db._resolve_task_by_name("child-proj")
+        parent = db._resolve_task_by_name("parent-proj")
+        assert c.parent_id == parent.id, "link must come off the prefixed file"
+
+    def test_prefixed_header_not_cleared_by_legacy_file(self, db, orbit_root, tmp_path):
+        """A previously-linked fork with a header in the prefixed file must NOT
+        be de-linked just because a header-less legacy context.md appears."""
+        (orbit_root / "active" / "parent-proj").mkdir(parents=True)
+        (orbit_root / "active" / "parent-proj" / "parent-proj-context.md").write_text("# p")
+        child = orbit_root / "active" / "child-proj"
+        child.mkdir(parents=True)
+        (child / "child-proj-context.md").write_text(
+            "# child-proj - Context\n**Fork of:** parent-proj\n\n## Description\n"
+        )
+        repo_id = self._repo(db, tmp_path)
+        db.scan_repo(repo_id)
+        assert db._resolve_task_by_name("child-proj").parent_id is not None
+
+        # A legacy header-less file appears; re-scan must preserve the link.
+        (child / "context.md").write_text("# child-proj - Context\n\n## Description\n")
+        db.scan_repo(repo_id)
+        assert db._resolve_task_by_name("child-proj").parent_id is not None
+
+
+class TestForkRenameInteractions:
+    """Renaming a fork child (a full project) must keep its parent link and
+    header; the header remains the durable source of truth across rename."""
+
+    def _repo(self, db, tmp_path):
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir(exist_ok=True)
+        return db.add_repo(repo_dir)
+
+    def test_child_rename_preserves_link_and_header(self, db, orbit_root, tmp_path):
+        (orbit_root / "active" / "parent-proj").mkdir(parents=True)
+        (orbit_root / "active" / "parent-proj" / "parent-proj-context.md").write_text("# p")
+        child = orbit_root / "active" / "child-proj"
+        child.mkdir(parents=True)
+        (child / "child-proj-context.md").write_text(
+            "# child-proj - Context\n**Fork of:** parent-proj\n\n## Description\n"
+        )
+        repo_id = self._repo(db, tmp_path)
+        db.scan_repo(repo_id)
+        c = db._resolve_task_by_name("child-proj")
+        parent = db._resolve_task_by_name("parent-proj")
+        assert c.parent_id == parent.id
+
+        db.rename_task(c.id, "renamed-child")
+
+        renamed = db._resolve_task_by_name("renamed-child")
+        assert renamed is not None
+        assert renamed.parent_id == parent.id  # link survives the rename
+        # The header moved with the file and still reconciles.
+        db.scan_repo(repo_id)
+        assert db._resolve_task_by_name("renamed-child").parent_id == parent.id
+
+
+class TestForkReconcilePreservesOnUnreadable:
+    """The 'absence of evidence is not evidence' contract: an unreadable
+    context file must PRESERVE the link, never clear it."""
+
+    def test_unreadable_context_preserves_link(self, db, orbit_root, tmp_path, monkeypatch):
+        (orbit_root / "active" / "parent-proj").mkdir(parents=True)
+        (orbit_root / "active" / "parent-proj" / "parent-proj-context.md").write_text("# p")
+        child = orbit_root / "active" / "child-proj"
+        child.mkdir(parents=True)
+        (child / "child-proj-context.md").write_text(
+            "# child-proj - Context\n**Fork of:** parent-proj\n\n## Description\n"
+        )
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        repo_id = db.add_repo(repo_dir)
+        db.scan_repo(repo_id)
+        c = db._resolve_task_by_name("child-proj")
+        assert c.parent_id is not None
+
+        # Make the child's context unreadable, then re-scan: the link must
+        # survive (OSError -> preserve), NOT be cleared as "validly absent".
+        real_read_text = pathlib.Path.read_text
+
+        def boom(self, *a, **k):
+            if self.name == "child-proj-context.md":
+                raise OSError("unreadable")
+            return real_read_text(self, *a, **k)
+
+        monkeypatch.setattr(pathlib.Path, "read_text", boom)
+        db.scan_repo(repo_id)
+        monkeypatch.undo()
+
+        assert db._resolve_task_by_name("child-proj").parent_id is not None
