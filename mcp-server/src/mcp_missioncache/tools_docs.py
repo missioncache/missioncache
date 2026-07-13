@@ -71,6 +71,15 @@ async def create_missioncache_files(
             "project so the statusline shows it. " + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
+    fork_of: Annotated[
+        str | None,
+        Field(
+            description="Parent project name to fork from. Writes a "
+            "'**Fork of:**' header into the new context file; the parent's "
+            "context file becomes this project's shared knowledge layer. "
+            "The parent should already exist (active or completed)."
+        ),
+    ] = None,
 ) -> dict:
     """
     Create MissionCache files for a new task.
@@ -135,9 +144,12 @@ async def create_missioncache_files(
             tasks=tasks,
             plan_content=plan,
             force=force,
+            fork_of=fork_of,
         )
 
-        # Scan to register task in database
+        # Scan to register task in database. For forks, the scan's reconcile
+        # pass also resolves the freshly written "**Fork of:**" header into
+        # tasks.parent_id - no separate linking step needed.
         db.scan_all_repos()
 
         # Find the created task by its known full_path (avoids name-only ambiguity)
@@ -175,7 +187,7 @@ async def create_missioncache_files(
         session_id = _resolve_session_id(session_id)
         session_bound = _bind_session_to_project(session_id, project_name)
 
-        return {
+        result = {
             "success": True,
             "task_id": task.id if task else None,
             "task_name": project_name,
@@ -186,6 +198,38 @@ async def create_missioncache_files(
             "repo_path": registered_repo_path,
             "session_bound": session_bound,
         }
+        if fork_of is not None:
+            # Linked means linked to the REQUESTED parent - a non-null
+            # parent_id alone could be a stale link preserved by the scan
+            # reconcile (e.g. force re-create pointing at an unresolvable
+            # new parent while the old link survives).
+            linked = False
+            if task and task.parent_id is not None:
+                try:
+                    parent_task = db.get_task(task.parent_id)
+                    linked = bool(parent_task and parent_task.name == fork_of)
+                except Exception:
+                    # A db error here means we can't verify the link, NOT that
+                    # it is unlinked - log so a real db problem isn't hidden
+                    # behind the benign-sounding "self-heals on next scan".
+                    logger.warning(
+                        "Fork link verification for %r -> %r failed; reporting "
+                        "unlinked, but parent_id may be set",
+                        project_name,
+                        fork_of,
+                        exc_info=True,
+                    )
+                    linked = False
+            result["fork_of"] = fork_of
+            result["fork_linked"] = linked
+            if not linked:
+                result["fork_warning"] = (
+                    f"'**Fork of:** {fork_of}' was written to the context header, "
+                    "but the database link does not (yet) point at that parent. "
+                    "The link self-heals on the next scan once the parent "
+                    "resolves unambiguously."
+                )
+        return result
 
     except MissionCacheError as e:
         return e.to_dict()
@@ -341,6 +385,15 @@ async def update_context_file(
 @mcp.tool()
 async def get_context_digest(
     project_name: Annotated[str, Field(description="Project name")],
+    seen_mtime: Annotated[
+        float | None,
+        Field(
+            description="For forks: the parent-context mtime this session last "
+            "saw (from its shared-seen marker). When passed, parent_digest."
+            "changed_since_seen reports whether a parallel session updated the "
+            "shared layer since."
+        ),
+    ] = None,
 ) -> dict:
     """
     Resume digest of a project's context file - read this INSTEAD of the
@@ -352,6 +405,13 @@ async def get_context_digest(
     verbatim, Next Steps verbatim, the newest 3 Recent Changes subsections,
     a section index (name + line number) for targeted follow-up reads, the
     file size, and per-project health warnings.
+
+    For a FORK (context header carries "**Fork of:** <parent>"), also returns
+    a ``parent_digest`` block: the parent's name, context file path, Last
+    Updated, current mtime, and - when ``seen_mtime`` is passed -
+    ``changed_since_seen``. The parent resolves from active/ or completed/,
+    so a completed parent's shared layer stays reachable. Best-effort: an
+    unresolvable parent yields ``parent_digest: null``, never an error.
     """
     try:
         # Fail fast on junk names and close the pre-validation existence
@@ -367,7 +427,65 @@ async def get_context_digest(
         path = Path(files.context_file)
         content = path.read_text()
         digest = context_health.build_digest(content, path)
-        return {"success": True, "file": files.context_file, **digest}
+
+        parent_digest = None
+        # is_fork lets the caller tell "not a fork" (parent_digest null, no
+        # error) from "fork whose parent read failed" (parent_digest null,
+        # fork_parent_error set) - the latter must still show the fork banner
+        # and prompt a manual re-read, not silently downgrade to a plain resume.
+        fork_name = context_health.parse_fork_parent(content)
+        is_fork = bool(fork_name and fork_name != project_name)
+        fork_parent_error = None
+        if is_fork:
+            try:
+                pfiles = project_files.get_missioncache_files(fork_name)
+                if pfiles.context_file:
+                    _validate_path(
+                        pfiles.context_file, "context_file", must_be_under=settings.root
+                    )
+                    ppath = Path(pfiles.context_file)
+                    # Couple the reported mtime to the bytes actually read:
+                    # stat, read, stat again; if an atomic writer replaced the
+                    # file mid-read, re-read once so mtime and digest describe
+                    # the same snapshot. (A content hash is the v2 contract.)
+                    pmtime = ppath.stat().st_mtime
+                    pcontent = ppath.read_text()
+                    if ppath.stat().st_mtime != pmtime:
+                        pmtime = ppath.stat().st_mtime
+                        pcontent = ppath.read_text()
+                    pdigest = context_health.build_digest(pcontent, ppath)
+                    parent_digest = {
+                        "name": fork_name,
+                        "context_file": pfiles.context_file,
+                        "last_updated": pdigest["last_updated"],
+                        "context_mtime": pmtime,
+                        "changed_since_seen": (
+                            pmtime > seen_mtime
+                            if seen_mtime is not None
+                            else None
+                        ),
+                    }
+                else:
+                    fork_parent_error = f"parent project '{fork_name}' has no context file"
+            # Narrow: a read/validation failure means "couldn't read the
+            # parent", but a programming error (AttributeError/KeyError) or a
+            # path-escape rejection should not be relabeled "didn't resolve".
+            except (OSError, MissionCacheError, ValueError) as e:
+                fork_parent_error = f"could not read parent '{fork_name}': {e}"
+                logger.warning(
+                    "Fork parent %r of %r did not resolve; parent_digest omitted",
+                    fork_name,
+                    project_name,
+                    exc_info=True,
+                )
+        return {
+            "success": True,
+            "file": files.context_file,
+            **digest,
+            "is_fork": is_fork,
+            "parent_digest": parent_digest,
+            "fork_parent_error": fork_parent_error,
+        }
 
     except MissionCacheError as e:
         return e.to_dict()

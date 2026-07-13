@@ -212,6 +212,19 @@ def get_missioncache_files(task_name: str, full_path: str | None = None) -> Miss
     )
 
 
+def _inject_fork_header(content: str, parent: str) -> str:
+    """Insert a ``**Fork of:** <parent>`` line into the context header region,
+    right after the ``**Last Updated:**`` line (falling back to right after
+    the H1 for custom templates), so the digest and scan reconcile find it."""
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith("**Last Updated:**"):
+            lines.insert(i + 1, f"**Fork of:** {parent}\n")
+            return "".join(lines)
+    lines.insert(1, f"\n**Fork of:** {parent}\n")
+    return "".join(lines)
+
+
 def create_missioncache_files(
     task_name: str,
     description: str = "TBD",
@@ -220,6 +233,7 @@ def create_missioncache_files(
     tasks: list[str] | None = None,
     plan_content: dict[str, str] | None = None,
     force: bool = False,
+    fork_of: str | None = None,
 ) -> MissionCacheFiles:
     """Create MissionCache files for a task under MISSIONCACHE_ROOT.
 
@@ -234,11 +248,23 @@ def create_missioncache_files(
             MissionCacheError(ALREADY_EXISTS) when any of plan/context/tasks already
             exist on disk for this task. Prevents silent data loss when the
             same name is reused.
+        fork_of: Optional parent project name. Writes a ``**Fork of:**``
+            header line into the new context file, which the DB scan
+            reconciles into the parent link. The parent's context file is the
+            fork's shared knowledge layer.
 
     Returns:
         MissionCacheFiles with paths to created files
     """
     validate_task_name(task_name)
+    if fork_of is not None:
+        validate_task_name(fork_of)
+        if fork_of == task_name:
+            raise MissionCacheError(
+                ErrorCode.VALIDATION_ERROR,
+                "A project cannot fork itself.",
+                {"task_name": task_name},
+            )
     task_dir = get_task_dir(task_name)
 
     if not force:
@@ -282,6 +308,8 @@ def create_missioncache_files(
     )
     context_content = context_content.replace("{{timestamp}}", timestamp)
     context_content = context_content.replace("{{description}}", description)
+    if fork_of is not None:
+        context_content = _inject_fork_header(context_content, fork_of)
 
     context_file = task_dir / f"{task_name}-context.md"
     context_file.write_text(context_content)
