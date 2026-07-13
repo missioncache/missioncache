@@ -37,7 +37,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 IS_MACOS = platform.system() == "Darwin"
 
@@ -664,6 +664,90 @@ class ProjectInfo(NamedTuple):
     name: str = ""
     display: str = ""
     progress: str = ""
+    fork_of: str = ""
+    shared_stale: bool = False
+
+
+# MUST stay byte-identical to context_health._FORK_NAME_RE (the db/MCP copy).
+# The statusline is a stdlib-only standalone script and cannot import
+# missioncache_db, so the grammar is mirrored here by hand. The no-slash /
+# leading-alnum shape is a load-bearing SECURITY control (blocks path
+# traversal via a hand-edited header). test_statusline_fork asserts the two
+# patterns are equal; keep them in lockstep.
+_FORK_HEADER_RE = re.compile(
+    r"^\*\*Fork of:\*\*\s*(?:\[\[([A-Za-z0-9][A-Za-z0-9._-]*)\]\]|([A-Za-z0-9][A-Za-z0-9._-]*))\s*$"
+)
+# Mirror of context_health._FENCE_RE + its CommonMark closer rule (same fence
+# char, closer length >= opener). Kept identical so this parser and the db's
+# _header_line agree on where the header region ends.
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+
+
+def _parse_fork_of(context_text: str) -> str:
+    """Parent name from a ``**Fork of:**`` line in the context header region
+    (everything before the first real ``## `` section), or "".
+
+    Fence-aware, mirroring context_health._header_line: a ``## `` INSIDE a
+    fenced code block does not end the header region (else the two parsers
+    disagree and the db links a fork the statusline renders as plain)."""
+    fence_char = None
+    fence_len = 0
+    for line in context_text.splitlines():
+        m = _FENCE_RE.match(line)
+        if fence_char is None:
+            if m:
+                fence_char = m.group(1)[0]
+                fence_len = len(m.group(1))
+            else:
+                stripped = line.strip()
+                if stripped.startswith("## "):
+                    break
+                match = _FORK_HEADER_RE.match(stripped)
+                if match:
+                    return match.group(1) or match.group(2)
+        else:
+            # Inside a fence: close only on the same char, length >= opener.
+            if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len:
+                fence_char = None
+                fence_len = 0
+    return ""
+
+
+def _resolve_parent_context(parent: str) -> Optional[Path]:
+    """The parent project's context file, searched in active/ then completed/
+    (a completed parent's shared layer stays reachable)."""
+    for base in (MISSIONCACHE_ACTIVE, MISSIONCACHE_ACTIVE.parent / "completed"):
+        for fname in (f"{parent}-context.md", "context.md"):
+            candidate = base / parent / fname
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _shared_is_stale(parent_ctx: Path, session_id: str, parent_name: str) -> bool:
+    """True when the shared (parent) context changed after this session's
+    last sync, per the shared-seen marker. The marker must belong to THIS
+    parent - a session that switched between forks of different parents has
+    a baseline for the other file, and mtimes across files do not compare.
+    No/foreign/corrupt marker reads as fresh - neutral, never a false alarm."""
+    # Shape-guard the session id before it becomes a filename: it is a trusted
+    # harness UUID today, but a stray '..' or '/' must never let the marker
+    # read escape the shared-seen dir.
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", session_id or ""):
+        return False
+    marker = STATE_DIR / "shared-seen" / f"{session_id}.json"
+    try:
+        data = json.loads(marker.read_text())
+        if data.get("parent") != parent_name:
+            return False
+        seen = data.get("seen_mtime")
+        if seen is None:
+            return False
+        # Exact comparison: the marker stores the same float st_mtime the
+        # writer statted, and JSON round-trips float64 exactly.
+        return parent_ctx.stat().st_mtime > float(seen)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _project_is_active_in_db(name: str) -> bool:
@@ -732,11 +816,37 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
             return ProjectInfo(name, display, "")
         return ProjectInfo()
 
+    # Fork awareness: a "**Fork of:**" line in the child's context header
+    # marks this project as a fork; the parent's context is its shared layer.
+    # Bounded read: the header sits at the very top, so read at most 8 KB
+    # instead of slurping the whole context (can be 100 KB+) on every render
+    # inside the ~300 ms statusline budget. UnicodeDecodeError is caught too -
+    # a non-UTF-8 file must drop only the fork annotation, not (via the
+    # main() except) the entire project cell.
+    fork_of = ""
+    shared_stale = False
+    for ctx_name in (f"{name}-context.md", "context.md"):
+        ctx_path = project_dir / ctx_name
+        if ctx_path.is_file():
+            try:
+                with open(ctx_path, "r", encoding="utf-8", errors="strict") as fh:
+                    head = fh.read(8192)
+                fork_of = _parse_fork_of(head)
+            except (OSError, UnicodeDecodeError):
+                pass
+            break
+    if fork_of:
+        parent_ctx = _resolve_parent_context(fork_of)
+        if parent_ctx is None:
+            fork_of = ""  # unresolvable parent: render as a plain project
+        else:
+            shared_stale = _shared_is_stale(parent_ctx, session_id, fork_of)
+
     tasks_content = _read_tasks_content(project_dir, name)
     if not tasks_content:
-        return ProjectInfo(name, display, "")
+        return ProjectInfo(name, display, "", fork_of, shared_stale)
     progress = f" {_parse_task_progress(tasks_content)}"
-    return ProjectInfo(name, display, progress)
+    return ProjectInfo(name, display, progress, fork_of, shared_stale)
 
 
 # ============ LAST ACTION TIME ============
@@ -1685,11 +1795,14 @@ def main() -> None:
 
     _FUTURE_TIMEOUT = 3
     try:
-        project_name, project_display, project_progress = (
-            f_project.result(timeout=_FUTURE_TIMEOUT)
-        )
+        project = f_project.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
-        project_name, project_display, project_progress = "", "", ""
+        project = ProjectInfo()
+    project_name, project_display, project_progress = (
+        project.name,
+        project.display,
+        project.progress,
+    )
     try:
         repo_name, branch, git_dirty = f_git.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
@@ -1765,6 +1878,15 @@ def main() -> None:
         else:
             linked_value = linked_name
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
+        if project.fork_of:
+            # Fork annotation: link to the parent's dashboard modal; a red dot
+            # means the shared (parent) context changed since this session's
+            # last sync - re-read it before building on stale knowledge.
+            parent_url = f"{_DASHBOARD_URL}/#projects?task={urllib.parse.quote(project.fork_of, safe='')}"
+            fork_value = _osc8_link(parent_url, project.fork_of)
+            if project.shared_stale:
+                fork_value += f" {COLORS['ctx_urgent']}● shared updated{RESET}{COLORS['project']}"
+            line2.append(_item(COLORS["project"], "⤵", "Fork of", fork_value))
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 

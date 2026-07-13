@@ -1231,6 +1231,20 @@ async def api_tasks_active(repo_id: int = None):
         else:
             parents.append(task_dict)
 
+    # Promote orphans: a child whose parent is not among the VISIBLE active
+    # tasks (the parent completed or was deleted) surfaces top-level instead
+    # of being dropped under a key nothing renders. The check runs against
+    # ALL visible task ids, not just current top-levels - in a chain
+    # completed-P -> active-A -> active-B, only A gets promoted and A keeps
+    # B in its own bucket.
+    visible_ids = {parent["id"] for parent in parents}
+    for bucket in children_map.values():
+        visible_ids.update(child["id"] for child in bucket)
+    for orphan_parent_id, orphaned in list(children_map.items()):
+        if orphan_parent_id not in visible_ids:
+            parents.extend(orphaned)
+            del children_map[orphan_parent_id]
+
     # Attach children to parents and calculate combined time
     for parent in parents:
         parent_id = parent["id"]
