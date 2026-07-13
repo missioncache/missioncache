@@ -1,8 +1,8 @@
-<title>MissionCache - One workbench for your AI coding projects</title>
-<meta name="description" content="Mission control for AI-assisted coding. Project memory, a time-analytics dashboard, autonomous execution, and a rich statusline - one system across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<title>MissionCache - The workbench that remembers your AI coding projects</title>
+<meta name="description" content="Mission control for AI-assisted coding. One workbench that remembers every project you build with AI: project memory, time analytics, and autonomous execution across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <link rel="icon" type="image/png" href="{{IMG_MARK}}">
-<meta property="og:title" content="MissionCache - One workbench for your AI coding projects">
-<meta property="og:description" content="Mission control for AI-assisted coding. Project memory, a time-analytics dashboard, autonomous execution, and a rich statusline - one system across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<meta property="og:title" content="MissionCache - The workbench that remembers your AI coding projects">
+<meta property="og:description" content="Mission control for AI-assisted coding. One workbench that remembers every project you build with AI: project memory, time analytics, and autonomous execution across Claude Code, Codex, OpenCode, and VSCode Copilot.">
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -197,8 +197,10 @@
   /* ---- Hero ---- */
   .hero { position: relative; overflow: hidden; padding-top: clamp(48px, 7vw, 84px); }
   .hero::before {
-    content: ""; position: absolute; inset: -40% 0 auto 0; height: 640px; z-index: 0;
-    background: radial-gradient(60% 60% at 50% 0%, var(--glow), transparent 70%);
+    content: ""; position: absolute; inset: 0; z-index: 0;
+    background:
+      radial-gradient(60% 42% at 50% -6%, var(--glow), transparent 70%),
+      radial-gradient(46% 34% at 50% 44%, var(--glow), transparent 72%);
     pointer-events: none;
   }
   .hero::after {
@@ -210,27 +212,65 @@
   }
   canvas.net { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
   .hero .wrap { position: relative; z-index: 2; }
-  /* full-width install bar under the hero text - the one command, unmissable */
-  .install-hero { margin-top: clamp(34px, 5vw, 52px); }
+  /* install bar: the hero's primary CTA - contained in the column, lit, alive */
+  .install-hero { max-width: 680px; margin: clamp(30px, 4.5vw, 46px) auto 0; }
   .install-hero .term {
+    position: relative; text-align: left;
     border: 2px solid transparent;
     background: linear-gradient(var(--con-bg), var(--con-bg)) padding-box,
                 linear-gradient(100deg, var(--grad-a), var(--grad-b)) border-box;
-    box-shadow: 0 0 0 1px var(--glow), 0 18px 64px -14px var(--glow), 0 24px 60px -30px rgba(0,0,0,.6);
+    box-shadow: 0 0 0 1px var(--glow), 0 22px 70px -14px var(--glow), 0 24px 60px -30px rgba(0,0,0,.6);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .install-hero .term::after {
+      content: ""; position: absolute; top: 0; left: -80%; width: 45%; height: 100%;
+      background: linear-gradient(105deg, transparent, rgba(255,255,255,0.10), transparent);
+      transform: skewX(-18deg); pointer-events: none;
+      animation: barsweep 6s ease-in-out infinite;
+    }
+    @keyframes barsweep { 0% { left: -80%; } 30% { left: 135%; } 100% { left: 135%; } }
   }
   .install-hero .term-body { padding: 22px 22px 24px; }
   .install-hero .term-cmd { font-size: 1.12rem; overflow-x: auto; }
   .install-hero .term-out { font-size: 0.9rem; }
+  .install-hero .assure { margin-top: 12px; font-size: 0.82rem; color: var(--ink-3); }
   @media (max-width: 480px) { .install-hero .term-cmd { font-size: 0.98rem; } }
+
+  /* works-with + trust chips as one centered meta band closing the hero column */
+  .meta-band { max-width: 640px; margin: 30px auto 0; padding-top: 22px; border-top: 1px solid var(--border); }
+  .meta-band .works { margin-top: 0; }
+  .meta-band .works .tools { justify-content: center; }
+  .meta-band .chips { justify-content: center; margin-top: 14px; }
   /* full-width product shot below the hero text */
   .hero-shot { margin-top: clamp(44px, 6vw, 72px); }
-  .hero h1 { font-size: clamp(2.3rem, 5.4vw, 3.7rem); line-height: 1.04; margin: 18px 0 0; }
-  .hero .sub { margin-top: 18px; font-size: 1.14rem; color: var(--ink-2); max-width: 40ch; }
-  .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 44ch; }
-  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+  /* centered hero column: text capped for reading, h1 allowed wider for drama */
+  .hero-center { text-align: center; max-width: 920px; margin-inline: auto; }
+  .hero-center .eyebrow::after { content: ""; width: 22px; height: 1px; background: var(--signal); opacity: .7; }
+  @media (max-width: 420px) { .hero-center .eyebrow::before, .hero-center .eyebrow::after { display: none; } }
 
-  /* brand logo above the headline - swaps black/white with the theme */
-  .hero-logo { width: clamp(260px, 50%, 560px); height: auto; margin-bottom: 24px; }
+  .hero h1 { font-size: clamp(2.4rem, 5.4vw, 4rem); line-height: 1.03; margin: 16px auto 0; }
+  /* dark themes only: light the accent word (muddies in light theme) */
+  :root[data-theme="dark"] .hero h1 .grad { filter: drop-shadow(0 0 18px rgba(168,85,247,.35)); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .hero h1 .grad { filter: drop-shadow(0 0 18px rgba(168,85,247,.35)); }
+  }
+  .hero .sub { margin: 20px auto 0; font-size: 1.15rem; color: var(--ink-2); max-width: 46ch; }
+  .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 56ch; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; justify-content: center; }
+
+  /* brand logo above the headline - swaps black/white with the theme, seated in a soft halo */
+  .logo-wrap { position: relative; display: inline-block; margin: 0 auto 22px; }
+  .logo-wrap::before {
+    content: ""; position: absolute; inset: -46% -22%; z-index: -1;
+    background: radial-gradient(50% 62% at 50% 50%, var(--glow), transparent 70%);
+    pointer-events: none;
+  }
+  .hero-logo { width: clamp(200px, 30vw, 380px); height: auto; }
+
+  /* hero entrance stagger (rides the existing .rv reveal) */
+  .rv.d1 { transition-delay: .06s; } .rv.d2 { transition-delay: .12s; }
+  .rv.d3 { transition-delay: .18s; } .rv.d4 { transition-delay: .24s; }
+  .rv.d5 { transition-delay: .30s; } .rv.d6 { transition-delay: .36s; }
   .hero-logo.on-dark { display: none; }
   .hero-logo.on-light { display: block; }
   @media (prefers-color-scheme: dark) {
@@ -414,6 +454,17 @@
   .yes { color: var(--ok); font-weight: 600; }
   .no { color: var(--ink-3); }
 
+  /* ---- Comparison matrix ---- */
+  .mx td, .mx th { text-align: center; }
+  .mx td:first-child, .mx th:first-child { text-align: left; }
+  .mx th:nth-child(2), .mx td:nth-child(2) { background: color-mix(in srgb, var(--signal) 8%, transparent); }
+  .mx .y { color: var(--ok); font-weight: 700; }
+  .mx .p { color: var(--warn); font-weight: 600; }
+  .mx .n { color: var(--ink-3); }
+  .mx-note { display: block; font-size: 0.7rem; font-weight: 400; color: var(--ink-3); margin-top: 2px; }
+  .mx-cap { margin-top: 12px; font-size: 0.85rem; color: var(--ink-3); }
+  .mx-cap a { color: var(--signal); }
+
   /* ---- Compare ---- */
   .compare { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: clamp(28px, 4vw, 44px); margin-top: 40px; }
   .compare .take { font-size: clamp(1.15rem, 2.4vw, 1.5rem); font-family: "SF Mono",ui-monospace,Menlo,monospace; letter-spacing: -0.01em; line-height: 1.4; color: var(--ink); max-width: 46ch; }
@@ -444,7 +495,12 @@
   /* ---- Stats ---- */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 40px; }
   @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
-  .stat { text-align: center; padding: 22px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+  .stat { text-align: center; padding: 22px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+    position: relative; overflow: hidden; transition: transform .18s ease, border-color .18s ease; }
+  .stat::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); opacity: 0; transition: opacity .2s ease; }
+  .stat:hover { transform: translateY(-3px); border-color: var(--border-2); }
+  .stat:hover::before { opacity: 1; }
   .stat .v { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 1.7rem; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
     background: linear-gradient(100deg,var(--grad-a),var(--grad-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .stat .k { margin-top: 6px; font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-3); }
@@ -491,10 +547,10 @@
       <span>Mission<span class="grad">Cache</span></span>
     </a>
     <nav class="nav-links">
-      <a href="#features">Features</a>
+      <a href="#compare">Compare</a>
       <a href="#how">How it works</a>
       <a href="#statusline">Statusline</a>
-      <a href="#compare">Compare</a>
+      <a href="#features">Features</a>
       <a href="{{DOCS_URL}}">Docs</a>
       <a href="{{CHANGELOG_URL}}">Changelog</a>
     </nav>
@@ -508,10 +564,10 @@
       <a class="btn btn-primary" href="#install">Install</a>
     </div>
     <div class="nav-drop" id="drop">
-      <a href="#features">Features</a>
+      <a href="#compare">Compare</a>
       <a href="#how">How it works</a>
       <a href="#statusline">Statusline</a>
-      <a href="#compare">Compare</a>
+      <a href="#features">Features</a>
       <a href="#install">Install</a>
       <a href="{{DOCS_URL}}">Docs</a>
       <a href="{{CHANGELOG_URL}}">Changelog</a>
@@ -526,48 +582,56 @@
 <section class="hero">
   <canvas class="net" aria-hidden="true"></canvas>
   <div class="wrap">
-    <div>
-      <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="560" height="100" alt="MissionCache">
-      <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="560" height="113" alt="MissionCache">
-      <span class="eyebrow">Mission control for AI-assisted coding</span>
-      <h1>One workbench for your <span class="grad">AI coding</span> projects.</h1>
-      <p class="sub">Plan, execute, track, and resume - <strong>without losing state</strong>.</p>
-      <p class="sub">Project memory, a <strong>time-analytics dashboard</strong>, <strong>autonomous execution</strong>, and a <strong>rich statusline</strong> - one system across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
+    <div class="hero-center">
+      <div class="logo-wrap rv">
+        <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="380" height="68" alt="MissionCache">
+        <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="380" height="77" alt="MissionCache">
+      </div>
+      <div>
+        <span class="eyebrow rv d1">Mission control for AI-assisted coding</span>
+      </div>
+      <h1 class="rv d2">One workbench that <span class="grad">remembers</span> every project you build with AI.</h1>
+      <p class="sub rv d3">Every project keeps a plan, context, and task list that <strong>survive context compaction and session end</strong>. One command reloads the full state and you <strong>pick up exactly where you left off</strong>.</p>
+      <p class="sub rv d3">A task manager, a memory layer, and an execution runner usually mean three separate tools. MissionCache is <strong>one workbench with all three</strong> - across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
 
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="#install">Get started</a>
-        <a class="btn" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
+      <div class="install-hero rv d4">
+        <div class="term">
+          <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">bash</span></div>
+          <div class="term-body">
+            <div class="term-cmd">
+              <span class="pr">$</span><code>uvx missioncache-install</code><span class="cursor"></span>
+              <button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button>
+            </div>
+            <div class="term-out"><strong>One command.</strong> Picks your components, wires the dashboard, and registers MissionCache in every AI tool it finds. <span class="ok">Under 3 minutes to first value.</span></div>
+          </div>
+        </div>
+        <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere.</p>
+      </div>
+
+      <div class="hero-cta rv d5">
+        <a class="btn btn-primary" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           Star on GitHub
         </a>
+        <a class="btn" href="#how">See how it works</a>
       </div>
 
-      <div class="works">
-        <span class="wl">Works with</span>
-        <div class="tools">
-          <span class="tool-chip"><span class="td"></span>Claude Code</span>
-          <span class="tool-chip"><span class="td"></span>Codex</span>
-          <span class="tool-chip"><span class="td"></span>OpenCode</span>
-          <span class="tool-chip"><span class="td"></span>VSCode Copilot</span>
-        </div>
-      </div>
-
-      <div class="chips">
-        <span class="chip"><span class="dot"></span>MIT licensed</span>
-        <span class="chip"><span class="dot"></span>Python 3.11+</span>
-        <span class="chip sig"><span class="dot"></span>MCP-compatible</span>
-      </div>
-    </div>
-
-    <div class="install-hero rv">
-      <div class="term">
-        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">bash</span></div>
-        <div class="term-body">
-          <div class="term-cmd">
-            <span class="pr">$</span><code>uvx missioncache-install</code><span class="cursor"></span>
-            <button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button>
+      <div class="meta-band rv d6">
+        <div class="works">
+          <span class="wl">Works with</span>
+          <div class="tools">
+            <span class="tool-chip"><span class="td"></span>Claude Code</span>
+            <span class="tool-chip"><span class="td"></span>Codex</span>
+            <span class="tool-chip"><span class="td"></span>OpenCode</span>
+            <span class="tool-chip"><span class="td"></span>VSCode Copilot</span>
           </div>
-          <div class="term-out"><strong>One command.</strong> Picks your components, wires the dashboard, and registers MissionCache in every AI tool it finds. <span class="ok">Under 3 minutes to first value.</span></div>
+        </div>
+        <div class="chips">
+          <span class="chip"><span class="dot"></span>MIT licensed</span>
+          <span class="chip"><span class="dot"></span>Python 3.11+</span>
+          <span class="chip sig"><span class="dot"></span>MCP-compatible</span>
+          <span class="chip"><span class="dot"></span>Local-first</span>
+          <span class="chip"><span class="dot"></span>Modular install</span>
         </div>
       </div>
     </div>
@@ -592,6 +656,7 @@
         <span class="eyebrow">The problem</span>
         <h2 style="margin-top:16px;">Your AI coding sessions have amnesia.</h2>
         <p class="lede">The context window compacts. The session ends. Tomorrow you rebuild the whole mental model - the plan, the decisions, what is left - from scratch. Every time.</p>
+        <p class="lede" style="margin-top:14px;">A CLAUDE.md file holds static rules. This is <strong>living project state</strong> - the plan, the decisions, the gotchas, and what is left - that updates as you work and reloads on command.</p>
         <p class="lede" style="margin-top:14px;">MissionCache gives each project a durable home. Watch the loop on the right: <strong>state saved before compaction, restored the next morning</strong>.</p>
       </div>
       <div class="rv">
@@ -612,13 +677,13 @@
     <div class="head rv">
       <span class="eyebrow">Why MissionCache</span>
       <h2>Three things, in one tool.</h2>
-      <p class="lede">No single existing tool integrates all three. MissionCache does - and it is honest about where the others are better.</p>
+      <p class="lede">Taskmaster manages tasks. claude-mem remembers. GSD executes. <strong>No single tool does all three - MissionCache is built as the integration.</strong> And we are honest below about where each of them is better.</p>
     </div>
     <div class="pillars">
       <div class="card rv">
         <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
         <h3>Your projects keep their memory</h3>
-        <p>Every project is three human-editable files - plan, context, tasks - under <span class="mono" style="font-size:.85em">~/.missioncache/active/</span>. They <strong>survive session end and context compaction</strong>. <span class="mono" style="font-size:.85em">/missioncache:load</span> reloads the full state, so you <strong>pick up exactly where you left off</strong>.</p>
+        <p>Not a static rules file. Every project is three human-editable files - plan, context, tasks - under <span class="mono" style="font-size:.85em">~/.missioncache/active/</span> that <strong>update as you work and survive session end and context compaction</strong>. <span class="mono" style="font-size:.85em">/missioncache:load</span> reloads the full state, so you <strong>pick up exactly where you left off</strong>.</p>
         <div class="tag"><b>persists</b> across compaction</div>
       </div>
       <div class="card rv">
@@ -632,6 +697,55 @@
         <h3>Autonomous execution you can watch live</h3>
         <p>MissionCache Auto runs a project's tasks in parallel with dependency-aware DAG scheduling, logs every attempt, and streams the whole run to the dashboard. Watch it live or walk away and read the iteration log after.</p>
         <div class="tag"><b>parallel</b> DAG scheduling</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ============ COMPARE ============ -->
+<section id="compare">
+  <div class="wrap">
+    <div class="head rv">
+      <span class="eyebrow">Why not the others</span>
+      <h2>We will tell you when to use something else.</h2>
+      <p class="lede">Every tool in this space does one thing. Here is the whole picture, checks and misses included.</p>
+    </div>
+
+    <div class="tbl-wrap rv tbl-scroll mx" style="margin-top:36px">
+      <table>
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th><span class="grad">MissionCache</span></th>
+            <th>Taskmaster AI</th>
+            <th>claude-mem</th>
+            <th>GSD</th>
+            <th>Agent Teams</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Project state that survives compaction</td><td class="y">&#10003;</td><td class="p">~</td><td class="p">~</td><td class="p">~</td><td class="n">&ndash;</td></tr>
+          <tr><td>Task checklists + dependency DAG</td><td class="y">&#10003;</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="p">~<span class="mx-note">flat list</span></td></tr>
+          <tr><td>Per-project time tracking</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="p">~<span class="mx-note">cost only</span></td><td class="n">&ndash;</td></tr>
+          <tr><td>Local analytics dashboard</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+          <tr><td>Autonomous execution</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="y">&#10003;</td><td class="y">&#10003;</td></tr>
+          <tr><td>Works beyond one agent</td><td class="y">&#10003;<span class="mx-note">4 via MCP</span></td><td class="y">&#10003;<span class="mx-note">13 IDEs</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mx-cap rv">Full tables, with where each tool beats us, in <a href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener">the README</a>.</p>
+
+    <div class="compare rv">
+      <p class="take">MissionCache is the only tool with <strong>per-project time tracking, a local analytics dashboard, and autonomous execution</strong> in the same place. That is the whole point.</p>
+      <div class="else">
+        <div class="row"><b>Taskmaster AI</b><span>if you want PRD-to-task decomposition across 13 IDEs.</span></div>
+        <div class="row"><b>Superpowers</b><span>if you want an enforced TDD methodology - and you can run it inside a MissionCache project.</span></div>
+        <div class="row"><b>claude-mem / MemPalace</b><span>if you want cross-project memory that outlives any single project.</span></div>
+        <div class="row"><b>GSD / GSD-2</b><span>if you want aggressive context-rot elimination with a fresh context per task.</span></div>
+        <div class="row"><b>Agent Teams</b><span>if you want zero-install native orchestration with no persistent state between runs.</span></div>
+        <div class="row"><b>MissionCache</b><span>if you want all of that integrated into one workbench for the project you are building now.</span></div>
       </div>
     </div>
   </div>
@@ -685,13 +799,14 @@
     <div class="head rv">
       <span class="eyebrow">Rich statusline</span>
       <h2>Your whole session, one glance up.</h2>
-      <p class="lede">A live mission readout above your prompt: <strong>usage limits, Claude health, version, context, project progress</strong> - linked into the dashboard, and fully yours to shape.</p>
+      <p class="lede">A live mission readout above your prompt: <strong>usage limits, Claude health, version, context, project progress</strong> - linked into the dashboard, and fully yours to shape. It even warns you before the context window forces a compaction, so you <strong>save state on your terms, not the window's</strong>.</p>
     </div>
 
     <div class="term rv" style="margin-top:38px">
       <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">missioncache-statusline</span><span class="live-dot"><i></i>live</span></div>
       <img class="sl-img" src="{{IMG_STATUSLINE}}" alt="MissionCache statusline in a real terminal: project with progress, git branch, model, tokens, context usage, Claude and Codex session limits with reset times, and Claude service status">
     </div>
+    <p class="mono rv" style="margin-top:10px;font-size:.76rem;color:var(--ink-3)">// real terminal, real session</p>
 
     <div class="sl-grid rv">
       <div class="card">
@@ -782,7 +897,7 @@
     <div class="head rv">
       <span class="eyebrow">Works everywhere</span>
       <h2>One MCP server. Four AI coding assistants.</h2>
-      <p class="lede">The installer detects which tools you have and asks per tool whether to register MissionCache. The project state and MCP tools are identical across all of them.</p>
+      <p class="lede">Most AI dev tooling is built for one agent. MissionCache is <strong>a single MCP server</strong>, so the same project state follows you into whichever agent you open. The installer detects which tools you have and asks per tool whether to register MissionCache.</p>
     </div>
     <div class="tbl-wrap rv tbl-scroll">
       <table>
@@ -795,31 +910,7 @@
         </tbody>
       </table>
     </div>
-  </div>
-</section>
-
-<hr class="rule">
-
-<!-- ============ COMPARE ============ -->
-<section id="compare">
-  <div class="wrap">
-    <div class="head rv">
-      <span class="eyebrow">Honest comparison</span>
-      <h2>We will tell you when to use something else.</h2>
-      <p class="lede">MissionCache sits where task management, context preservation, and execution-with-analytics usually ship as three separate tools. Here is the honest read.</p>
-    </div>
-    <div class="compare rv">
-      <p class="take">MissionCache is the only tool with <strong>per-project time tracking, a local analytics dashboard, and autonomous execution</strong> in the same place. That is the whole point.</p>
-      <div class="else">
-        <div class="row"><b>Taskmaster AI</b><span>if you want PRD-to-task decomposition across 13 IDEs.</span></div>
-        <div class="row"><b>Superpowers</b><span>if you want an enforced TDD methodology - and you can run it inside a MissionCache project.</span></div>
-        <div class="row"><b>claude-mem / MemPalace</b><span>if you want cross-project memory that outlives any single project.</span></div>
-        <div class="row"><b>GSD / GSD-2</b><span>if you want aggressive context-rot elimination with a fresh context per task.</span></div>
-        <div class="row"><b>Agent Teams</b><span>if you want zero-install native orchestration with no persistent state between runs.</span></div>
-        <div class="row"><b>MissionCache</b><span>if you want all of that integrated into one workbench for the project you are building now.</span></div>
-      </div>
-      <p style="margin-top:24px;font-size:.85rem;"><a href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener" style="color:var(--signal)">See the full side-by-side tables &rarr;</a></p>
-    </div>
+    <p class="mx-cap rv">Claude Code gets the full workbench today. Codex, OpenCode, and Copilot get the shared project state and the full MCP tool suite, with the rest tracked as follow-ups.</p>
   </div>
 </section>
 
@@ -834,7 +925,7 @@
       <div class="stat"><div class="v" data-n="7">7</div><div class="k">slash commands</div></div>
       <div class="stat"><div class="v">MIT</div><div class="k">open source</div></div>
     </div>
-    <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Live GitHub stars and PyPI installs wire in here at launch.</p>
+    <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Open source under MIT. Inspect every line on <a href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener" style="color:var(--signal)">GitHub</a>.</p>
   </div>
 </section>
 
@@ -844,7 +935,7 @@
     <div class="head rv">
       <span class="eyebrow">Install</span>
       <h2>One command. Two flavors.</h2>
-      <p class="lede">Pick the full workbench, or just the plugin core. Both are <strong>under three minutes to first value</strong> - measured, not promised.</p>
+      <p class="lede">Pick the full workbench, or just the plugin core. Both are <strong>under three minutes to first value</strong> - measured, not promised. One session to feel it: run <span class="mono" style="font-size:.9em">/missioncache:new</span>, and your plan survives the first compaction.</p>
     </div>
 
     <div class="install-card rv">
@@ -886,11 +977,13 @@
       <h2>The questions developers actually ask.</h2>
     </div>
     <div class="faq rv">
+      <details><summary>How is this different from CLAUDE.md or built-in memory?</summary><p>CLAUDE.md is a static rules file you maintain by hand. MissionCache keeps <strong>living project state</strong> - the plan, your decisions, the gotchas you flagged, and progress - that updates as you work and reloads with one command. It complements CLAUDE.md, it does not replace it.</p></details>
       <details><summary>Where does my data live?</summary><p><strong>On your machine.</strong> Project files are plain markdown under <span class="mono" style="font-size:.9em">~/.missioncache/</span>, and the dashboard runs locally at <span class="mono" style="font-size:.9em">localhost:8787</span>. <strong>Nothing is sent anywhere.</strong> The whole thing is local-first and self-hosted.</p></details>
       <details><summary>Do I have to install every component?</summary><p>No. The MCP server plus the database is the minimum, and everything else is opt-in. The wizard lets you deselect the dashboard, auto, or statusline, and each package can be used on its own.</p></details>
       <details><summary>Which tools does it work with?</summary><p>Claude Code gets the full experience. Codex, OpenCode, and VSCode Copilot Chat get the project state and the MCP tool suite today, with hooks, statusline, and auto tracked as a follow-up. Any tool that speaks MCP can use the core.</p></details>
       <details><summary>Is it free?</summary><p>Yes. MissionCache is open source under the MIT license. Use it, fork it, build on it.</p></details>
       <details><summary>Does it work on Windows?</summary><p>The plugin, MCP server, and <span class="mono" style="font-size:.9em">missioncache-auto</span> install fine. Windows service registration for the dashboard is not automated yet - the installer prints manual steps.</p></details>
+      <details><summary>What if I want to remove it?</summary><p>Uninstall the packages and delete <span class="mono" style="font-size:.9em">~/.missioncache</span>. Your project files are plain markdown, so anything you want to keep, you keep. <strong>Nothing is locked in.</strong></p></details>
     </div>
   </div>
 </section>
