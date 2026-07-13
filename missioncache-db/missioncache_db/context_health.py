@@ -486,6 +486,11 @@ def _header_line(content: str, prefix: str) -> Optional[str]:
     return None
 
 
+# MUST stay byte-identical to statusline._FORK_HEADER_RE (the dashboard copy),
+# which mirrors this by hand because the statusline is stdlib-only and cannot
+# import this module. The no-slash / leading-alnum shape is a load-bearing
+# security control (blocks path traversal via a hand-edited header).
+# test_statusline_fork asserts the two patterns are equal.
 _FORK_NAME_RE = re.compile(
     r"^\*\*Fork of:\*\*\s*(?:\[\[([A-Za-z0-9][A-Za-z0-9._-]*)\]\]|([A-Za-z0-9][A-Za-z0-9._-]*))\s*$"
 )

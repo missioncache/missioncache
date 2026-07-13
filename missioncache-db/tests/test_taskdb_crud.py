@@ -513,19 +513,19 @@ class TestSetTaskParent:
     def test_self_parent_rejected(self, db):
         """A task cannot be its own parent."""
         task = db.create_task("loner")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="its own parent"):
             db.set_task_parent(task.id, task.id)
 
     def test_missing_parent_rejected(self, db):
         """Linking to a nonexistent parent raises."""
         child = db.create_task("child-proj")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Parent task 99999 not found"):
             db.set_task_parent(child.id, 99999)
 
     def test_missing_child_rejected(self, db):
         """Linking a nonexistent child raises."""
         parent = db.create_task("parent-proj")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Task 99999 not found"):
             db.set_task_parent(99999, parent.id)
 
 
@@ -562,7 +562,7 @@ class TestSetTaskParentCycles:
         a = db.create_task("aaa")
         b = db.create_task("bbb")
         db.set_task_parent(a.id, b.id)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cycle"):
             db.set_task_parent(b.id, a.id)
 
     def test_three_node_cycle_rejected(self, db):
@@ -572,5 +572,5 @@ class TestSetTaskParentCycles:
         c = db.create_task("ccc")
         db.set_task_parent(a.id, b.id)
         db.set_task_parent(b.id, c.id)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cycle"):
             db.set_task_parent(c.id, a.id)
