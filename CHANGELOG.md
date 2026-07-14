@@ -4,6 +4,33 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - website and changelog links plus the running version in the dashboard sidebar (missioncache-dashboard)
+
+- The dashboard sidebar footer now links out to missioncache.dev and to the changelog, next to the theme toggle. These are the dashboard's first outbound links.
+- The sidebar shows the running dashboard version. It is read from the installed package metadata through a new `GET /api/version` endpoint, so there is no second copy of the number to fall out of step with the package. `/health` returns the version too, so one curl answers what is running. Note that under an editable install the metadata is a snapshot from the last `pip install -e`, so a maintainer working in the source tree can see an older number than `pyproject.toml` says. Published wheels carry accurate metadata, so this only affects maintainers.
+
+### Fixed - the dashboard reported a stale version in its OpenAPI metadata (missioncache-dashboard)
+
+- The FastAPI app was built with a hardcoded `version="2.0.0"` that had drifted away from the real package version and surfaced stale in `/docs` and `/openapi.json`. It now reads the package version, so the app no longer keeps its own copy of the number.
+
+### Added - a documentation page for project forks (docs)
+
+- New `docs/forks.md` covers what a fork is, when to fork instead of starting a new project or adding a subtask, how the shared context layer works, how parallel sessions stay fresh, and what happens when the parent completes. The "when to fork" section is the part that was missing: it says plainly that two separate projects is the right answer more often than a fork.
+- The landing page now carries forks as a first-class feature, with a worked example of two lanes over one shared context.
+- Gaps filled around the feature: the bundled rules file and the README command table were both missing `/missioncache:rename`, the rules file was also missing `/missioncache:fork`, the hooks doc did not list the shared-seen state file, and the architecture doc did not explain that `tasks.parent_id` is the fork linkage or that the `**Fork of:**` header regex is mirrored by hand in two files and must stay byte-identical.
+
+### Changed - dark theme is the landing page default, plus a hero tagline and a friendlier uvx note (site)
+
+- The landing page now opens in dark theme for first-time visitors instead of following the OS setting. A saved theme choice still wins, and the toggle works as before.
+- A short tagline sits under the hero logo: "Plan, execute, track, and resume - without losing state."
+- The install section explains how to get uvx for people who do not have it: it comes with uv, with a copyable `pip install uv` command and the curl installer for machines without Python. The hero carries a one-line pointer to the same answer.
+
+### Fixed - links on the landing page were hard to see (site)
+
+- Text links carried no underline and two of them had no hover state at all, so they read as plain text. Body links are now underlined at rest and strengthen on hover, nav and footer links grow a gradient underline on hover, and every link has a focus ring for keyboard users.
+- The hero's kit chips signalled that they open a panel with a faint dotted underline, which was easy to miss. They are now pills with a `+` affordance, each carrying its own icon, and an open chip is filled so you can tell which one you are reading.
+- The kit panel used to open fixed at the center of the page. It now opens directly under the chip you are on, with a caret pointing at it, and glides between chips as you move along the row. The panel header repeats the chip's icon so the connection reads at a glance.
+
 ## 2026-07-14
 
 Published package versions: missioncache-db 1.0.12, mcp-missioncache 1.0.14, missioncache-dashboard 1.0.6.
