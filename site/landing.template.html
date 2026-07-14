@@ -6,7 +6,11 @@
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<script>(function(){try{var t=localStorage.getItem('missioncache-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})()</script>
+<!-- Dark is the deliberate default: a first visit gets dark even on a light-mode OS. A saved
+     choice always wins. This always stamps data-theme, so the prefers-color-scheme blocks below
+     are now only the no-JS fallback. The read is in the try because localStorage throws in some
+     private-browsing modes; the write is outside it so the default still lands when it does. -->
+<script>(function(){var t=null;try{t=localStorage.getItem('missioncache-theme');}catch(e){}document.documentElement.setAttribute('data-theme',(t==='light'||t==='dark')?t:'dark');})()</script>
 
 <style>
   /* ============================================================
@@ -29,6 +33,13 @@
     --signal:      #5A56F0;
     --signal-2:    #7A50E8;
     --on-signal:   #FFFFFF;
+    /* Chip text sits on a tinted fill at ~11.5px, so it needs 4.5:1. --signal only
+       clears that on the bare ground, not through the fill, and --signal-2 is LIGHTER
+       than --signal here, so hovering with it would raise text and background toward
+       each other. These two darken instead. Dark theme maps them straight back to the
+       signal pair, which already clears AA on that ground. */
+    --chip-ink:    #4B47D6;
+    --chip-ink-2:  #3F3AB8;
     --grad-a:      #A855F7;
     --grad-b:      #3B82F6;
     --ok:          #0E9E58;
@@ -59,6 +70,8 @@
       --signal:    #8F8BFF;
       --signal-2:  #A98BFF;
       --on-signal: #0A0B12;
+      --chip-ink:  #8F8BFF;
+      --chip-ink-2:#A98BFF;
       --ok:        #3AD48E;
       --warn:      #F0B44E;
       --err:       #F07A6E;
@@ -70,6 +83,7 @@
     --border:rgba(24,20,52,0.10); --border-2:rgba(24,20,52,0.16);
     --ink:#14131C; --ink-2:#45435A; --ink-3:#6E6C85;
     --signal:#5A56F0; --signal-2:#7A50E8; --on-signal:#FFFFFF;
+    --chip-ink:#4B47D6; --chip-ink-2:#3F3AB8;
     --ok:#0E9E58; --warn:#A9690A; --err:#C4453A; --glow:rgba(122,80,232,0.18);
   }
   :root[data-theme="dark"] {
@@ -77,6 +91,7 @@
     --border:rgba(150,150,205,0.13); --border-2:rgba(150,150,205,0.22);
     --ink:#E9E9F4; --ink-2:#ADACC7; --ink-3:#79788F;
     --signal:#8F8BFF; --signal-2:#A98BFF; --on-signal:#0A0B12;
+    --chip-ink:#8F8BFF; --chip-ink-2:#A98BFF;
     --ok:#3AD48E; --warn:#F0B44E; --err:#F07A6E; --glow:rgba(139,120,255,0.22);
   }
 
@@ -98,7 +113,27 @@
   .mono { font-family: "SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace; }
   ::selection { background: var(--signal); color: var(--on-signal); }
 
+  /* ---- Links ------------------------------------------------------------
+     Anchors here are mostly chrome (buttons, nav, footer, brand), so the base
+     stays stripped and real text links opt IN with .lnk. Every anchor gets a
+     focus ring - buttons already had one, links had nothing. */
   a { color: inherit; text-decoration: none; }
+  a:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+
+  /* body-copy links: the easiest to miss, so they carry a resting underline */
+  .lnk, .mx-cap a {
+    color: var(--signal);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--signal) 45%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color .15s ease, text-decoration-color .15s ease, text-decoration-thickness .15s ease;
+  }
+  .lnk:hover, .mx-cap a:hover {
+    color: var(--signal-2);
+    text-decoration-color: currentColor;
+    text-decoration-thickness: 2px;
+  }
   img { max-width: 100%; display: block; }
 
   .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
@@ -161,10 +196,22 @@
   .prog { position: absolute; bottom: -1px; left: 0; height: 2px; width: 0;
     background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); z-index: 51; }
   .nav-in { display: flex; align-items: center; gap: 22px; height: 62px; position: relative; }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-weight: 600; font-size: 1.02rem; letter-spacing: -0.01em; }
+  .brand { display: flex; align-items: center; gap: 10px; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-weight: 600; font-size: 1.02rem; letter-spacing: -0.01em; transition: opacity .15s ease; }
+  .brand img { transition: filter .2s ease; }
+  .brand:hover { opacity: .84; }
+  .brand:hover img { filter: drop-shadow(0 0 9px var(--glow)); }
   .nav-links { display: flex; gap: 20px; margin-left: 12px; }
-  .nav-links a { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.83rem; color: var(--ink-2); transition: color .15s; }
+  .nav-links a {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.83rem;
+    color: var(--ink-2); position: relative; transition: color .15s;
+  }
+  .nav-links a::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 1.5px;
+    background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
+    transform: scaleX(0); transform-origin: left; transition: transform .18s ease;
+  }
   .nav-links a:hover { color: var(--ink); }
+  .nav-links a:hover::after, .nav-links a:focus-visible::after { transform: scaleX(1); }
   .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   .icon-btn {
     width: 38px; height: 38px; display: grid; place-items: center;
@@ -182,9 +229,18 @@
     box-shadow: 0 18px 40px -24px rgba(0,0,0,.4);
   }
   .nav-drop.open { display: flex; }
-  .nav-drop a { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.92rem; color: var(--ink-2); padding: 10px 2px; border-bottom: 1px solid var(--border); }
+  .nav-drop a {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.92rem;
+    color: var(--ink-2); padding: 10px 2px; border-bottom: 1px solid var(--border);
+    box-shadow: inset 2px 0 0 transparent;
+    transition: color .15s ease, padding-left .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
   .nav-drop a:last-child { border-bottom: 0; }
-  .nav-drop a:hover { color: var(--ink); }
+  .nav-drop a:hover, .nav-drop a:focus-visible {
+    color: var(--ink); padding-left: 10px;
+    box-shadow: inset 2px 0 0 var(--signal);
+    border-bottom-color: var(--border-2);
+  }
   @media (max-width: 860px) { .nav-links { display: none; } .menu-btn { display: grid; } }
   @media (max-width: 480px) {
     .nav-in { gap: 10px; }
@@ -245,29 +301,71 @@
   /* ---- kit line: interactive chips + explainer panel ---- */
   .kit-line {
     position: relative; display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
-    gap: 4px 10px;
+    gap: 8px;
   }
-  .kit-line::before, .kit-line::after { content: ""; width: 22px; height: 1px; background: var(--signal); opacity: .7; }
-  @media (max-width: 420px) { .kit-line::before, .kit-line::after { display: none; } }
+
   .kit-chip {
     font-family: "SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase;
-    color: var(--signal); background: none; border: 0; padding: 2px 1px; cursor: pointer;
-    border-bottom: 1px dotted color-mix(in srgb, var(--signal) 60%, transparent);
-    transition: color .15s, border-color .15s;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 9px; border-radius: 999px; cursor: pointer;
+    color: var(--chip-ink);
+    background: color-mix(in srgb, var(--signal) 7%, transparent);
+    border: 1px solid color-mix(in srgb, var(--signal) 28%, transparent);
+    transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease, box-shadow .15s ease;
   }
-  .kit-chip:hover, .kit-chip[aria-expanded="true"] { color: var(--signal-2); border-bottom-color: var(--signal-2); }
+  /* same +/- affordance the FAQ uses - the page teaches it once */
+  .kit-chip::after {
+    content: "+"; font-size: 0.92rem; line-height: 1; font-weight: 600;
+    letter-spacing: 0; opacity: .7; transition: opacity .15s ease;
+  }
+  .kit-chip:hover {
+    color: var(--chip-ink-2);
+    background: color-mix(in srgb, var(--signal) 15%, transparent);
+    border-color: color-mix(in srgb, var(--signal) 55%, transparent);
+    transform: translateY(-1px);
+  }
+  .kit-chip:hover::after { opacity: 1; }
+  /* OPEN is its own state: filled and seated (no lift), lit, glyph flips to minus */
+  .kit-chip[aria-expanded="true"] {
+    color: var(--on-signal);
+    background: var(--signal);
+    border-color: var(--signal);
+    transform: none;
+    box-shadow: 0 6px 18px -8px var(--glow);
+  }
+  .kit-chip[aria-expanded="true"]:hover { background: var(--signal-2); border-color: var(--signal-2); }
+  .kit-chip[aria-expanded="true"]::after { content: "\2212"; opacity: 1; }
   .kit-chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
-  .kit-sep { color: var(--ink-3); font-size: 0.72rem; }
+  /* anchored under the hovered chip by JS (left/top/--kit-caret); glides between chips */
   .kit-panel {
-    position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%);
+    position: absolute; top: 0; left: 0;
     width: min(560px, 92vw); z-index: 30; text-align: left;
     background: var(--surface); border: 1px solid var(--border-2); border-radius: 14px;
     padding: 18px 20px 20px;
     box-shadow: 0 24px 60px -24px rgba(0,0,0,.5), 0 10px 34px -12px var(--glow);
+    transition: left .32s cubic-bezier(.22,1,.36,1), top .32s cubic-bezier(.22,1,.36,1);
   }
+  .kit-panel:not([hidden]) { animation: kit-pop .28s cubic-bezier(.22,1,.36,1); }
+  @keyframes kit-pop { from { opacity: 0; transform: translateY(9px) scale(.98); } }
+  .kit-panel::before {
+    content: ""; position: absolute; top: -6px; left: var(--kit-caret, 50%);
+    width: 11px; height: 11px; transform: translateX(-50%) rotate(45deg);
+    background: var(--surface);
+    border-left: 1px solid var(--border-2); border-top: 1px solid var(--border-2);
+    border-top-left-radius: 3px;
+    transition: left .32s cubic-bezier(.22,1,.36,1);
+  }
+  /* first open lands in place - no glide from a stale position */
+  .kit-panel.no-glide, .kit-panel.no-glide::before { transition: none; }
+  /* wrapped chip row: the panel sits below the whole group, so a caret would point at the wrong row */
+  .kit-panel.no-caret::before { display: none; }
   .kit-pane { display: none; }
-  .kit-pane.on { display: block; }
+  .kit-pane.on { display: block; animation: kit-pane-in .22s ease both; }
+  @keyframes kit-pane-in { from { opacity: 0; transform: translateY(4px); } }
+  .kit-chip svg { width: 12px; height: 12px; flex: none; opacity: .85; }
+  .kit-chip:hover svg, .kit-chip[aria-expanded="true"] svg { opacity: 1; }
+  .kit-pane h4 svg { width: 15px; height: 15px; vertical-align: -2.5px; margin-right: 7px; color: var(--signal); }
   .kit-pane h4 {
     font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
     font-size: 0.78rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
@@ -315,7 +413,12 @@
     background: radial-gradient(50% 62% at 50% 50%, var(--glow), transparent 70%);
     pointer-events: none;
   }
-  .hero-logo { width: clamp(200px, 30vw, 380px); height: auto; }
+  .hero-logo { width: clamp(240px, 36vw, 460px); height: auto; }
+  .tagline {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+    font-size: 0.88rem; letter-spacing: .04em; color: var(--ink-2);
+    margin: -6px 0 26px;
+  }
 
   /* hero entrance stagger (rides the existing .rv reveal) */
   .rv.d1 { transition-delay: .06s; } .rv.d2 { transition-delay: .12s; }
@@ -421,7 +524,8 @@
   @media (max-width: 940px) { .problem-grid { grid-template-columns: 1fr; gap: 36px; } }
   .problem h2 { font-size: clamp(1.9rem, 4.4vw, 2.8rem); line-height: 1.06; }
   .problem p.lede { margin-top: 20px; font-size: 1.08rem; }
-  .demo-body { min-height: 372px; font-size: 0.85rem; line-height: 1.8; }
+  .demo-body { font-size: 0.85rem; line-height: 1.8; }
+  #demo { min-height: 372px; }   /* reserved height is only for the typing replay */
   .demo-body .ln { display: block; white-space: pre-wrap; word-break: break-word; }
   .c-cmd { color: var(--con-ink); }
   .c-cmd .pr { color: var(--signal-2); }
@@ -513,7 +617,6 @@
   .mx .n { color: var(--ink-3); }
   .mx-note { display: block; font-size: 0.7rem; font-weight: 400; color: var(--ink-3); margin-top: 2px; }
   .mx-cap { margin-top: 12px; font-size: 0.85rem; color: var(--ink-3); }
-  .mx-cap a { color: var(--signal); }
 
   /* ---- Compare ---- */
   .compare { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: clamp(28px, 4vw, 44px); margin-top: 40px; }
@@ -576,8 +679,17 @@
   footer { border-top: 1px solid var(--border); padding: 44px 0 56px; color: var(--ink-3); }
   .foot-grid { display: flex; flex-wrap: wrap; gap: 28px; justify-content: space-between; align-items: flex-start; }
   .foot-links { display: flex; flex-wrap: wrap; gap: 22px; }
-  .foot-links a { font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.83rem; color: var(--ink-2); }
+  .foot-links a {
+    font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.83rem;
+    color: var(--ink-2); position: relative; transition: color .15s;
+  }
+  .foot-links a::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -3px; height: 1.5px;
+    background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
+    transform: scaleX(0); transform-origin: left; transition: transform .18s ease;
+  }
   .foot-links a:hover { color: var(--ink); }
+  .foot-links a:hover::after, .foot-links a:focus-visible::after { transform: scaleX(1); }
   .foot-note { font-size: 0.8rem; margin-top: 26px; max-width: 70ch; line-height: 1.7; }
   .foot-credits { font-size: 0.8rem; margin-top: 12px; color: var(--ink-3); }
 
@@ -585,6 +697,16 @@
   .js .rv { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease; }
   .js .rv.in { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) { .js .rv { opacity: 1; transform: none; transition: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-links a::after, .foot-links a::after { transition: none; }
+    .nav-drop a { transition: color .15s ease, box-shadow .15s ease; }
+    .nav-drop a:hover, .nav-drop a:focus-visible { padding-left: 2px; }
+    .kit-chip { transition: none; }
+    .kit-chip:hover { transform: none; }
+    .kit-panel, .kit-panel::before { transition: none; animation: none; }
+    .kit-pane.on { animation: none; }
+  }
 </style>
 
 <script>document.documentElement.classList.add('js');</script>
@@ -637,18 +759,20 @@
         <img class="hero-logo on-light" src="{{IMG_LOGO_LIGHT}}" width="380" height="68" alt="MissionCache">
         <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="380" height="77" alt="MissionCache">
       </div>
+      <p class="tagline rv d1">Plan, execute, track, and resume - without losing state.</p>
       <div class="kit-line rv d1" role="group" aria-label="What is in the kit - hover or tap each piece">
-        <button class="kit-chip" data-kit="mcp" aria-expanded="false" aria-controls="kit-panel">MCP tools</button><span class="kit-sep" aria-hidden="true">&middot;</span>
-        <button class="kit-chip" data-kit="hooks" aria-expanded="false" aria-controls="kit-panel">Hooks</button><span class="kit-sep" aria-hidden="true">&middot;</span>
-        <button class="kit-chip" data-kit="commands" aria-expanded="false" aria-controls="kit-panel">Commands</button><span class="kit-sep" aria-hidden="true">&middot;</span>
-        <button class="kit-chip" data-kit="statusline" aria-expanded="false" aria-controls="kit-panel">Statusline</button><span class="kit-sep" aria-hidden="true">&middot;</span>
-        <button class="kit-chip" data-kit="dashboard" aria-expanded="false" aria-controls="kit-panel">Dashboard</button><span class="kit-sep" aria-hidden="true">&middot;</span>
-        <button class="kit-chip" data-kit="auto" aria-expanded="false" aria-controls="kit-panel">Autonomous runs</button>
+        <button class="kit-chip" data-kit="mcp" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>MCP tools</button>
+        <button class="kit-chip" data-kit="hooks" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-10 12h9l-1 8 10-12h-9l1-8z"/></svg>Hooks</button>
+        <button class="kit-chip" data-kit="commands" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>Commands</button>
+        <button class="kit-chip" data-kit="fork" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>Forks</button>
+        <button class="kit-chip" data-kit="statusline" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Statusline</button>
+        <button class="kit-chip" data-kit="dashboard" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>Dashboard</button>
+        <button class="kit-chip" data-kit="auto" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Auto runs</button>
 
         <div class="kit-panel" id="kit-panel" hidden>
           <button class="kit-close" type="button" aria-label="Close">&times;</button>
           <div class="kit-pane" data-kit="mcp">
-            <h4>MCP tools</h4>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>MCP tools</h4>
             <p>36 tools your agent calls directly: create and load projects, save state, update tasks, log runs, record time.</p>
             <p class="wired">wired: they write the same project files the dashboard and statusline read</p>
             <div class="kit-snip">create_missioncache_files   get_context_digest
@@ -656,35 +780,44 @@ update_context_file       complete_task
 record_heartbeat          log_iteration   <b>+30 more</b></div>
           </div>
           <div class="kit-pane" data-kit="hooks">
-            <h4>Hooks</h4>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-10 12h9l-1 8 10-12h-9l1-8z"/></svg>Hooks</h4>
             <p>Lifecycle hooks that act without being asked. The PreCompact hook snapshots your project state right before the context window compacts; session hooks track activity in the background.</p>
             <p class="wired">wired: what the hooks save is exactly what /missioncache:load restores</p>
             <div class="kit-snip">&#9888; context window at 94% - compacting
 <b>&#10003; PreCompact hook fired &middot; state saved</b></div>
           </div>
           <div class="kit-pane" data-kit="commands">
-            <h4>Commands</h4>
-            <p>Seven lifecycle slash commands, plus /whats-new installed alongside them.</p>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>Commands</h4>
+            <p>Eight lifecycle slash commands, plus /whats-new installed alongside them.</p>
             <p class="wired">wired: each command reads and writes the same three project files</p>
             <div class="kit-snip">/missioncache:new       plan it
 /missioncache:load      resume exactly there
 /missioncache:save      snapshot decisions
+/missioncache:fork      one shared context, own tasks
 /missioncache:done      archive with stats   <b>+3 more</b></div>
           </div>
+          <div class="kit-pane" data-kit="fork">
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>Project forks</h4>
+            <p>Fork a project and the parent's context becomes one shared knowledge layer. Every child reads it, any session can update it, and the others are told when it changed. Each child still keeps its own plan and its own tasks.</p>
+            <p class="wired">wired: only context is shared - tasks are never copied between a parent and its forks</p>
+            <div class="kit-snip">/missioncache:fork data-pipeline ios-tests
+<b>&#10003; shared context &middot; data-pipeline</b>
+<b>&#10003; own plan &middot; own tasks &middot; own progress</b></div>
+          </div>
           <div class="kit-pane" data-kit="statusline">
-            <h4>Statusline</h4>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Statusline</h4>
             <p>Usage limits with reset times, live Claude health, compact warnings, and your project's progress - one glance above the prompt.</p>
             <p class="wired">wired: configured from the dashboard Settings, deep-links back into it</p>
             <img class="kit-img" src="{{IMG_THUMB_STATUSLINE}}" alt="The MissionCache statusline in a terminal" loading="lazy">
           </div>
           <div class="kit-pane" data-kit="dashboard">
-            <h4>Dashboard</h4>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>Dashboard</h4>
             <p>Projects, progress, per-repo time, and run history - local, at localhost:8787.</p>
             <p class="wired">wired: fed by the hooks' heartbeats and Claude's own session logs</p>
             <img class="kit-img" src="{{IMG_THUMB_PROJECTS}}" alt="The MissionCache dashboard projects view" loading="lazy">
           </div>
           <div class="kit-pane" data-kit="auto">
-            <h4>Autonomous runs</h4>
+            <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Autonomous runs</h4>
             <p>missioncache-auto runs a project's tasks in parallel with dependency-aware DAG scheduling.</p>
             <p class="wired">wired: streams live into the dashboard; progress lands in the same tasks file</p>
             <img class="kit-img" src="{{IMG_THUMB_AUTO}}" alt="A task dependency graph during an autonomous run" loading="lazy">
@@ -707,6 +840,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
           </div>
         </div>
         <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere - not even to us.</p>
+        <p class="assure">No uvx on your machine? It comes with uv - run <span class="mono" style="font-size:.92em">pip install uv</span> once, or see <a class="lnk" href="#install">Install</a> for other options.</p>
       </div>
 
       <div class="hero-cta rv d5">
@@ -828,6 +962,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
         </thead>
         <tbody>
           <tr><td>Project state that survives compaction</td><td class="y">&#10003;</td><td class="p">~</td><td class="p">~</td><td class="p">~</td><td class="n">&ndash;</td></tr>
+          <tr><td>Shared context across parallel projects</td><td class="y">&#10003;</td><td class="p">~<span class="mx-note">tags isolate lanes</span></td><td class="p">~<span class="mx-note">global memory</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
           <tr><td>Task checklists + dependency DAG</td><td class="y">&#10003;</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="p">~<span class="mx-note">flat list</span></td></tr>
           <tr><td>Per-project time tracking</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="p">~<span class="mx-note">cost only</span></td><td class="n">&ndash;</td></tr>
           <tr><td>Local analytics dashboard</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
@@ -836,7 +971,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
         </tbody>
       </table>
     </div>
-    <p class="mx-cap rv">Full tables, with where each tool beats us, in <a href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener">the README</a>.</p>
+    <p class="mx-cap rv">Full tables, with where each tool beats us, in <a class="lnk" href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener">the README</a>.</p>
 
     <div class="compare rv">
       <p class="take">MissionCache is the only tool with <strong>per-project time tracking, a local analytics dashboard, and autonomous execution</strong> in the same place. That is the whole point.</p>
@@ -987,6 +1122,38 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       </div>
     </div>
 
+    <div class="feat rv">
+      <div class="feat-txt">
+        <span class="eyebrow">Project forks</span>
+        <h3>One shared spine. Separate lanes.</h3>
+        <p>Some work has one common base and several parallel lanes. A data pipeline, plus a test layer for each product it feeds. Fork the base project and each lane becomes its own project with its own tasks. The base project's context becomes the shared knowledge layer that all of them read.</p>
+        <p style="margin-top:14px;">Architecture, access patterns, environment facts, the gotchas you already hit - all of that lives in the parent. Any session can add to it. The other sessions are told when it changed, so nobody keeps working from a stale picture.</p>
+        <ul class="feat-list">
+          <li>Only context is shared. Tasks are never copied between a parent and its forks</li>
+          <li>The statusline adds a "Fork of &lt;parent&gt;" cell, with a dot when the shared context is newer than what this session last read</li>
+          <li>Finish the parent whenever you want. Its context stays readable, and its forks keep running</li>
+        </ul>
+      </div>
+      <div class="term">
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two lanes, one context</span></div>
+        <div class="term-body demo-body">
+          <span class="ln c-cmd"><span class="pr">$</span> /missioncache:fork data-pipeline ios-tests</span>
+          <span class="ln c-ok">&#10003; ios-tests created &middot; Fork of: data-pipeline</span>
+          <span class="ln c-ok">&#10003; shared context &middot; data-pipeline</span>
+          <span class="ln c-ok">&#10003; own plan &middot; own tasks &middot; own progress</span>
+          <span class="ln"> </span>
+          <span class="ln c-cmd"><span class="pr">$</span> /missioncache:fork data-pipeline android-tests</span>
+          <span class="ln c-ok">&#10003; android-tests created &middot; Fork of: data-pipeline</span>
+          <span class="ln"> </span>
+          <span class="ln c-dim">&hellip; the android session adds a gotcha to the shared layer &hellip;</span>
+          <span class="ln"> </span>
+          <span class="ln c-cmd"><span class="pr">$</span> /missioncache:load ios-tests</span>
+          <span class="ln c-warn">&#9679; shared context updated by a sibling session</span>
+          <span class="ln c-next">&rarr; re-read data-pipeline context before you continue</span>
+        </div>
+      </div>
+    </div>
+
   </div>
 </section>
 
@@ -1023,10 +1190,10 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     <div class="stats rv" id="stats">
       <div class="stat"><div class="v" data-n="36">36</div><div class="k">MCP tools</div></div>
       <div class="stat"><div class="v" data-n="4">4</div><div class="k">AI tools supported</div></div>
-      <div class="stat"><div class="v" data-n="7">7</div><div class="k">slash commands</div></div>
+      <div class="stat"><div class="v" data-n="8">8</div><div class="k">slash commands</div></div>
       <div class="stat"><div class="v">MIT</div><div class="k">open source</div></div>
     </div>
-    <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Open source under MIT. Inspect every line on <a href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener" style="color:var(--signal)">GitHub</a>.</p>
+    <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Open source under MIT. Inspect every line on <a class="lnk" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">GitHub</a>.</p>
   </div>
 </section>
 
@@ -1055,7 +1222,9 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
         <div class="cmdline"><span class="pr">$</span><code>uvx missioncache-install</code><button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button></div>
         <div class="cmdline"><span class="pr">$</span><code>pipx run missioncache-install</code><span style="color:var(--con-ink-2);font-size:.8em"># or, if you prefer pipx</span><button class="copy-cmd" data-copy="pipx run missioncache-install">Copy</button></div>
         <p class="note">The interactive wizard asks which components to install (default is all): the plugin, the dashboard as a background service, the <span class="mono" style="font-size:.85em">missioncache-auto</span> CLI, the statusline, and the rule files. For a hands-off run, use <span class="mono" style="font-size:.85em">--all --yes</span>.</p>
-        <p class="req">Requires Python 3.11+, Claude Code CLI, and uv on your PATH. No uv? pip install uv, or use pipx.</p>
+        <p class="req">Requires Python 3.11+ and the Claude Code CLI. The uvx command is part of uv - if you don't have it yet, install it once:</p>
+        <div class="cmdline" style="margin-top:10px"><span class="pr">$</span><code>pip install uv</code><span style="color:var(--con-ink-2);font-size:.8em"># or: curl -LsSf https://astral.sh/uv/install.sh | sh</span><button class="copy-cmd" data-copy="pip install uv">Copy</button></div>
+        <p class="req">No Python either? Use the curl command above - it needs nothing pre-installed. And pipx works in place of uvx if you already have it.</p>
       </div>
 
       <div class="panel" id="panel-plugin" role="tabpanel" aria-labelledby="tab-plugin" tabindex="0">
@@ -1079,10 +1248,11 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     </div>
     <div class="faq rv">
       <details><summary>How is this different from CLAUDE.md or built-in memory?</summary><p>CLAUDE.md is a static rules file you maintain by hand. MissionCache keeps <strong>living project state</strong> - the plan, your decisions, the gotchas you flagged, and progress - that updates as you work and reloads with one command. It complements CLAUDE.md, it does not replace it.</p></details>
+      <details><summary>When should I fork a project instead of starting a new one?</summary><p>Fork when two efforts share one base and still need their own task lists. A data pipeline with a separate test layer per product is the normal shape. The parent's context becomes the shared knowledge layer - architecture, access patterns, environment facts, the gotchas you already hit - and every fork reads it. Each fork keeps its own plan and its own tasks, and <strong>tasks are never copied</strong>. Start a fresh project instead when the two efforts have nothing real in common.</p></details>
       <details><summary>Where does my data live?</summary><p><strong>On your machine.</strong> Project files are plain markdown under <span class="mono" style="font-size:.9em">~/.missioncache/</span>, and the dashboard runs locally at <span class="mono" style="font-size:.9em">localhost:8787</span>. <strong>Nothing is sent anywhere.</strong> The whole thing is local-first and self-hosted.</p></details>
       <details><summary>Do I have to install every component?</summary><p>No. The MCP server plus the database is the minimum, and everything else is opt-in. The wizard lets you deselect the dashboard, auto, or statusline, and each package can be used on its own.</p></details>
       <details><summary>Which tools does it work with?</summary><p>Claude Code gets the full experience. Codex, OpenCode, and VSCode Copilot Chat get the project state and the MCP tool suite today, with hooks, statusline, and auto tracked as a follow-up. Any tool that speaks MCP can use the core.</p></details>
-      <details><summary>Is it free?</summary><p>Yes. MissionCache is open source under the MIT license. Use it, fork it, build on it.</p></details>
+      <details><summary>Is it free?</summary><p>Yes. MissionCache is open source under the MIT license. Read the code, change it, build on it.</p></details>
       <details><summary>Does it work on Windows?</summary><p>The plugin, MCP server, and <span class="mono" style="font-size:.9em">missioncache-auto</span> install fine. Windows service registration for the dashboard is not automated yet - the installer prints manual steps.</p></details>
       <details><summary>What if I want to remove it?</summary><p>Uninstall the packages and delete <span class="mono" style="font-size:.9em">~/.missioncache</span>. Your project files are plain markdown, so anything you want to keep, you keep. <strong>Nothing is locked in.</strong></p></details>
     </div>
@@ -1188,11 +1358,48 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       var kitPanes = Array.prototype.slice.call(kitPanel.querySelectorAll('.kit-pane'));
       var kitCloseBtn = kitPanel.querySelector('.kit-close');
       var kitTimer = null;
-      function kitOpen(key) {
+      /* Horizontally the panel centres on the hovered chip and the caret tracks that chip.
+         Vertically it sits below the whole chip group, not below the chip - see below. */
+      function kitPosition(chip) {
+        var lineRect = kitLine.getBoundingClientRect();
+        var chipRect = chip.getBoundingClientRect();
+        var panelW = kitPanel.offsetWidth;
+        var margin = 12;
+        var chipCenter = chipRect.left + chipRect.width / 2;
+        /* clientWidth, not innerWidth: innerWidth counts the scrollbar, which would let the
+           right-edge clamp slide the panel under a classic (non-overlay) scrollbar. */
+        var viewportW = document.documentElement.clientWidth;
+        var clamped = Math.max(margin, Math.min(chipCenter - panelW / 2, viewportW - panelW - margin));
+        var caret = Math.max(20, Math.min(chipCenter - clamped, panelW - 20));
+        kitPanel.style.left = (clamped - lineRect.left) + 'px';
+        /* sit below the WHOLE chip group. Anchoring to the chip instead would put the
+           panel on top of the later rows once the line wraps, making those chips
+           unclickable. On one row this is the same number. */
+        kitPanel.style.top = (lineRect.height + 10) + 'px';
+        kitPanel.style.setProperty('--kit-caret', caret + 'px');
+        /* the caret points at the chip, so it only makes sense from the last row */
+        var onLastRow = chipRect.bottom >= lineRect.bottom - 1;
+        kitPanel.classList.toggle('no-caret', !onLastRow);
+      }
+      function kitOpen(key, chip) {
         clearTimeout(kitTimer);
+        var wasHidden = kitPanel.hidden;
         kitPanel.hidden = false;
         kitPanes.forEach(function (p) { p.classList.toggle('on', p.getAttribute('data-kit') === key); });
         kitChips.forEach(function (c) { c.setAttribute('aria-expanded', String(c.getAttribute('data-kit') === key)); });
+        /* On first open the panel has no previous position, so it must LAND where it belongs
+           instead of gliding in from a stale spot. .no-glide kills the transition while we set
+           left/top. NOT dead code: reading offsetWidth forces a synchronous reflow, which commits
+           those values while the transition is still off. Delete it and the browser batches the
+           class removal with the position change, and the glide comes back. */
+        if (wasHidden) {
+          kitPanel.classList.add('no-glide');
+          kitPosition(chip);
+          void kitPanel.offsetWidth;
+          kitPanel.classList.remove('no-glide');
+        } else {
+          kitPosition(chip);
+        }
       }
       function kitClose() {
         clearTimeout(kitTimer);
@@ -1202,11 +1409,11 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       function kitDelayClose() { clearTimeout(kitTimer); kitTimer = setTimeout(kitClose, 160); }
       kitChips.forEach(function (c) {
         var key = c.getAttribute('data-kit');
-        c.addEventListener('mouseenter', function () { kitOpen(key); });
+        c.addEventListener('mouseenter', function () { kitOpen(key, c); });
         c.addEventListener('mouseleave', kitDelayClose);
-        c.addEventListener('focus', function () { kitOpen(key); });
+        c.addEventListener('focus', function () { kitOpen(key, c); });
         /* click always opens (hover may have opened already; a click should never surprise-close) */
-        c.addEventListener('click', function (e) { e.preventDefault(); kitOpen(key); });
+        c.addEventListener('click', function (e) { e.preventDefault(); kitOpen(key, c); });
       });
       kitPanel.addEventListener('mouseenter', function () { clearTimeout(kitTimer); });
       kitPanel.addEventListener('mouseleave', kitDelayClose);
@@ -1215,6 +1422,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       document.addEventListener('click', function (e) {
         if (!kitPanel.hidden && !kitLine.contains(e.target)) kitClose();
       });
+      window.addEventListener('resize', function () { if (!kitPanel.hidden) kitClose(); });
     }
 
     /* ---------- install tabs (ARIA tab pattern with roving tabindex) ---------- */
