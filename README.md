@@ -243,6 +243,10 @@ Every project has three markdown files: `plan`, `context`, and `tasks`. They liv
 
 MissionCache's `PreCompact` hook auto-saves project state before Claude Code compacts the context window. When you run `/missioncache:load` in a new session, the full state reloads. You never reconstruct your mental model from scratch, and you never lose a decision you made three sessions ago.
 
+### Forks: a shared context layer under a parent project
+
+Some work splits into parallel lanes that all lean on the same body of knowledge: one pipeline, two product-specific test layers on top of it. A fork is a full project with a parent. Each lane gets its own plan, its own task list, and its own clock, but the parent's context file is the one shared layer they all read, so the architecture, the access patterns, and the gotchas that cost you a day each are written down once instead of once per lane. Any session can update the shared layer, and sibling sessions are told when it changed, on resume and in the statusline. Tasks are never shared and never copied. It is the middle ground between a subtask, which cannot have its own task list, and a second project, which would keep a second copy of everything the two of you already know, and let it drift.
+
 ### Local analytics dashboard
 
 A FastAPI + vanilla JS single-page app at `localhost:8787`. Shows active and completed projects with time tracking, per-repo breakdowns, hourly heatmaps, a weekly activity view, MissionCache Auto execution monitoring with DAG visualization, and untracked Claude Code sessions alongside the tracked ones. Dual-database under the hood: SQLite for writes, DuckDB for analytics reads.
@@ -283,6 +287,7 @@ For readers who know the Anthropic Productivity Plugin or [Taskmaster AI](https:
 |---|---|---|---|
 | Auto task decomposition from PRD | manual (Claude-assisted) | manual | yes (dependency-aware) |
 | Plan + context + tasks files per project | yes | partial (tasks only) | no |
+| Parallel lanes sharing one context, separate task lists | yes (forks) | no (tasks only, no context file to share) | partial (tags give separate lists, no shared context file) |
 | Resume project across sessions | yes (`/missioncache:load`) | yes (workplace memory) | yes (file-based JSON) |
 | Time tracking per task | yes (heartbeats) | no | no |
 | Local dashboard | yes (web, analytics) | yes (HTML Kanban) | no |
@@ -291,7 +296,7 @@ For readers who know the Anthropic Productivity Plugin or [Taskmaster AI](https:
 | Multi-IDE support | Claude Code, Codex, OpenCode, VSCode (MCP) | Cowork-first | 13 IDEs |
 | License | MIT | Anthropic official | MIT + Commons Clause |
 
-**Honest takeaway:** Taskmaster is stronger at PRD decomposition and at working across multiple IDEs. The Productivity Plugin is the simplest official option, with a Kanban board and workplace memory, and it ships from Anthropic. MissionCache is the only one of the three with per-project time tracking, a local analytics dashboard, and autonomous execution in the same tool.
+**Honest takeaway:** Taskmaster is stronger at PRD decomposition and at working across multiple IDEs. Its tags also give you a separate task list per lane, which is half of what a fork does. What it does not give you is a shared context layer that those lanes read and write together, so each lane still keeps its own copy of what you know. The Productivity Plugin is the simplest official option, with a Kanban board and workplace memory, and it ships from Anthropic. MissionCache is the only one of the three with per-project time tracking, a local analytics dashboard, and autonomous execution in the same tool, and the only one where separate task lists per lane and one shared layer under them come together.
 
 ### vs. Memory and context preservation
 
@@ -304,12 +309,13 @@ For readers who know [claude-mem](https://github.com/thedotmack/claude-mem) or [
 | Storage | Human-editable markdown | AI-compressed, vector search | Structured memory palace |
 | Project-scoped state | yes (plan, context, tasks) | partial | partial (wings can be projects) |
 | Task checklists with progress | yes | no | no |
+| Parallel lanes sharing one context, separate task lists | yes (forks) | no (no task lists) | no (no task lists) |
 | Time tracking | yes | no | no |
 | Dashboard | yes | partial (web viewer) | no |
 | Autonomous execution | yes | no | no |
 | Cross-domain recall across projects | partial | yes | yes (by design) |
 
-**Honest takeaway:** claude-mem and MemPalace are genuinely better than missioncache at cross-project memory recall. They auto-capture and query across everything you have ever worked on. MissionCache is better at project-scoped state: what is the plan for *this* project, what have I decided, what is the task list, how much time have I spent, what is next. You can reasonably run missioncache alongside a memory layer: MemPalace or claude-mem for long-term cross-project recall, missioncache for the project you are actively building.
+**Honest takeaway:** claude-mem and MemPalace are genuinely better than missioncache at cross-project memory recall. They auto-capture and query across everything you have ever worked on. MissionCache is better at project-scoped state: what is the plan for *this* project, what have I decided, what is the task list, how much time have I spent, what is next. Recall and forks sit on different axes and do not compete. Recall is a search over work you have already done. A fork is a live file that two currently-running projects share as a write target, and each one is told when the other changed it. claude-mem has the memory without the task lists, Taskmaster's tags have the task lists without the shared layer, and a fork is both at once. They compose. You can reasonably run missioncache alongside a memory layer: MemPalace or claude-mem for long-term cross-project recall, missioncache for the project you are actively building.
 
 ### vs. Execution and methodology frameworks
 
@@ -321,6 +327,7 @@ For readers who know [GSD](https://github.com/gsd-build/get-shit-done) or [Super
 | Prescribes a methodology | no (flexible) | yes (spec, research, execute) | yes (7 phases, TDD enforced) |
 | Autonomous execution | yes (DAG, parallel) | yes (sequential phases) | partial (native Task tool only) |
 | Context preservation across sessions | yes (plan/context/tasks files) | partial (fresh context per task) | no |
+| Parallel lanes sharing one context, separate task lists | yes (forks) | no (fresh context per task, nothing to share) | no (no cross-session context) |
 | Time tracking | yes (per project) | partial (cost and token tracking) | no |
 | Dashboard | yes | no | no |
 | Statusline integration | yes | no | no |
@@ -339,6 +346,7 @@ For readers coming from [Claude Code Agent Teams](https://code.claude.com/docs/e
 | Zero install | no (plugin) | yes | yes | yes |
 | Persistent project state between invocations | yes (plan, context, tasks files) | no | N/A | no |
 | Task list with dependencies | yes (DAG-scheduled) | yes (flat, shared) | N/A | no |
+| Parallel lanes sharing one context, separate task lists | yes (forks) | no (one flat shared task list, no persistent state) | N/A | no |
 | Multi-session orchestration | missioncache-auto (parallel, DAG) | yes (2 to 16 sessions) | N/A | no |
 | Time tracking per project | yes (heartbeats, JSONL merge) | no | no | no (contribution metrics only) |
 | Local dashboard with analytics | yes | no | N/A | cloud-only |
@@ -395,6 +403,7 @@ The MCP server plus `missioncache-db` is the minimum viable install (and the onl
 | `/missioncache:load` | Resume work on an active project |
 | `/missioncache:save` | Persist progress before session end or compaction |
 | `/missioncache:done` | Mark a project as completed and archive |
+| `/missioncache:rename` | Rename the current project |
 | `/missioncache:prompts` | Regenerate optimized prompts for subtasks |
 | `/missioncache:mode` | Assign workflow mode (interactive or autonomous) to tasks |
 
@@ -405,6 +414,7 @@ Deep dives for each component live in `docs/`:
 - [**Installation**](docs/installation.md) - all three install paths (`uvx missioncache-install`, marketplace, manual), verification, uninstall, troubleshooting
 - [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
+- [**Forks**](docs/forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness
 - [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
 - [**MCP Tools**](docs/mcp-tools.md) - all 36 tools by module, error handling, extension patterns
 - [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration

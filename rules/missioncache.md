@@ -8,10 +8,12 @@ All MissionCache skills use the `missioncache:` prefix:
 | Skill | Purpose |
 |-------|---------|
 | `/missioncache:new` | Create new project with plan, context, tasks files |
+| `/missioncache:fork` | Create a project as a fork of a parent, sharing the parent's context |
 | `/missioncache:prompts` | Generate optimized prompts for subtasks |
 | `/missioncache:save` | Save progress before compaction or session end |
 | `/missioncache:load` | Resume work on an active project |
 | `/missioncache:done` | Mark project complete and archive |
+| `/missioncache:rename` | Rename the current project |
 | `/missioncache:mode` | Assign workflow mode to tasks |
 
 ## MissionCache Project Updates
