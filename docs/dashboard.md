@@ -284,7 +284,7 @@ The fallback flow for writing project state is instructive: `/missioncache:load`
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/health` | Health check. Returns DuckDB path and existence. |
+| GET | `/health` | Health check. Returns the running dashboard version, the DuckDB path, and whether it exists. |
 | POST | `/api/sync` | Trigger SQLite → DuckDB sync and return result counts. |
 | GET | `/api/stream` | SSE stream of today's stats, updated every 30 seconds. |
 

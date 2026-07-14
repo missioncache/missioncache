@@ -446,6 +446,46 @@
             margin-top: auto;
             padding-top: 16px;
             border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .sidebar-footer-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .sidebar-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .sidebar-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.25s ease;
+        }
+
+        .sidebar-link:hover {
+            color: var(--accent-purple);
+            text-decoration: underline;
+        }
+
+        .sidebar-link-sep {
+            color: var(--text-muted);
+            opacity: 0.5;
+        }
+
+        .sidebar-version {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
         }
 
         .theme-toggle {
@@ -4986,26 +5026,34 @@
                 </a>
             </div>
             <div class="sidebar-footer">
-                <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
-                    <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="5"/>
-                        <line x1="12" y1="1" x2="12" y2="3"/>
-                        <line x1="12" y1="21" x2="12" y2="23"/>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                        <line x1="1" y1="12" x2="3" y2="12"/>
-                        <line x1="21" y1="12" x2="23" y2="12"/>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                    </svg>
-                    <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                    </svg>
-                    <svg class="theme-icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="9"/>
-                        <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>
-                    </svg>
-                </button>
+                <div class="sidebar-links">
+                    <a class="sidebar-link" href="https://missioncache.dev" target="_blank" rel="noopener noreferrer">Website</a>
+                    <span class="sidebar-link-sep" aria-hidden="true">·</span>
+                    <a class="sidebar-link" href="https://missioncache.dev/changelog/" target="_blank" rel="noopener noreferrer">Changelog</a>
+                </div>
+                <div class="sidebar-footer-row">
+                    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
+                        <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/>
+                            <line x1="12" y1="1" x2="12" y2="3"/>
+                            <line x1="12" y1="21" x2="12" y2="23"/>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                            <line x1="1" y1="12" x2="3" y2="12"/>
+                            <line x1="21" y1="12" x2="23" y2="12"/>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                        </svg>
+                        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                        </svg>
+                        <svg class="theme-icon-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="9"/>
+                            <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>
+                        </svg>
+                    </button>
+                    <span class="sidebar-version" id="sidebarVersion"></span>
+                </div>
             </div>
         </nav>
 
@@ -9395,6 +9443,28 @@
             }
         }
 
+        async function fetchVersion() {
+            const el = document.getElementById('sidebarVersion');
+            try {
+                const res = await fetch(`${API_BASE}/api/version`);
+                // A 404 here means the running service predates /api/version, so
+                // it is serving old code. Blank would look identical to a build
+                // that never had the label - the one failure worth seeing.
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (el && data.version) {
+                    el.textContent = `v${data.version}`;
+                    el.title = `MissionCache Dashboard ${data.version} (installed package metadata)`;
+                }
+            } catch (e) {
+                if (el) {
+                    el.textContent = 'v?';
+                    el.title = 'Could not read the dashboard version. The service may be running old code - restart it.';
+                }
+                console.warn('Failed to load dashboard version:', e);
+            }
+        }
+
         // Determine task category: stored value first, name heuristic as fallback
         function getTaskCategory(task) {
             // Priority 0: category stored in the DB (assigned at creation time)
@@ -9521,6 +9591,9 @@
             // modal selector render them from the first paint (re-renders
             // whatever already loaded when it resolves later).
             fetchCustomCategories();
+
+            // Show which dashboard version is running in the sidebar footer.
+            fetchVersion();
 
             // Auto-refresh every 15 minutes
             setInterval(async () => {

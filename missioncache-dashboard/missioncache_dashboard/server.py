@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.background import BackgroundTask
 
+from . import __version__
 from .statusline import ADDON_COLOR_ALLOW
 
 from missioncache_dashboard.lib import config
@@ -184,7 +185,7 @@ async def lifespan(app: FastAPI):
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MissionCache Dashboard", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="MissionCache Dashboard", version=__version__, lifespan=lifespan)
 
 # CORS scoped to the dashboard's own origin. A wildcard here would let any
 # website the user visits read every endpoint and drive the mutating ones
@@ -3242,12 +3243,24 @@ async def delete_category_endpoint(name: str):
     return {"success": True, "removed": normalized}
 
 
+@app.get("/api/version")
+async def get_version():
+    """The running dashboard version, for the sidebar label.
+
+    Sourced from the installed package metadata (missioncache_dashboard.__version__),
+    never a literal - a hardcoded copy is exactly how the FastAPI app version
+    drifted to a stale 2.0.0.
+    """
+    return {"version": __version__}
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     db = get_db()
     return {
         "status": "healthy",
+        "version": __version__,
         "duckdb_path": str(db.db_path),
         "duckdb_exists": db.db_path.exists(),
         "timestamp": datetime.now().isoformat(),
