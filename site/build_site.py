@@ -45,6 +45,7 @@ DOCS = [
     ("installation", "Installation"),
     ("architecture", "Architecture"),
     ("dashboard", "Dashboard"),
+    ("forks", "Forks"),
     ("missioncache-auto", "MissionCache Auto"),
     ("mcp-tools", "MCP Tools"),
     ("cli", "CLI Reference"),

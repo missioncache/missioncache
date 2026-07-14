@@ -147,6 +147,13 @@ behavior on existing sessions.
 
 - **Subtasks are out of scope.** Rename the parent project; subtasks ride
   along.
+- **Renaming a parent that has forks breaks its children.** The rename does
+  not touch them. Each child's context file still carries a
+  `**Fork of:** <old-name>` header, which now names a project that does not
+  exist, so the scan can no longer re-heal the link and the statusline drops
+  the fork cell. Before renaming a parent, check whether anything forks from
+  it, and update every child's `**Fork of:**` line to the new name in the
+  same breath. See [`docs/forks.md`](../docs/forks.md).
 - **The CLI equivalent** is `missioncache-db rename-task <old-name> <new-name>`
   for batch / external use. The dashboard has a Rename button in the
   project modal for the same purpose.

@@ -101,6 +101,14 @@ Separately from the per-session flow above, the dashboard is a persistent proces
 
 See [The dual-database pattern](#the-dual-database-pattern) for the details of why there are two DB files and what trade-offs it makes.
 
+### The fork path
+
+The six steps above are one linear trace of a prompt, and a fork is not a step in it. It is a second shape the project state can take, so it is worth naming here.
+
+A project created with `/missioncache:fork` carries a `**Fork of:** <parent>` line in its context header. The child is a full project with its own plan, context, tasks, and clock. What it shares is the parent's context file, which becomes the knowledge layer every child and the parent's own sessions read. Tasks are never shared or copied.
+
+The header is the durable link. `tasks.parent_id` is derived from it by the scan's reconcile pass, not authored directly. `get_context_digest` on a fork returns a `parent_digest` block so `/missioncache:load` can tell you when a sibling session changed the shared layer, using a per-session marker at `~/.claude/hooks/state/shared-seen/<session-id>.json` that the statusline also reads. Full detail in [`forks.md`](./forks.md).
+
 ## Storage
 
 MissionCache's state lives in three places:
@@ -127,6 +135,8 @@ The canonical tables are all defined in `missioncache-db/missioncache_db/__init_
 | `auto_execution_logs` | Streaming log lines from MissionCache Auto workers | `execution_id`, `worker_id`, `subtask_id`, `level`, `message`, `timestamp` |
 
 Triggers keep `updated_at` fresh on every row update and set `completed_at`/`archived_at` when `status` transitions into the corresponding state. The `tasks` table has a `UNIQUE(repo_id, full_path)` constraint that matters during scan - rescanning the same repo should not produce duplicate rows.
+
+`tasks.parent_id` is the fork linkage (see [`forks.md`](./forks.md)). You never author it directly. It is derived from the `**Fork of:** <parent>` line in the child's context header: the scan's reconcile pass sets it, re-heals it when the link was lost, and clears it when the header goes away. The header is the source of truth, the column is the index - `idx_tasks_parent` is what makes the children lookup fast. The FK is `ON DELETE SET NULL`, which is why `delete_task` refuses to delete a parent that still has children rather than silently unlinking them.
 
 **Created by the dashboard (also in `~/.missioncache/tasks.db`):**
 
@@ -361,12 +371,14 @@ These are the things that will trip you up if you are new to the codebase, colle
 - **The dashboard's `_get_jsonl_task_times()` joins by `cwd = repo.path`.** Multiple tasks sharing a repo all draw from the same JSONL pool, and the only disambiguator is `c.date >= DATE(t.created_at)`. Overlapping tasks on the same repo can therefore double-count - known limitation.
 - **`_effective_time(task_id, heartbeat, jsonl) = max(heartbeat, jsonl)` is applied in `/api/tasks/active`, `/api/tasks/completed`, and `/api/task/<id>`.** Dashboard-reported times are merged MissionCache+Claude-JSONL, not pure heartbeats. If you are debugging a time discrepancy between missioncache-db and the dashboard, this is almost always why.
 - **`UserPromptSubmit` can receive `prompt` as a list of content blocks** (when the user attaches an image). Any hook or tool that treats `prompt` as a string without flattening the list will crash. `activity_tracker.py` and `task_tracker.py` both handle this - copy the pattern.
+- **The `**Fork of:**` header regex is hand-mirrored in two places and must stay byte-identical.** `_FORK_NAME_RE` at `missioncache-db/missioncache_db/context_health.py:494` and `_FORK_HEADER_RE` at `missioncache-dashboard/missioncache_dashboard/statusline.py:677` are the same pattern, written out twice. The statusline is a stdlib-only standalone script and cannot import `missioncache_db`, so it cannot share the constant. The pattern's shape - no slashes, must lead with an alphanumeric - is a load-bearing security control: it blocks path traversal through a hand-edited context header, and that header is a plain text file any user can write. `missioncache-dashboard/tests/test_statusline_fork.py:202` asserts the two patterns are equal. If you change one, change the other in the same commit, or that test fails, which is the point.
 
 ## Where to go from here
 
 This doc is the foundation; the other component docs assume you have read it.
 
 - [`dashboard.md`](./dashboard.md) - dashboard screens, API endpoints, sync, customization.
+- [`forks.md`](./forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness.
 - [`missioncache-auto.md`](./missioncache-auto.md) - sequential vs parallel, DAG resolution, learning tags, worker model.
 - [`mcp-tools.md`](./mcp-tools.md) - full MCP tool reference with parameters and return shapes.
 - [`statusline.md`](./statusline.md) - statusline layout, configuration, icons.
