@@ -12,7 +12,7 @@ The statusline is a 6- or 7-line block that renders below every Claude Code prom
 
 | Line | Icon cell | What it shows |
 |------|-----------|---------------|
-| 1 | Project | Active MissionCache project name + `[completed/total]` progress bracket, with OSC 8 hyperlink to the dashboard. When the project is a fork, a `⤵ Fork of <parent>` cell follows, OSC 8-linked to the parent's dashboard modal; a `● shared updated` dot appears when the parent (shared) context changed since this session last synced (driven by the shared-seen marker). Also shows "Last Action" time for the session. Empty if no MissionCache project. |
+| 1 | Project | Active MissionCache project name + `[completed/total]` progress bracket, with OSC 8 hyperlink to the dashboard. When the project is a fork, a `⤵ Fork of <parent>` cell follows, OSC 8-linked to the parent's dashboard modal; a cyan `● parent updated HH:MM` note appears when the parent (shared) context changed since this session last synced (driven by the shared-seen marker). The time is the change's local wall clock (`Jul 14 14:32`-style when not from today, matching the Last Action cell) - absolute, because the statusline only re-renders on conversation events. It clears when the session re-reads the parent (load, save-to-parent, or a direct parent digest read). Also shows "Last Action" time for the session. Empty if no MissionCache project. |
 | 2 | Dir | Current working directory, git branch + clean/dirty indicator, worktree annotation if applicable. |
 | 3 | Time | Elapsed session time, current date/time, edit count for the session. |
 | 4 | Metrics | Model name, tokens used, context window percentage with warning colors. Shows "Fast mode activated" if Claude Code fast mode is on. |
