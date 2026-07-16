@@ -19,7 +19,7 @@ Assign workflow modes (autonomous or interactive) to specific tasks in a Mission
 
 If invoked bare (`/missioncache:mode` with no arguments), switch to interactive mode before running Step 1.
 
-**Step 0a: Detect project.** Resolve the current Claude session and look up the active project, using the same SESSION_ID resolver pattern as `/missioncache:save` (pointer-first, mtime fallback). If no project is found, print `Usage: /missioncache:mode <project> <range:mode,...>` and stop.
+**Step 0a: Detect project.** Look up the active project via `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>")`. <!-- claude-code-only -->In Claude Code, first resolve the current session (same SESSION_ID resolver pattern as `/missioncache:save`, pointer-first, mtime fallback) and pass it as `session_id` so the per-session binding wins.<!-- /claude-code-only --> If no project is found, print `Usage: /missioncache:mode <project> <range:mode,...>` and stop.
 
 **Step 0b: Show tasks.** Call `mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<detected>")` and read tasks.md. Parse task numbers, titles, and any existing `[auto]` / `[inter]` markers. Display:
 

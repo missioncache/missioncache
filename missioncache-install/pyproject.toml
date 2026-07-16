@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-install"
-version = "1.0.5"
+version = "1.0.6"
 description = "Bootstrap installer for MissionCache - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"

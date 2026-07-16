@@ -162,7 +162,10 @@ def test_render_substitutes_mcp_prefix_everywhere() -> None:
 def test_render_handles_file_without_frontmatter() -> None:
     src = "Plain markdown.\n`mcp__plugin_missioncache_pm__foo`\n"
     rendered = command_clients._render_for_non_claude(src)
-    assert rendered == "Plain markdown.\n`mcp__missioncache__foo`\n"
+    assert "Plain markdown.\n`mcp__missioncache__foo`\n" in rendered
+    assert rendered.index("Runtime note") < rendered.index("Plain markdown"), (
+        "notice must precede the body when there is no frontmatter"
+    )
 
 
 def test_render_preserves_other_frontmatter_keys() -> None:
@@ -181,6 +184,120 @@ def test_render_preserves_other_frontmatter_keys() -> None:
     assert "agent: build" in rendered
     assert "model: anthropic/claude-3-5-sonnet-20241022" in rendered
     assert "argument-hint:" not in rendered
+
+
+def test_render_strips_claude_only_regions() -> None:
+    """Marked regions (session-id resolution, statusline binding) must be
+    dropped whole. Left in place, their transcript-mtime fallback resolves a
+    LIVE Claude session and writes its binding - a Codex run hijacked a real
+    session's project binding this way (2026-07-16)."""
+    src = (
+        "---\n"
+        'description: "x"\n'
+        "---\n"
+        "Keep this intro.\n"
+        "\n"
+        "<!-- claude-code-only -->\n"
+        "```bash\n"
+        'SESSION_ID="$CLAUDE_CODE_SESSION_ID"\n'
+        "```\n"
+        "Capture the printed SESSION_ID.\n"
+        "<!-- /claude-code-only -->\n"
+        "\n"
+        "Keep this tail.\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "CLAUDE_CODE_SESSION_ID" not in rendered.replace(
+        command_clients._NON_CLAUDE_NOTICE, ""
+    ), "executable resolver bash must not survive the render"
+    assert "Capture the printed SESSION_ID" not in rendered
+    assert "claude-code-only" not in rendered, "markers themselves must be stripped"
+    assert "Keep this intro." in rendered
+    assert "Keep this tail." in rendered
+
+
+def test_render_strips_multiple_claude_only_regions_independently() -> None:
+    src = (
+        "A.\n"
+        "<!-- claude-code-only -->one<!-- /claude-code-only -->\n"
+        "B.\n"
+        "<!-- claude-code-only -->two<!-- /claude-code-only -->\n"
+        "C.\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "one" not in rendered and "two" not in rendered
+    assert "A." in rendered and "B." in rendered and "C." in rendered, (
+        "a greedy match across regions would swallow B"
+    )
+
+
+def test_render_inserts_runtime_notice_after_frontmatter() -> None:
+    src = (
+        "---\n"
+        'description: "x"\n'
+        "---\n"
+        "\n"
+        "Body.\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "Runtime note" in rendered
+    fm_end = rendered.index("---\n", 4)
+    assert rendered.index("Runtime note") > fm_end, "notice goes after frontmatter"
+    assert rendered.index("Runtime note") < rendered.index("Body."), (
+        "notice must precede the command body"
+    )
+
+
+def test_render_raises_on_unbalanced_markers() -> None:
+    """An unpaired opener fails OPEN in the regex (non-greedy = no match), so
+    the session bash would leak silently. The render must fail loudly."""
+    src = (
+        "Body.\n"
+        "<!-- claude-code-only -->\n"
+        'SESSION_ID="$CLAUDE_CODE_SESSION_ID"\n'
+        "no closing marker\n"
+    )
+    with pytest.raises(ValueError, match="unbalanced"):
+        command_clients._render_for_non_claude(src)
+
+
+def test_render_notice_is_separated_from_body() -> None:
+    """The notice blockquote needs a trailing blank line or CommonMark
+    lazy-continuation absorbs the first body paragraph into the quote."""
+    src = "---\ndescription: \"x\"\n---\nBody paragraph.\n"
+    rendered = command_clients._render_for_non_claude(src)
+    notice_end = rendered.index(command_clients._NON_CLAUDE_NOTICE) + len(
+        command_clients._NON_CLAUDE_NOTICE
+    )
+    assert rendered[notice_end - 2 : notice_end] == "\n\n", (
+        "notice must end with a blank line"
+    )
+
+
+def test_all_real_commands_render_without_claude_state_access() -> None:
+    """The sweep the whole marker mechanism exists for: rendering every REAL
+    canonical command source must produce output with NO executable
+    Claude-state access. A single unwrapped block (save.md's fork restamp
+    was missed exactly this way) reintroduces the live-session hijack."""
+    repo_commands = Path(__file__).parent.parent.parent / "commands"
+    forbidden = (
+        'SESSION_ID="$CLAUDE_CODE_SESSION_ID"',   # executable resolver
+        "SESSION_ID=\"${CLAUDE_CODE_SESSION_ID}\"",
+        'ls -t "$HOME/.claude/projects',          # transcript-mtime walk
+        "hooks/state/shared-seen",                # marker writes
+        "hooks/state/projects/",                  # binding writes/removals
+        "hooks-state.db",                         # project_state SQL
+        "hooks/state/cwd-session",                # pointer reads
+    )
+    for name in command_clients.CANONICAL_COMMANDS:
+        src = (repo_commands / f"{name}.md").read_text()
+        rendered = command_clients._render_for_non_claude(src)
+        body = rendered.replace(command_clients._NON_CLAUDE_NOTICE, "")
+        for needle in forbidden:
+            assert needle not in body, (
+                f"{name}.md render leaks Claude-state access: {needle!r}"
+            )
+        assert "claude-code-only" not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -454,22 +571,33 @@ def test_install_codex_commands_builds_full_marketplace_tree(
     assert marketplace["plugins"][0]["source"] == {
         "source": "local", "path": "./plugins/missioncache"
     }
+    # codex 0.144.1 rejects the whole manifest on the legacy
+    # "authentication": "OFF" value (unknown variant, expected ON_INSTALL or
+    # ON_USE); omitting the key means no auth. Pin the full intended shape.
+    assert marketplace["plugins"][0]["policy"] == {"installation": "AVAILABLE"}
 
 
-def test_install_codex_commands_writes_config_stanza(
+def test_install_codex_commands_activates_via_plugin_add(
     isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
 ) -> None:
+    """Activation goes through `codex plugin add` - the canonical flow that
+    populates Codex's plugin cache and writes the config stanza itself. The
+    old hand-written bare stanza never populated the cache, so Codex listed
+    the plugin "not installed" and commands never loaded (live, 0.144.1)."""
     _set_codex_present(monkeypatch, True)
-    monkeypatch.setattr(
-        command_clients.subprocess_utils, "run", lambda cmd, **kw: _proc()
-    )
+    calls: list[list[str]] = []
+
+    def _record(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return _proc()
+
+    monkeypatch.setattr(command_clients.subprocess_utils, "run", _record)
 
     command_clients.install_codex_commands(_make_ctx())
 
-    text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert '[plugins."missioncache@missioncache"]' in text
+    assert ["codex", "plugin", "add", "missioncache@missioncache"] in calls
 
 
 def test_install_codex_commands_preserves_existing_config_stanzas(
@@ -488,29 +616,48 @@ def test_install_codex_commands_preserves_existing_config_stanzas(
         '[plugins."github@openai-curated"]\n'
     )
 
+    before = command_clients.CODEX_CONFIG_TOML.read_text()
     command_clients.install_codex_commands(_make_ctx())
 
-    text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert "[mcp_servers.missioncache]" in text
-    assert '[plugins."github@openai-curated"]' in text
-    assert '[plugins."missioncache@missioncache"]' in text
+    # codex plugin add owns all config writes now; the installer itself must
+    # leave the user's config byte-for-byte intact.
+    assert command_clients.CODEX_CONFIG_TOML.read_text() == before
 
 
-def test_install_codex_commands_idempotent_on_config(
+def test_install_codex_plugin_already_installed_is_success(
     isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
 ) -> None:
+    """Re-running install when the plugin is already installed must REFRESH
+    (remove + re-add): Codex caches the plugin by version, so treating
+    "already installed" as done would leave stale cached commands active
+    while the installer reports success."""
     _set_codex_present(monkeypatch, True)
-    monkeypatch.setattr(
-        command_clients.subprocess_utils, "run", lambda cmd, **kw: _proc()
+    calls: list[list[str]] = []
+    add_count = 0
+
+    def _fake(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal add_count
+        calls.append(cmd)
+        if cmd[:3] == ["codex", "plugin", "add"]:
+            add_count += 1
+            if add_count == 1:
+                raise command_clients.subprocess_utils.CommandFailed(
+                    cmd=cmd, returncode=1, stdout="", stderr="plugin already installed"
+                )
+        return _proc()
+
+    monkeypatch.setattr(command_clients.subprocess_utils, "run", _fake)
+
+    command_clients.install_codex_commands(_make_ctx())
+
+    assert ["codex", "plugin", "remove", "missioncache@missioncache"] in calls, (
+        "already-installed must trigger a refresh remove"
     )
+    assert add_count == 2, "refresh must re-add after the remove"
 
-    command_clients.install_codex_commands(_make_ctx())
-    command_clients.install_codex_commands(_make_ctx())
-
-    text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert text.count('[plugins."missioncache@missioncache"]') == 1
+    assert "codex_commands" in state.load()["components"]
 
 
 def test_install_codex_commands_skips_when_codex_missing(
@@ -755,7 +902,7 @@ def test_install_codex_commands_skips_state_record_on_marketplace_failure(
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
 ) -> None:
-    """When marketplace registration fails, do not enable plugin or record state."""
+    """Marketplace failure raises (honest summary) - no activation, no state."""
     _set_codex_present(monkeypatch, True)
 
     def _fake(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
@@ -767,7 +914,8 @@ def test_install_codex_commands_skips_state_record_on_marketplace_failure(
 
     monkeypatch.setattr(command_clients.subprocess_utils, "run", _fake)
 
-    command_clients.install_codex_commands(_make_ctx())
+    with pytest.raises(command_clients.subprocess_utils.CommandFailed):
+        command_clients.install_codex_commands(_make_ctx())
 
     assert "codex_commands" not in state.load().get("components", {}), (
         "state must NOT record success when marketplace registration fails"
@@ -798,7 +946,7 @@ def test_render_does_not_rewrite_unrelated_colons() -> None:
     """The /missioncache: rewrite must not match URLs, timestamps, or namespaces."""
     src = "Body with https://example.com and 12:30:00 timestamp.\n"
     rendered = command_clients._render_for_non_claude(src)
-    assert rendered == src, "no /missioncache: literal -> no rewrite"
+    assert src in rendered, "no /missioncache: literal -> body byte-identical"
 
 
 def test_install_opencode_commands_warns_on_partial(
@@ -861,23 +1009,28 @@ def test_install_vscode_commands_warns_when_settings_unparsable(
     )
 
 
-def test_enable_codex_plugin_treats_commented_stanza_as_absent(
+def test_install_codex_plugin_raises_on_real_failure(
     isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_bundled_commands: Path,
 ) -> None:
-    """A commented-out stanza is not active; install must add the live one."""
-    command_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
-    command_clients.CODEX_CONFIG_TOML.write_text(
-        '# [plugins."missioncache@missioncache"]\n# disabled for testing\n'
-    )
+    """A real `codex plugin add` failure must propagate so the component
+    lands in the installer's failed list instead of a green checkmark."""
+    _set_codex_present(monkeypatch, True)
 
-    command_clients._enable_codex_plugin()
+    def _fake(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["codex", "plugin", "add"]:
+            raise command_clients.subprocess_utils.CommandFailed(
+                cmd=cmd, returncode=1, stdout="", stderr="cache directory not writable"
+            )
+        return _proc()
 
-    text = command_clients.CODEX_CONFIG_TOML.read_text()
-    assert '# [plugins."missioncache@missioncache"]' in text, "comment must be preserved"
-    # The non-commented stanza must now also exist.
-    assert command_clients._CODEX_PLUGIN_STANZA_RE.search(text), (
-        "live stanza must be appended even though a comment matches the substring"
-    )
+    monkeypatch.setattr(command_clients.subprocess_utils, "run", _fake)
+
+    with pytest.raises(command_clients.subprocess_utils.CommandFailed):
+        command_clients.install_codex_commands(_make_ctx())
+
+    assert "codex_commands" not in state.load().get("components", {})
 
 
 def test_uninstall_vscode_commands_warns_on_unexpected_oserror(
@@ -946,20 +1099,18 @@ def test_install_codex_commands_skips_when_codex_mcp_failed_this_session(
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
 ) -> None:
-    """Parent MCP install ran and failed -> child skips with a different pointer."""
+    """Parent MCP install ran and FAILED -> child must raise so it lands in
+    the failed list, not warn into a green checkmark for commands whose MCP
+    server never registered."""
     _set_codex_present(monkeypatch, True)
-
-    warn_calls: list[str] = []
-    monkeypatch.setattr(command_clients.ui, "warn", lambda msg: warn_calls.append(msg))
 
     ctx = _make_ctx(mcp_ready=())
     ctx.mcp_success["codex"] = False
-    command_clients.install_codex_commands(ctx)
+    with pytest.raises(command_clients.subprocess_utils.CommandFailed) as exc:
+        command_clients.install_codex_commands(ctx)
 
     assert "codex_commands" not in state.load().get("components", {})
-    assert any("failed earlier in this run" in m for m in warn_calls), (
-        f"expected 'failed earlier' wording; got {warn_calls!r}"
-    )
+    assert "failed earlier in this run" in exc.value.stderr
 
 
 def test_install_opencode_commands_skips_when_opencode_mcp_not_ready(

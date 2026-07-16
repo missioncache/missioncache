@@ -46,6 +46,7 @@ If the response carries `active_children_count > 0` and a `warning`, surface it 
 
 Call `mcp__plugin_missioncache_pm__process_heartbeats()` to finalize time tracking.
 
+<!-- claude-code-only -->
 ### Step 5: Clear Statusline
 
 Remove the project pointer so the statusline stops showing the completed project name. Mirrors the resolver in `/missioncache:new` / `/missioncache:load` (filesystem primary, term-env fallback) and uses direct SQL because the dashboard has no DELETE endpoint for project_state. Silently no-ops on quick-install setups without `hooks-state.db`.
@@ -86,6 +87,7 @@ print("Cleared project_state for session " + sid + " (rows: " + str(cur.rowcount
   rm -f "$HOME/.claude/hooks/state/projects/${SESSION_ID}.json" 2>/dev/null
 fi
 ```
+<!-- /claude-code-only -->
 
 ### Step 6: Share Dashboard Link (if running)
 

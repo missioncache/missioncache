@@ -17,7 +17,7 @@ Save progress on an active project using atomic MCP calls.
 1b. **If not found, try detecting from MissionCache files and register session:**
    ```
    mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<name>")
-   # If found, create pending-task.json and record heartbeat
+   # If found, record heartbeat (Step 1b registers the session in Claude Code)
    ```
 
 2. **Update context file:**
@@ -47,6 +47,7 @@ Save progress on an active project using atomic MCP calls.
 
 ### Step 1: Find Current Project
 
+<!-- claude-code-only -->
 First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/missioncache:load` and `/missioncache:new`. Without this, the lookup can only match when cwd is under `~/.missioncache/active/<task>/`, which fails from the repo root.
 
 ```bash
@@ -76,8 +77,12 @@ echo "SESSION_ID=$SESSION_ID RECENT=$RECENT"
 3. For each distinct project, call `mcp__plugin_missioncache_pm__get_task(project_name=...)` to confirm it's still active.
 4. Ask the user which project they intend to save and wait for their reply. Show one option per distinct project, using `<project name>` as the label and `last-worked <ago>` as the description. If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it; otherwise present the options as a numbered prose list.
 5. Use the selected project name to drive the save directly via `mcp__plugin_missioncache_pm__get_missioncache_files(project_name=...)` - skip the session_id-based lookup entirely.
+<!-- /claude-code-only -->
 
-If `RECENT <= 1`, proceed normally: call `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>", session_id="<SESSION_ID>")` to detect the active project. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
+Detect the active project by calling `mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>")`.
+<!-- claude-code-only -->
+If `RECENT <= 1`, also pass `session_id="<SESSION_ID>"` so the per-session binding wins. If `$SESSION_ID` is empty (extremely rare - means no Claude transcript for this cwd), omit the arg and rely on cwd-pattern matching.
+<!-- /claude-code-only -->
 
 **If project not found but MissionCache files exist:** Sometimes the session isn't registered (no `projects/<session-id>.json`) but the project exists. In this case:
 
@@ -85,6 +90,7 @@ If `RECENT <= 1`, proceed normally: call `mcp__plugin_missioncache_pm__find_task
 2. Call `mcp__plugin_missioncache_pm__get_missioncache_files(project_name="<name>")` to confirm
 3. If found, **register the session** (see Step 1b)
 
+<!-- claude-code-only -->
 ### Step 1b: Register Session (if not registered)
 
 If `find_task_for_directory` returned `found: false` but `get_missioncache_files` found the project:
@@ -92,6 +98,7 @@ If `find_task_for_directory` returned `found: false` but `get_missioncache_files
 ```bash
 SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1; echo "done"
 ```
+<!-- /claude-code-only -->
 
 Then record initial heartbeat:
 ```
@@ -140,6 +147,7 @@ mcp__plugin_missioncache_pm__update_tasks_file(
 )
 ```
 
+<!-- claude-code-only -->
 **Fork branch - restamp your own shared-seen marker if you wrote the SHARED (parent) layer.** When this project is a fork and this save updated the PARENT's context (the shared layer that siblings read), restamp this session's marker to the parent's new mtime. Without this, your own write reads back as a parallel-session update on your next `/missioncache:load` and the statusline dot stays lit over your own edit. Skip it when you only updated this project's own context. Resolve the parent's context path + fresh mtime from the parent itself, then run:
 
 ```bash
@@ -163,6 +171,7 @@ fi
 ```
 
 This is the one place restamping from a fresh `stat()` is correct: this session just wrote the file, so its on-disk mtime IS the version this session has seen. (The read paths, load/fork, stamp from the digest's snapshot-coupled mtime instead, because they did not write it.)
+<!-- /claude-code-only -->
 
 ### Step 4: Finalize Time Tracking
 
