@@ -154,6 +154,57 @@ PROJECTS = [
             2: [1], 3: [1], 4: [2, 3],
         },
     },
+    # Fork family: one parent with two forks. Renders as the fork tree in the
+    # Projects table (parent row + two fork-child rows joined by the rail).
+    # The forks are more recently active than the parent, so the parent's
+    # Updated cell shows the "via fork" note and the family sorts as one unit.
+    {
+        "name": "data-pipeline",
+        "repo": "pipelines",
+        "status": "active",
+        "jira_key": "DATA-201",
+        "priority": 2,
+        "branch": "feat/event-schema-v2",
+        "description": "Event ingestion pipeline feeding product analytics for the iOS and Android apps",
+        "remaining": "Land the June backfill job, then start the schema v2 rollout",
+        "started_days_ago": 6,
+        "last_active_hours_ago": 26,
+        "pattern": "moderate",
+        "tasks_total": 9,
+        "tasks_done": 6,
+    },
+    {
+        "name": "ios-tests",
+        "repo": "pipelines",
+        "status": "active",
+        "fork_of": "data-pipeline",
+        "jira_key": None,
+        "priority": None,
+        "branch": "tests/ios-events",
+        "description": "End-to-end test layer for the iOS analytics events the pipeline feeds",
+        "remaining": "Cover the session-replay events, then wire into CI",
+        "started_days_ago": 3,
+        "last_active_hours_ago": 3,
+        "pattern": "fresh",
+        "tasks_total": 7,
+        "tasks_done": 3,
+    },
+    {
+        "name": "android-tests",
+        "repo": "pipelines",
+        "status": "active",
+        "fork_of": "data-pipeline",
+        "jira_key": None,
+        "priority": None,
+        "branch": "tests/android-events",
+        "description": "End-to-end test layer for the Android analytics events",
+        "remaining": "Port the fixture factory from iOS, add the churn-event suite",
+        "started_days_ago": 2,
+        "last_active_hours_ago": 5,
+        "pattern": "scattered",
+        "tasks_total": 6,
+        "tasks_done": 1,
+    },
     {
         "name": "circuit-breaker-tuning",
         "repo": "api",
@@ -367,6 +418,52 @@ Recommended Feast for phase 1. Tecton's serving SLOs were better but the
 integration cost was too high for a team of our size. Feast ships with
 enough serving latency headroom to hit our targets.
 """,
+    "data-pipeline": """# Data Pipeline - Plan
+
+## Goal
+One event ingestion pipeline feeding product analytics for both mobile apps.
+Kafka in, warehouse tables out, with a versioned event schema both apps and
+both test layers agree on.
+
+## Approach
+1. Land the event schema registry (v1 frozen, v2 in draft)
+2. Build the ingestion consumers with dead-letter handling
+3. Backfill June events from the raw S3 dumps
+4. Roll out schema v2 behind a dual-write window
+
+## Success Criteria
+- End-to-end latency from app event to warehouse row under 5 minutes
+- Zero dropped events during the schema v2 dual-write window
+""",
+    "ios-tests": """# iOS Tests - Plan
+
+## Goal
+End-to-end test layer for the iOS analytics events. Every event type the
+pipeline ingests from the iOS app gets a fixture and an assertion on the
+warehouse row it should produce.
+
+## Approach
+1. Fixture factory for the iOS event envelope
+2. Suites per event family: screen views, purchases, session replay
+3. Wire into CI against the staging pipeline
+
+## Success Criteria
+- Every v1 event type covered before the schema v2 rollout starts
+""",
+    "android-tests": """# Android Tests - Plan
+
+## Goal
+End-to-end test layer for the Android analytics events, mirroring the iOS
+layer over the same shared pipeline knowledge.
+
+## Approach
+1. Port the fixture factory from the iOS layer
+2. Suites per event family: screen views, purchases, churn signals
+3. Wire into CI against the staging pipeline
+
+## Success Criteria
+- Parity with the iOS suite for the shared event families
+""",
 }
 
 
@@ -515,6 +612,63 @@ Recommended Feast. Detailed writeup in the linked Confluence doc.
 ## Recommendation
 Feast for phase 1. Revisit Tecton if serving latency becomes a bottleneck.
 """,
+    "data-pipeline": """# Data Pipeline - Context
+
+## Key Architectural Decisions
+- One shared event schema registry for both apps - the iOS and Android test
+  layers fork this project and read this file as their shared memory
+- Dead-letter queue per consumer group, replayed nightly, so a bad event
+  never blocks the partition
+
+## Key Files
+| File | Purpose |
+|------|---------|
+| `schema/registry.json` | Versioned event schema (v1 frozen, v2 draft) |
+| `consumers/ingest.py` | Kafka consumers with dead-letter handling |
+| `jobs/backfill_june.py` | June backfill from raw S3 dumps |
+
+## Gotchas
+- The staging Kafka cluster rotates credentials weekly - the token in
+  `secrets/staging.env` goes stale every Monday morning
+- Purchase events double-fire on the iOS side when the app is backgrounded
+  mid-checkout; dedupe on `event_id`, never on timestamp
+
+## Next Steps
+- Land the June backfill job
+- Open the schema v2 dual-write window
+""",
+    "ios-tests": """# iOS Tests - Context
+**Fork of:** data-pipeline
+
+## Key Architectural Decisions
+- Fixtures assert on warehouse rows, not on Kafka messages - the pipeline
+  owns the transport, the tests own the outcome
+- Shared pipeline facts (schema registry, staging credentials, dedupe rules)
+  live in the parent context - this file holds only iOS-specific knowledge
+
+## Gotchas
+- Session-replay events batch on the client and arrive up to 90s late;
+  the assertions poll with a 2-minute ceiling
+
+## Next Steps
+- Cover the session-replay events
+- Wire the suite into CI
+""",
+    "android-tests": """# Android Tests - Context
+**Fork of:** data-pipeline
+
+## Key Architectural Decisions
+- Mirrors the iOS layer's fixture factory; shared pipeline facts stay in
+  the parent context so the two lanes never drift on schema or credentials
+
+## Gotchas
+- Churn signals only fire on production builds - staging uses a synthetic
+  emitter seeded from the shared schema registry
+
+## Next Steps
+- Port the fixture factory from the iOS layer
+- Add the churn-event suite
+""",
 }
 
 
@@ -584,6 +738,34 @@ def make_tasks_file(project: dict) -> str:
             "Measure integration cost",
             "Write up comparison",
             "Present recommendation to ML team",
+        ],
+        "data-pipeline": [
+            "Design the versioned event schema registry",
+            "Freeze schema v1 with both app teams",
+            "Build ingestion consumers with dead-letter handling",
+            "Nightly dead-letter replay job",
+            "Warehouse table DDL + partitioning",
+            "End-to-end latency measurement harness",
+            "June backfill job from raw S3 dumps",
+            "Draft schema v2",
+            "Schema v2 dual-write rollout",
+        ],
+        "ios-tests": [
+            "Fixture factory for the iOS event envelope",
+            "Screen-view event suite",
+            "Purchase event suite (incl. the double-fire dedupe case)",
+            "Session-replay event suite",
+            "Warehouse-row assertion helpers with polling ceiling",
+            "Staging credentials rotation handling",
+            "Wire the suite into CI",
+        ],
+        "android-tests": [
+            "Port the fixture factory from the iOS layer",
+            "Screen-view event suite",
+            "Purchase event suite",
+            "Synthetic churn-signal emitter for staging",
+            "Churn-event suite",
+            "Wire the suite into CI",
         ],
     }
     items = tasks_by_project[name]
@@ -673,11 +855,14 @@ def seed_tasks(
         else:
             last_worked_on = iso(NOW - timedelta(days=p["completed_days_ago"]))
             completed_at = last_worked_on
+        # Fork children link to their parent via parent_id. The parent must
+        # appear before its forks in PROJECTS so its id is already known.
+        parent_id = task_ids[p["fork_of"]] if p.get("fork_of") else None
         cur = conn.execute(
             """INSERT INTO tasks (repo_id, name, full_path, status, type, tags,
                                    priority, jira_key, branch, created_at, updated_at,
-                                   completed_at, last_worked_on)
-               VALUES (?, ?, ?, ?, 'coding', '[]', ?, ?, ?, ?, ?, ?, ?)""",
+                                   completed_at, last_worked_on, parent_id)
+               VALUES (?, ?, ?, ?, 'coding', '[]', ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 repo_ids[p["repo"]],
                 p["name"],
@@ -690,6 +875,7 @@ def seed_tasks(
                 iso(NOW),
                 completed_at,
                 last_worked_on,
+                parent_id,
             ),
         )
         task_ids[p["name"]] = cur.lastrowid  # type: ignore[assignment]
@@ -994,7 +1180,7 @@ def main() -> None:
         conn.close()
 
     write_missioncache_files(demo_home)
-    print("  wrote MissionCache plan/context/tasks files for 6 projects")
+    print(f"  wrote MissionCache plan/context/tasks files for {len(PROJECTS)} projects")
 
     # Sync SQLite -> DuckDB so the dashboard has the analytics layer ready
     # on startup without a separate migration step. Use the same code path the

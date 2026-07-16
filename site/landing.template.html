@@ -1,8 +1,8 @@
-<title>MissionCache - Mission control for your AI coding projects</title>
-<meta name="description" content="Mission control for every project you build with AI. MCP tools, hooks, commands, a statusline, a dashboard, and autonomous runs - working even when you don't. Across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<title>MissionCache - Project memory, time tracking & autonomous runs for AI coding</title>
+<meta name="description" content="Your AI agent forgets everything between sessions. MissionCache gives every project a living memory - plan, tasks, progress, decisions - that survives compaction and moves across tools: start in Claude Code, pick it up in Codex or OpenCode. Plus time tracking, a local dashboard, and autonomous runs.">
 <link rel="icon" type="image/png" href="{{IMG_MARK}}">
-<meta property="og:title" content="MissionCache - Mission control for your AI coding projects">
-<meta property="og:description" content="Mission control for every project you build with AI. MCP tools, hooks, commands, a statusline, a dashboard, and autonomous runs - working even when you don't. Across Claude Code, Codex, OpenCode, and VSCode Copilot.">
+<meta property="og:title" content="MissionCache - Project memory, time tracking & autonomous runs for AI coding">
+<meta property="og:description" content="Your AI agent forgets everything between sessions. MissionCache gives every project a living memory - plan, tasks, progress, decisions - that survives compaction and moves across tools: start in Claude Code, pick it up in Codex or OpenCode. Plus time tracking, a local dashboard, and autonomous runs.">
 <meta property="og:url" content="https://missioncache.dev/">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -165,10 +165,19 @@
     font-size: 0.9rem; font-weight: 600; letter-spacing: 0.01em;
     display: inline-flex; align-items: center; gap: 8px;
     padding: 11px 18px; border-radius: 9px; cursor: pointer;
-    border: 1px solid var(--border-2); background: var(--surface); color: var(--ink);
+    border: 1px solid transparent; color: var(--ink);
+    background: linear-gradient(var(--surface), var(--surface)) padding-box,
+                linear-gradient(120deg, color-mix(in srgb, var(--grad-a) 40%, var(--border-2)), color-mix(in srgb, var(--grad-b) 40%, var(--border-2))) border-box;
     transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
   }
-  .btn:hover { transform: translateY(-1px); border-color: var(--signal); }
+  .btn:not(.btn-primary):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px -14px var(--glow);
+    background: linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+                linear-gradient(120deg, var(--grad-a), var(--grad-b)) border-box;
+  }
+  .btn .go { transition: transform .15s ease; color: var(--signal); }
+  .btn:hover .go { transform: translateY(2px); }
   .btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
   .btn-primary {
     position: relative; overflow: hidden;
@@ -288,20 +297,17 @@
   }
   .install-hero .term-body { padding: 22px 22px 24px; }
   .install-hero .term-cmd { font-size: 1.12rem; overflow-x: auto; }
-  .install-hero .term-out { font-size: 0.9rem; }
-  .install-hero .assure { margin-top: 12px; font-size: 0.82rem; color: var(--ink-3); }
+  .install-hero .assure { margin-top: 12px; font-size: 0.82rem; color: var(--ink-3); text-wrap: balance; }
   @media (max-width: 480px) { .install-hero .term-cmd { font-size: 0.98rem; } }
 
   /* works-with + trust chips as one centered meta band closing the hero column */
-  .meta-band { max-width: 640px; margin: 30px auto 0; padding-top: 22px; border-top: 1px solid var(--border); }
-  .meta-band .works { margin-top: 0; }
-  .meta-band .works .tools { justify-content: center; }
-  .meta-band .chips { justify-content: center; margin-top: 14px; }
+  .meta-band { max-width: 780px; margin: 30px auto 0; padding-top: 22px; border-top: 1px solid var(--border); }
+  .meta-band .chips { justify-content: center; margin-top: 0; }
 
   /* ---- kit line: interactive chips + explainer panel ---- */
   .kit-line {
     position: relative; display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
-    gap: 8px;
+    gap: 8px; margin-top: 28px;
   }
 
   .kit-chip {
@@ -392,18 +398,20 @@
   /* full-width product shot below the hero text */
   .hero-shot { margin-top: clamp(44px, 6vw, 72px); }
   /* centered hero column: text capped for reading, h1 allowed wider for drama */
-  .hero-center { text-align: center; max-width: 920px; margin-inline: auto; }
+  .hero-center { text-align: center; }
   .hero-center .eyebrow::after { content: ""; width: 22px; height: 1px; background: var(--signal); opacity: .7; }
   @media (max-width: 420px) { .hero-center .eyebrow::before, .hero-center .eyebrow::after { display: none; } }
 
-  .hero h1 { font-size: clamp(2.4rem, 5.4vw, 4rem); line-height: 1.03; margin: 16px auto 0; }
+  .hero h1 { font-size: clamp(2.4rem, 5.4vw, 3.25rem); line-height: 1.08; margin: 16px auto 0; }
+  /* the gradient promise always starts its own line - two sentences, two lines */
+  .hero h1 .grad { display: block; }
   /* dark themes only: light the accent word (muddies in light theme) */
   :root[data-theme="dark"] .hero h1 .grad { filter: drop-shadow(0 0 18px rgba(168,85,247,.35)); }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .hero h1 .grad { filter: drop-shadow(0 0 18px rgba(168,85,247,.35)); }
   }
   .hero .sub { margin: 20px auto 0; font-size: 1.12rem; color: var(--ink-2); max-width: 62ch; }
-  .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 56ch; }
+  .hero .sub + .sub { margin-top: 12px; font-size: 1.02rem; max-width: 74ch; text-wrap: balance; }
   .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; justify-content: center; }
 
   /* brand logo above the headline - swaps black/white with the theme, seated in a soft halo */
@@ -413,11 +421,11 @@
     background: radial-gradient(50% 62% at 50% 50%, var(--glow), transparent 70%);
     pointer-events: none;
   }
-  .hero-logo { width: clamp(240px, 36vw, 460px); height: auto; }
+  .hero-logo { width: clamp(260px, 38vw, 540px); height: auto; }
   .tagline {
     font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
-    font-size: 0.88rem; letter-spacing: .04em; color: var(--ink-2);
-    margin: -6px 0 26px;
+    font-size: 1.05rem; letter-spacing: .04em; color: var(--ink-2);
+    margin: -2px 0 26px;
   }
 
   /* hero entrance stagger (rides the existing .rv reveal) */
@@ -437,14 +445,66 @@
 
   /* prose emphasis (the four bolded themes) */
   p strong, li strong, .lede strong, .sub strong { color: var(--ink); font-weight: 650; }
-  .term-out strong { color: var(--con-ink); font-weight: 650; }
 
-  /* works-with strip under the CTA */
-  .works { margin-top: 28px; }
-  .works .wl { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
-  .works .tools { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  /* two-column hero: copy on the left, install terminal + CTAs on the right */
+  .hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: clamp(28px, 4vw, 54px); align-items: start; margin-top: 36px; text-align: left; }
+  .hero-copy { padding-top: 14px; }
+  .hero-copy h1 { font-size: clamp(1.9rem, 2.9vw, 2.6rem); margin: 0; text-wrap: balance; }
+  .hero-copy .sub { margin: 18px 0 0; }
+  .hero-side { text-align: center; }
+  .hero-side .install-hero { margin-top: 0; }
+  .hero-side .hero-cta { margin-top: 20px; }
+  /* the wizard facts, moved out of the terminal: reads like output, lives outside the frame */
+  .install-facts { list-style: none; padding: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; width: fit-content; margin: 14px auto 0; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.78rem; color: var(--ink-2); text-align: left; }
+  .install-facts .fact { display: flex; gap: 9px; }
+  .install-facts b { color: var(--ok); font-weight: 600; flex: none; }
+  .install-facts strong { color: var(--ink); font-weight: 650; }
+  .install-hero .assure strong { color: var(--ink); font-weight: 650; }
+  /* CTA variants: white = GitHub, green = the "go" action (terminal ok-green) */
+  .btn.btn-white { background: #f2f0fb; color: #17141f; }
+  .btn.btn-white:hover { transform: translateY(-2px); background: #fff; box-shadow: 0 10px 26px -12px rgba(244,242,255,.35); }
+  [data-theme="light"] .btn.btn-white { background: #1b1826; color: #f4f2ff; }
+  [data-theme="light"] .btn.btn-white:hover { background: #241f33; box-shadow: 0 10px 26px -14px var(--glow); }
+  .btn.btn-green { color: var(--ok);
+    background: linear-gradient(var(--surface), var(--surface)) padding-box,
+                linear-gradient(120deg, color-mix(in srgb, var(--ok) 60%, var(--border-2)), color-mix(in srgb, var(--ok) 25%, var(--border-2))) border-box; }
+  .btn.btn-green:hover { transform: translateY(-2px); box-shadow: 0 10px 26px -14px rgba(58,212,142,.35);
+    background: linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+                linear-gradient(120deg, var(--ok), color-mix(in srgb, var(--ok) 45%, var(--grad-b))) border-box; }
+  .btn-green .go { color: inherit; }
+  @media (max-width: 960px) {
+    .hero-grid { grid-template-columns: 1fr; text-align: center; gap: 34px; }
+    .hero-copy .sub { margin: 18px auto 0; }
+  }
+
+  /* portability rail: the hero's signature - a project dot travels the track
+     from tool to tool. Hairline framing only; the install terminal stays the
+     hero's brightest object. */
+  .rail { margin: 44px auto 0; padding-top: 26px; position: relative; }
+  .rail::before { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: min(340px, 70%); height: 1px; background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); opacity: .65; }
+  /* a real h2 for heading navigation; the size override keeps it below the
+     section-heading scale (the global h2 rule would render it 2.25rem) */
+  .rail-title { margin: 0; font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: clamp(1.05rem, 1.6vw, 1.35rem); line-height: 1.2; font-weight: 650; background: linear-gradient(100deg, var(--grad-a), var(--grad-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .rail-track { position: relative; display: flex; flex-wrap: wrap; gap: 14px; margin-top: 20px; justify-content: center; align-items: center; }
+  .rail-line { position: absolute; left: 5%; right: 5%; top: 50%; height: 2px; transform: translateY(-50%); background: linear-gradient(90deg, transparent, var(--grad-a) 18%, var(--grad-b) 82%, transparent); opacity: .3; }
+  .rail-dot { position: absolute; top: 50%; left: 4%; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); background: linear-gradient(120deg, var(--grad-a), var(--grad-b)); box-shadow: 0 0 14px 2px var(--glow); animation: rail-travel 7s ease-in-out infinite; }
+  @keyframes rail-travel {
+    0% { left: 4%; opacity: 0; }
+    6% { opacity: 1; }
+    32% { left: 36%; }
+    58% { left: 64%; }
+    90% { left: 96%; opacity: 1; }
+    100% { left: 96%; opacity: 0; }
+  }
+  .rail-track .tool-chip { position: relative; z-index: 1; font-size: 0.95rem; padding: 14px 22px 12px; flex-direction: column; gap: 8px; }
+  .rail-track .tool-chip svg { height: 24px; width: auto; fill: var(--ink); opacity: .92; }
+  .rail-cap { margin: 16px auto 0; font-size: 0.9rem; color: var(--ink-2); max-width: 60ch; text-wrap: balance; }
+  @media (max-width: 700px) { .rail-line, .rail-dot { display: none; } }
   .tool-chip { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 0.9rem; font-weight: 650; color: var(--ink); padding: 9px 16px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface); display: inline-flex; align-items: center; gap: 8px; }
-  .tool-chip .td { width: 7px; height: 7px; border-radius: 50%; background: linear-gradient(120deg, var(--grad-a), var(--grad-b)); flex: none; }
+
+  /* two-frame handoff proof in #why */
+  .handoff { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 36px; }
+  @media (max-width: 860px) { .handoff { grid-template-columns: 1fr; } }
 
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
   .chip {
@@ -502,8 +562,6 @@
   }
   .copy-cmd:hover { color: var(--con-ink); border-color: var(--signal); }
   .copy-cmd:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-  .term-out { color: var(--con-ink-2); margin-top: 12px; font-size: 0.82rem; line-height: 1.7; }
-  .term-out .ok { color: var(--con-ok); }
 
   .frame { background: var(--con-bg); border: 1px solid var(--con-border); border-radius: 12px; overflow: hidden;
     box-shadow: 0 26px 70px -34px rgba(0,0,0,.55);
@@ -582,7 +640,23 @@
   .feat-list li::before { content: "\25B8"; color: var(--signal); flex: none; }
 
   /* ---- Statusline section ---- */
-  .sl-img { display: block; width: 100%; }
+  /* statusline rendered as text - same layout and palette as the real line */
+  .sl-text { padding: 16px 20px 18px; background: var(--con-bg); font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: .8rem; line-height: 2.1; overflow-x: auto; }
+  .sl-text .ln { white-space: nowrap; }
+  .sl-text .sep { color: rgb(100,100,110); margin: 0 7px; }
+  .sl-text .u { text-decoration: underline dotted; text-underline-offset: 3px; }
+  .sl-text .c-proj { color: rgb(80,200,120); }
+  .sl-text .c-dir { color: rgb(180,140,100); }
+  .sl-text .c-md { color: rgb(180,130,200); }
+  .sl-text .c-tok { color: rgb(100,200,200); }
+  .sl-text .c-dt { color: rgb(160,160,180); }
+  .sl-text .c-ed { color: rgb(200,160,120); }
+  .sl-text .c-git { color: rgb(220,180,50); }
+  .sl-text .c-ctx { color: rgb(160,170,190); }
+  .sl-text .c-ses { color: rgb(100,160,200); }
+  .sl-text .c-wk { color: rgb(160,130,190); }
+  .sl-text .c-fork { color: rgb(0,212,212); }
+  .sl-text .c-k8s { color: rgb(150,120,180); }
   .sl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 28px; }
   @media (max-width: 900px) { .sl-grid { grid-template-columns: 1fr; } }
   .wn {
@@ -605,8 +679,6 @@
   tbody td { padding: 14px 18px; border-bottom: 1px solid var(--border); color: var(--ink-2); }
   tbody tr:last-child td { border-bottom: 0; }
   tbody td:first-child { color: var(--ink); font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.86rem; }
-  .yes { color: var(--ok); font-weight: 600; }
-  .no { color: var(--ink-3); }
 
   /* ---- Comparison matrix ---- */
   .mx td, .mx th { text-align: center; }
@@ -644,19 +716,6 @@
   .panel .note { margin-top: 16px; font-size: 0.88rem; color: var(--ink-2); }
   .panel .req { margin-top: 14px; font-size: 0.8rem; color: var(--ink-3); font-family: "SF Mono",ui-monospace,Menlo,monospace; }
   .giveup { margin-top: 16px; font-size: 0.85rem; color: var(--ink-2); padding: 12px 14px; border-left: 2px solid var(--warn); background: var(--surface-2); border-radius: 0 8px 8px 0; }
-
-  /* ---- Stats ---- */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 40px; }
-  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
-  .stat { text-align: center; padding: 22px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
-    position: relative; overflow: hidden; transition: transform .18s ease, border-color .18s ease; }
-  .stat::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); opacity: 0; transition: opacity .2s ease; }
-  .stat:hover { transform: translateY(-3px); border-color: var(--border-2); }
-  .stat:hover::before { opacity: 1; }
-  .stat .v { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 1.7rem; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
-    background: linear-gradient(100deg,var(--grad-a),var(--grad-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .stat .k { margin-top: 6px; font-family: "SF Mono",ui-monospace,Menlo,monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-3); }
 
   /* ---- FAQ ---- */
   .faq { margin-top: 40px; display: grid; gap: 12px; }
@@ -706,6 +765,7 @@
     .kit-chip:hover { transform: none; }
     .kit-panel, .kit-panel::before { transition: none; animation: none; }
     .kit-pane.on { animation: none; }
+    .rail-dot { animation: none; display: none; }
   }
 </style>
 
@@ -760,7 +820,53 @@
         <img class="hero-logo on-dark" src="{{IMG_LOGO_DARK}}" width="380" height="77" alt="MissionCache">
       </div>
       <p class="tagline rv d1">Plan, execute, track, and resume - without losing state.</p>
-      <div class="kit-line rv d1" role="group" aria-label="What is in the kit - hover or tap each piece">
+      <div class="hero-grid">
+      <div class="hero-copy">
+      <h1 class="rv d2">Your AI agent forgets everything. <span class="grad">Your projects remember.</span></h1>
+      <p class="sub rv d3">MissionCache keeps <strong>a living memory for every project</strong> - the plan, the decisions, the gotchas, what is left. It updates <strong>as you work</strong>, gets a snapshot <strong>before every compaction</strong>, and reloads with one command - the next session picks up exactly where this one stopped.</p>
+      <p class="sub rv d3">Not another memory plugin: <strong>task&nbsp;lists, time&nbsp;tracking, a local&nbsp;dashboard, and autonomous&nbsp;runs</strong>.</p>
+      </div>
+      <div class="hero-side">
+      <div class="install-hero rv d3">
+        <div class="term">
+          <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">bash</span></div>
+          <div class="term-body">
+            <div class="term-cmd">
+              <span class="pr">$</span><code>uvx missioncache-install</code><span class="cursor"></span>
+              <button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button>
+            </div>
+          </div>
+        </div>
+        <ul class="install-facts">
+          <li class="fact"><b aria-hidden="true">&#10003;</b> <span><strong>one command</strong> - a wizard asks what to install and which AI tools to register</span></li>
+          <li class="fact"><b aria-hidden="true">&#10003;</b> <span>everything lives under <strong>~/.missioncache</strong></span></li>
+          <li class="fact"><b aria-hidden="true">&#10003;</b> <span>about <strong>3 minutes</strong> to first value</span></li>
+        </ul>
+        <p class="assure"><strong>No uvx on your machine?</strong> It comes with uv - run <span class="mono" style="font-size:.92em">pip install uv</span> once, or see <a class="lnk" href="#install">Install</a> for other options.</p>
+        <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere - <strong>not even to us</strong>.</p>
+      </div>
+      <div class="hero-cta rv d4">
+        <a class="btn btn-white" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Star on GitHub
+        </a>
+        <a class="btn btn-green" href="#how">See how it works <span class="go" aria-hidden="true">&darr;</span></a>
+      </div>
+      </div>
+      </div>
+      <div class="rail rv d5">
+        <h2 class="rail-title">Your project. Every tool.</h2>
+        <div class="rail-track">
+          <span class="rail-line" aria-hidden="true"></span>
+          <span class="rail-dot" aria-hidden="true"></span>
+          <span class="tool-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>Claude Code</span>
+          <span class="tool-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>Codex</span>
+          <span class="tool-chip"><svg viewBox="128 96 256 320" fill-rule="evenodd" aria-hidden="true"><path d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z"/></svg>OpenCode</span>
+          <span class="tool-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.922 16.997C23.061 18.492 18.063 22.02 12 22.02 5.937 22.02.939 18.492.078 16.997A.641.641 0 0 1 0 16.741v-2.869a.883.883 0 0 1 .053-.22c.372-.935 1.347-2.292 2.605-2.656.167-.429.414-1.055.644-1.517a10.098 10.098 0 0 1-.052-1.086c0-1.331.282-2.499 1.132-3.368.397-.406.89-.717 1.474-.952C7.255 2.937 9.248 1.98 11.978 1.98c2.731 0 4.767.957 6.166 2.093.584.235 1.077.546 1.474.952.85.869 1.132 2.037 1.132 3.368 0 .368-.014.733-.052 1.086.23.462.477 1.088.644 1.517 1.258.364 2.233 1.721 2.605 2.656a.841.841 0 0 1 .053.22v2.869a.641.641 0 0 1-.078.256Zm-11.75-5.992h-.344a4.359 4.359 0 0 1-.355.508c-.77.947-1.918 1.492-3.508 1.492-1.725 0-2.989-.359-3.782-1.259a2.137 2.137 0 0 1-.085-.104L4 11.746v6.585c1.435.779 4.514 2.179 8 2.179 3.486 0 6.565-1.4 8-2.179v-6.585l-.098-.104s-.033.045-.085.104c-.793.9-2.057 1.259-3.782 1.259-1.59 0-2.738-.545-3.508-1.492a4.359 4.359 0 0 1-.355-.508Zm2.328 3.25c.549 0 1 .451 1 1v2c0 .549-.451 1-1 1-.549 0-1-.451-1-1v-2c0-.549.451-1 1-1Zm-5 0c.549 0 1 .451 1 1v2c0 .549-.451 1-1 1-.549 0-1-.451-1-1v-2c0-.549.451-1 1-1Zm3.313-6.185c.136 1.057.403 1.913.878 2.497.442.544 1.134.938 2.344.938 1.573 0 2.292-.337 2.657-.751.384-.435.558-1.15.558-2.361 0-1.14-.243-1.847-.705-2.319-.477-.488-1.319-.862-2.824-1.025-1.487-.161-2.192.138-2.533.529-.269.307-.437.808-.438 1.578v.021c0 .265.021.562.063.893Zm-1.626 0c.042-.331.063-.628.063-.894v-.02c-.001-.77-.169-1.271-.438-1.578-.341-.391-1.046-.69-2.533-.529-1.505.163-2.347.537-2.824 1.025-.462.472-.705 1.179-.705 2.319 0 1.211.175 1.926.558 2.361.365.414 1.084.751 2.657.751 1.21 0 1.902-.394 2.344-.938.475-.584.742-1.44.878-2.497Z"/></svg>VSCode Copilot</span>
+        </div>
+        <p class="rail-cap">Start in one tool, pick it up in another - <strong>the whole project follows</strong>, with one MissionCache underneath connecting them all. Full workbench on Claude Code; project state + all 36 MCP tools everywhere.</p>
+      </div>
+      <div class="kit-line rv d5" role="group" aria-label="What is in the kit - hover or tap each piece">
         <button class="kit-chip" data-kit="mcp" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>MCP tools</button>
         <button class="kit-chip" data-kit="hooks" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-10 12h9l-1 8 10-12h-9l1-8z"/></svg>Hooks</button>
         <button class="kit-chip" data-kit="commands" aria-expanded="false" aria-controls="kit-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>Commands</button>
@@ -793,13 +899,13 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
             <div class="kit-snip">/missioncache:new       plan it
 /missioncache:load      resume exactly there
 /missioncache:save      snapshot decisions
-/missioncache:fork      one shared context, own tasks
+/missioncache:fork      one shared memory, own tasks
 /missioncache:done      archive with stats   <b>+3 more</b></div>
           </div>
           <div class="kit-pane" data-kit="fork">
             <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>Project forks</h4>
-            <p>Fork a project and the parent's context becomes one shared knowledge layer. Every child reads it, any session can update it, and the others are told when it changed. Each child still keeps its own plan and its own tasks.</p>
-            <p class="wired">wired: only context is shared - tasks are never copied between a parent and its forks</p>
+            <p>A second project that shares the first one's memory. Fork a project and the parent's context file becomes the memory every lane reads. Any session can update it, and the others are told when it changed. Each fork keeps its own plan and its own tasks.</p>
+            <p class="wired">wired: memory is shared, tasks are not - nothing is copied between a parent and its forks</p>
             <div class="kit-snip">/missioncache:fork data-pipeline ios-tests
 <b>&#10003; shared context &middot; data-pipeline</b>
 <b>&#10003; own plan &middot; own tasks &middot; own progress</b></div>
@@ -824,43 +930,8 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
           </div>
         </div>
       </div>
-      <h1 class="rv d2"><span class="grad">Mission control</span> for every project you build with AI.</h1>
-      <p class="sub rv d3">MissionCache wires <strong>a complete system</strong> around your agent - and it <strong>works even when you don't</strong>: hooks save state before every compaction, the tracker clocks time while you argue with your agent, the statusline warns before the context window fills.</p>
-      <p class="sub rv d3">One workbench across <strong>Claude Code, Codex, OpenCode, and VSCode Copilot</strong>.</p>
-
-      <div class="install-hero rv d4">
-        <div class="term">
-          <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">bash</span></div>
-          <div class="term-body">
-            <div class="term-cmd">
-              <span class="pr">$</span><code>uvx missioncache-install</code><span class="cursor"></span>
-              <button class="copy-cmd" data-copy="uvx missioncache-install">Copy</button>
-            </div>
-            <div class="term-out"><strong>One command.</strong> Picks your components, wires the dashboard, and registers MissionCache in every AI tool it finds. <span class="ok">Under 3 minutes to first value.</span> Houston not required.</div>
-          </div>
-        </div>
-        <p class="assure">Open source and MIT licensed. Everything runs on your machine, and nothing is sent anywhere - not even to us.</p>
-        <p class="assure">No uvx on your machine? It comes with uv - run <span class="mono" style="font-size:.92em">pip install uv</span> once, or see <a class="lnk" href="#install">Install</a> for other options.</p>
-      </div>
-
-      <div class="hero-cta rv d5">
-        <a class="btn btn-primary" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          Star on GitHub
-        </a>
-        <a class="btn" href="#how">See how it works</a>
-      </div>
 
       <div class="meta-band rv d6">
-        <div class="works">
-          <span class="wl">Works with</span>
-          <div class="tools">
-            <span class="tool-chip"><span class="td"></span>Claude Code</span>
-            <span class="tool-chip"><span class="td"></span>Codex</span>
-            <span class="tool-chip"><span class="td"></span>OpenCode</span>
-            <span class="tool-chip"><span class="td"></span>VSCode Copilot</span>
-          </div>
-        </div>
         <div class="chips">
           <span class="chip"><span class="dot"></span>MIT licensed</span>
           <span class="chip"><span class="dot"></span>Python 3.11+</span>
@@ -912,8 +983,28 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     <div class="head rv">
       <span class="eyebrow">Why MissionCache</span>
       <h2>Three things, in one tool.</h2>
-      <p class="lede">Taskmaster manages tasks. claude-mem remembers. GSD executes. <strong>No single tool does all three - MissionCache is built as the integration.</strong> And we are honest below about where each of them is better.</p>
+      <p class="lede">Taskmaster manages tasks. claude-mem remembers. GSD executes. <strong>No single tool does all three - MissionCache is built as the integration.</strong> And because a project is just files any MCP tool reads and writes, it is not chained to one agent:</p>
     </div>
+    <div class="handoff rv">
+      <div class="term">
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; auth-refactor</span></div>
+        <div class="term-body demo-body">
+          <span class="ln c-cmd"><span class="pr">$</span> /missioncache:save</span>
+          <span class="ln c-ok">&#10003; context.md   decisions &middot; gotchas &middot; next steps</span>
+          <span class="ln c-ok">&#10003; 5/12 tasks &middot; written to ~/.missioncache</span>
+        </div>
+      </div>
+      <div class="term">
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">codex &middot; same project, another tool</span></div>
+        <div class="term-body demo-body">
+          <span class="ln c-cmd"><span class="pr">$</span> /missioncache:load auth-refactor</span>
+          <span class="ln c-ok">&#10003; plan restored &middot; 5/12 tasks done</span>
+          <span class="ln c-ok">&#10003; decisions intact &middot; gotchas loaded</span>
+          <span class="ln c-next">&rarr; next step: wire refresh-token rotation</span>
+        </div>
+      </div>
+    </div>
+    <p class="mx-cap rv">Project state and all 36 MCP tools work in every tool. The dashboard, statusline, and autonomous runs are Claude Code today.</p>
     <div class="pillars">
       <div class="card rv">
         <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
@@ -961,26 +1052,24 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
           </tr>
         </thead>
         <tbody>
-          <tr><td>Project state that survives compaction</td><td class="y">&#10003;</td><td class="p">~</td><td class="p">~</td><td class="p">~</td><td class="n">&ndash;</td></tr>
-          <tr><td>Shared context across parallel projects</td><td class="y">&#10003;</td><td class="p">~<span class="mx-note">tags isolate lanes</span></td><td class="p">~<span class="mx-note">global memory</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+          <tr><td>Project state that survives compaction</td><td class="y">&#10003;</td><td class="p">~</td><td class="p">~</td><td class="p">~</td><td class="p">~<span class="mx-note">task list only</span></td></tr>
+          <tr><td>Shared memory across parallel projects</td><td class="y">&#10003;</td><td class="p">~<span class="mx-note">tags isolate lanes</span></td><td class="p">~<span class="mx-note">global memory</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
           <tr><td>Task checklists + dependency DAG</td><td class="y">&#10003;</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="p">~<span class="mx-note">flat list</span></td></tr>
           <tr><td>Per-project time tracking</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="p">~<span class="mx-note">cost only</span></td><td class="n">&ndash;</td></tr>
           <tr><td>Local analytics dashboard</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="p">~</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
           <tr><td>Autonomous execution</td><td class="y">&#10003;</td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="y">&#10003;</td><td class="y">&#10003;</td></tr>
-          <tr><td>Works beyond one agent</td><td class="y">&#10003;<span class="mx-note">4 via MCP</span></td><td class="y">&#10003;<span class="mx-note">13 IDEs</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
+          <tr><td>Whole project moves between tools</td><td class="y">&#10003;<span class="mx-note">plan + tasks + progress</span></td><td class="p">~<span class="mx-note">tasks only, 13 IDEs</span></td><td class="p">~<span class="mx-note">memory only, 7+ agents</span></td><td class="n">&ndash;</td><td class="n">&ndash;</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="mx-cap rv">Full tables, with where each tool beats us, in <a class="lnk" href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener">the README</a>.</p>
+    <p class="mx-cap rv">Full tables, with where each tool beats us, in <a class="lnk" href="https://github.com/missioncache/missioncache#how-missioncache-compares" target="_blank" rel="noopener">the README</a>. Claude Code gets the full workbench; Codex, OpenCode, and Copilot get the project state and all 36 MCP tools.</p>
 
     <div class="compare rv">
-      <p class="take">MissionCache is the only tool with <strong>per-project time tracking, a local analytics dashboard, and autonomous execution</strong> in the same place. That is the whole point.</p>
+      <p class="take">MissionCache is the only tool with <strong>per-project time tracking, a local analytics dashboard, and autonomous execution</strong> in the same place. And the only one where <strong>the whole project moves with you between tools</strong>. That is the whole point.</p>
       <div class="else">
         <div class="row"><b>Taskmaster AI</b><span>if you want PRD-to-task decomposition across 13 IDEs.</span></div>
-        <div class="row"><b>Superpowers</b><span>if you want an enforced TDD methodology - and you can run it inside a MissionCache project.</span></div>
         <div class="row"><b>claude-mem / MemPalace</b><span>if you want cross-project memory that outlives any single project.</span></div>
         <div class="row"><b>GSD / GSD-2</b><span>if you want aggressive context-rot elimination with a fresh context per task.</span></div>
-        <div class="row"><b>Agent Teams</b><span>if you want zero-install native orchestration with no persistent state between runs.</span></div>
         <div class="row"><b>MissionCache</b><span>if you want all of that integrated into one workbench for the project you are building now.</span></div>
       </div>
     </div>
@@ -995,7 +1084,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     <div class="head rv">
       <span class="eyebrow">The lifecycle</span>
       <h2>From "new project" to "done" - and resumable at every step.</h2>
-      <p class="lede">Five commands. Your state is safe between every one of them.</p>
+      <p class="lede">Five steps. Your state is safe between every one of them.</p>
     </div>
     <div class="steps rv" id="steps">
       <div class="step on">
@@ -1006,7 +1095,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       <div class="step">
         <div class="n">02 / WORK</div>
         <div class="cmd">edit &middot; test &middot; decide</div>
-        <p>Time is tracked in the background. The PreCompact hook <strong>auto-saves your state</strong> before the window compacts.</p>
+        <p>Your project files update as you work, and time is tracked in the background. The PreCompact hook <strong>auto-saves your state</strong> before the window compacts.</p>
       </div>
       <div class="step">
         <div class="n">03 / LOAD</div>
@@ -1039,41 +1128,34 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     </div>
 
     <div class="term rv" style="margin-top:38px">
-      <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">missioncache-statusline</span><span class="live-dot"><i></i>live</span></div>
-      <img class="sl-img" src="{{IMG_STATUSLINE}}" alt="MissionCache statusline in a real terminal: project with progress, git branch, model, tokens, context usage, Claude and Codex session limits with reset times, and Claude service status">
+      <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">missioncache-statusline</span></div>
+      <div class="sl-text" role="img" aria-label="The MissionCache statusline: project with progress, fork parent with a parent-updated note, directory, git branch, model, tokens, context usage, session and weekly limits with reset times, and Claude service status">
+        <div class="ln">&#128203; <span class="c-proj">Project: <span class="u">ios-tests [3/7]</span></span><span class="sep">&#9474;</span>&#10549; <span class="c-proj">Fork of: <span class="u">data-pipeline</span></span> <span class="c-fork">&#9679; parent updated 14:32</span><span class="sep">&#9474;</span>&#128336; <span class="c-dt">Last Action: Jul 12 14:27</span></div>
+        <div class="ln">&#128193; <span class="c-dir">Dir: work</span><span class="sep">&#9474;</span>&#128256; <span class="c-git">Git: tests/ios-events</span><span class="sep">&#9474;</span>&#9200; <span class="c-tok">Elapsed: 2h 5m</span><span class="sep">&#9474;</span>&#9784;&#65039; <span class="c-k8s">K8s: lke1852</span><span class="sep">&#9474;</span>&#9999;&#65039; <span class="c-ed">Edits: 5</span><span class="sep">&#9474;</span>&#128230; <span class="c-proj">v2.1.210 (0d)</span></div>
+        <div class="ln">&#129302; <span class="c-md">Model: Fable 5</span><span class="sep">&#9474;</span>&#129504; <span class="c-md">Effort: high</span><span class="sep">&#9474;</span>&#128290; <span class="c-tok">Tokens: &#8593;81.8K/&#8595;1.5K</span><span class="sep">&#9474;</span>&#128202; <span class="c-ctx">Ctx: 27%</span><span class="sep">&#9474;</span>&#9989; <span class="c-proj u">Claude Status: OK</span></div>
+        <div class="ln">&#9201;&#65039; <span class="c-ses">Session: 21% &#128260; thu 1am</span><span class="sep">&#9474;</span>&#128197; <span class="c-wk">Weekly: 56% &#128260; fri 11pm</span><span class="sep">&#9474;</span>&#10024; <span class="c-proj">claude.ai</span><span class="sep">&#9474;</span>&#129504; <span class="c-proj">Codex (Plus): 8% &#128260; thu 4am</span></div>
+      </div>
     </div>
-    <p class="mono rv" style="margin-top:10px;font-size:.76rem;color:var(--ink-3)">// real terminal, real session</p>
+    <p class="mono rv" style="margin-top:10px;font-size:.76rem;color:var(--ink-3)">// the actual layout, rendered as text - yours draws above the prompt</p>
 
     <div class="sl-grid rv">
       <div class="card">
         <h3>Limits, with reset times</h3>
-        <p>Claude session and weekly usage as percentages, each with its <strong>reset time</strong>. Opus tracked separately, unlimited plans show &infin;, and Codex gets its own line when installed.</p>
-      </div>
-      <div class="card">
-        <h3>Live Claude health</h3>
-        <p>Open incidents from <span class="mono" style="font-size:.85em">status.claude.com</span> surface <strong>right in the line</strong>, linked to the status page. All clear reads "Claude Status: OK".</p>
-      </div>
-      <div class="card">
-        <h3>Version watch</h3>
-        <p>Your Claude Code version, how old it is, and an <strong>upgrade arrow</strong> the moment a newer release ships.</p>
+        <p>Claude session and weekly usage as percentages, each with its <strong>reset time</strong>. Opus tracked separately, Codex gets its own line when installed, and open incidents from <span class="mono" style="font-size:.85em">status.claude.com</span> surface right in the line.</p>
       </div>
       <div class="card">
         <h3>Compact before it hurts</h3>
         <p>Context usage with tiered warnings: <strong>"Compact recommended" at 65%, "Compact now!" at 80%</strong> - so you save state on your terms, not the window's.</p>
       </div>
       <div class="card">
-        <h3>Project telemetry</h3>
-        <p>Your project's progress as <span class="mono" style="font-size:.85em">[5/12]</span> linked into the dashboard, plus git branch, model, tokens, and when your last action happened.</p>
-      </div>
-      <div class="card">
         <h3>Make it yours</h3>
-        <p><strong>Toggle every field</strong> from the dashboard Settings, and <strong>add your own cells</strong> - any command's output can become part of the line.</p>
+        <p>Project progress as <span class="mono" style="font-size:.85em">[5/12]</span>, git branch, model, tokens, a version watch with an upgrade arrow. <strong>Toggle every field</strong> from the dashboard Settings, and <strong>add your own cells</strong>.</p>
       </div>
     </div>
 
     <div class="wn rv">
       <span class="wn-cmd">/whats-new</span>
-      <p>The installer also sets up <strong>/whats-new</strong>: run it and it reads everything that changed in Claude Code since you last checked, summarizes what matters, and proposes tailored upgrades to your own setup - with before/after diffs. The statusline's version cell stays yellow until you review, then flips green.</p>
+      <p>The installer also sets up <strong>/whats-new</strong>: it reads what changed in Claude Code since you last checked and proposes tailored upgrades to your own setup, with before/after diffs.</p>
     </div>
   </div>
 </section>
@@ -1124,18 +1206,18 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
 
     <div class="feat rv">
       <div class="feat-txt">
-        <span class="eyebrow">Project forks</span>
-        <h3>One shared spine. Separate lanes.</h3>
-        <p>Some work has one common base and several parallel lanes. A data pipeline, plus a test layer for each product it feeds. Fork the base project and each lane becomes its own project with its own tasks. The base project's context becomes the shared knowledge layer that all of them read.</p>
-        <p style="margin-top:14px;">Architecture, access patterns, environment facts, the gotchas you already hit - all of that lives in the parent. Any session can add to it. The other sessions are told when it changed, so nobody keeps working from a stale picture.</p>
+        <span class="eyebrow">Project forks &middot; shared memory</span>
+        <h3>Related projects, one shared memory.</h3>
+        <p>Building several things on the same base? A data pipeline plus a test layer for each product it feeds. A backend plus its clients. They share the setup, the access details, the gotchas you already hit - but each needs its own task list.</p>
+        <p style="margin-top:14px;"><span class="mono" style="font-size:.88em">/missioncache:fork</span> creates a real second project that reads the parent's context file as its shared memory. Write the shared facts once, in the parent, and every fork knows them. When one session updates the shared memory, the others are told, so nobody keeps working from a stale picture.</p>
         <ul class="feat-list">
-          <li>Only context is shared. Tasks are never copied between a parent and its forks</li>
-          <li>The statusline adds a "Fork of &lt;parent&gt;" cell, with a dot when the shared context is newer than what this session last read</li>
-          <li>Finish the parent whenever you want. Its context stays readable, and its forks keep running</li>
+          <li>Only the memory is shared. Tasks are never copied between a parent and its forks</li>
+          <li>The statusline adds a "Fork of &lt;parent&gt;" cell, with a dot when the shared memory is newer than what this session last read</li>
+          <li>Finish the parent whenever you want. Its memory stays readable, and its forks keep running</li>
         </ul>
       </div>
       <div class="term">
-        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two lanes, one context</span></div>
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two lanes, one memory</span></div>
         <div class="term-body demo-body">
           <span class="ln c-cmd"><span class="pr">$</span> /missioncache:fork data-pipeline ios-tests</span>
           <span class="ln c-ok">&#10003; ios-tests created &middot; Fork of: data-pipeline</span>
@@ -1159,51 +1241,13 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
 
 <hr class="rule">
 
-<!-- ============ WORKS EVERYWHERE ============ -->
-<section id="tools">
-  <div class="wrap">
-    <div class="head rv">
-      <span class="eyebrow">Works everywhere</span>
-      <h2>One MCP server. Four AI coding assistants.</h2>
-      <p class="lede">Most AI dev tooling is built for one agent. MissionCache is <strong>a single MCP server</strong>, so the same project state follows you into whichever agent you open. The installer detects which tools you have and asks per tool whether to register MissionCache.</p>
-    </div>
-    <div class="tbl-wrap rv tbl-scroll">
-      <table>
-        <thead><tr><th>Tool</th><th>MCP server</th><th>Slash commands</th><th>Dashboard &middot; statusline &middot; auto</th></tr></thead>
-        <tbody>
-          <tr><td>Claude Code</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">full</td></tr>
-          <tr><td>Codex CLI</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">not yet</td></tr>
-          <tr><td>OpenCode</td><td class="yes">yes</td><td class="yes">yes</td><td class="no">not yet</td></tr>
-          <tr><td>VSCode (Copilot Chat)</td><td class="yes">yes</td><td class="yes">yes (macOS)</td><td class="no">editor-level</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="mx-cap rv">Claude Code gets the full workbench today. Codex, OpenCode, and Copilot get the shared project state and the full MCP tool suite, with the rest tracked as follow-ups.</p>
-  </div>
-</section>
-
-<hr class="rule">
-
-<!-- ============ STATS ============ -->
-<section style="padding-top:clamp(40px,6vw,72px);padding-bottom:0;">
-  <div class="wrap">
-    <div class="stats rv" id="stats">
-      <div class="stat"><div class="v" data-n="36">36</div><div class="k">MCP tools</div></div>
-      <div class="stat"><div class="v" data-n="4">4</div><div class="k">AI tools supported</div></div>
-      <div class="stat"><div class="v" data-n="8">8</div><div class="k">slash commands</div></div>
-      <div class="stat"><div class="v">MIT</div><div class="k">open source</div></div>
-    </div>
-    <p class="mono" style="text-align:center;margin-top:16px;font-size:.78rem;color:var(--ink-3)">Open source under MIT. Inspect every line on <a class="lnk" href="https://github.com/missioncache/missioncache" target="_blank" rel="noopener">GitHub</a>.</p>
-  </div>
-</section>
-
 <!-- ============ INSTALL ============ -->
 <section id="install">
   <div class="wrap">
     <div class="head rv">
       <span class="eyebrow">Install</span>
       <h2>One command. Two flavors.</h2>
-      <p class="lede">Pick the full workbench, or just the plugin core. Both are <strong>under three minutes to first value</strong> - measured, not promised. One session to feel it: run <span class="mono" style="font-size:.9em">/missioncache:new</span>, and your plan survives the first compaction.</p>
+      <p class="lede">Pick the full workbench, or just the plugin core. Either way it is <strong>about three minutes to first value</strong>, and the machine part is under 30 seconds - measured, not promised. One session to feel it: run <span class="mono" style="font-size:.9em">/missioncache:new</span>, and your plan survives the first compaction.</p>
     </div>
 
     <div class="install-card rv">
@@ -1248,12 +1292,13 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     </div>
     <div class="faq rv">
       <details><summary>How is this different from CLAUDE.md or built-in memory?</summary><p>CLAUDE.md is a static rules file you maintain by hand. MissionCache keeps <strong>living project state</strong> - the plan, your decisions, the gotchas you flagged, and progress - that updates as you work and reloads with one command. It complements CLAUDE.md, it does not replace it.</p></details>
-      <details><summary>When should I fork a project instead of starting a new one?</summary><p>Fork when two efforts share one base and still need their own task lists. A data pipeline with a separate test layer per product is the normal shape. The parent's context becomes the shared knowledge layer - architecture, access patterns, environment facts, the gotchas you already hit - and every fork reads it. Each fork keeps its own plan and its own tasks, and <strong>tasks are never copied</strong>. Start a fresh project instead when the two efforts have nothing real in common.</p></details>
+      <details><summary>When should I fork a project instead of starting a new one?</summary><p>First, what a fork is here: a project fork, not a Claude conversation fork. It creates a real second project that shares the parent's memory (its context file) while keeping its own tasks. Fork when two efforts share one base and still need their own task lists. A data pipeline with a separate test layer per product is the normal shape. Architecture, access patterns, environment facts, the gotchas you already hit - they live once in the parent, and every fork reads them. <strong>Tasks are never copied.</strong> Start a fresh project instead when the two efforts have nothing real in common.</p></details>
       <details><summary>Where does my data live?</summary><p><strong>On your machine.</strong> Project files are plain markdown under <span class="mono" style="font-size:.9em">~/.missioncache/</span>, and the dashboard runs locally at <span class="mono" style="font-size:.9em">localhost:8787</span>. <strong>Nothing is sent anywhere.</strong> The whole thing is local-first and self-hosted.</p></details>
       <details><summary>Do I have to install every component?</summary><p>No. The MCP server plus the database is the minimum, and everything else is opt-in. The wizard lets you deselect the dashboard, auto, or statusline, and each package can be used on its own.</p></details>
-      <details><summary>Which tools does it work with?</summary><p>Claude Code gets the full experience. Codex, OpenCode, and VSCode Copilot Chat get the project state and the MCP tool suite today, with hooks, statusline, and auto tracked as a follow-up. Any tool that speaks MCP can use the core.</p></details>
+      <details><summary>Which tools does it work with?</summary><p>Claude Code gets the full experience. Codex, OpenCode, and VSCode Copilot Chat get the project state, the slash commands, and the 36-tool MCP suite today, with hooks, statusline, and auto tracked as a follow-up. The key part: <strong>the whole project - plan, tasks, progress, decisions - is one shared set of files</strong>, not recalled snippets, so you start in Claude Code and pick it up in Codex or OpenCode exactly where you left off.</p></details>
+      <details><summary>Isn't this just cross-agent memory like claude-mem?</summary><p>claude-mem and similar tools recall <strong>memories</strong> into whatever agent you are in - useful, but it is context injection. MissionCache moves the <strong>whole project</strong>: the plan you approved, the task checklist with its progress, the decisions and gotchas you logged - all as human-editable files any MCP agent reads and writes. Check off a task in Codex and Claude Code sees it. It is shared project state, not recalled memory. And if you want pure long-lived cross-project memory, claude-mem is genuinely good at that - we say so in the comparison.</p></details>
       <details><summary>Is it free?</summary><p>Yes. MissionCache is open source under the MIT license. Read the code, change it, build on it.</p></details>
-      <details><summary>Does it work on Windows?</summary><p>The plugin, MCP server, and <span class="mono" style="font-size:.9em">missioncache-auto</span> install fine. Windows service registration for the dashboard is not automated yet - the installer prints manual steps.</p></details>
+      <details><summary>Does it work on Windows?</summary><p>Partially, today. The MCP server, project files, and <span class="mono" style="font-size:.9em">missioncache-auto</span> install and run fine. The lifecycle hooks - including the compaction snapshot and session tracking - do not run on Windows yet, and dashboard service registration prints manual steps instead of automating. A Windows port is on the roadmap.</p></details>
       <details><summary>What if I want to remove it?</summary><p>Uninstall the packages and delete <span class="mono" style="font-size:.9em">~/.missioncache</span>. Your project files are plain markdown, so anything you want to keep, you keep. <strong>Nothing is locked in.</strong></p></details>
     </div>
   </div>
@@ -1491,30 +1536,6 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
         // re-trigger the top progress-bar animation
         var s = steps[cur]; s.classList.remove('on'); void s.offsetWidth; s.classList.add('on');
       }, 3000);
-    }
-
-    /* ---------- stat count-up ---------- */
-    var stats = document.getElementById('stats');
-    if (stats && 'IntersectionObserver' in window && !reduced) {
-      var sio = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (!e.isIntersecting) return;
-          sio.unobserve(e.target);
-          Array.prototype.forEach.call(stats.querySelectorAll('[data-n]'), function (el) {
-            var n = parseInt(el.getAttribute('data-n'), 10) || 0;
-            var t0 = null;
-            var tick = function (ts) {
-              if (t0 === null) t0 = ts;
-              var p = Math.min(1, (ts - t0) / 900);
-              p = 1 - Math.pow(1 - p, 3);
-              el.textContent = String(Math.round(n * p));
-              if (p < 1) requestAnimationFrame(tick);
-            };
-            requestAnimationFrame(tick);
-          });
-        });
-      }, { threshold: 0.4 });
-      sio.observe(stats);
     }
 
     /* ---------- session story terminal ---------- */
