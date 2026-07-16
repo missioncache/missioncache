@@ -734,7 +734,8 @@ def test_install_codex_sets_mcp_success_false_when_mcp_add_fails(
     monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run)
 
     ctx = _make_ctx()
-    mcp_clients.install_codex(ctx)
+    with pytest.raises(mcp_clients.subprocess_utils.CommandFailed):
+        mcp_clients.install_codex(ctx)
     assert ctx.mcp_success.get("codex") is False
 
 
@@ -770,7 +771,8 @@ def test_install_opencode_sets_mcp_success_false_on_unparseable_config(
     mcp_clients.OPENCODE_CONFIG_PATH.write_text('{"mcp":')
 
     ctx = _make_ctx()
-    mcp_clients.install_opencode(ctx)
+    with pytest.raises(mcp_clients.subprocess_utils.CommandFailed):
+        mcp_clients.install_opencode(ctx)
     assert ctx.mcp_success.get("opencode") is False
 
 
@@ -803,7 +805,8 @@ def test_install_opencode_refuses_jsonc_and_preserves_user_file(
     monkeypatch.setattr(mcp_clients.ui, "warn", lambda msg: warn_calls.append(msg))
 
     ctx = _make_ctx()
-    mcp_clients.install_opencode(ctx)
+    with pytest.raises(mcp_clients.subprocess_utils.CommandFailed) as exc:
+        mcp_clients.install_opencode(ctx)
 
     # File must be byte-for-byte unchanged.
     assert mcp_clients.OPENCODE_CONFIG_PATH.read_text() == original
@@ -811,10 +814,9 @@ def test_install_opencode_refuses_jsonc_and_preserves_user_file(
     # opencode_commands install.
     assert ctx.mcp_success.get("opencode") is False
     assert "opencode" not in state.load().get("components", {})
-    # User gets the exact snippet to add manually.
-    assert any(
-        '"missioncache"' in m and "manually" in m.lower() for m in warn_calls
-    ), f"expected manual-add snippet warning; got {warn_calls!r}"
+    # User gets the exact snippet to add manually - carried in the raised
+    # failure, which install_components surfaces as the component's warning.
+    assert '"missioncache"' in exc.value.stderr and "manually" in exc.value.stderr.lower()
 
 
 def test_install_vscode_refuses_jsonc_and_preserves_user_file(
@@ -840,14 +842,13 @@ def test_install_vscode_refuses_jsonc_and_preserves_user_file(
     monkeypatch.setattr(mcp_clients.ui, "warn", lambda msg: warn_calls.append(msg))
 
     ctx = _make_ctx()
-    mcp_clients.install_vscode(ctx)
+    with pytest.raises(mcp_clients.subprocess_utils.CommandFailed) as exc:
+        mcp_clients.install_vscode(ctx)
 
     assert mcp_clients.VSCODE_USER_MCP_PATH.read_text() == original
     assert ctx.mcp_success.get("vscode") is False
     assert "vscode" not in state.load().get("components", {})
-    assert any(
-        '"missioncache"' in m and "manually" in m.lower() for m in warn_calls
-    ), f"expected manual-add snippet warning; got {warn_calls!r}"
+    assert '"missioncache"' in exc.value.stderr and "manually" in exc.value.stderr.lower()
 
 
 def test_install_vscode_sets_mcp_success_true_on_success(
@@ -909,3 +910,217 @@ def test_ensure_mcp_missioncache_on_path_returns_true_when_already_present(
 
     assert mcp_clients._ensure_mcp_missioncache_on_path() is True
     pipx_called.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _ensure_codex_auto_approval
+# ---------------------------------------------------------------------------
+
+def _codex_config_with_missioncache() -> str:
+    return (
+        "[projects.x]\n"
+        'trust_level = "trusted"\n'
+        "\n"
+        "[mcp_servers.missioncache]\n"
+        'command = "mcp-missioncache"\n'
+        "\n"
+        "[mcp_servers.other]\n"
+        'command = "other-server"\n'
+    )
+
+
+def test_ensure_codex_auto_approval_inserts_key_in_missioncache_section(
+    isolated_home: Path,
+) -> None:
+    """The key must land INSIDE [mcp_servers.missioncache], never leak into a
+    following section (that would auto-approve a stranger's tools)."""
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text(_codex_config_with_missioncache())
+
+    mcp_clients._ensure_codex_auto_approval()
+
+    text = mcp_clients.CODEX_CONFIG_TOML.read_text()
+    section = text[text.index("[mcp_servers.missioncache]"):text.index("[mcp_servers.other]")]
+    assert 'default_tools_approval_mode = "approve"' in section
+    other = text[text.index("[mcp_servers.other]"):]
+    assert "default_tools_approval_mode" not in other
+    assert 'trust_level = "trusted"' in text, "unrelated sections preserved"
+
+
+def test_ensure_codex_auto_approval_idempotent(isolated_home: Path) -> None:
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text(_codex_config_with_missioncache())
+
+    mcp_clients._ensure_codex_auto_approval()
+    once = mcp_clients.CODEX_CONFIG_TOML.read_text()
+    mcp_clients._ensure_codex_auto_approval()
+
+    assert mcp_clients.CODEX_CONFIG_TOML.read_text() == once
+    assert once.count("default_tools_approval_mode") == 1
+
+
+def test_ensure_codex_auto_approval_respects_existing_user_value(
+    isolated_home: Path,
+) -> None:
+    """A user who chose "prompt" keeps their choice - never overwrite."""
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text(
+        "[mcp_servers.missioncache]\n"
+        'command = "mcp-missioncache"\n'
+        'default_tools_approval_mode = "prompt"\n'
+    )
+
+    mcp_clients._ensure_codex_auto_approval()
+
+    text = mcp_clients.CODEX_CONFIG_TOML.read_text()
+    assert 'default_tools_approval_mode = "prompt"' in text
+    assert text.count("default_tools_approval_mode") == 1, (
+        "must not ALSO insert approve alongside the user's value"
+    )
+
+
+def test_ensure_codex_auto_approval_warns_when_section_missing(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text("[projects.x]\n")
+    warns: list[str] = []
+    monkeypatch.setattr(mcp_clients.ui, "warn", lambda msg: warns.append(msg))
+
+    mcp_clients._ensure_codex_auto_approval()
+
+    assert mcp_clients.CODEX_CONFIG_TOML.read_text() == "[projects.x]\n", "untouched"
+    assert any("not found" in w for w in warns)
+
+
+def test_install_codex_configures_approval_on_both_paths(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh add AND already-registered must both end with tool approval set -
+    the already-registered path is exactly the machine where every tool call
+    was auto-cancelled in exec mode (live, codex 0.144.1)."""
+    monkeypatch.setattr(
+        mcp_clients.shutil,
+        "which",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
+    )
+    _set_mcp_missioncache_path_ok(monkeypatch)
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+
+    def fake_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["codex", "mcp", "list"]:
+            return _proc(stdout="(no servers configured)\n")
+        if cmd[:3] == ["codex", "mcp", "add"]:
+            # codex mcp add writes the server section itself.
+            mcp_clients.CODEX_CONFIG_TOML.write_text(
+                '[mcp_servers.missioncache]\ncommand = "mcp-missioncache"\n'
+            )
+        return _proc()
+
+    monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run)
+    mcp_clients.install_codex(_make_ctx())
+    assert 'default_tools_approval_mode = "approve"' in mcp_clients.CODEX_CONFIG_TOML.read_text()
+
+    # Second run takes the already-registered branch; wipe the key first.
+    mcp_clients.CODEX_CONFIG_TOML.write_text(
+        '[mcp_servers.missioncache]\ncommand = "mcp-missioncache"\n'
+    )
+
+    def fake_run_registered(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["codex", "mcp", "list"]:
+            return _proc(stdout="missioncache  mcp-missioncache\n")
+        return _proc()
+
+    monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run_registered)
+    mcp_clients.install_codex(_make_ctx())
+    assert 'default_tools_approval_mode = "approve"' in mcp_clients.CODEX_CONFIG_TOML.read_text()
+
+
+def test_ensure_codex_auto_approval_respects_commented_out_key(
+    isolated_home: Path,
+) -> None:
+    """A commented-out key is the user's visible choice (they disabled it
+    deliberately or codex left it as documentation) - never insert a live
+    value over it."""
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text(
+        "[mcp_servers.missioncache]\n"
+        'command = "mcp-missioncache"\n'
+        '# default_tools_approval_mode = "prompt"\n'
+    )
+
+    mcp_clients._ensure_codex_auto_approval()
+
+    text = mcp_clients.CODEX_CONFIG_TOML.read_text()
+    assert text.count("default_tools_approval_mode") == 1
+    assert 'default_tools_approval_mode = "approve"' not in text
+
+
+def test_ensure_codex_auto_approval_header_at_eof_without_newline(
+    isolated_home: Path,
+) -> None:
+    """Header as the last line with no trailing newline: inserting must not
+    glue the key onto the header (that produced invalid TOML)."""
+    import tomllib
+
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text("[mcp_servers.missioncache]")
+
+    mcp_clients._ensure_codex_auto_approval()
+
+    text = mcp_clients.CODEX_CONFIG_TOML.read_text()
+    parsed = tomllib.loads(text)  # must stay valid TOML
+    assert parsed["mcp_servers"]["missioncache"]["default_tools_approval_mode"] == "approve"
+
+
+def test_ensure_codex_auto_approval_write_failure_warns_not_raises(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing config write must warn and return (best-effort contract),
+    never abort the whole install with an uncaught OSError."""
+    mcp_clients.CODEX_CONFIG_TOML.parent.mkdir(parents=True)
+    mcp_clients.CODEX_CONFIG_TOML.write_text(
+        '[mcp_servers.missioncache]\ncommand = "mcp-missioncache"\n'
+    )
+    warns: list[str] = []
+    monkeypatch.setattr(mcp_clients.ui, "warn", lambda msg: warns.append(msg))
+
+    def _boom(path, text):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(mcp_clients.fs_utils, "write_config_text", _boom)
+
+    mcp_clients._ensure_codex_auto_approval()  # must not raise
+
+    assert any("Could not write" in w for w in warns)
+
+
+def test_install_codex_raises_when_mcp_add_fails(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed codex mcp add must reach the installer's failed list (raise),
+    not warn into a green checkmark, and mcp_success must record the failure
+    for the commands child."""
+    monkeypatch.setattr(
+        mcp_clients.shutil,
+        "which",
+        lambda name: "/opt/homebrew/bin/codex" if name == "codex" else "/x/mcp-missioncache",
+    )
+    _set_mcp_missioncache_path_ok(monkeypatch)
+
+    def fake_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["codex", "mcp", "list"]:
+            return _proc(stdout="(no servers configured)\n")
+        if cmd[:3] == ["codex", "mcp", "add"]:
+            raise mcp_clients.subprocess_utils.CommandFailed(
+                cmd=cmd, returncode=1, stdout="", stderr="network unreachable"
+            )
+        return _proc()
+
+    monkeypatch.setattr(mcp_clients.subprocess_utils, "run", fake_run)
+    ctx = _make_ctx()
+
+    with pytest.raises(mcp_clients.subprocess_utils.CommandFailed):
+        mcp_clients.install_codex(ctx)
+
+    assert ctx.mcp_success["codex"] is False

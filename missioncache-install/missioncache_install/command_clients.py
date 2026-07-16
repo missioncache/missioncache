@@ -5,8 +5,8 @@ prompts, mode) into Codex, OpenCode, and VSCode Copilot Chat alongside the
 existing Claude plugin. The MCP server is registered by mcp_clients.py; this
 module handles only the slash command surface.
 
-Four transformations apply to every non-Claude variant. Two are applied by
-`_render_for_non_claude`; the filename prefix is applied at the call site:
+Six transformations apply to every non-Claude variant. All but the filename
+prefix are applied by `_render_for_non_claude`:
 
 1. Filename gets a `missioncache-` prefix (missioncache-load.md etc.). All three tools have
    flat slash command namespaces, so the prefix avoids clashes with other
@@ -19,6 +19,12 @@ Four transformations apply to every non-Claude variant. Two are applied by
 4. Cross-references between commands are rewritten from `/missioncache:<name>` to
    `/missioncache-<name>` so that "Run /missioncache:prompts my-project" prose in command
    bodies points at a slash command that actually exists in the target tool.
+5. `<!-- claude-code-only -->` ... `<!-- /claude-code-only -->` regions are
+   dropped - session-id resolution and statusline/binding steps that are
+   meaningless in other tools and, worse, can hijack a live Claude session's
+   binding via the transcript-mtime fallback.
+6. A runtime notice is inserted after the frontmatter telling the executing
+   model to skip Claude-session machinery and omit session_id arguments.
 
 Per-tool destination summary:
 
@@ -70,8 +76,10 @@ CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 
 # Codex plugin manifest version. Independent of missioncache-install's version - the
 # plugin is a stable artifact whose bumps signal command-shape changes, not
-# installer-tooling changes.
-CODEX_PLUGIN_VERSION = "1.0.0"
+# installer-tooling changes. Codex caches the plugin by this version, so any
+# change to the rendered command content MUST bump it or updated installs
+# keep serving the old cached copy.
+CODEX_PLUGIN_VERSION = "1.1.0"
 
 # Substitution regex for the MCP tool prefix. Anchored at a word boundary so
 # the rewrite only matches the full `mcp__plugin_missioncache_pm__` literal and not
@@ -85,13 +93,47 @@ _MCP_PREFIX_RE = re.compile(r"\bmcp__plugin_missioncache_pm__")
 # rewrite unrelated `:` separators (timestamps, ratios, etc.).
 _MISSIONCACHE_SLASH_REF_RE = re.compile(r"/missioncache:([a-z]+)")
 
+# Claude-only region markers. Command sources wrap Claude Code-specific
+# blocks (session-id resolution bash, statusline/hooks-state.db binding
+# steps) in these HTML comments; the non-Claude render drops the whole
+# region. Left in place, that bash is not just dead weight in other tools:
+# its transcript-mtime fallback resolves to whatever CLAUDE session touched
+# the cwd most recently and then WRITES that session's binding - a Codex run
+# hijacked a live Claude session's project binding this way (2026-07-16).
+_CLAUDE_ONLY_RE = re.compile(
+    r"[ \t]*<!--\s*claude-code-only\s*-->.*?<!--\s*/claude-code-only\s*-->[ \t]*\n?",
+    re.DOTALL,
+)
+
+# Inserted after frontmatter in every non-Claude render. Belt to the
+# markers' braces: covers session_id arguments and any Claude-specific
+# reference that survives outside a marked region.
+_NON_CLAUDE_NOTICE = (
+    "> **Runtime note:** This command is running outside Claude Code, so "
+    "Claude's session machinery does not exist here. Skip any step or bash "
+    "that resolves a Claude SESSION_ID (`CLAUDE_CODE_SESSION_ID`, "
+    "`~/.claude/projects` transcript walks), skip statusline/session "
+    "registration steps entirely, and omit every `session_id` argument on "
+    "MCP tool calls. Never read or write `~/.claude/hooks/state/` or "
+    "`~/.claude/hooks-state.db` - writing them can corrupt a live Claude "
+    "Code session's project binding.\n\n"
+)
+
 # Codex marketplace add: the CLI lacks an "already registered" exit code, so
 # we sniff stderr for an idempotency phrase. Restricted to the unambiguous
 # "already <verb>" wordings; anything ambiguous (e.g. "marketplace exists at
 # this path with different content" or "already in use by another marketplace")
 # is treated as a real failure rather than silently swallowed as success.
+# Wordings validated against codex 0.144.1.
 _CODEX_ALREADY_REGISTERED_RE = re.compile(
     r"\balready (added|registered|installed|exists)\b",
+    re.IGNORECASE,
+)
+# Plugin add uses a narrower sniff: "already exists" is a common phrase in
+# REAL failures ("destination already exists and is not empty"), and a false
+# positive here converts a broken plugin install into recorded success.
+_CODEX_PLUGIN_ALREADY_RE = re.compile(
+    r"\balready (added|installed)\b",
     re.IGNORECASE,
 )
 # Symmetric pattern for the uninstall path: a remove against a non-registered
@@ -99,13 +141,6 @@ _CODEX_ALREADY_REGISTERED_RE = re.compile(
 _CODEX_ABSENT_RE = re.compile(
     r"\b(not found|no such|does not exist|unknown marketplace)\b",
     re.IGNORECASE,
-)
-# Codex plugin activation stanza detection. Anchored to start-of-line and
-# allows leading whitespace but rejects a leading `#` (commented-out stanzas
-# do not activate the plugin and must not be treated as already-enabled).
-_CODEX_PLUGIN_STANZA_RE = re.compile(
-    r'^\s*\[plugins\."missioncache@missioncache"\]\s*$',
-    re.MULTILINE,
 )
 
 
@@ -140,12 +175,18 @@ def _mcp_ready_for(tool: str, ctx: "InstallContext") -> bool:
     if outcome is True:
         return True
     if outcome is False:
-        ui.warn(
-            f"Skipping {tool} slash commands - {tool} MCP registration "
-            "failed earlier in this run. Fix the underlying issue and "
-            f"re-run with --update."
+        # Parent ran and FAILED: this component genuinely cannot work, so
+        # raise rather than warn-and-return - a silent return here rendered
+        # a green checkmark (and exit 0) for commands whose MCP server never
+        # registered.
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", f"{tool}-commands"], 1, "",
+            f"{tool} MCP registration failed earlier in this run - the "
+            "slash commands would have no MCP server to call. Fix the "
+            "underlying issue and re-run with --update.",
         )
-        return False
+    # Parent did not run in this session (user's flag choice, e.g.
+    # `--codex-commands --no-codex`): a legitimate skip, not a failure.
     ui.warn(
         f"Skipping {tool} slash commands - {tool} MCP server was not "
         f"registered in this run. Run `missioncache-install --{tool}` first "
@@ -231,30 +272,43 @@ def _emit_command_install_outcome(
 
 
 def _render_for_non_claude(content: str) -> str:
-    """Apply the three non-Claude transformations to a command's source content.
+    """Apply the non-Claude transformations to a command's source content.
 
     1. Strip the `argument-hint: ...` frontmatter line if present.
     2. Rewrite `mcp__plugin_missioncache_pm__` -> `mcp__missioncache__` everywhere.
     3. Rewrite `/missioncache:<name>` -> `/missioncache-<name>` so cross-references between
        commands ("Run /missioncache:prompts ...") point at the slash command name
        that actually exists in the target tool.
+    4. Drop `<!-- claude-code-only -->` ... `<!-- /claude-code-only -->`
+       regions (session-id resolution, statusline/binding steps).
+    5. Insert the non-Claude runtime notice after the frontmatter, covering
+       Claude-specific references that survive outside marked regions.
 
     Frontmatter is the leading `---\\n...---\\n` block. If absent, the
-    substitutions still apply to the body. The body is otherwise untouched.
+    substitutions still apply to the body and the notice goes on top.
     """
+    head = ""
     if content.startswith("---\n"):
         end = content.find("\n---\n", 4)
         if end != -1:
             head_block = content[: end + 5]
-            body = content[end + 5:]
-            head_lines = [
+            content = content[end + 5:]
+            head = "".join(
                 line for line in head_block.splitlines(keepends=True)
                 if not line.lstrip().startswith("argument-hint:")
-            ]
-            content = "".join(head_lines) + body
+            )
+    content = _CLAUDE_ONLY_RE.sub("", content)
+    if "claude-code-only" in content:
+        # An unpaired or typo'd marker fails OPEN: the non-greedy regex
+        # simply does not match, and the Claude-session bash (the hijack
+        # vector this strip exists for) would leak into the render
+        # silently. Fail loudly at build/install time instead.
+        raise ValueError(
+            "unbalanced <!-- claude-code-only --> markers in command source"
+        )
     content = _MCP_PREFIX_RE.sub("mcp__missioncache__", content)
     content = _MISSIONCACHE_SLASH_REF_RE.sub(r"/missioncache-\1", content)
-    return content
+    return head + "\n" + _NON_CLAUDE_NOTICE + content.lstrip("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -500,22 +554,28 @@ def install_codex_commands(ctx: "InstallContext") -> None:
     expected = len(CANONICAL_COMMANDS)
     command_count = _build_codex_marketplace(ctx)
     if command_count == 0:
-        ui.warn("No Codex commands written - skipping marketplace registration")
-        return
+        # Raise rather than warn-and-return: install_components only counts
+        # a component as failed when its installer raises, and a silent
+        # return here rendered a green checkmark for a component that never
+        # installed (observed live 2026-07-16).
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "codex-commands"], 1, "",
+            "no Codex command sources found - nothing written",
+        )
 
     if not _register_codex_marketplace():
-        # Marketplace registration failed for an unknown reason. Do NOT
-        # activate the stanza or record state - the plugin would point at a
+        # Do NOT activate the plugin or record state - it would point at a
         # marketplace Codex doesn't know about and `--update` / `--uninstall`
-        # would operate on a fiction.
-        ui.warn(
-            "Skipping plugin activation in ~/.codex/config.toml because "
-            "marketplace registration failed. Re-run with --update once the "
-            "underlying issue is resolved."
+        # would operate on a fiction. Raising makes the component land in
+        # the failed list so the summary stays honest.
+        raise subprocess_utils.CommandFailed(
+            ["codex", "plugin", "marketplace", "add", str(CODEX_MARKETPLACE_DIR)],
+            1, "",
+            "marketplace registration failed (details warned above); "
+            "re-run with --update once resolved",
         )
-        return
 
-    _enable_codex_plugin()
+    _install_codex_plugin()
     state.record_component(
         "codex_commands",
         {
@@ -590,7 +650,11 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
             {
                 "name": "missioncache",
                 "source": {"source": "local", "path": "./plugins/missioncache"},
-                "policy": {"installation": "AVAILABLE", "authentication": "OFF"},
+                # No "authentication" key: codex 0.144.1 rejects the manifest
+                # outright on the old "OFF" value (unknown variant, expected
+                # ON_INSTALL or ON_USE) and omitting it means no auth, which
+                # is what we want. Verified live 2026-07-16.
+                "policy": {"installation": "AVAILABLE"},
                 "category": "Productivity",
             }
         ],
@@ -642,41 +706,61 @@ def _register_codex_marketplace() -> bool:
         return False
 
 
-def _enable_codex_plugin() -> None:
-    """Append `[plugins."missioncache@missioncache"]` to ~/.codex/config.toml.
+def _install_codex_plugin() -> None:
+    """Activate the plugin via `codex plugin add missioncache@missioncache`.
 
-    Codex activates plugins via an empty TOML stanza in config.toml; the bare
-    header is enough to enable the plugin without per-plugin overrides.
+    This is the canonical activation flow: it copies the plugin into Codex's
+    cache (~/.codex/plugins/cache/) and writes the config stanza with
+    `enabled = true` itself. The previous approach - hand-appending a bare
+    `[plugins."missioncache@missioncache"]` header to config.toml - never
+    populated the plugin cache, so Codex listed the plugin "not installed"
+    and the commands never loaded (verified live on codex 0.144.1,
+    2026-07-16).
 
-    Existence check uses an anchored regex (`_CODEX_PLUGIN_STANZA_RE`) so a
-    commented-out stanza (`# [plugins."missioncache@missioncache"]`) is correctly ignored
-    and the active stanza gets appended. A bare substring check would have
-    treated the comment as already-enabled and silently skipped activation.
-
-    We keep missioncache-install dep-free by handling the file as plain text rather
-    than parsing/serializing TOML.
+    Raises CommandFailed on real failure so the component lands in the
+    installer's failed list. An already-installed plugin is REFRESHED
+    (remove + re-add): Codex caches the plugin by version under
+    ~/.codex/plugins/cache/, so treating "already installed" as done would
+    leave stale command content active after an --update while the installer
+    reports success.
     """
-    if not CODEX_CONFIG_TOML.exists():
-        CODEX_CONFIG_TOML.parent.mkdir(parents=True, exist_ok=True)
-        fs_utils.write_config_text(CODEX_CONFIG_TOML, "")
-
-    text = CODEX_CONFIG_TOML.read_text()
-    stanza_header = '[plugins."missioncache@missioncache"]'
-    if _CODEX_PLUGIN_STANZA_RE.search(text):
-        ui.detail("Codex plugin stanza already present in config.toml")
-        return
-    if text and not text.endswith("\n"):
-        text += "\n"
-    if text and not text.endswith("\n\n"):
-        text += "\n"
-    text += stanza_header + "\n"
-    fs_utils.write_config_text(CODEX_CONFIG_TOML, text)
-    ui.detail('Added [plugins."missioncache@missioncache"] stanza to ~/.codex/config.toml')
+    try:
+        subprocess_utils.run(
+            ["codex", "plugin", "add", "missioncache@missioncache"]
+        )
+        ui.detail("Installed plugin via codex plugin add missioncache@missioncache")
+    except subprocess_utils.CommandFailed as e:
+        combined = (e.stderr or "") + (e.stdout or "")
+        if not _CODEX_PLUGIN_ALREADY_RE.search(combined):
+            raise
+        subprocess_utils.run(
+            ["codex", "plugin", "remove", "missioncache@missioncache"]
+        )
+        subprocess_utils.run(
+            ["codex", "plugin", "add", "missioncache@missioncache"]
+        )
+        ui.detail("Refreshed installed plugin (remove + re-add) so the cached commands match this build")
 
 
 def uninstall_codex_commands(ctx: "InstallContext") -> None:
-    """Reverse install: marketplace remove, config stanza strip, tree delete."""
+    """Reverse install: plugin remove, marketplace remove, legacy stanza strip, tree delete."""
     if shutil.which("codex"):
+        # New-style installs: codex plugin add wrote the config stanza and
+        # the plugin cache copy; codex plugin remove reverses both.
+        try:
+            subprocess_utils.run(
+                ["codex", "plugin", "remove", "missioncache@missioncache"]
+            )
+            ui.detail("Removed missioncache plugin from Codex")
+        except subprocess_utils.CommandFailed as e:
+            combined = (e.stderr or "") + (e.stdout or "")
+            if _CODEX_ABSENT_RE.search(combined):
+                ui.detail("Codex plugin already absent")
+            else:
+                ui.warn(
+                    f"codex plugin remove failed: "
+                    f"{e.stderr.strip() or e.stdout.strip() or 'unknown error'}"
+                )
         try:
             subprocess_utils.run(
                 ["codex", "plugin", "marketplace", "remove", "missioncache"]

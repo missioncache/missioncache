@@ -127,6 +127,7 @@ rather than rebasing to the monorepo root. Default is `True`.
 
 ### Step 4: Create MissionCache Files
 
+<!-- claude-code-only -->
 First resolve the current Claude session ID so the new project binds to this session for the statusline. Run:
 
 ```bash
@@ -149,8 +150,9 @@ echo "$SESSION_ID"
 ```
 
 Capture the printed `SESSION_ID`. With `$CLAUDE_CODE_SESSION_ID` available it is essentially always populated; only if the output is empty (older Claude Code with no transcript yet) call `create_missioncache_files` without the `session_id` argument and tell the user the statusline can be populated by running `/missioncache:load` once the project exists.
+<!-- /claude-code-only -->
 
-Now create the MissionCache files. Pass `research_findings` from Step 2 via the `plan` dict. Pass the resolved `session_id` so the binding is atomic with task creation. Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
+Now create the MissionCache files. Pass `research_findings` from Step 2 via the `plan` dict.<!-- claude-code-only --> Pass the resolved `session_id` so the binding is atomic with task creation.<!-- /claude-code-only --> Pass `force=True` ONLY if Step 1's duplicate check confirmed the user wants to recreate destructively - the tool returns `ALREADY_EXISTS` by default to prevent silent overwrite.
 
 **Derive the project category** from the description (and the conversation context), and pass it as `category`. Pick the single best fit from this taxonomy - judge by what the project DOES, not by keywords in its name:
 
@@ -269,9 +271,9 @@ Non-coding projects don't need prompts:
 
 1. Ask for project name and optional JIRA ticket
 
-2. Resolve the current session ID using the same bash as Step 4 above, and capture the printed `SESSION_ID`.
+2. <!-- claude-code-only -->Resolve the current session ID using the same bash as Step 4 above, and capture the printed `SESSION_ID`.<!-- /claude-code-only -->
 
-3. Create project, passing `session_id` so the statusline binds atomically. Non-coding projects default to `category="noncoding"` unless the description clearly fits another taxonomy value (e.g. a docs-writing project is `docs`):
+3. Create the project.<!-- claude-code-only --> Pass `session_id` so the statusline binds atomically.<!-- /claude-code-only --> Non-coding projects default to `category="noncoding"` unless the description clearly fits another taxonomy value (e.g. a docs-writing project is `docs`):
    ```
    mcp__plugin_missioncache_pm__create_task(
      name="<project-name>",

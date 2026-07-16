@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -102,11 +103,14 @@ def install_codex(ctx: "InstallContext") -> None:
         ctx.mcp_success["codex"] = False
         return
     if not _ensure_mcp_missioncache_on_path():
-        ui.warn("Skipping Codex registration - mcp-missioncache prereq failed")
         ctx.mcp_success["codex"] = False
-        return
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "codex"], 1, "",
+            "mcp-missioncache prereq failed - Codex registration impossible",
+        )
     if _codex_missioncache_registered():
         ui.detail("MissionCache already registered with Codex")
+        _ensure_codex_auto_approval()
         state.record_component("codex", {"command": "mcp-missioncache"})
         ui.success("Codex MCP integration confirmed")
         ctx.mcp_success["codex"] = True
@@ -114,15 +118,109 @@ def install_codex(ctx: "InstallContext") -> None:
     ui.detail("Running: codex mcp add missioncache -- mcp-missioncache")
     try:
         subprocess_utils.run(["codex", "mcp", "add", "missioncache", "--", "mcp-missioncache"])
-    except subprocess_utils.CommandFailed as e:
-        ui.warn(
-            f"codex mcp add failed: {e.stderr.strip() or e.stdout.strip() or 'unknown error'}"
-        )
+    except subprocess_utils.CommandFailed:
+        # Propagate so the component lands in the failed list - a warn here
+        # rendered a green checkmark (and exit 0) for a broken registration.
         ctx.mcp_success["codex"] = False
-        return
+        raise
+    _ensure_codex_auto_approval()
     state.record_component("codex", {"command": "mcp-missioncache"})
     ui.success("Codex MCP integration installed")
     ctx.mcp_success["codex"] = True
+
+
+CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
+
+
+def _ensure_codex_auto_approval() -> None:
+    """Ensure `default_tools_approval_mode = "approve"` on the missioncache server.
+
+    Without it Codex treats every missioncache tool call as needing per-call
+    approval: the TUI prompts on each call and `codex exec` auto-cancels
+    them, so every slash command dies on its first MCP call (observed live
+    on codex 0.144.1: /missioncache-load failed with "user cancelled MCP
+    tool call"). `codex mcp add` has no flag for this, so the key is written
+    into the `[mcp_servers.missioncache]` section directly. MissionCache's
+    tools manage project files under ~/.missioncache, so blanket approval is
+    the intended posture, same as the Claude plugin.
+
+    The edit is line-based, not TOML-aware (same limitation as
+    `_strip_codex_plugin_stanza`, documented there): a header-lookalike line
+    inside a multi-line string value could fool the section scan. As a
+    backstop the result is validated with tomllib before writing - an edit
+    that would produce unparseable TOML warns and leaves the file untouched,
+    and write failures warn rather than abort the install (this helper is
+    best-effort; the MCP registration itself is the load-bearing part).
+    An existing key - including a commented-out one, which reads as the
+    user's deliberate choice - is never overridden.
+    """
+    try:
+        text = CODEX_CONFIG_TOML.read_text()
+    except OSError:
+        ui.warn(
+            "Could not read ~/.codex/config.toml to set tool approval - "
+            'add default_tools_approval_mode = "approve" under '
+            "[mcp_servers.missioncache] manually"
+        )
+        return
+
+    lines = text.splitlines(keepends=True)
+    header_idx = None
+    section_end = len(lines)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if header_idx is None:
+            if stripped == "[mcp_servers.missioncache]":
+                header_idx = i
+        elif stripped.startswith("[") and stripped.endswith("]"):
+            section_end = i
+            break
+    if header_idx is None:
+        ui.warn(
+            "[mcp_servers.missioncache] section not found in config.toml - "
+            "tool approval not configured"
+        )
+        return
+
+    section = lines[header_idx:section_end]
+    for line in section:
+        key = line.strip().lstrip("#").strip().split("=")[0].strip()
+        if key == "default_tools_approval_mode":
+            # Live value or commented-out: either way the user has seen this
+            # knob - respect their state rather than silently flipping it.
+            ui.detail("Codex tool approval already configured for missioncache")
+            return
+
+    # A header as the file's last line may lack a trailing newline; inserting
+    # after it would glue the key onto the header and break the TOML.
+    if not lines[header_idx].endswith("\n"):
+        lines[header_idx] += "\n"
+    lines.insert(header_idx + 1, 'default_tools_approval_mode = "approve"\n')
+    new_text = "".join(lines)
+
+    try:
+        tomllib.loads(new_text)
+    except tomllib.TOMLDecodeError as e:
+        ui.warn(
+            f"Refusing to edit ~/.codex/config.toml - the edit would produce "
+            f"invalid TOML ({e}). Add default_tools_approval_mode = "
+            '"approve" under [mcp_servers.missioncache] manually.'
+        )
+        return
+
+    try:
+        fs_utils.write_config_text(CODEX_CONFIG_TOML, new_text)
+    except OSError as e:
+        ui.warn(
+            f"Could not write ~/.codex/config.toml ({e}) - add "
+            'default_tools_approval_mode = "approve" under '
+            "[mcp_servers.missioncache] manually"
+        )
+        return
+    ui.detail(
+        'Set default_tools_approval_mode = "approve" for the missioncache '
+        "MCP server (tools run without per-call prompts)"
+    )
 
 
 def uninstall_codex(ctx: "InstallContext") -> None:
@@ -178,18 +276,22 @@ def install_opencode(ctx: "InstallContext") -> None:
         ctx.mcp_success["opencode"] = False
         return
     if not _ensure_mcp_missioncache_on_path():
-        ui.warn("Skipping OpenCode registration - mcp-missioncache prereq failed")
         ctx.mcp_success["opencode"] = False
-        return
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "opencode"], 1, "",
+            "mcp-missioncache prereq failed - OpenCode registration impossible",
+        )
 
     desired = {"type": "local", "command": ["mcp-missioncache"]}
     OPENCODE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         data, indent, used_jsonc = _load_json_object(OPENCODE_CONFIG_PATH)
     except json.JSONDecodeError as e:
-        ui.warn(f"Cannot parse {OPENCODE_CONFIG_PATH}: {e}. Fix the file and re-run.")
         ctx.mcp_success["opencode"] = False
-        return
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "opencode"], 1, "",
+            f"Cannot parse {OPENCODE_CONFIG_PATH}: {e}. Fix the file and re-run.",
+        )
 
     mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else None
     existing = mcp.get("missioncache") if mcp is not None else None
@@ -200,13 +302,13 @@ def install_opencode(ctx: "InstallContext") -> None:
     elif used_jsonc:
         # File has comments or trailing commas. json.dumps would silently
         # strip them; refuse to write and tell the user exactly what to add.
-        ui.warn(
+        ctx.mcp_success["opencode"] = False
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "opencode"], 1, "",
             f"{OPENCODE_CONFIG_PATH} contains comments or trailing commas. "
             "Auto-merge would strip them. Add this entry manually under "
-            f'"mcp" and re-run with --update:\n  "missioncache": {json.dumps(desired)}'
+            f'"mcp" and re-run with --update:\n  "missioncache": {json.dumps(desired)}',
         )
-        ctx.mcp_success["opencode"] = False
-        return
     else:
         if mcp is None:
             mcp = {}
@@ -285,18 +387,22 @@ def install_vscode(ctx: "InstallContext") -> None:
         ctx.mcp_success["vscode"] = False
         return
     if not _ensure_mcp_missioncache_on_path():
-        ui.warn("Skipping VSCode registration - mcp-missioncache prereq failed")
         ctx.mcp_success["vscode"] = False
-        return
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "vscode"], 1, "",
+            "mcp-missioncache prereq failed - VSCode registration impossible",
+        )
 
     desired = {"type": "stdio", "command": "mcp-missioncache"}
     VSCODE_USER_MCP_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         data, indent, used_jsonc = _load_json_object(VSCODE_USER_MCP_PATH)
     except json.JSONDecodeError as e:
-        ui.warn(f"Cannot parse {VSCODE_USER_MCP_PATH}: {e}. Fix the file and re-run.")
         ctx.mcp_success["vscode"] = False
-        return
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "vscode"], 1, "",
+            f"Cannot parse {VSCODE_USER_MCP_PATH}: {e}. Fix the file and re-run.",
+        )
 
     servers = data.get("servers") if isinstance(data.get("servers"), dict) else None
     existing = servers.get("missioncache") if servers is not None else None
@@ -307,13 +413,13 @@ def install_vscode(ctx: "InstallContext") -> None:
     elif used_jsonc:
         # File has comments or trailing commas; refuse auto-merge to avoid
         # silently stripping them. mcp.json is JSONC by VSCode convention.
-        ui.warn(
+        ctx.mcp_success["vscode"] = False
+        raise subprocess_utils.CommandFailed(
+            ["missioncache-install", "vscode"], 1, "",
             f"{VSCODE_USER_MCP_PATH} contains comments or trailing commas. "
             "Auto-merge would strip them. Add this entry manually under "
-            f'"servers" and re-run with --update:\n  "missioncache": {json.dumps(desired)}'
+            f'"servers" and re-run with --update:\n  "missioncache": {json.dumps(desired)}',
         )
-        ctx.mcp_success["vscode"] = False
-        return
     else:
         if servers is None:
             servers = {}

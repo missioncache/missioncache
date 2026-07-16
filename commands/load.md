@@ -76,6 +76,7 @@ If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo
 
 ### Step 1: Get Project Details
 
+<!-- claude-code-only -->
 First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_missioncache_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
 
 ```bash
@@ -91,7 +92,10 @@ fi
 echo "SESSION_ID=$SESSION_ID"
 ```
 
-Capture the printed `SESSION_ID`. Then call `mcp__plugin_missioncache_pm__get_task(project_name="<name>", session_id="<SESSION_ID>")` which returns:
+Capture the printed `SESSION_ID`.
+<!-- /claude-code-only -->
+
+Then call `mcp__plugin_missioncache_pm__get_task(project_name="<name>")` - in Claude Code, also pass `session_id="<SESSION_ID>"` so the session binds server-side. It returns:
 - Project ID and status
 - Time invested (formatted)
 - Progress (completion %)
@@ -99,7 +103,9 @@ Capture the printed `SESSION_ID`. Then call `mcp__plugin_missioncache_pm__get_ta
 - File paths
 - `session_bound: true | false | <omitted>` indicating whether the session-to-project binding succeeded server-side. If the response includes `session_bound: true`, the statusline will reflect this project immediately - the Step 4 bash binding is still run as defense-in-depth and to refresh the dashboard list view, but it is no longer load-bearing.
 
+<!-- claude-code-only -->
 If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg from `get_task`; Step 4 reuses this same value, so its binding is skipped too and the user can populate the statusline later by re-running `/missioncache:load`.
+<!-- /claude-code-only -->
 
 ### Step 2: Get the Context Digest
 
@@ -119,9 +125,15 @@ If `get_context_digest` returns an error (older MCP server without the tool), fa
 
 **Fork branch (when the digest returns a non-null `parent_digest`):** this project is a fork and the parent's context file is its shared knowledge layer.
 
+Read the shared layer: call `get_context_digest(project_name="<parent>")` and fold its Next Steps / newest Recent Changes into the resume summary.
+
+<!-- claude-code-only -->
+Freshness tracking refines that read via this session's shared-seen marker:
+
 1. BEFORE calling the digest, read this session's shared-seen marker if it exists (`~/.claude/hooks/state/shared-seen/<SESSION_ID>.json`) and pass its `seen_mtime` to the digest call: `get_context_digest(project_name="<name>", seen_mtime=<marker seen_mtime>)`. No marker -> call without `seen_mtime`.
-2. If `parent_digest.changed_since_seen` is `true`, OR there was no marker (first fork resume in this session), actually READ the shared layer before stamping anything: call `get_context_digest(project_name="<parent>", session_id="<SESSION_ID from Step 1>")` and fold its Next Steps / newest Recent Changes into the resume summary. The marker means "this session consumed the shared layer at this version" - never stamp what was not read. On mcp-missioncache 1.0.15+ this parent read AUTO-STAMPS the marker server-side (the response carries `shared_seen_stamped: true`), baselined to the exact bytes it read - when you see that flag, SKIP Step 4's manual stamp entirely (its mtime comes from the earlier Step 2 response and can be older; overwriting the auto-stamp with it would re-light the statusline note over content you already read).
+2. Read the parent digest (pass `session_id="<SESSION_ID from Step 1>"`) only when `parent_digest.changed_since_seen` is `true` OR there was no marker (first fork resume in this session). The marker means "this session consumed the shared layer at this version" - never stamp what was not read. On mcp-missioncache 1.0.15+ this parent read AUTO-STAMPS the marker server-side (the response carries `shared_seen_stamped: true`), baselined to the exact bytes it read - when you see that flag, SKIP Step 4's manual stamp entirely (its mtime comes from the earlier Step 2 response and can be older; overwriting the auto-stamp with it would re-light the statusline note over content you already read).
 3. Step 4's bash block then stamps the marker with `parent_digest.context_mtime` FROM THE DIGEST RESPONSE (the snapshot-coupled value), never a fresh stat of the file - a sibling write between the digest read and the stamp must not be silently baselined.
+<!-- /claude-code-only -->
 
 ### Step 3: Display Resume Summary
 
@@ -195,6 +207,7 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 
 Waiting on renders NEXT TO Next Steps by design - both are the "what now" surface. When a Waiting-on row's external reply has arrived (the user mentions it, or you see it in the conversation), act on what it gates and resolve the row via `/missioncache:save`'s `waiting_on_resolve`. Offer the full context file ("say 'full context' for the whole file") instead of dumping it.
 
+<!-- claude-code-only -->
 ### Step 4: Register Session for Time Tracking
 
 Register the project against the current Claude session so the statusline picks it up, reusing the `SESSION_ID` resolved in Step 1. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
@@ -250,12 +263,14 @@ if task_id.isdigit():
 ' 2>/dev/null
 fi
 ```
+<!-- /claude-code-only -->
 
 Then record initial heartbeat:
 ```
 mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
 ```
 
+<!-- claude-code-only -->
 **Fork marker stamp (forks only):** when Step 2 found a `parent_digest` AND the shared layer was actually consumed (it was fresh, or you read the parent digest per the fork branch), stamp this session's shared-seen marker with the mtime FROM the digest response. SKIP this entirely when the parent digest response carried `shared_seen_stamped: true` - the server already stamped a fresher, bytes-coupled value and this bash stamp would overwrite it with an older one. Do not stat the file here - `parent_digest.context_mtime` is coupled to the bytes the digest actually read, and a fresh stat could silently baseline a sibling's newer write. Replace the values, then run:
 
 ```bash
@@ -279,7 +294,9 @@ fi
 ```
 
 The marker stamp does not suppress stderr (matching `/missioncache:fork` and `/missioncache:save`): a persistently failing stamp - e.g. a non-float `SEEN_MTIME` - should surface, not silently disable freshness tracking. A single dropped stamp is self-correcting anyway (the next load finds no marker and re-reads the shared layer).
+<!-- /claude-code-only -->
 
+<!-- claude-code-only -->
 ### Step 5: Track the Active Checklist Task (when known)
 
 If the user signals which MissionCache checklist task they want to work on
@@ -305,6 +322,7 @@ without completing anything.
 If the user resumes without naming a specific task, skip this step -
 the field hides cleanly. Do NOT guess or use the first ``[ ]`` line as
 a fallback; misleading data is worse than missing data.
+<!-- /claude-code-only -->
 
 ## Example Output
 
