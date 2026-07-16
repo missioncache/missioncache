@@ -43,6 +43,15 @@
             --glow-orange: rgba(255, 107, 74, 0.4);
             --glow-green: rgba(61, 232, 160, 0.4);
 
+            /* Fork family (fork-tree in the Projects table). Cyan on purpose:
+               the table's hover/selection ambiance is purple, so a purple rail
+               would blend in instead of coupling the family. */
+            --fork-accent: #00d4d4;
+            --fork-line: rgba(0, 212, 212, 0.5);
+            --fork-family-bg: rgba(0, 212, 212, 0.055);
+            --fork-family-bg-hover: rgba(0, 212, 212, 0.10);
+            --fork-badge-bg: rgba(0, 212, 212, 0.14);
+
             /* Borders and gradients */
             --border: rgba(80, 80, 120, 0.3);
             --border-light: rgba(120, 120, 160, 0.2);
@@ -75,6 +84,13 @@
             --border-light: rgba(0, 0, 0, 0.06);
             --bg-tertiary: rgba(240, 240, 245, 0.95);
             --bg-hover: rgba(0, 0, 0, 0.04);
+            /* deeper teal so the fork rail and badges read on white -
+               #087f7f clears WCAG AA 4.5:1 at the 10px badge size */
+            --fork-accent: #087f7f;
+            --fork-line: rgba(10, 143, 143, 0.5);
+            --fork-family-bg: rgba(10, 143, 143, 0.06);
+            --fork-family-bg-hover: rgba(10, 143, 143, 0.10);
+            --fork-badge-bg: rgba(10, 143, 143, 0.12);
         }
 
         [data-theme="light"] .sidebar {
@@ -1842,19 +1858,6 @@
             margin-bottom: 2px;
         }
 
-        .task-parent-label.clickable-parent {
-            cursor: pointer;
-            padding: 2px 6px;
-            margin-left: -6px;
-            border-radius: 4px;
-            transition: all 0.15s ease;
-        }
-
-        .task-parent-label.clickable-parent:hover {
-            background: rgba(139, 92, 246, 0.15);
-            color: var(--accent-purple);
-        }
-
         .task-parent-label .task-icon {
             width: 14px;
             height: 14px;
@@ -1876,6 +1879,69 @@
         .task-parent {
             color: var(--text-muted);
             font-size: 11px;
+        }
+
+        /* --- Fork rows: tinted band + tree connector ---
+           Only the FORK rows are colored; the parent row stays a default table
+           row (its only fork cues are the count badge and the via-fork note).
+           Rows are real <tr>s in a border-collapse table, so the connector is
+           drawn as per-row segments (pseudo-elements in each row's first td),
+           which stay aligned across variable row heights. */
+        tr.fork-child > td { background: var(--fork-family-bg); }
+        tr.fork-child.clickable-row:hover > td { background: var(--fork-family-bg-hover); }
+
+        tr.fork-child > td:first-child { position: relative; }
+
+        /* fork rows: indent name content to clear the elbow */
+        tr.fork-child .task-name-cell { padding-left: 20px; }
+
+        /* vertical spine; consecutive forks connect edge to edge, and the first
+           fork's spine touches the parent row's bottom edge, so the rail reads
+           as flowing out of the parent without coloring the parent row */
+        tr.fork-child > td:first-child::before {
+            content: ""; position: absolute; left: 9px; top: 0; bottom: 0;
+            width: 2px; background: var(--fork-line);
+        }
+        /* last fork: spine stops at its elbow */
+        tr.fork-child-last > td:first-child::before { bottom: auto; height: 24px; }
+
+        /* horizontal elbow into the fork's name line */
+        tr.fork-child > td:first-child::after {
+            content: ""; position: absolute; left: 9px; top: 24px;
+            width: 16px; height: 2px; background: var(--fork-line);
+        }
+        /* parent of a fork family: a short rail stub so the tree visibly
+           originates at the parent's name line and flows into the first
+           fork's spine (same left/top constants, so they align exactly) */
+        tr.fork-parent > td:first-child { position: relative; }
+        tr.fork-parent > td:first-child::before {
+            content: ""; position: absolute; left: 9px; top: 24px; bottom: 0;
+            width: 2px; background: var(--fork-line);
+        }
+
+        .fork-badge {
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 1px 7px; border-radius: 4px;
+            font-size: 10px; font-weight: 600;
+            background: var(--fork-badge-bg); color: var(--fork-accent);
+            white-space: nowrap;
+        }
+        .fork-count-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 999px;
+            font-size: 10px; font-weight: 600;
+            background: var(--fork-badge-bg); color: var(--fork-accent);
+            white-space: nowrap;
+        }
+        .fork-updated-note {
+            display: inline-block; margin-left: 4px;
+            /* full-opacity accent: an opacity fade dropped light-theme
+               contrast below AA at this size */
+            font-size: 10px; color: var(--fork-accent);
+        }
+        .visually-hidden {
+            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+            overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
         }
 
         .task-meta {
@@ -7722,14 +7788,28 @@
             renderActiveTasks(activeTasksCache);
         }
 
+        // Most recent activity across a family (parent + forks). ISO strings
+        // compare lexically. This is what makes a save on ANY family member
+        // bump the whole group to the top of the 'updated' sort.
+        function familyUpdatedKey(t) {
+            let best = t.last_worked_on || t.created_at || '';
+            for (const s of (t.subtasks || [])) {
+                const v = s.last_worked_on || s.created_at || '';
+                if (v > best) best = v;
+            }
+            return best;
+        }
+
         function sortProjects(tasks) {
             const { key, dir } = getProjectsSort();
             const val = t => {
                 switch (key) {
                     case 'name': return (t.name || '').toLowerCase();
+                    // parent's own progress: forks are separate lanes, an average would mislead
                     case 'progress': return t.completion_pct || 0;
-                    case 'time': return t.time_spent_seconds || 0;
-                    default: return t.last_worked_on || t.created_at || '';
+                    // family total (equals own time when there are no forks)
+                    case 'time': return t.combined_time_seconds ?? t.time_spent_seconds ?? 0;
+                    default: return familyUpdatedKey(t);
                 }
             };
             const mul = dir === 'asc' ? 1 : -1;
@@ -7764,101 +7844,124 @@
                 return;
             }
 
-            // Flatten tasks: show parent tasks and their subtasks
-            const displayTasks = [];
-            for (const task of tasks) {
-                // Skip parent tasks if they have subtasks (show subtasks instead)
-                if (task.subtasks && task.subtasks.length > 0) {
-                    // Add subtasks with parent context
-                    for (const subtask of task.subtasks) {
-                        displayTasks.push({
-                            ...subtask,
-                            parent_name: task.name,
-                            parent_id: task.id,
-                            parent_repo_name: task.repo_name,
-                        });
-                    }
+            // Fork tree: every family renders as the parent's OWN row followed by
+            // its fork rows, connected by the cyan rail. Families were already
+            // sorted as units by sortProjects.
+            const rowsHTML = [];
+            for (const parent of tasks) {
+                const forks = parent.subtasks || [];
+                if (forks.length > 0) {
+                    rowsHTML.push(renderProjectRow(parent, { role: 'parent', forkCount: forks.length }));
+                    forks.forEach((fork, i) => {
+                        rowsHTML.push(renderProjectRow(fork, {
+                            role: 'child',
+                            isLast: i === forks.length - 1,
+                            parentName: parent.name,
+                        }));
+                    });
                 } else {
-                    displayTasks.push(task);
+                    rowsHTML.push(renderProjectRow(parent, { role: 'standalone' }));
+                }
+            }
+            tbody.innerHTML = rowsHTML.join('');
+        }
+
+        // The family member with the most recent activity - the reason the
+        // family sits where it does under the 'updated' sort.
+        function familyMostRecent(parent) {
+            let best = parent;
+            let bestKey = parent.last_worked_on || parent.created_at || '';
+            for (const s of (parent.subtasks || [])) {
+                const k = s.last_worked_on || s.created_at || '';
+                if (k > bestKey) { best = s; bestKey = k; }
+            }
+            return best;
+        }
+
+        function renderProjectRow(task, opts) {
+            // Build JIRA badge: clickable anchor when jira_url is configured,
+            // plain span otherwise (prevents broken href="#" navigation).
+            const jiraLink = task.jira_key
+                ? (task.jira_url
+                    ? `<a href="${escapeHtml(task.jira_url)}" class="jira-link" target="_blank" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</a>`
+                    : `<span class="jira-link jira-link-plain" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</span>`)
+                : '';
+
+            const description = task.description || '';
+            const progress = task.completion_pct || 0;
+            const remaining = task.remaining_summary || (progress === 0 ? 'Not started' : `${progress}% complete`);
+            const progressColor = getProgressColor(progress);
+            const taskIcon = getTaskIconHTML(task);
+            const modeBadge = getModeBadge(task.project_mode);
+            const repoBadge = task.repo_name ? `<span class="repo-badge">${escapeHtml(task.repo_name)}</span>` : '';
+
+            let trClass = 'clickable-row';
+            let aria = `Open details for ${escapeHtml(task.name)}`;
+            let nameBadge = '';
+            let metaBadge = '';
+            let hiddenNote = '';
+
+            if (opts.role === 'parent') {
+                const n = opts.forkCount;
+                const plural = n === 1 ? 'fork' : 'forks';
+                aria += `, ${n} ${plural}`;
+                trClass += ' fork-parent';
+                // On the NAME line, mirroring the children's pill placement, so
+                // "has forks" sits on the line the eye actually scans.
+                nameBadge = `<span class="fork-count-badge" title="${n} ${plural} share this project's context">&#x2442; ${n} ${plural}</span>`;
+            } else if (opts.role === 'child') {
+                trClass += ' fork-child' + (opts.isLast ? ' fork-child-last' : '');
+                aria += `, fork of ${escapeHtml(opts.parentName)}`;
+                nameBadge = `<span class="fork-badge" title="Fork of ${escapeHtml(opts.parentName)} - shares its context, keeps its own tasks">&#x2935; fork</span>`;
+                hiddenNote = `<span class="visually-hidden">Fork of ${escapeHtml(opts.parentName)}</span>`;
+            }
+
+            const taskNameHTML = `
+                <div class="task-name-cell">
+                    <div class="task-name-main">
+                        ${taskIcon}
+                        ${wrapWithCopyIcon(task.name, task.name)}
+                        ${nameBadge}${hiddenNote}
+                    </div>
+                    <div class="task-meta">${repoBadge}${modeBadge}${jiraLink ? ` ${jiraLink}` : ''}${metaBadge ? ` ${metaBadge}` : ''}</div>
+                </div>
+            `;
+
+            // Time cell: the parent shows the family total (equals own time when
+            // there are no forks); its own share travels in the tooltip.
+            let timeCell;
+            if (opts.role === 'parent') {
+                timeCell = `<td title="family total (own: ${escapeHtml(task.time_spent_formatted || '0m')})">${escapeHtml(task.combined_time_formatted || task.time_spent_formatted || '0m')}</td>`;
+            } else {
+                timeCell = `<td>${escapeHtml(task.time_spent_formatted || '0m')}</td>`;
+            }
+
+            // Updated cell: when a FORK is the most recent family member, the
+            // parent row says so - it explains why the family bumped up.
+            let updatedHTML = escapeHtml(task.last_worked_ago || '-');
+            if (opts.role === 'parent') {
+                const recent = familyMostRecent(task);
+                if (recent !== task) {
+                    updatedHTML = `${escapeHtml(recent.last_worked_ago || '-')}<span class="fork-updated-note">via fork</span>`;
                 }
             }
 
-            tbody.innerHTML = displayTasks.map(task => {
-                // Build JIRA badge: clickable anchor when jira_url is configured,
-                // plain span otherwise (prevents broken href="#" navigation).
-                const jiraLink = task.jira_key
-                    ? (task.jira_url
-                        ? `<a href="${escapeHtml(task.jira_url)}" class="jira-link" target="_blank" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</a>`
-                        : `<span class="jira-link jira-link-plain" title="${escapeHtml(task.jira_key)}">${escapeHtml(task.jira_key)}</span>`)
-                    : '';
-
-                // Build description (show full text)
-                const description = task.description || '';
-
-                // Build progress display
-                const progress = task.completion_pct || 0;
-                const remaining = task.remaining_summary || (progress === 0 ? 'Not started' : `${progress}% complete`);
-                const progressColor = getProgressColor(progress);
-
-                const taskIcon = getTaskIconHTML(task);
-
-                // Build task name cell with better subtask hierarchy display
-                let taskNameHTML;
-                // Mode badge
-                const modeBadge = getModeBadge(task.project_mode);
-                const repoBadge = task.repo_name ? `<span class="repo-badge">${escapeHtml(task.repo_name)}</span>` : '';
-
-                if (task.parent_name) {
-                    // Subtask: show parent label above (clickable), then subtask with tree indicator
-                    // Parent label opens the parent task's modal. The id/name/repo
-                    // travel in escaped data-* attributes read by the delegated click
-                    // listener; they are only emitted when a parent_id exists, so a
-                    // parentless label falls through to the subtask row's handler
-                    // (matching the old no-onclick behavior).
-                    const parentDataAttrs = task.parent_id
-                        ? ` data-task-id="${task.parent_id}" data-task-name="${escapeHtml(task.parent_name)}" data-repo-name="${escapeHtml(task.parent_repo_name || '')}"`
-                        : '';
-                    taskNameHTML = `
-                        <div class="task-name-cell">
-                            <div class="task-parent-label clickable-parent"${parentDataAttrs} title="Click to view parent task">${escapeHtml(task.parent_name)}</div>
-                            <div class="task-name-main">
-                                <span class="subtask-indicator">└─</span>
-                                ${taskIcon}
-                                ${wrapWithCopyIcon(task.name, task.name)}
+            return `
+                <tr class="${trClass}" tabindex="0" role="button" aria-label="${aria}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
+                    <td>${taskNameHTML}</td>
+                    <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
+                    <td>
+                        <div class="progress-cell">
+                            <div class="progress-bar">
+                                <div class="progress-fill ${progressColor}" style="width: ${progress}%"></div>
                             </div>
-                            <div class="task-meta">${repoBadge}${modeBadge}${jiraLink ? ` ${jiraLink}` : ''}</div>
+                            <span class="progress-text">${escapeHtml(remaining)}</span>
                         </div>
-                    `;
-                } else {
-                    // Standalone task: simple layout
-                    taskNameHTML = `
-                        <div class="task-name-cell">
-                            <div class="task-name-main">
-                                ${taskIcon}
-                                ${wrapWithCopyIcon(task.name, task.name)}
-                            </div>
-                            <div class="task-meta">${repoBadge}${modeBadge}${jiraLink ? ` ${jiraLink}` : ''}</div>
-                        </div>
-                    `;
-                }
-
-                return `
-                    <tr class="clickable-row" tabindex="0" role="button" aria-label="Open details for ${escapeHtml(task.name)}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
-                        <td>${taskNameHTML}</td>
-                        <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
-                        <td>
-                            <div class="progress-cell">
-                                <div class="progress-bar">
-                                    <div class="progress-fill ${progressColor}" style="width: ${progress}%"></div>
-                                </div>
-                                <span class="progress-text">${escapeHtml(remaining)}</span>
-                            </div>
-                        </td>
-                        <td>${task.time_spent_formatted || '0m'}</td>
-                        <td style="color: var(--text-muted);">${task.last_worked_ago || '-'}</td>
-                    </tr>
-                `;
-            }).join('');
+                    </td>
+                    ${timeCell}
+                    <td style="color: var(--text-muted);">${updatedHTML}</td>
+                </tr>
+            `;
         }
 
         function getProgressColor(progress) {
@@ -9284,13 +9387,6 @@
             const copyIcon = e.target.closest?.('.copy-icon');
             if (copyIcon) {
                 copyTaskName(e, copyIcon);
-                return;
-            }
-            // Only a parent label carrying a parent id opens the parent modal; a
-            // parentless label falls through to the subtask row below it.
-            const parentLabel = e.target.closest?.('.clickable-parent');
-            if (parentLabel && parentLabel.dataset.taskId) {
-                openTaskModal(Number(parentLabel.dataset.taskId), parentLabel.dataset.taskName || '', parentLabel.dataset.repoName || '');
                 return;
             }
             const el = e.target.closest?.('.clickable-row, .task-item.clickable');
