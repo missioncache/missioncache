@@ -58,18 +58,18 @@ class TestSessionStart:
             repo_id=10,
             full_path="active/my-task",
         )
-        mock_repo = SimpleNamespace(short_name="my-repo", path="/fake/repo")
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
         mock_db.get_task_time.return_value = 0
         mock_db.format_duration.return_value = "0m"
 
         monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-42")
         monkeypatch.setattr("os.getcwd", lambda: "/fake/repo")
 
-        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}):
+        # Real (empty) data root: a bare MagicMock root would make every
+        # .exists() truthy on the MISSIONCACHE_ROOT resolution path.
+        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db, MISSIONCACHE_ROOT=tmp_path / "mcroot-empty")}):
             # Re-import to pick up mocked module
             import importlib
             import hooks.session_start as mod
@@ -132,18 +132,17 @@ class TestSessionStart:
             repo_id=1,
             full_path="active/context-task",
         )
-        mock_repo = SimpleNamespace(short_name="repo", path="/repo")
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
         mock_db.get_task_time.return_value = 3600
         mock_db.format_duration.return_value = "1h 0m"
 
         monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-99")
         monkeypatch.setattr("os.getcwd", lambda: "/repo")
 
-        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}):
+        # Real (empty) data root - see test_find_task_for_cwd_integration.
+        with patch.dict("sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db, MISSIONCACHE_ROOT=tmp_path / "mcroot-empty")}):
             import importlib
             import hooks.session_start as mod
 
@@ -603,8 +602,15 @@ class TestPreCompact:
     """
 
     def _setup_task(self, tmp_path, ctx_seed=None):
-        """Build a task dir + mock task/repo. Returns (task_dir, ctx_file, mocks)."""
-        task_dir = tmp_path / "orbit" / "active" / "compact-task"
+        """Build a task dir + mock task/repo. Returns (task_dir, ctx_file, mocks).
+
+        The task dir lives under the DATA ROOT (tmp mcroot), NOT under the
+        repo path - matching the real ~/.missioncache layout. The original
+        fixture placed it under the mock repo path, which replicated the
+        legacy path join the hook wrongly used, so every test passed while
+        the hook silently no-oped in production (found 2026-07-15).
+        """
+        task_dir = tmp_path / "mcroot" / "active" / "compact-task"
         task_dir.mkdir(parents=True)
         ctx_file = task_dir / "compact-task-context.md"
         ctx_file.write_text(
@@ -618,16 +624,20 @@ class TestPreCompact:
             repo_id=1,
             full_path="active/compact-task",
         )
-        mock_repo = SimpleNamespace(path=str(tmp_path / "orbit"))
-        return task_dir, ctx_file, mock_task, mock_repo
+        # No repo mock on purpose: the hook must never resolve MissionCache
+        # files through the repo, and it no longer reads repos at all.
+        return task_dir, ctx_file, mock_task
 
-    def _run(self, monkeypatch, mock_db, transcript_path=None):
+    def _run(self, monkeypatch, mock_db, transcript_path=None, tmp_path=None):
         """Reload pre_compact with stdin payload and mock missioncache_db.
 
         The mock carries the REAL context_health module: the hook routes its
         Recent Changes prepend through
         ``missioncache_db.context_health.prepend_recent_changes``, and the
         tests assert on real file content, so that path must not be mocked.
+        MISSIONCACHE_ROOT is a real path (the fixture's data root) - a
+        MagicMock here would make every ``.exists()`` truthy and mask
+        resolution bugs.
         """
         from missioncache_db import context_health as real_context_health
 
@@ -637,7 +647,9 @@ class TestPreCompact:
             "sys.modules",
             {
                 "missioncache_db": MagicMock(
-                    TaskDB=lambda: mock_db, context_health=real_context_health
+                    TaskDB=lambda: mock_db,
+                    context_health=real_context_health,
+                    MISSIONCACHE_ROOT=(tmp_path or Path("/nonexistent")) / "mcroot",
                 )
             },
         ):
@@ -653,14 +665,13 @@ class TestPreCompact:
     ):
         """Hook stamps timestamp and prepends a Pre-Compact Snapshot subsection."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+        _task_dir, ctx_file, mock_task = self._setup_task(tmp_path)
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
         mock_db.process_heartbeats.return_value = 0
 
-        self._run(monkeypatch, mock_db)
+        self._run(monkeypatch, mock_db, tmp_path=tmp_path)
 
         content = ctx_file.read_text()
         assert "2025-01-01 00:00" not in content
@@ -673,7 +684,7 @@ class TestPreCompact:
     ):
         """Snapshot body contains the recent user prompts and assistant text."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+        _task_dir, ctx_file, mock_task = self._setup_task(tmp_path)
 
         # Build a fixture JSONL transcript with 2 user prompts + 2 assistant
         # responses, plus one isMeta system-injected user (should be skipped)
@@ -724,9 +735,8 @@ class TestPreCompact:
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
 
-        self._run(monkeypatch, mock_db, transcript_path=transcript)
+        self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
 
         content = ctx_file.read_text()
         assert "fix the bug in foo.py" in content
@@ -746,7 +756,7 @@ class TestPreCompact:
         # Speed up the test by zeroing out the retry delay
         monkeypatch.setattr("time.sleep", lambda *_: None)
 
-        _task_dir, ctx_file, _, _ = self._setup_task(tmp_path)
+        _task_dir, ctx_file, _ = self._setup_task(tmp_path)
         original_content = ctx_file.read_text()
 
         mock_db = MagicMock()
@@ -754,7 +764,7 @@ class TestPreCompact:
             "database is locked"
         )
 
-        mod = self._run(monkeypatch, mock_db)
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path)
 
         assert mod.ERROR_FILE.exists(), "sticky error file should be written"
         sticky = json.loads(mod.ERROR_FILE.read_text())
@@ -769,7 +779,7 @@ class TestPreCompact:
         """A successful run removes any leftover sticky error file from a
         previous failed compaction so /missioncache:load does not surface stale warnings."""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-        _task_dir, _ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+        _task_dir, _ctx_file, mock_task = self._setup_task(tmp_path)
 
         # Pre-seed a sticky error from a previous failed run. Build the path
         # the same way the module will (so the assertion can use mod.ERROR_FILE
@@ -782,9 +792,8 @@ class TestPreCompact:
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
 
-        mod = self._run(monkeypatch, mock_db)
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path)
 
         assert not mod.ERROR_FILE.exists(), (
             "successful run must clear prior sticky error file"
@@ -797,7 +806,7 @@ class TestPreCompact:
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr("time.sleep", lambda *_: None)
 
-        _task_dir, ctx_file, mock_task, mock_repo = self._setup_task(tmp_path)
+        _task_dir, ctx_file, mock_task = self._setup_task(tmp_path)
         original = ctx_file.read_text()
 
         mock_db = MagicMock()
@@ -806,9 +815,8 @@ class TestPreCompact:
             sqlite3.OperationalError("database is locked"),
             mock_task,
         ]
-        mock_db.get_repo.return_value = mock_repo
 
-        mod = self._run(monkeypatch, mock_db)
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path)
 
         assert ctx_file.read_text() != original, "snapshot should have landed"
         assert "Pre-Compact Snapshot" in ctx_file.read_text()
@@ -1402,16 +1410,26 @@ class TestSessionStartTaskDiscipline:
     def test_output_includes_discipline_reminder(
         self, tmp_path, monkeypatch, capsys
     ):
-        """session_start output points at /missioncache:load and update_tasks_file."""
+        """session_start output points at /missioncache:load and update_tasks_file,
+        and the MissionCache-files Tip renders iff the task dir resolves under
+        the DATA ROOT. The task dir lives under mcroot and a decoy exists
+        under the repo path, so a regression to the legacy repo-path join
+        cannot pass: the mock module would lack a usable MISSIONCACHE_ROOT
+        only if resolution went through the repo again (mutation guard for
+        the session_start half of the 2026-07-15 path fix)."""
         # Redirect Path.home() to tmp_path so the hook's state-file writes
         # (pending-task.json, projects/<session>.json) land in our sandbox
         # instead of polluting the real ~/.claude/hooks/state/.
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        # Real on-disk task_dir so the `task_dir.exists()` check passes.
-        repo_path = tmp_path / "repo"
-        task_dir = repo_path / "active" / "my-task"
+        # Real on-disk task dir under the DATA ROOT - never under the repo.
+        mcroot = tmp_path / "mcroot"
+        task_dir = mcroot / "active" / "my-task"
         task_dir.mkdir(parents=True)
+        # Deliberately NO active/my-task under the repo path: the legacy
+        # repo-join world must find nothing.
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
 
         mock_task = SimpleNamespace(
             id=1,
@@ -1421,19 +1439,23 @@ class TestSessionStartTaskDiscipline:
             repo_id=10,
             full_path="active/my-task",
         )
-        mock_repo = SimpleNamespace(short_name="my-repo", path=str(repo_path))
 
         mock_db = MagicMock()
         mock_db.find_task_for_cwd.return_value = mock_task
-        mock_db.get_repo.return_value = mock_repo
         mock_db.get_task_time.return_value = 0
         mock_db.format_duration.return_value = "0m"
 
         monkeypatch.setenv("CLAUDE_SESSION_ID", "sess-discipline-test")
-        monkeypatch.setattr("os.getcwd", lambda: str(task_dir))
+        monkeypatch.setattr("os.getcwd", lambda: str(repo_path))
 
         with patch.dict(
-            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
+            "sys.modules",
+            {
+                "missioncache_db": MagicMock(
+                    TaskDB=lambda: mock_db,
+                    MISSIONCACHE_ROOT=mcroot,
+                )
+            },
         ):
             import importlib
             import hooks.session_start as mod
@@ -1444,19 +1466,23 @@ class TestSessionStartTaskDiscipline:
         output = capsys.readouterr().out
         assert "/missioncache:load" in output
         assert "update_tasks_file" in output
+        # The Tip block proves the dir resolved under MISSIONCACHE_ROOT.
+        assert "**MissionCache files:**" in output
+        assert str(task_dir) in output
 
     def test_taskcreate_note_is_unconditional(
         self, tmp_path, monkeypatch, capsys
     ):
         """The 'ignore built-in TaskCreate/task tools' note fires whenever a
-        task is active, even when no repo path resolves (so the MissionCache-files
-        Tip block is skipped). The divergence hook only nudges this on
-        divergence, so session_start must state it proactively.
+        task is active, even when the task's files dir does not resolve (so
+        the MissionCache-files Tip block is skipped). The divergence hook only
+        nudges this on divergence, so session_start must state it proactively.
         """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
-        # repo_id=None -> repo_path stays None -> the Tip block never runs,
-        # so the note must come from the unconditional line, not the Tip.
+        # The data root exists but holds no dir for this task -> the Tip
+        # block never runs, so the note must come from the unconditional
+        # line, not the Tip.
         mock_task = SimpleNamespace(
             id=1,
             name="my-task",
@@ -1475,7 +1501,15 @@ class TestSessionStartTaskDiscipline:
         monkeypatch.setattr("os.getcwd", lambda: str(tmp_path))
 
         with patch.dict(
-            "sys.modules", {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
+            "sys.modules",
+            {
+                "missioncache_db": MagicMock(
+                    TaskDB=lambda: mock_db,
+                    # Real (empty) path: a MagicMock root would make
+                    # .exists() truthy and wrongly render the Tip.
+                    MISSIONCACHE_ROOT=tmp_path / "mcroot-empty",
+                )
+            },
         ):
             import importlib
             import hooks.session_start as mod
@@ -1484,7 +1518,7 @@ class TestSessionStartTaskDiscipline:
             mod.main()
 
         output = capsys.readouterr().out
-        # The Tip block did not run (no repo path)...
+        # The Tip block did not run (task dir absent under the data root)...
         assert "**MissionCache files:**" not in output
         # ...but the unconditional TaskCreate note still appears.
         assert "TaskCreate" in output

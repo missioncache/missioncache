@@ -77,7 +77,7 @@ def _is_valid_session_id(value: object) -> bool:
     return (
         isinstance(value, str)
         and 0 < len(value) <= _MAX_PREV_SESSION_ID_LEN
-        and bool(_SESSION_ID_CHARSET_RE.match(value))
+        and bool(_SESSION_ID_CHARSET_RE.fullmatch(value))
     )
 
 # Bundled missioncache-db path for marketplace installs (no system pip install).
@@ -690,7 +690,10 @@ def main():
     install_bundled_rules()
 
     try:
-        from missioncache_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import (  # type: ignore[import-not-found]
+            MISSIONCACHE_ROOT,
+            TaskDB,
+        )
 
         db = TaskDB()
         cwd = os.getcwd()
@@ -699,12 +702,6 @@ def main():
         task = db.find_task_for_cwd(cwd, session_id)
 
         if task:
-            # Get repo info for the output context message.
-            repo_path = None
-            if task.repo_id:
-                repo = db.get_repo(task.repo_id)
-                if repo:
-                    repo_path = repo.path
 
             # Write session-specific project file for statusline display.
             # This is the per-session pointer that find_task_for_cwd reads
@@ -731,8 +728,9 @@ def main():
             if session_id:
                 output += f"**Session ID:** `{session_id}`\n"
 
-            if repo_path:
-                task_dir = Path(repo_path) / task.full_path
+            if task.full_path:
+                # MissionCache files live under MISSIONCACHE_ROOT, not the repo.
+                task_dir = MISSIONCACHE_ROOT / task.full_path
                 if task_dir.exists():
                     output += f"**MissionCache files:** `{task_dir}`\n"
                     output += """

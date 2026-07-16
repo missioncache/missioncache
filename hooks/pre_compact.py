@@ -7,7 +7,7 @@ under a `### <timestamp>` Pre-Compact Snapshot subsection so something
 state-bearing actually survives compaction. Uses an atomic flock-protected
 read-modify-write so concurrent saves do not race.
 
-DB calls (find_task_for_cwd, get_repo, process_heartbeats) are wrapped in
+DB calls (find_task_for_cwd, process_heartbeats) are wrapped in
 bounded retry-with-backoff because under active MCP server load the hook
 can collide with other writers and silently fail (sqlite3 OperationalError:
 database is locked). On terminal failure the hook writes a sticky error
@@ -300,6 +300,7 @@ def main():
     session_id = payload.get("session_id") or os.environ.get("CLAUDE_SESSION_ID")
 
     try:
+        from missioncache_db import MISSIONCACHE_ROOT  # type: ignore[import-not-found]
         from missioncache_db import TaskDB  # type: ignore[import-not-found]
         from missioncache_db import context_health  # type: ignore[import-not-found]
     except ImportError:
@@ -316,17 +317,26 @@ def main():
     task = _safe_db_call(
         "find_task_for_cwd", lambda: db.find_task_for_cwd(cwd, session_id)
     )
-    if not task or not task.repo_id:
+    if not task or not task.full_path:
         return
 
-    repo = _safe_db_call(
-        "get_repo", lambda: db.get_repo(task.repo_id), task_name=task.name
-    )
-    if not repo:
-        return
-
-    task_dir = Path(repo.path) / task.full_path
+    # MissionCache files live under MISSIONCACHE_ROOT (~/.missioncache by
+    # default, env-overridable), NOT under the repo path - task.full_path
+    # already carries the "active/<name>" segment. Joining onto repo.path
+    # here was pre-migration path math that made this dir check fail
+    # silently, so no snapshot landed for any post-migration task (verified
+    # 2026-07-15: zero Pre-Compact Snapshot sections anywhere under
+    # ~/.missioncache). Same resolution as task_tracker.py and the MCP
+    # server's settings.root, though those hardcode the home default.
+    task_dir = MISSIONCACHE_ROOT / task.full_path
     if not task_dir.exists():
+        # Legitimate for manual/global tasks (no files dir by design), but an
+        # active/ task SHOULD have one - surface it rather than repeating the
+        # silent bail that hid the path bug for months.
+        if task.full_path.startswith("active/"):
+            _write_sticky_error(
+                f"task dir missing for snapshot: {task_dir}", task_name=task.name
+            )
         return
 
     context_file = None
@@ -335,6 +345,10 @@ def main():
             context_file = cf
             break
     if not context_file:
+        if task.full_path.startswith("active/"):
+            _write_sticky_error(
+                f"no context file for snapshot in {task_dir}", task_name=task.name
+            )
         return
 
     # Build the snapshot from transcript
