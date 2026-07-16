@@ -138,6 +138,58 @@ def atomic_write_json(path: Path, payload: object) -> None:
         return
 
 
+def session_binding_path(session_id: str) -> Path:
+    """Canonical path of the per-session project binding file.
+
+    Single owner of the ``~/.claude/hooks/state/projects/<sid>.json``
+    convention. Every writer (session_start hook, MCP server binding,
+    /missioncache:load's bash fallback) and reader (find_task_for_cwd,
+    pre_compact's bound-session check, statusline) must resolve the path
+    through here or match this format exactly - a hand-rolled copy that
+    drifts silently reintroduces the "bound but undetected" snapshot loss.
+    """
+    return Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
+
+
+def write_session_binding(
+    session_id: str, project_name: str, task_id: Optional[int] = None
+) -> None:
+    """Write the per-session project binding atomically.
+
+    ``task_id`` is the durable identity: resolution prefers it over the
+    name, so bindings that carry it are immune to name reuse and renames.
+    Name-only bindings (older writers, the load command's bash fallback
+    before it learned taskId) stay readable as legacy.
+    """
+    payload: Dict[str, Any] = {
+        "projectName": project_name,
+        "updated": datetime.now().astimezone().isoformat(),
+        "sessionId": session_id,
+    }
+    if task_id is not None:
+        payload["taskId"] = int(task_id)
+    atomic_write_json(session_binding_path(session_id), payload)
+
+
+def read_session_binding(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """Read the per-session binding as ``(file_exists, data_or_None)``.
+
+    The two-part return lets callers distinguish the three states that
+    matter: no file (session simply not bound - benign), file present and
+    parseable (bound), and file present but unreadable/corrupt (a bug
+    condition - pre_compact turns it into a sticky error rather than
+    treating it as unbound).
+    """
+    path = session_binding_path(session_id)
+    if not path.exists():
+        return (False, None)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return (True, None)
+    return (True, data if isinstance(data, dict) else None)
+
+
 def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
     """Idempotently create every table needed in hooks-state.db.
 
@@ -2525,21 +2577,33 @@ class TaskDB:
             except (json.JSONDecodeError, IOError):
                 pass  # Fall through to other methods
 
-        # Priority 2: Check per-session project file (written by statusline)
-        # This persists the project assignment after pending-project.json is consumed
+        # Priority 2: the per-session binding file (written on /missioncache:load
+        # by the MCP server / session_start / the load command's bash fallback).
+        # The binding is explicit - the user named the project - so cwd must
+        # not veto it: a project is routinely worked from outside its
+        # registered repo, and forks inherit the parent's repo_id.
         if session_id:
-            session_project_file = state_dir / "projects" / f"{session_id}.json"
-            if session_project_file.exists():
-                try:
-                    with open(session_project_file) as f:
-                        session_data = json.load(f)
-                    task_name = session_data.get("projectName", "")
+            _exists, binding = read_session_binding(session_id)
+            if binding:
+                task_id = binding.get("taskId")
+                if isinstance(task_id, int):
+                    # Durable identity: immune to name reuse and renames.
+                    # A dead id (completed/deleted task) deliberately does
+                    # NOT fall back to the name - a same-named unrelated
+                    # project must not inherit this session's snapshots.
+                    task = self.get_task(task_id)
+                    if task and task.status in ("active", "paused"):
+                        return task
+                else:
+                    # Legacy name-only binding (older writers).
+                    task_name = binding.get("projectName", "")
                     if task_name:
                         task = self._find_task_by_registered_name(task_name, cwd_path)
                         if task:
                             return task
-                except (json.JSONDecodeError, IOError):
-                    pass  # Fall through to other methods
+                        task = self._find_active_task_by_name(task_name)
+                        if task:
+                            return task
 
         # Priority 3: Check if cwd is under centralized MissionCache root.
         # Resolve the root the same way as cwd so a symlinked MISSIONCACHE_ROOT
@@ -2641,6 +2705,51 @@ class TaskDB:
                 if row:
                     return Task.from_row(row)
 
+        return None
+
+    def _find_active_task_by_name(self, task_name: str) -> Optional[Task]:
+        """Resolve an active task by name alone, ignoring repo and cwd.
+
+        Fallback for LEGACY name-only session bindings (files written before
+        write_session_binding stamped taskId): the binding is explicit - the
+        user named the project via /missioncache:load - so cwd carries no
+        signal and must not veto it. A project is routinely worked from
+        outside its registered repo, and forks inherit the parent's repo_id.
+        Without this fallback, every such session silently lost pre-compact
+        snapshots AND heartbeats (verified 2026-07-16 on
+        centra-e2e-segmentation-ai worked from ~/work).
+
+        Returns None on an ambiguous name rather than guessing between repos.
+        Bare names only: subtask rows store a bare name too, so this also
+        resolves subtasks; a "parent/subtask" string simply misses, same as
+        before the fallback existed.
+
+        CAUTION - uniqueness is not identity: a single active match can
+        still be a same-named STRANGER (the bound project completed, an
+        unrelated project reused the name). That hole is closed properly by
+        the taskId in current bindings; this name path only serves bindings
+        from before taskId existed and inherits the residual risk.
+        """
+        with self.connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM tasks WHERE name = ?
+                   AND status IN ('active', 'paused')""",
+                (task_name,),
+            ).fetchall()
+        if len(rows) == 1:
+            return Task.from_row(rows[0])
+        if len(rows) > 1:
+            # The one place that KNOWS the binding is ambiguous. Leave a
+            # breadcrumb every consumer inherits (heartbeats, stop,
+            # session_start) - stderr is invisible to the MCP stdio
+            # protocol and hooks tolerate it, and the alternative is time
+            # tracking silently vanishing with no trace anywhere.
+            print(
+                f"missioncache: session binding '{task_name}' is ambiguous "
+                f"({len(rows)} active/paused tasks share the name) - "
+                "refusing to guess, resolution skipped",
+                file=sys.stderr,
+            )
         return None
 
     # =========================================================================

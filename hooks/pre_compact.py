@@ -112,6 +112,26 @@ def _write_sticky_error(reason, task_name=None):
         pass
 
 
+def _session_binding_state(session_id):
+    """Return ``(binding_exists, project_name_or_None)`` for this session.
+
+    Reads through missioncache_db.read_session_binding - the single owner of
+    the binding path/format - so this check cannot drift from the file the
+    resolution path actually reads. The two-part return distinguishes the
+    benign case (no file: session simply not bound) from the bug cases
+    (file present but resolution failed, or file present but unreadable).
+    """
+    if not session_id:
+        return (False, None)
+    try:
+        from missioncache_db import read_session_binding  # type: ignore[import-not-found]
+        exists, data = read_session_binding(session_id)
+    except Exception:
+        return (False, None)
+    name = (data or {}).get("projectName") or None
+    return (exists, name)
+
+
 def _clear_sticky_error():
     """Remove sticky error after a successful PreCompact run."""
     if ERROR_FILE.exists():
@@ -318,6 +338,26 @@ def main():
         "find_task_for_cwd", lambda: db.find_task_for_cwd(cwd, session_id)
     )
     if not task or not task.full_path:
+        # Distinguish "session is simply not on a project" (benign, stay
+        # quiet) from "session HAS a binding on file but resolution came
+        # back empty" (bug condition: stale taskId, duplicate active name,
+        # archived task, corrupt binding). This exact bail hid the cwd-veto
+        # resolution bug silently - never bail without checking the binding.
+        binding_exists, bound_name = _session_binding_state(session_id)
+        if binding_exists:
+            if bound_name:
+                _write_sticky_error(
+                    f"session is bound to '{bound_name}' but task resolution "
+                    "returned nothing (project completed/archived elsewhere? "
+                    "duplicate active name?)",
+                    task_name=bound_name,
+                )
+            else:
+                _write_sticky_error(
+                    "session binding file exists but is unreadable or names "
+                    f"no project (session {session_id}) - snapshots are not "
+                    "being saved; re-run /missioncache:load to rebind"
+                )
         return
 
     # MissionCache files live under MISSIONCACHE_ROOT (~/.missioncache by

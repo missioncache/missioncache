@@ -628,7 +628,7 @@ class TestPreCompact:
         # files through the repo, and it no longer reads repos at all.
         return task_dir, ctx_file, mock_task
 
-    def _run(self, monkeypatch, mock_db, transcript_path=None, tmp_path=None):
+    def _run(self, monkeypatch, mock_db, transcript_path=None, tmp_path=None, session_id=None):
         """Reload pre_compact with stdin payload and mock missioncache_db.
 
         The mock carries the REAL context_health module: the hook routes its
@@ -640,8 +640,11 @@ class TestPreCompact:
         resolution bugs.
         """
         from missioncache_db import context_health as real_context_health
+        from missioncache_db import read_session_binding as real_read_session_binding
 
         payload = {"transcript_path": str(transcript_path) if transcript_path else "", "cwd": "/fake/cwd"}
+        if session_id:
+            payload["session_id"] = session_id
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(payload)))
         with patch.dict(
             "sys.modules",
@@ -649,6 +652,11 @@ class TestPreCompact:
                 "missioncache_db": MagicMock(
                     TaskDB=lambda: mock_db,
                     context_health=real_context_health,
+                    # Real function on purpose: the bound-vs-unbound sticky
+                    # tests verify real binding-file path construction and
+                    # parsing (a MagicMock here would unpack garbage and
+                    # silently take the no-binding path).
+                    read_session_binding=real_read_session_binding,
                     MISSIONCACHE_ROOT=(tmp_path or Path("/nonexistent")) / "mcroot",
                 )
             },
@@ -772,6 +780,67 @@ class TestPreCompact:
         assert "find_task_for_cwd" in sticky["reason"]
         # context.md should be untouched - DB lookup never succeeded
         assert ctx_file.read_text() == original_content
+
+    def test_bound_session_unresolvable_writes_sticky_error(
+        self, tmp_path, monkeypatch
+    ):
+        """A session WITH a binding on file whose resolution returns None is a
+        bug condition (duplicate name, archived task, stale binding) and must
+        surface via the sticky error, not repeat the silent bail that hid the
+        cwd-veto resolution bug (found 2026-07-16)."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        binding_dir = tmp_path / ".claude" / "hooks" / "state" / "projects"
+        binding_dir.mkdir(parents=True)
+        (binding_dir / "sess-x.json").write_text(
+            json.dumps({"projectName": "ghost-proj", "sessionId": "sess-x"})
+        )
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path, session_id="sess-x")
+
+        assert mod.ERROR_FILE.exists(), (
+            "bound-but-unresolvable session must write a sticky error"
+        )
+        sticky = json.loads(mod.ERROR_FILE.read_text())
+        assert "ghost-proj" in sticky["reason"]
+        assert sticky["task_name"] == "ghost-proj"
+
+    def test_unbound_session_no_task_stays_silent(self, tmp_path, monkeypatch):
+        """A session with NO binding and no task is the benign everyday case
+        (session simply not on a project) - no sticky error."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path, session_id="sess-y")
+
+        assert not mod.ERROR_FILE.exists(), (
+            "unbound session must not write a sticky error"
+        )
+
+    def test_corrupt_binding_writes_sticky_error(self, tmp_path, monkeypatch):
+        """A binding file that EXISTS but cannot be parsed is a bug condition
+        (the session was bound; snapshots are not being saved) - it must
+        alarm, not masquerade as the benign unbound case."""
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        binding_dir = tmp_path / ".claude" / "hooks" / "state" / "projects"
+        binding_dir.mkdir(parents=True)
+        (binding_dir / "sess-z.json").write_text("{corrupt json!")
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+
+        mod = self._run(monkeypatch, mock_db, tmp_path=tmp_path, session_id="sess-z")
+
+        assert mod.ERROR_FILE.exists(), (
+            "present-but-unreadable binding must write a sticky error"
+        )
+        sticky = json.loads(mod.ERROR_FILE.read_text())
+        assert "unreadable" in sticky["reason"]
+        assert "sess-z" in sticky["reason"]
 
     def test_successful_run_clears_prior_sticky_error(
         self, tmp_path, monkeypatch

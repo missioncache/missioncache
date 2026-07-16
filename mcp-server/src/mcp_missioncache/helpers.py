@@ -6,7 +6,6 @@ import os
 import re
 import sqlite3
 import urllib.request
-from datetime import datetime
 from pathlib import Path
 
 import missioncache_db  # type: ignore[import-not-found]
@@ -66,7 +65,9 @@ def _resolve_session_id(session_id: str | None) -> str | None:
     return (os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip() or None
 
 
-def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
+def _bind_session_to_project(
+    session_id: str | None, project_name: str, task_id: int | None = None
+) -> bool:
     """Bind a Claude Code session to a project so the statusline picks it up.
 
     Writes the ``project_state`` row in ``~/.claude/hooks-state.db`` (source
@@ -123,17 +124,11 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
         )
         return False
 
-    pointer_file = (
-        Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
-    )
     try:
-        missioncache_db.atomic_write_json(
-            pointer_file,
-            {
-                "projectName": project_name,
-                "updated": datetime.now().astimezone().isoformat(),
-                "sessionId": session_id,
-            },
+        # write_session_binding owns the pointer path/format; task_id gives
+        # find_task_for_cwd a durable identity immune to name reuse.
+        missioncache_db.write_session_binding(
+            session_id, project_name, task_id=task_id
         )
     except OSError as e:
         # DB row already written - the per-session pointer is a secondary

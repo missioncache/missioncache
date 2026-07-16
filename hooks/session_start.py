@@ -513,29 +513,19 @@ def write_cwd_session_pointer(session_id: str) -> None:
     )
 
 
-def write_session_project(task_name: str, session_id: str) -> None:
+def write_session_project(task_name: str, session_id: str, task_id: int | None = None) -> None:
     """Write session-specific project file for statusline display.
 
-    Writes directly to projects/<session_id>.json via tmp+rename, avoiding
-    the shared pending-project.json file which is prone to race conditions
-    when multiple sessions run concurrently. Atomic semantics also prevent
-    a mid-write crash from leaving a truncated file that the next statusline
-    read would treat as corrupt.
+    Delegates to missioncache_db.write_session_binding - the single owner of
+    the binding path and format (atomic tmp+rename, no shared pending file).
+    ``task_id`` gives resolution a durable identity immune to name reuse.
     """
     if not session_id:
         return
 
-    from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
+    from missioncache_db import write_session_binding  # type: ignore[import-not-found]
 
-    project_file = Path.home() / ".claude" / "hooks" / "state" / "projects" / f"{session_id}.json"
-    atomic_write_json(
-        project_file,
-        {
-            "projectName": task_name,
-            "updated": datetime.now().astimezone().isoformat(),
-            "sessionId": session_id,
-        },
-    )
+    write_session_binding(session_id, task_name, task_id=task_id)
 
 
 def get_session_context() -> tuple[str | None, str | None]:
@@ -708,7 +698,7 @@ def main():
             # for heartbeat routing; the old shared pending-task.json file
             # was vestigial and removed in mcp-missioncache 0.2.13.
             if session_id:
-                write_session_project(task.name, session_id)
+                write_session_project(task.name, session_id, task_id=task.id)
 
             # Get time info
             time_seconds = db.get_task_time(task.id)
