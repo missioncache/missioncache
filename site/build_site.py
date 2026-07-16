@@ -61,7 +61,6 @@ LANDING_IMAGES = {
     "{{IMG_PROJECTS}}":   ("img/demo_projects.jpg", "image/jpeg"),
     "{{IMG_ACTIVITY}}":   ("img/demo_activity.jpg", "image/jpeg"),
     "{{IMG_AUTO}}":       ("img/demo_auto.jpg", "image/jpeg"),
-    "{{IMG_STATUSLINE}}": ("img/statusline.jpg", "image/jpeg"),
     "{{IMG_THUMB_STATUSLINE}}": ("img/thumb_statusline.jpg", "image/jpeg"),
     "{{IMG_THUMB_PROJECTS}}":   ("img/thumb_projects.jpg", "image/jpeg"),
     "{{IMG_THUMB_AUTO}}":       ("img/thumb_auto.jpg", "image/jpeg"),
