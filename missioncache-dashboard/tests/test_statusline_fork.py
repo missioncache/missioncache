@@ -16,9 +16,10 @@ import pytest
 
 import missioncache_dashboard.statusline as mod
 from missioncache_dashboard.statusline import (
+    _format_wall_time,
     _parse_fork_of,
     _resolve_parent_context,
-    _shared_is_stale,
+    _shared_stale_mtime,
 )
 
 
@@ -83,7 +84,7 @@ class TestResolveParentContext:
         assert _resolve_parent_context("no-such") is None
 
 
-class TestSharedIsStale:
+class TestSharedStaleMtime:
     def _marker(self, state, session_id, seen_mtime):
         (state / "shared-seen" / f"{session_id}.json").write_text(
             json.dumps({"parent": "parent-proj", "seen_mtime": seen_mtime})
@@ -91,14 +92,14 @@ class TestSharedIsStale:
 
     def test_no_marker_is_fresh(self, fork_fs):
         _a, _c, _state, parent_ctx = fork_fs
-        assert _shared_is_stale(parent_ctx, "sess-1", "parent-proj") is False
+        assert _shared_stale_mtime(parent_ctx, "sess-1", "parent-proj") is None
 
     def test_marker_current_is_fresh(self, fork_fs):
         _a, _c, state, parent_ctx = fork_fs
         self._marker(state, "sess-1", parent_ctx.stat().st_mtime)
-        assert _shared_is_stale(parent_ctx, "sess-1", "parent-proj") is False
+        assert _shared_stale_mtime(parent_ctx, "sess-1", "parent-proj") is None
 
-    def test_parent_updated_after_marker_is_stale(self, fork_fs):
+    def test_parent_updated_after_marker_returns_change_mtime(self, fork_fs):
         _a, _c, state, parent_ctx = fork_fs
         seen = parent_ctx.stat().st_mtime
         self._marker(state, "sess-1", seen)
@@ -106,12 +107,12 @@ class TestSharedIsStale:
         # Force a strictly-newer mtime deterministically (no sleep, no
         # filesystem-granularity dependency - flakes on coarse-mtime FSes).
         os.utime(parent_ctx, (seen + 10, seen + 10))
-        assert _shared_is_stale(parent_ctx, "sess-1", "parent-proj") is True
+        assert _shared_stale_mtime(parent_ctx, "sess-1", "parent-proj") == seen + 10
 
     def test_corrupt_marker_is_fresh(self, fork_fs):
         _a, _c, state, parent_ctx = fork_fs
         (state / "shared-seen" / "sess-1.json").write_text("{not json")
-        assert _shared_is_stale(parent_ctx, "sess-1", "parent-proj") is False
+        assert _shared_stale_mtime(parent_ctx, "sess-1", "parent-proj") is None
 
     def test_foreign_parent_marker_is_fresh(self, fork_fs):
         """A marker recorded for a DIFFERENT parent (session switched forks)
@@ -120,7 +121,23 @@ class TestSharedIsStale:
         (state / "shared-seen" / "sess-1.json").write_text(
             json.dumps({"parent": "other-parent", "seen_mtime": 1.0})
         )
-        assert _shared_is_stale(parent_ctx, "sess-1", "parent-proj") is False
+        assert _shared_stale_mtime(parent_ctx, "sess-1", "parent-proj") is None
+
+
+class TestFormatWallTime:
+    def test_today_renders_clock_only(self):
+        from datetime import datetime
+        now = datetime.now()
+        # noon today is unambiguous regardless of when the test runs
+        stamp = now.replace(hour=12, minute=34, second=0).timestamp()
+        assert _format_wall_time(stamp) == "12:34"
+
+    def test_other_day_includes_date(self):
+        from datetime import datetime, timedelta
+        past = datetime.now() - timedelta(days=3)
+        past = past.replace(hour=9, minute=5, second=0)
+        # Month-name form, matching the Last Action cell's format.
+        assert _format_wall_time(past.timestamp()) == past.strftime("%b %-d %H:%M")
 
 
 # ── get_project_info fork detection (IO) ────────────────────────────────
@@ -160,7 +177,7 @@ class TestGetProjectInfoFork:
         assert info.name == "child-proj"
         assert info.fork_of == "parent-proj"
         assert info.progress.strip() == "[1/2]"
-        assert info.shared_stale is False  # no marker: neutral
+        assert info.shared_stale_mtime == 0.0  # no marker: neutral
 
     def test_unresolvable_parent_renders_plain(self, fork_fs, monkeypatch):
         active, _c, _state, _parent_ctx = fork_fs
@@ -186,7 +203,7 @@ class TestGetProjectInfoFork:
         info = mod.get_project_info("sess-1", 60)
         assert info.name == "solo-proj"
         assert info.fork_of == ""
-        assert info.shared_stale is False
+        assert info.shared_stale_mtime == 0.0
 
 
 # ── cross-parser parity (the split-brain guard) ──────────────────────────
@@ -250,14 +267,19 @@ class TestForkRenderAssembly:
         assert "⤵" in line
 
     def test_stale_glyph_present_only_when_stale(self, fork_fs):
-        """The staleness glyph is appended iff shared_stale."""
+        """The staleness glyph is appended iff shared_stale_mtime is set."""
         _a, _c, state, parent_ctx = fork_fs
         # fresh -> no glyph in the assembled fork value
         fork_value_fresh = mod._osc8_link("u", "parent-proj")
-        assert "shared updated" not in fork_value_fresh
+        assert "parent updated" not in fork_value_fresh
         # stale -> the render appends the marker (mirrors statusline.py logic)
-        stale_value = fork_value_fresh + f" {mod.COLORS['ctx_urgent']}● shared updated{mod.RESET}"
-        assert "● shared updated" in stale_value
+        stamp = mod._format_wall_time(parent_ctx.stat().st_mtime)
+        stale_value = (
+            fork_value_fresh
+            + f" {mod.COLORS['fork_update']}● parent updated {stamp}{mod.RESET}"
+        )
+        assert "● parent updated" in stale_value
+        assert stamp in stale_value
 
 
 def _bound_conn(name):
@@ -279,4 +301,4 @@ class TestSessionIdGuard:
     def test_traversal_session_id_reads_no_marker(self, fork_fs):
         """A session id with path chars must not let the marker read escape."""
         _a, _c, _state, parent_ctx = fork_fs
-        assert _shared_is_stale(parent_ctx, "../../etc/passwd", "parent-proj") is False
+        assert _shared_stale_mtime(parent_ctx, "../../etc/passwd", "parent-proj") is None

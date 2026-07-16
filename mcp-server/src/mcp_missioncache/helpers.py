@@ -93,7 +93,7 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
     """
     if not session_id or not project_name:
         return False
-    if not _SESSION_ID_RE.match(session_id):
+    if not _SESSION_ID_RE.fullmatch(session_id):
         logger.warning("Skipping session binding: invalid session_id shape")
         return False
 
@@ -142,6 +142,30 @@ def _bind_session_to_project(session_id: str | None, project_name: str) -> bool:
         logger.warning(f"Failed to write per-session pointer: {e}")
         return False
     return True
+
+
+def _get_bound_project(session_id: str | None) -> str | None:
+    """The project this session is bound to (its ``project_state`` row), or None.
+
+    Read-side mirror of ``_bind_session_to_project``. Best-effort: a missing
+    DB, missing row, or invalid session id all read as "not bound" - callers
+    use this to gate optional behavior, never as a hard dependency.
+    """
+    if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
+        return None
+    db_path = missioncache_db.HOOKS_STATE_DB_PATH
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    return row[0] if row and row[0] else None
 
 
 async def _notify_dashboard_task_created() -> None:
