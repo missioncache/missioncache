@@ -1,11 +1,13 @@
 """MissionCache file operation MCP tools - create, get, update MissionCache files."""
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field
 
+import missioncache_db
 from missioncache_db import CATEGORIES, context_health
 
 from . import active_task, project_files
@@ -16,6 +18,7 @@ from .errors import MissionCacheError, MissionCacheFileNotFoundError, TaskNotFou
 from .helpers import (
     SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
+    _get_bound_project,
     _notify_dashboard_task_created,
     _resolve_session_id,
     _resolve_to_git_root,
@@ -382,6 +385,62 @@ async def update_context_file(
         return {"error": True, "message": str(e)}
 
 
+def _stamp_shared_seen_for_fork_reader(
+    parent_name: str,
+    parent_ctx_path: str,
+    parent_mtime: float,
+    session_id: str | None = None,
+) -> bool:
+    """Restamp the calling session's shared-seen marker when it is a fork of
+    ``parent_name`` - reading the parent's digest IS consuming the shared
+    layer, so the statusline's "parent updated" indicator clears immediately
+    instead of waiting for the next /missioncache:load. When this stamp fires,
+    the digest response carries ``shared_seen_stamped: true`` and the
+    /missioncache:load fork flow skips its own bash stamp (which would
+    otherwise overwrite this bytes-coupled value with an older mtime from an
+    earlier response). Best-effort on every branch: no session id, no binding,
+    non-fork caller, or an IO failure all mean "no stamp", never an error."""
+    session_id = _resolve_session_id(session_id)
+    if not session_id:
+        return False
+    bound = _get_bound_project(session_id)
+    if not bound or bound == parent_name:
+        return False
+    try:
+        bfiles = project_files.get_missioncache_files(bound)
+        if not bfiles.context_file:
+            return False
+        # 8KB head read: the "**Fork of:**" header lives in the header region
+        # (before the first "##") by the context-file convention, and the
+        # statusline reads the same 8KB head (statusline.get_project_info) -
+        # this size IS the de-facto contract for fork-header placement.
+        with open(bfiles.context_file, "r", encoding="utf-8", errors="strict") as fh:
+            head = fh.read(8192)
+    except (OSError, MissionCacheError, ValueError):
+        # UnicodeDecodeError is a ValueError subclass - covered.
+        return False
+    if context_health.parse_fork_parent(head) != parent_name:
+        return False
+    marker_dir = Path.home() / ".claude" / "hooks" / "state" / "shared-seen"
+    try:
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        missioncache_db.atomic_write_json(
+            marker_dir / f"{session_id}.json",
+            {
+                "parent": parent_name,
+                "parent_context_path": parent_ctx_path,
+                "seen_mtime": parent_mtime,
+                "seen_at": datetime.now().astimezone().isoformat(),
+            },
+        )
+    except OSError:
+        logger.warning(
+            "shared-seen stamp for parent %r failed", parent_name, exc_info=True
+        )
+        return False
+    return True
+
+
 @mcp.tool()
 async def get_context_digest(
     project_name: Annotated[str, Field(description="Project name")],
@@ -392,6 +451,14 @@ async def get_context_digest(
             "saw (from its shared-seen marker). When passed, parent_digest."
             "changed_since_seen reports whether a parallel session updated the "
             "shared layer since."
+        ),
+    ] = None,
+    session_id: Annotated[
+        str | None,
+        Field(
+            description="Claude session id; lets a fork session's direct read "
+            "of its parent's digest restamp the shared-seen marker. "
+            + SESSION_ID_RESOLVE_HINT
         ),
     ] = None,
 ) -> dict:
@@ -425,7 +492,14 @@ async def get_context_digest(
             )
         _validate_path(files.context_file, "context_file", must_be_under=settings.root)
         path = Path(files.context_file)
+        # Couple the mtime to the bytes actually read (same dance as the
+        # parent branch below) - the shared-seen stamp must baseline exactly
+        # the snapshot the caller consumed, never a racing writer's newer one.
+        own_mtime = path.stat().st_mtime
         content = path.read_text()
+        if path.stat().st_mtime != own_mtime:
+            own_mtime = path.stat().st_mtime
+            content = path.read_text()
         digest = context_health.build_digest(content, path)
 
         parent_digest = None
@@ -435,6 +509,14 @@ async def get_context_digest(
         # and prompt a manual re-read, not silently downgrade to a plain resume.
         fork_name = context_health.parse_fork_parent(content)
         is_fork = bool(fork_name and fork_name != project_name)
+        # A fork is never itself a parent (chains are one level deep), so only
+        # a non-fork digest can be a shared-layer read. Gating here spares the
+        # stamp's DB connection and bound-context read on every fork digest.
+        shared_seen_stamped = False
+        if not is_fork:
+            shared_seen_stamped = _stamp_shared_seen_for_fork_reader(
+                project_name, files.context_file, own_mtime, session_id
+            )
         fork_parent_error = None
         if is_fork:
             try:
@@ -485,6 +567,9 @@ async def get_context_digest(
             "is_fork": is_fork,
             "parent_digest": parent_digest,
             "fork_parent_error": fork_parent_error,
+            # True when this read auto-restamped the calling fork session's
+            # shared-seen marker (the caller is a fork of project_name).
+            "shared_seen_stamped": shared_seen_stamped,
         }
 
     except MissionCacheError as e:

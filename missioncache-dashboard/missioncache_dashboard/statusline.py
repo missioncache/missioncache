@@ -65,6 +65,9 @@ COLORS = {
     "ctx": f"{ESC}[38;2;160;170;190m",
     "ctx_warn": f"{ESC}[38;2;220;180;50m",
     "ctx_urgent": f"{ESC}[38;2;255;109;0m",
+    # Fork-family accent (matches the dashboard fork tree's cyan) - the
+    # shared-layer update indicator, deliberately NOT the ctx_urgent alarm.
+    "fork_update": f"{ESC}[38;2;0;212;212m",
     "ctx_est": f"{ESC}[38;2;100;150;220m",
     "time": f"{ESC}[38;2;100;180;180m",
     "edit": f"{ESC}[38;2;200;160;120m",
@@ -665,7 +668,9 @@ class ProjectInfo(NamedTuple):
     display: str = ""
     progress: str = ""
     fork_of: str = ""
-    shared_stale: bool = False
+    # Parent-context mtime when the shared layer changed after this session's
+    # last sync; 0.0 = fresh (or not a fork).
+    shared_stale_mtime: float = 0.0
 
 
 # MUST stay byte-identical to context_health._FORK_NAME_RE (the db/MCP copy).
@@ -724,30 +729,46 @@ def _resolve_parent_context(parent: str) -> Optional[Path]:
     return None
 
 
-def _shared_is_stale(parent_ctx: Path, session_id: str, parent_name: str) -> bool:
-    """True when the shared (parent) context changed after this session's
-    last sync, per the shared-seen marker. The marker must belong to THIS
-    parent - a session that switched between forks of different parents has
-    a baseline for the other file, and mtimes across files do not compare.
+def _shared_stale_mtime(
+    parent_ctx: Path, session_id: str, parent_name: str
+) -> Optional[float]:
+    """The parent context's mtime when it changed after this session's last
+    sync (per the shared-seen marker), else None. The marker must belong to
+    THIS parent - a session that switched between forks of different parents
+    has a baseline for the other file, and mtimes across files do not compare.
     No/foreign/corrupt marker reads as fresh - neutral, never a false alarm."""
     # Shape-guard the session id before it becomes a filename: it is a trusted
     # harness UUID today, but a stray '..' or '/' must never let the marker
     # read escape the shared-seen dir.
     if not re.fullmatch(r"[A-Za-z0-9._-]+", session_id or ""):
-        return False
+        return None
     marker = STATE_DIR / "shared-seen" / f"{session_id}.json"
     try:
         data = json.loads(marker.read_text())
         if data.get("parent") != parent_name:
-            return False
+            return None
         seen = data.get("seen_mtime")
         if seen is None:
-            return False
+            return None
         # Exact comparison: the marker stores the same float st_mtime the
         # writer statted, and JSON round-trips float64 exactly.
-        return parent_ctx.stat().st_mtime > float(seen)
+        mtime = parent_ctx.stat().st_mtime
+        return mtime if mtime > float(seen) else None
     except (OSError, ValueError, TypeError):
-        return False
+        return None
+
+
+def _format_wall_time(mtime: float) -> str:
+    """A change timestamp as the user's local wall clock: HH:MM today,
+    "Jul 14 14:32" otherwise - the same shape as the Last Action cell, and
+    unambiguous internationally (a numeric DD/MM reads as MM/DD to half the
+    audience). Absolute on purpose - the statusline only re-renders on
+    conversation events, so a relative "25m ago" would sit frozen and
+    mislead during idle stretches."""
+    dt = datetime.fromtimestamp(mtime)
+    if dt.date() == datetime.now().date():
+        return dt.strftime("%H:%M")
+    return dt.strftime("%b %-d %H:%M")
 
 
 def _project_is_active_in_db(name: str) -> bool:
@@ -824,7 +845,7 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
     # a non-UTF-8 file must drop only the fork annotation, not (via the
     # main() except) the entire project cell.
     fork_of = ""
-    shared_stale = False
+    shared_stale_mtime = 0.0
     for ctx_name in (f"{name}-context.md", "context.md"):
         ctx_path = project_dir / ctx_name
         if ctx_path.is_file():
@@ -840,13 +861,15 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
         if parent_ctx is None:
             fork_of = ""  # unresolvable parent: render as a plain project
         else:
-            shared_stale = _shared_is_stale(parent_ctx, session_id, fork_of)
+            shared_stale_mtime = (
+                _shared_stale_mtime(parent_ctx, session_id, fork_of) or 0.0
+            )
 
     tasks_content = _read_tasks_content(project_dir, name)
     if not tasks_content:
-        return ProjectInfo(name, display, "", fork_of, shared_stale)
+        return ProjectInfo(name, display, "", fork_of, shared_stale_mtime)
     progress = f" {_parse_task_progress(tasks_content)}"
-    return ProjectInfo(name, display, progress, fork_of, shared_stale)
+    return ProjectInfo(name, display, progress, fork_of, shared_stale_mtime)
 
 
 # ============ LAST ACTION TIME ============
@@ -1879,13 +1902,20 @@ def main() -> None:
             linked_value = linked_name
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
         if project.fork_of:
-            # Fork annotation: link to the parent's dashboard modal; a red dot
-            # means the shared (parent) context changed since this session's
-            # last sync - re-read it before building on stale knowledge.
+            # Fork annotation: link to the parent's dashboard modal; a cyan dot
+            # (the fork-family accent, matching the dashboard's fork tree) means
+            # the shared (parent) context changed since this session's last sync
+            # - re-read it before building on stale knowledge. The timestamp is
+            # the parent change's local wall-clock time, absolute on purpose
+            # (see _format_wall_time).
             parent_url = f"{_DASHBOARD_URL}/#projects?task={urllib.parse.quote(project.fork_of, safe='')}"
             fork_value = _osc8_link(parent_url, project.fork_of)
-            if project.shared_stale:
-                fork_value += f" {COLORS['ctx_urgent']}● shared updated{RESET}{COLORS['project']}"
+            if project.shared_stale_mtime:
+                stamp = _format_wall_time(project.shared_stale_mtime)
+                fork_value += (
+                    f" {COLORS['fork_update']}● parent updated {stamp}"
+                    f"{RESET}{COLORS['project']}"
+                )
             line2.append(_item(COLORS["project"], "⤵", "Fork of", fork_value))
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))

@@ -126,3 +126,115 @@ class TestGetContextDigest:
         # waiting row; both should surface without the caller asking.
         result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
         assert isinstance(result["health_warnings"], list)
+
+
+# ── shared-seen auto-stamp (digest-read clears the fork staleness dot) ────
+
+
+@pytest.fixture()
+def fork_reader(project, tmp_path, monkeypatch):
+    """A fork of demo-project, bound to the calling session.
+
+    Redirects HOME (shared-seen marker dir) and the hooks-state DB into
+    tmp so the stamp is fully observable and isolated.
+    """
+    import sqlite3
+
+    import missioncache_db
+
+    fork_dir = tmp_path / "mc" / "active" / "fork-proj"
+    fork_dir.mkdir(parents=True)
+    (fork_dir / "fork-proj-context.md").write_text(
+        "# Fork - Context\n**Fork of:** demo-project\n\n## Description\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-stamp-1")
+    state_db = tmp_path / "hooks-state.db"
+    monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", state_db)
+    conn = sqlite3.connect(str(state_db))
+    missioncache_db.init_hooks_state_db_schema(conn)
+    conn.execute(
+        "INSERT INTO project_state (session_id, project_name, updated_at) "
+        "VALUES (?, ?, datetime('now', 'localtime'))",
+        ("sess-stamp-1", "fork-proj"),
+    )
+    conn.commit()
+    conn.close()
+    return tmp_path / "home" / ".claude" / "hooks" / "state" / "shared-seen"
+
+
+class TestSharedSeenAutoStamp:
+    def test_fork_session_digesting_parent_stamps_marker(self, project, fork_reader):
+        import json
+
+        result = asyncio.run(
+            tools_docs.get_context_digest(project_name="demo-project")
+        )
+        assert result["success"] is True
+        assert result["shared_seen_stamped"] is True
+        marker = json.loads((fork_reader / "sess-stamp-1.json").read_text())
+        assert marker["parent"] == "demo-project"
+        assert marker["seen_mtime"] == project.stat().st_mtime
+
+    def test_fork_session_digesting_itself_does_not_stamp(self, project, fork_reader):
+        result = asyncio.run(tools_docs.get_context_digest(project_name="fork-proj"))
+        assert result["success"] is True
+        assert result["shared_seen_stamped"] is False
+        assert not (fork_reader / "sess-stamp-1.json").exists()
+
+    def test_non_fork_session_does_not_stamp(self, project, fork_reader, monkeypatch):
+        import sqlite3
+
+        import missioncache_db
+
+        conn = sqlite3.connect(str(missioncache_db.HOOKS_STATE_DB_PATH))
+        conn.execute(
+            "UPDATE project_state SET project_name = 'demo-project' "
+            "WHERE session_id = 'sess-stamp-1'"
+        )
+        conn.commit()
+        conn.close()
+        result = asyncio.run(
+            tools_docs.get_context_digest(project_name="demo-project")
+        )
+        assert result["shared_seen_stamped"] is False
+        assert not (fork_reader / "sess-stamp-1.json").exists()
+
+    def test_no_session_id_does_not_stamp(self, project, fork_reader, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        result = asyncio.run(
+            tools_docs.get_context_digest(project_name="demo-project")
+        )
+        assert result["shared_seen_stamped"] is False
+        assert not (fork_reader / "sess-stamp-1.json").exists()
+
+    def test_fork_of_other_parent_does_not_stamp(
+        self, project, fork_reader, tmp_path
+    ):
+        """The parse_fork_parent discriminator: a session bound to a fork of a
+        DIFFERENT parent digesting this project must not stamp. Distinct from
+        the self-digest guard, which short-circuits earlier."""
+        fork_ctx = tmp_path / "mc" / "active" / "fork-proj" / "fork-proj-context.md"
+        fork_ctx.write_text(
+            "# Fork - Context\n**Fork of:** other-parent\n\n## Description\n"
+        )
+        result = asyncio.run(
+            tools_docs.get_context_digest(project_name="demo-project")
+        )
+        assert result["success"] is True
+        assert result["shared_seen_stamped"] is False
+        assert not (fork_reader / "sess-stamp-1.json").exists()
+
+    def test_explicit_session_id_param_stamps_without_env(
+        self, project, fork_reader, monkeypatch
+    ):
+        """Pre-2.1.154 / non-Claude clients pass session_id explicitly; the
+        stamp must work without the env var."""
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        result = asyncio.run(
+            tools_docs.get_context_digest(
+                project_name="demo-project", session_id="sess-stamp-1"
+            )
+        )
+        assert result["shared_seen_stamped"] is True
+        assert (fork_reader / "sess-stamp-1.json").exists()
