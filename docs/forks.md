@@ -1,6 +1,6 @@
 # Forks
 
-This document covers MissionCache's forks: a way to run two or more projects that lean on the same body of knowledge, without keeping a separate copy of that knowledge in each one. A fork is a full project with a parent, and the parent's context file is the shared layer they all read and write.
+This document covers MissionCache's forks: a way to run two or more projects that lean on the same body of knowledge, without keeping a separate copy of that knowledge in each one. A fork here is a project fork, not a Claude conversation fork and not a git fork. It is a full project with a parent, and the parent's context file is the shared memory they all read and write.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (MissionCache file layout, the `tasks` table, `~/.claude/hooks/state/`, the MCP tools). If a term in this doc is not defined here, it is defined there.
 
@@ -104,9 +104,9 @@ Two sessions on two forks are two people editing one shared file. MissionCache d
 | The shared-seen marker | `~/.claude/hooks/state/shared-seen/<session-id>.json`. Records the parent-context mtime this session last read. Shape: `{parent, parent_context_path, seen_mtime, seen_at}`. Seeded by `/missioncache:fork`, stamped by `/missioncache:load`, restamped by `/missioncache:save` when that save wrote the parent. |
 | `parent_digest.changed_since_seen` | `get_context_digest` takes a `seen_mtime` and returns this flag on a fork. True means a sibling session updated the shared layer since this session last synced. |
 | The `/missioncache:load` banner | On resume, the fork line reads either "shared context up to date" or "UPDATED by a parallel session since your last sync". On the second, `/missioncache:load` reads the parent's digest before continuing. |
-| The statusline cell | A `⤵ Fork of <parent>` cell, OSC 8-linked to the parent's dashboard modal, with a `● shared updated` dot when the parent's context is newer than this session's marker. |
+| The statusline cell | A `⤵ Fork of <parent>` cell, OSC 8-linked to the parent's dashboard modal, with a cyan `● parent updated HH:MM` note (local wall-clock time of the change; `Jul 14 14:32`-style when it is not from today) when the parent's context is newer than this session's marker. |
 
-The marker means "this session consumed the shared layer at this version". It is only stamped after the shared layer was actually read, never before.
+The marker means "this session consumed the shared layer at this version". It is only stamped after the shared layer was actually read, never before. It is stamped by `/missioncache:fork`, `/missioncache:load`, `/missioncache:save` (when the fork wrote the parent layer), and - since mcp-missioncache 1.0.15 - automatically by `get_context_digest` when a fork session reads its parent's digest directly, so asking Claude to re-read the shared context clears the statusline note on the spot.
 
 ## Completing the parent
 
@@ -162,7 +162,7 @@ Note this is the grammar for **parsing the header line**, not the rule for namin
 
 - [`architecture.md`](./architecture.md) - the `tasks` schema, `parent_id`, and the invariant about the two hand-mirrored `Fork of:` regexes.
 - [`mcp-tools.md`](./mcp-tools.md) - `create_missioncache_files(fork_of=...)`, `get_context_digest`, `update_context_file`, `complete_task`.
-- [`statusline.md`](./statusline.md) - the fork cell, the shared-updated dot, and the OSC 8 links.
+- [`statusline.md`](./statusline.md) - the fork cell, the cyan parent-updated note, and the OSC 8 links.
 - [`dashboard.md`](./dashboard.md) - how a fork renders when its parent leaves the active set.
 - [`commands/fork.md`](../commands/fork.md) - the command itself, step by step, including migrating shared content out of a monolith parent.
 - `missioncache-db/missioncache_db/context_health.py:499` - `parse_fork_parent`, the header-region-only parse that every other piece depends on.

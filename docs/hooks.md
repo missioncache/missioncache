@@ -6,6 +6,8 @@ It assumes you have read [`architecture.md`](./architecture.md) for the shared v
 
 If you are just trying to *use* MissionCache, you already are - hooks run automatically once the plugin is installed. The rest of this doc is for when you want to understand what they do, debug one that is misbehaving, or add your own.
 
+**Windows:** the hooks do not run on Windows yet. They are registered as `python3` commands, a name most Windows Python installs lack, and the PreCompact hook imports the Unix-only `fcntl` module (used for a file lock during the snapshot write), which fails on Windows before the hook can start. A Windows port is tracked; until then, everything in this doc applies to macOS and Linux.
+
 ## The hook model
 
 Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers four of them via `hooks/hooks.json`:
@@ -213,7 +215,7 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
-The shared-seen marker records the parent-context mtime this session last read. That is how the statusline knows whether to show the `● shared updated` dot on a fork, and how `/missioncache:load` knows whether to banner that a parallel session changed the shared layer. See [`forks.md`](./forks.md).
+The shared-seen marker records the parent-context mtime this session last read. That is how the statusline knows whether to show the cyan `● parent updated HH:MM` note on a fork, and how `/missioncache:load` knows whether to banner that a parallel session changed the shared layer. Besides the slash commands, `get_context_digest` restamps it when a fork session reads its parent's digest. See [`forks.md`](./forks.md).
 
 **Invariant to be aware of:** `pending-task.json` and `pending-project.json` appear in git history but are no longer written or read by any current code path (`pending-task.json` removed in mcp-missioncache 0.2.13; `pending-project.json` writers were already removed earlier). The live per-session pointer is `projects/<session-id>.json`. Do not rely on either pending file.
 
