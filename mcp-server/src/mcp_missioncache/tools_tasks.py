@@ -349,7 +349,7 @@ async def get_task(
         # without the caller resolving the id client-side.
         session_id = _resolve_session_id(session_id)
         if session_id:
-            session_bound = _bind_session_to_project(session_id, task.name)
+            session_bound = _bind_session_to_project(session_id, task.name, task_id=task.id)
             result["session_bound"] = session_bound
 
         return result
@@ -517,7 +517,7 @@ async def create_task(
         # running /missioncache:load. Falls back to the CLAUDE_CODE_SESSION_ID env
         # var so the binding works without the caller resolving the id.
         session_id = _resolve_session_id(session_id)
-        session_bound = _bind_session_to_project(session_id, name)
+        session_bound = _bind_session_to_project(session_id, name, task_id=task.id)
 
         result = CreateTaskResult(
             task_id=task.id,

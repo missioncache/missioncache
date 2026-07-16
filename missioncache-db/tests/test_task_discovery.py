@@ -128,6 +128,242 @@ class TestFindTaskForCwd:
         assert found.name == task_name
 
 
+class TestExplicitBindingCwdIndependence:
+    """The per-session binding file (written on /missioncache:load) names the
+    project directly. cwd must not veto it: projects are routinely worked
+    from outside their registered repo, and forks inherit the parent's
+    repo_id. Current bindings carry taskId (durable identity, immune to name
+    reuse); name-only bindings are the legacy shape and resolve by name with
+    an ambiguity guard. Contract source: the load/save promise (state
+    survives compaction for the loaded project, README + docs/hooks.md) -
+    which the pre-compact and heartbeat hooks can only honor if resolution
+    succeeds for the bound session.
+    """
+
+    def _repo_task(self, db, tmp_path, repo_name, task_name, status="active"):
+        repo_dir = tmp_path / repo_name
+        repo_dir.mkdir(exist_ok=True)
+        repo_id = db.add_repo(str(repo_dir))
+        with db.connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO tasks (repo_id, name, full_path, status, type)"
+                " VALUES (?, ?, ?, ?, 'coding')",
+                (repo_id, task_name, f"active/{task_name}", status),
+            )
+            conn.commit()
+            task_id = cursor.lastrowid
+        return repo_dir, task_id
+
+    def _bind_session(self, tmp_path, session_id, task_name, task_id=None):
+        hooks_state = tmp_path / ".claude" / "hooks" / "state" / "projects"
+        hooks_state.mkdir(parents=True, exist_ok=True)
+        payload = {"projectName": task_name, "sessionId": session_id}
+        if task_id is not None:
+            payload["taskId"] = task_id
+        (hooks_state / f"{session_id}.json").write_text(json.dumps(payload))
+
+    def _outside_cwd(self, tmp_path):
+        outside = tmp_path / "unrelated" / "workdir"
+        outside.mkdir(parents=True, exist_ok=True)
+        return outside
+
+    # ── taskId bindings (current shape) ───────────────────────────────
+
+    def test_binding_with_task_id_resolves_by_id_not_name(
+        self, db, tmp_path, monkeypatch
+    ):
+        """taskId is the durable identity: it wins even when the binding's
+        projectName is stale (project renamed after binding was written)."""
+        _repo, task_id = self._repo_task(db, tmp_path, "repo1", "real-proj")
+        self._bind_session(
+            tmp_path, "sess-id-1", "old-stale-name", task_id=task_id
+        )
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-id-1"
+        )
+        assert found is not None
+        assert found.id == task_id
+        assert found.name == "real-proj"
+
+    def test_stale_task_id_does_not_fall_back_to_same_named_stranger(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The misroute hole: bound project completed, an UNRELATED project
+        reuses the name. A dead taskId must resolve to None - never to the
+        stranger - or snapshots and heartbeats route into the wrong project.
+        """
+        _r1, dead_id = self._repo_task(
+            db, tmp_path, "repo1", "cleanup", status="completed"
+        )
+        self._repo_task(db, tmp_path, "repo2", "cleanup")  # the stranger
+        self._bind_session(tmp_path, "sess-id-2", "cleanup", task_id=dead_id)
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-id-2"
+        )
+        assert found is None, (
+            "a dead taskId must not fall back to a same-named stranger"
+        )
+
+    def test_binding_with_paused_task_id_resolves(self, db, tmp_path, monkeypatch):
+        """Paused projects are resumable - the binding stays resolvable."""
+        _repo, task_id = self._repo_task(
+            db, tmp_path, "repo1", "paused-proj", status="paused"
+        )
+        self._bind_session(tmp_path, "sess-id-3", "paused-proj", task_id=task_id)
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-id-3"
+        )
+        assert found is not None
+        assert found.id == task_id
+
+    # ── legacy name-only bindings ─────────────────────────────────────
+
+    def test_legacy_binding_resolves_outside_registered_repo(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The original bug: session bound to a project whose registered repo
+        does not contain cwd got None back, so snapshots and heartbeats were
+        lost. Name-only (legacy) bindings resolve via the global fallback."""
+        self._repo_task(db, tmp_path, "repo1", "bound-proj")
+        self._bind_session(tmp_path, "sess-1", "bound-proj")
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-1"
+        )
+        assert found is not None
+        assert found.name == "bound-proj"
+
+    def test_legacy_binding_to_completed_task_returns_none(
+        self, db, tmp_path, monkeypatch
+    ):
+        """The status filter is the discriminator the pre-compact sticky
+        error depends on: a completed bound project must resolve to None,
+        not snapshot into an archived project's files."""
+        self._repo_task(db, tmp_path, "repo1", "done-proj", status="completed")
+        self._bind_session(tmp_path, "sess-4", "done-proj")
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-4"
+        )
+        assert found is None
+
+    def test_legacy_binding_subtask_bare_name_resolves(
+        self, db, tmp_path, monkeypatch
+    ):
+        """Subtask rows store a bare name, so a binding naming a subtask
+        resolves via the fallback; the 'parent/subtask' form misses (matches
+        the docstring's claimed contract)."""
+        _repo, parent_id = self._repo_task(db, tmp_path, "repo1", "parent-p")
+        with db.connection() as conn:
+            conn.execute(
+                "INSERT INTO tasks (repo_id, name, full_path, status, type, parent_id)"
+                " SELECT repo_id, 'sub-p', 'active/parent-p/sub-p', 'active', 'coding', ?"
+                " FROM tasks WHERE id = ?",
+                (parent_id, parent_id),
+            )
+            conn.commit()
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        outside = self._outside_cwd(tmp_path)
+
+        self._bind_session(tmp_path, "sess-5", "sub-p")
+        found = db.find_task_for_cwd(str(outside), session_id="sess-5")
+        assert found is not None
+        assert found.name == "sub-p"
+        assert found.parent_id == parent_id
+
+        self._bind_session(tmp_path, "sess-6", "parent-p/sub-p")
+        assert db.find_task_for_cwd(str(outside), session_id="sess-6") is None
+
+    def test_ambiguous_name_outside_repos_returns_none(
+        self, db, tmp_path, monkeypatch, capsys
+    ):
+        """Two active projects share the bound name and cwd disambiguates
+        neither: refuse to guess rather than pick a repo arbitrarily - and
+        leave the stderr breadcrumb every consumer inherits."""
+        self._repo_task(db, tmp_path, "repo1", "dup-proj")
+        self._repo_task(db, tmp_path, "repo2", "dup-proj")
+        self._bind_session(tmp_path, "sess-2", "dup-proj")
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(
+            str(self._outside_cwd(tmp_path)), session_id="sess-2"
+        )
+        assert found is None
+        err = capsys.readouterr().err
+        assert "ambiguous" in err and "dup-proj" in err
+
+    def test_ambiguous_name_inside_repo_still_resolves_repo_scoped(
+        self, db, tmp_path, monkeypatch
+    ):
+        """When cwd IS inside one of the same-named projects' repos, the
+        repo-scoped lookup wins as before - the fallback never runs."""
+        self._repo_task(db, tmp_path, "repo1", "dup-proj")
+        repo2, _tid = self._repo_task(db, tmp_path, "repo2", "dup-proj")
+        self._bind_session(tmp_path, "sess-3", "dup-proj")
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        found = db.find_task_for_cwd(str(repo2), session_id="sess-3")
+        assert found is not None
+        assert found.name == "dup-proj"
+        repo2_id = db.get_repo_by_path(str(repo2)).id
+        assert found.repo_id == repo2_id
+
+
+class TestSessionBindingAccessors:
+    """write_session_binding / read_session_binding own the binding file
+    convention - every writer and reader goes through them (or matches
+    their format exactly), so the shape is pinned here once."""
+
+    def test_roundtrip_with_task_id(self, tmp_path, monkeypatch):
+        from missioncache_db import read_session_binding, write_session_binding
+
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        write_session_binding("sess-a", "proj-x", task_id=42)
+
+        exists, data = read_session_binding("sess-a")
+        assert exists is True
+        assert data["projectName"] == "proj-x"
+        assert data["taskId"] == 42
+        assert data["sessionId"] == "sess-a"
+        assert "updated" in data
+
+    def test_roundtrip_without_task_id_omits_key(self, tmp_path, monkeypatch):
+        from missioncache_db import read_session_binding, write_session_binding
+
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        write_session_binding("sess-b", "proj-y")
+
+        exists, data = read_session_binding("sess-b")
+        assert exists is True
+        assert "taskId" not in data
+
+    def test_missing_file_reads_as_not_bound(self, tmp_path, monkeypatch):
+        from missioncache_db import read_session_binding
+
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        assert read_session_binding("never-bound") == (False, None)
+
+    def test_corrupt_file_reads_as_exists_but_unreadable(
+        self, tmp_path, monkeypatch
+    ):
+        from missioncache_db import read_session_binding, session_binding_path
+
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        path = session_binding_path("sess-c")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+
+        assert read_session_binding("sess-c") == (True, None)
+
+
 # ── fork reconcile on scan ────────────────────────────────────────────────
 
 

@@ -188,7 +188,9 @@ async def create_missioncache_files(
         # running /missioncache:load. Falls back to the CLAUDE_CODE_SESSION_ID env
         # var so the binding works without the caller resolving the id.
         session_id = _resolve_session_id(session_id)
-        session_bound = _bind_session_to_project(session_id, project_name)
+        session_bound = _bind_session_to_project(
+            session_id, project_name, task_id=task.id if task else None
+        )
 
         result = {
             "success": True,

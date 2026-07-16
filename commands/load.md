@@ -201,11 +201,12 @@ Register the project against the current Claude session so the statusline picks 
 
 This step is defense-in-depth: Step 1's `get_task(session_id=...)` already performs the server-side binding via the MCP tool. The bash block additionally hits the dashboard API so the dashboard list view refreshes immediately (instead of waiting for the next periodic SQLite -> DuckDB sync) and writes the per-session pointer in case the MCP binding raced.
 
-Replace `<project-name>` with the actual project name and `<SESSION_ID from Step 1>` with the value captured in Step 1, then run:
+Replace `<project-name>` with the actual project name, `<SESSION_ID from Step 1>` with the value captured in Step 1, and `<task id>` with the numeric `id` from Step 1's `get_task` response (leave TASK_ID empty if you don't have it - the pointer then keeps the legacy name-only shape), then run:
 
 ```bash
 PROJECT_NAME='<project-name>'
 SESSION_ID='<SESSION_ID from Step 1>'
+TASK_ID='<task id>'
 
 # Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
 if [ -n "$SESSION_ID" ]; then
@@ -227,19 +228,25 @@ conn.execute(
 conn.commit()
 ' 2>/dev/null
 
-  # Write per-session project pointer read by find_task_for_cwd (missioncache-db/__init__.py:1270).
-  # Without this, /missioncache:save cannot find the task when cwd is the repo root (only when
-  # cwd is under ~/.missioncache/active/<task>/). Format matches session_start.py's
-  # write_session_project() exactly so either writer is interchangeable.
-  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
+  # Write per-session project pointer read by find_task_for_cwd. Without this,
+  # /missioncache:save cannot find the task when cwd is the repo root (only when
+  # cwd is under ~/.missioncache/active/<task>/). Format MUST match
+  # missioncache_db.write_session_binding (the owner of the convention);
+  # taskId is the durable identity resolution prefers - omitting it here
+  # would clobber the MCP server's richer binding with a name-only one.
+  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" TASK_ID="$TASK_ID" python3 -c '
 import os, json, datetime, pathlib
 projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
 projects_dir.mkdir(parents=True, exist_ok=True)
-(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps({
+payload = {
     "projectName": os.environ["PROJECT_NAME"],
     "updated": datetime.datetime.now().astimezone().isoformat(),
     "sessionId": os.environ["SESSION_ID"],
-}))
+}
+task_id = os.environ.get("TASK_ID", "").strip()
+if task_id.isdigit():
+    payload["taskId"] = int(task_id)
+(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps(payload))
 ' 2>/dev/null
 fi
 ```
