@@ -4,6 +4,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-19
+
+Published package versions: missioncache-db 1.0.13, mcp-missioncache 1.0.16, missioncache-install 1.0.6, missioncache-dashboard 1.0.7.
+
 ### Fixed - the dashboard service install no longer crashes on systemd-less Linux, and actually runs there (missioncache-dashboard)
 
 - On a machine where systemd is not PID 1 - the WSL default unless enabled in /etc/wsl.conf - `missioncache-dashboard install-service` crashed with a raw traceback ("Failed to connect to bus") because it ran systemctl unconditionally, and it left an orphan unit file behind since the unit was written before the first systemctl call. Found on a fresh WSL Ubuntu install.
