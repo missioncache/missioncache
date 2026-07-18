@@ -4,6 +4,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - the statusline shows when the project's context was last saved (missioncache-dashboard)
+
+- The Project row gains a "Saved" cell: the last time the project's own context file changed - a `/missioncache:save`, an MCP context update, a pre-compact snapshot, or a manual edit. It always shows the date, never a bare clock time, so a project resumed days after its last save does not read as saved today. The stamp links to the project's Context tab in the dashboard modal, and Last Action moved one cell right to make room. Forks show their own Saved stamp next to the existing "parent updated" signal - one is "my layer", the other is "the shared layer moved under me". missioncache-dashboard bumped to 1.0.8.
+
 ## 2026-07-19
 
 Published package versions: missioncache-db 1.0.13, mcp-missioncache 1.0.16, missioncache-install 1.0.6, missioncache-dashboard 1.0.7.

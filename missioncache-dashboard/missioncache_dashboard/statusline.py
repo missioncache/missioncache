@@ -5,7 +5,7 @@ Reads JSON from stdin (Claude Code session data) and outputs
 a multi-line ANSI-colored status display.
 
 Layout:
-  Line 1: Project    - [project name + progress] [last action] (last action shows even with no active project)
+  Line 1: Project    - [project name + progress] [fork of?] [saved] [last action] (last action shows even with no active project)
   Line 2: Location   - [dir] [git branch+status]
   Line 3: Session    - [elapsed] [edits]
   Line 4: Metrics    - [model] [effort?]
@@ -671,6 +671,9 @@ class ProjectInfo(NamedTuple):
     # Parent-context mtime when the shared layer changed after this session's
     # last sync; 0.0 = fresh (or not a fork).
     shared_stale_mtime: float = 0.0
+    # This project's own context file mtime; 0.0 = no context file (or
+    # unstattable). Rendered as the "Saved" cell.
+    context_saved_mtime: float = 0.0
 
 
 # MUST stay byte-identical to context_health._FORK_NAME_RE (the db/MCP copy).
@@ -771,6 +774,13 @@ def _format_wall_time(mtime: float) -> str:
     return dt.strftime("%b %-d %H:%M")
 
 
+def _format_saved_time(mtime: float) -> str:
+    """The project context's last-save time, ALWAYS with the date ("Jul 14
+    23:15", never bare HH:MM): a project resumed days after its last save
+    must not read as saved today. Same shape as the Last Action cell."""
+    return datetime.fromtimestamp(mtime).strftime("%b %-d %H:%M")
+
+
 def _project_is_active_in_db(name: str) -> bool:
     """True if a task named ``name`` is active in the tasks DB.
 
@@ -846,10 +856,14 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
     # main() except) the entire project cell.
     fork_of = ""
     shared_stale_mtime = 0.0
+    context_saved_mtime = 0.0
     for ctx_name in (f"{name}-context.md", "context.md"):
         ctx_path = project_dir / ctx_name
         if ctx_path.is_file():
             try:
+                # Stat before the read: a non-UTF-8 file drops only the fork
+                # annotation, not the Saved stamp.
+                context_saved_mtime = ctx_path.stat().st_mtime
                 with open(ctx_path, "r", encoding="utf-8", errors="strict") as fh:
                     head = fh.read(8192)
                 fork_of = _parse_fork_of(head)
@@ -867,9 +881,13 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
 
     tasks_content = _read_tasks_content(project_dir, name)
     if not tasks_content:
-        return ProjectInfo(name, display, "", fork_of, shared_stale_mtime)
+        return ProjectInfo(
+            name, display, "", fork_of, shared_stale_mtime, context_saved_mtime
+        )
     progress = f" {_parse_task_progress(tasks_content)}"
-    return ProjectInfo(name, display, progress, fork_of, shared_stale_mtime)
+    return ProjectInfo(
+        name, display, progress, fork_of, shared_stale_mtime, context_saved_mtime
+    )
 
 
 # ============ LAST ACTION TIME ============
@@ -1890,8 +1908,9 @@ def main() -> None:
     if pr_field:
         line1.append(pr_field)
 
-    # Line 2 (top row): Project + Last Action. Last Action trails the row;
-    # when no MissionCache project is loaded it takes the row's first slot.
+    # Line 2 (top row): Project [+ Fork of] [+ Saved] + Last Action. Last
+    # Action trails the row; when no MissionCache project is loaded it takes
+    # the row's first slot.
     line2: list[str] = []
     if project_name:
         linked_name = _osc8_link(f"{_DASHBOARD_URL}/#projects", project_display)
@@ -1917,6 +1936,21 @@ def main() -> None:
                     f"{RESET}{COLORS['project']}"
                 )
             line2.append(_item(COLORS["project"], "⤵", "Fork of", fork_value))
+        if project.context_saved_mtime:
+            # Links to the project's Context tab in the dashboard modal.
+            saved_stamp = _format_saved_time(project.context_saved_mtime)
+            ctx_url = (
+                f"{_DASHBOARD_URL}/#projects"
+                f"?task={urllib.parse.quote(project_name, safe='')}&tab=context"
+            )
+            line2.append(
+                _item(
+                    COLORS["datetime"],
+                    "\U0001f4be",
+                    "Saved",
+                    _osc8_link(ctx_url, saved_stamp),
+                )
+            )
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 
