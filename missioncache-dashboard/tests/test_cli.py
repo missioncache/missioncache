@@ -118,3 +118,193 @@ class TestResolveBinary:
         monkeypatch.setattr(cli.shutil, "which", lambda name: None)
         with pytest.raises(SystemExit, match="Could not find"):
             cli.resolve_binary()
+
+
+# --- Profile autostart (systemd-less Linux / WSL) -----------------------------
+
+
+class TestAutostartBlock:
+    def test_render_contains_markers_and_guarded_start(self):
+        out = cli.render_autostart_block(8787)
+        assert out.startswith(cli.AUTOSTART_BEGIN)
+        assert out.rstrip("\n").endswith(cli.AUTOSTART_END)
+        assert "pgrep -f 'missioncache-dashboard serve'" in out
+        assert "MISSIONCACHE_DASHBOARD_PORT=8787" in out
+        assert "nohup missioncache-dashboard serve" in out
+
+    def test_strip_removes_only_managed_block(self):
+        text = (
+            "export PATH=$PATH:/opt/x\n"
+            + cli.render_autostart_block(8787)
+            + "alias ll='ls -la'\n"
+        )
+        out = cli._strip_autostart_block(text)
+        assert "export PATH" in out
+        assert "alias ll" in out
+        assert cli.AUTOSTART_BEGIN not in out
+        assert "nohup" not in out
+
+    def test_strip_handles_torn_block(self):
+        """A hand-mangled block missing its end marker must not survive as a
+        half-managed fragment."""
+        text = "keep this\n" + cli.AUTOSTART_BEGIN + "\nnohup something &\n"
+        out = cli._strip_autostart_block(text)
+        assert "keep this" in out
+        assert cli.AUTOSTART_BEGIN not in out
+        assert "nohup" not in out
+
+    def test_strip_noop_without_block(self):
+        text = "export PATH=$PATH:/opt/x\n"
+        assert cli._strip_autostart_block(text) == text
+
+
+class TestProfileAutostart:
+    def _setup(self, tmp_path, monkeypatch, port_busy=True):
+        monkeypatch.setattr(cli.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli, "resolve_binary", lambda: "/fake/bin/missioncache-dashboard")
+        # port "in use" -> the immediate background start is skipped, keeping
+        # these tests process-free.
+        monkeypatch.setattr(cli, "port_in_use", lambda port: port_busy)
+
+    def test_install_writes_block_and_removes_orphan_unit(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        unit = tmp_path / ".config" / "systemd" / "user" / cli.SYSTEMD_UNIT
+        unit.parent.mkdir(parents=True)
+        unit.write_text("[Unit]")  # leftover from a pre-fix install
+
+        cli.install_profile_autostart(8787)
+
+        profile = tmp_path / ".profile"
+        assert cli.AUTOSTART_BEGIN in profile.read_text()
+        assert not unit.exists(), "pre-fix orphan unit must be cleaned up"
+
+    def test_install_idempotent_single_block(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        cli.install_profile_autostart(8787)
+        cli.install_profile_autostart(9000)
+
+        text = (tmp_path / ".profile").read_text()
+        assert text.count(cli.AUTOSTART_BEGIN) == 1
+        assert "MISSIONCACHE_DASHBOARD_PORT=9000" in text
+        assert "MISSIONCACHE_DASHBOARD_PORT=8787" not in text
+
+    def test_install_preserves_existing_profile_content(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        (tmp_path / ".profile").write_text("export EDITOR=vim\n")
+
+        cli.install_profile_autostart(8787)
+
+        text = (tmp_path / ".profile").read_text()
+        assert text.startswith("export EDITOR=vim\n")
+        assert cli.AUTOSTART_BEGIN in text
+
+    def test_bash_profile_preferred_when_exists(self, tmp_path, monkeypatch):
+        """bash reads ~/.bash_profile INSTEAD of ~/.profile when present -
+        writing to .profile there would never execute."""
+        self._setup(tmp_path, monkeypatch)
+        (tmp_path / ".bash_profile").write_text("# user bash profile\n")
+
+        cli.install_profile_autostart(8787)
+
+        assert cli.AUTOSTART_BEGIN in (tmp_path / ".bash_profile").read_text()
+        assert not (tmp_path / ".profile").exists()
+
+    def test_uninstall_removes_block_and_leaves_rest(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        calls = []
+        monkeypatch.setattr(
+            cli.subprocess, "run", lambda cmd, **kw: calls.append(cmd)
+        )
+        (tmp_path / ".profile").write_text("export EDITOR=vim\n")
+        cli.install_profile_autostart(8787)
+
+        cli.uninstall_profile_autostart()
+
+        text = (tmp_path / ".profile").read_text()
+        assert cli.AUTOSTART_BEGIN not in text
+        assert "export EDITOR=vim" in text
+        assert ["pkill", "-f", "missioncache-dashboard serve"] in calls
+
+
+class TestInstallLinuxDispatch:
+    def test_no_systemd_uses_profile_autostart(self, monkeypatch):
+        monkeypatch.setattr(cli, "systemd_available", lambda: False)
+        called = []
+        monkeypatch.setattr(cli, "install_profile_autostart", lambda port: called.append(port))
+        monkeypatch.setattr(
+            cli, "install_systemd",
+            lambda port: (_ for _ in ()).throw(AssertionError("must not touch systemctl")),
+        )
+
+        cli.install_linux(8787)
+
+        assert called == [8787]
+
+    def test_systemctl_failure_falls_back_without_traceback(self, monkeypatch):
+        """systemd present but the user session is broken: degrade to the
+        profile mechanism instead of crashing mid-install (the WSL bug)."""
+        import subprocess as sp
+
+        monkeypatch.setattr(cli, "systemd_available", lambda: True)
+        monkeypatch.setattr(
+            cli, "install_systemd",
+            lambda port: (_ for _ in ()).throw(sp.CalledProcessError(1, ["systemctl"])),
+        )
+        called = []
+        monkeypatch.setattr(cli, "install_profile_autostart", lambda port: called.append(port))
+
+        cli.install_linux(8787)  # must not raise
+
+        assert called == [8787]
+
+    def test_systemd_success_skips_fallback(self, monkeypatch):
+        monkeypatch.setattr(cli, "systemd_available", lambda: True)
+        monkeypatch.setattr(cli, "install_systemd", lambda port: None)
+        monkeypatch.setattr(
+            cli, "install_profile_autostart",
+            lambda port: (_ for _ in ()).throw(AssertionError("fallback must not run")),
+        )
+
+        cli.install_linux(8787)
+
+
+class TestProfileAutostartImmediateStart:
+    def test_install_starts_dashboard_when_port_free(self, tmp_path, monkeypatch):
+        """The immediate background start: correct binary argv, port in env,
+        detached session - this is the 'works the moment install finishes'
+        half of the fallback."""
+        monkeypatch.setattr(cli.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli, "resolve_binary", lambda: "/fake/bin/missioncache-dashboard")
+        monkeypatch.setattr(cli, "port_in_use", lambda port: False)
+        spawned = {}
+
+        def fake_popen(argv, **kw):
+            spawned["argv"] = argv
+            spawned["env"] = kw.get("env", {})
+            spawned["detached"] = kw.get("start_new_session", False)
+
+        monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+
+        cli.install_profile_autostart(9000)
+
+        assert spawned["argv"] == ["/fake/bin/missioncache-dashboard", "serve"]
+        assert spawned["env"]["MISSIONCACHE_DASHBOARD_PORT"] == "9000"
+        assert spawned["detached"] is True
+
+
+class TestStatusProfileAutostart:
+    def test_status_recognizes_profile_install(self, tmp_path, monkeypatch, capsys):
+        """status must not report 'not installed' on the systemd-less machine
+        the profile mechanism exists for."""
+        monkeypatch.setattr(cli.sys, "platform", "linux")
+        monkeypatch.setattr(cli.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli, "resolve_binary", lambda: "/fake/bin/missioncache-dashboard")
+        monkeypatch.setattr(cli, "port_in_use", lambda port: True)
+        cli.install_profile_autostart(8787)
+
+        rc = cli.cmd_status(None)
+
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Installed: True" in out
+        assert "Running:   True" in out

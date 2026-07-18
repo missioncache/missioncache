@@ -4,6 +4,11 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - the dashboard service install no longer crashes on systemd-less Linux, and actually runs there (missioncache-dashboard)
+
+- On a machine where systemd is not PID 1 - the WSL default unless enabled in /etc/wsl.conf - `missioncache-dashboard install-service` crashed with a raw traceback ("Failed to connect to bus") because it ran systemctl unconditionally, and it left an orphan unit file behind since the unit was written before the first systemctl call. Found on a fresh WSL Ubuntu install.
+- Linux service registration now checks for systemd first and, when absent (or when systemctl fails despite systemd being present), falls back to a profile autostart: a managed marker block in `~/.bash_profile`/`~/.profile` that starts the dashboard on login if it is not already running, plus an immediate background start so the dashboard works the moment the install finishes. Uninstall removes the block and stops the process; the fallback also cleans up an orphan unit left by the pre-fix version. missioncache-dashboard bumped to 1.0.7.
+
 ### Fixed - the Codex install actually works end to end, and non-Claude commands can no longer touch Claude's session state (missioncache-install, plugin commands)
 
 - Codex rejected the generated marketplace manifest outright - `"authentication": "OFF"` is not a valid policy value on codex 0.144.1 (expected ON_INSTALL or ON_USE) - so the slash-command install failed at registration on every machine. The key is simply omitted now (no auth is the default), verified live.
