@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-dashboard"
-version = "1.0.6"
+version = "1.0.7"
 description = "MissionCache Dashboard - Task analytics and autonomous execution monitoring for Claude Code MissionCache projects"
 readme = "README.md"
 requires-python = ">=3.11"

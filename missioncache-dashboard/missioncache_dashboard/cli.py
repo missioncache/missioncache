@@ -8,9 +8,10 @@ Entry point for the `missioncache-dashboard` console script. Subcommands:
     missioncache-dashboard reinstall-service   Uninstall + install (Python path fix).
     missioncache-dashboard status              Show installed / running state.
 
-Platform support: macOS (launchd) and Linux (systemd --user). Windows
-prints manual instructions and exits 0 - Task Scheduler support is
-deferred.
+Platform support: macOS (launchd) and Linux (systemd --user, with a
+shell-profile autostart fallback on systemd-less machines like default
+WSL). Windows prints manual instructions and exits 0 - Task Scheduler
+support is deferred.
 """
 
 from __future__ import annotations
@@ -192,6 +193,18 @@ def uninstall_launchd() -> None:
     print(f"  Removed {plist}")
 
 
+def systemd_available() -> bool:
+    """True when systemd is this machine's init (PID 1).
+
+    /run/systemd/system exists exactly when systemd is running as the system
+    manager - the check systemd's own docs recommend. On WSL it is absent
+    unless the user enabled systemd via /etc/wsl.conf, which is why a fresh
+    WSL Ubuntu crashed here with "Failed to connect to bus" before this
+    check existed.
+    """
+    return Path("/run/systemd/system").exists()
+
+
 def install_systemd(port: int) -> None:
     binary = resolve_binary()
     unit = systemd_unit_path()
@@ -211,6 +224,136 @@ def uninstall_systemd() -> None:
     unit.unlink()
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
     print(f"  Removed {unit}")
+
+
+# Managed autostart block markers for systemd-less Linux (WSL default).
+# Everything between the markers is owned by install-service; uninstall
+# removes the whole block and nothing else.
+AUTOSTART_BEGIN = "# >>> missioncache-dashboard autostart >>>"
+AUTOSTART_END = "# <<< missioncache-dashboard autostart <<<"
+# Single source for the process signature the profile guard greps for and
+# uninstall kills - the two must stay in lockstep.
+AUTOSTART_MATCH = "missioncache-dashboard serve"
+
+
+def autostart_log_path() -> Path:
+    """One log file shared by the login-time redirect and the immediate start."""
+    return log_dir() / "missioncache-dashboard-autostart.log"
+
+
+def autostart_profile_path() -> Path:
+    """The shell startup file the autostart block goes into.
+
+    bash reads ~/.bash_profile INSTEAD of ~/.profile when it exists, so
+    prefer it; otherwise ~/.profile (sourced by login shells - the shape
+    every WSL terminal opens). Assumes bash: a ~/.bash_login-only setup or
+    a zsh login shell won't source either file - unlikely on the default
+    WSL Ubuntu this fallback exists for.
+    """
+    bash_profile = Path.home() / ".bash_profile"
+    if bash_profile.exists():
+        return bash_profile
+    return Path.home() / ".profile"
+
+
+def render_autostart_block(port: int) -> str:
+    log_file = autostart_log_path()
+    return (
+        f"{AUTOSTART_BEGIN}\n"
+        "# Managed by `missioncache-dashboard install-service` - do not edit inside\n"
+        "# the markers; `uninstall-service` removes the whole block.\n"
+        "if command -v missioncache-dashboard >/dev/null 2>&1 && "
+        f"! pgrep -f '{AUTOSTART_MATCH}' >/dev/null 2>&1; then\n"
+        f"  (MISSIONCACHE_DASHBOARD_PORT={port} nohup missioncache-dashboard serve "
+        f">>'{log_file}' 2>&1 &)\n"
+        "fi\n"
+        f"{AUTOSTART_END}\n"
+    )
+
+
+def _strip_autostart_block(text: str) -> str:
+    begin = text.find(AUTOSTART_BEGIN)
+    if begin == -1:
+        return text
+    end = text.find(AUTOSTART_END, begin)
+    if end == -1:
+        # Torn block (manual edit): remove from begin to end of file rather
+        # than leave half a managed block behind.
+        return text[:begin].rstrip("\n") + "\n"
+    return text[:begin] + text[end + len(AUTOSTART_END):].lstrip("\n")
+
+
+def install_profile_autostart(port: int) -> None:
+    """Autostart for systemd-less Linux: profile block + immediate start."""
+    binary = resolve_binary()
+    log_dir().mkdir(parents=True, exist_ok=True)
+
+    # A unit file may linger from a pre-fix install that wrote it before
+    # discovering systemctl doesn't work here. Remove it so enabling systemd
+    # later doesn't surprise-start a second mechanism.
+    systemd_unit_path().unlink(missing_ok=True)
+
+    profile = autostart_profile_path()
+    existing = profile.read_text() if profile.exists() else ""
+    body = _strip_autostart_block(existing)
+    if body:
+        body = body.rstrip("\n") + "\n\n"
+    profile.write_text(body + render_autostart_block(port))
+    print(f"  Autostart block written to {profile} (starts on next login shell)")
+
+    if port_in_use(port):
+        print(f"  Dashboard already running on port {port}")
+        return
+    log_file = autostart_log_path()
+    env = {**os.environ, "MISSIONCACHE_DASHBOARD_PORT": str(port)}
+    with open(log_file, "ab") as log:
+        subprocess.Popen(
+            [binary, "serve"], env=env, stdout=log, stderr=log,
+            start_new_session=True,
+        )
+    print(f"  Dashboard started in the background (port {port}, log: {log_file})")
+
+
+def uninstall_profile_autostart() -> None:
+    profile = autostart_profile_path()
+    if profile.exists():
+        text = profile.read_text()
+        stripped = _strip_autostart_block(text)
+        if stripped != text:
+            profile.write_text(stripped)
+            print(f"  Removed autostart block from {profile}")
+    subprocess.run(["pkill", "-f", AUTOSTART_MATCH], check=False)
+
+
+def install_linux(port: int) -> None:
+    """systemd when it runs here, profile autostart otherwise.
+
+    The fallback also catches systemd-present-but-broken user sessions: a
+    failing systemctl degrades to the profile mechanism instead of dumping
+    a traceback mid-install (the exact failure a fresh WSL Ubuntu hit).
+    """
+    if systemd_available():
+        try:
+            install_systemd(port)
+            return
+        except subprocess.CalledProcessError as e:
+            print(
+                f"  systemctl failed (exit {e.returncode}) - falling back to "
+                "profile autostart."
+            )
+    else:
+        print(
+            "  systemd is not running on this machine (PID 1 is not systemd - "
+            "the WSL default) - using profile autostart instead."
+        )
+    install_profile_autostart(port)
+
+
+def uninstall_linux() -> None:
+    """Remove whichever mechanism is present (both, if a machine has both)."""
+    if systemd_unit_path().exists():
+        uninstall_systemd()
+    uninstall_profile_autostart()
 
 
 # =============================================================================
@@ -234,7 +377,7 @@ def cmd_install_service(_args: argparse.Namespace) -> int:
     if sys.platform == "darwin":
         install_launchd(port)
     elif sys.platform.startswith("linux"):
-        install_systemd(port)
+        install_linux(port)
     elif sys.platform == "win32":
         print(
             "Windows service registration is not yet supported.\n"
@@ -252,7 +395,7 @@ def cmd_uninstall_service(_args: argparse.Namespace) -> int:
     if sys.platform == "darwin":
         uninstall_launchd()
     elif sys.platform.startswith("linux"):
-        uninstall_systemd()
+        uninstall_linux()
     elif sys.platform == "win32":
         print("Windows service was never auto-registered; nothing to uninstall.")
         return 0
@@ -295,6 +438,15 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 check=False,
             )
             running = result.stdout.strip() == "active"
+        else:
+            # systemd-less installs (WSL default) register via the profile
+            # autostart block; without this branch, status reported "not
+            # installed / not running" on the very platform that path serves.
+            profile = autostart_profile_path()
+            installed = profile.exists() and AUTOSTART_BEGIN in profile.read_text()
+            if installed:
+                port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
+                running = port_in_use(port)
         print(f"  Installed: {installed}")
         print(f"  Running:   {running}")
     elif sys.platform == "win32":
