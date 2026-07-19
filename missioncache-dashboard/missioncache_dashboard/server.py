@@ -92,6 +92,10 @@ def _init_hooks_state_db() -> None:
     and the dashboard cannot drift on column shapes. Dashboard-specific
     migrations (added columns) layer on top here.
     """
+    # A machine that has never run Claude Code has no ~/.claude yet, and
+    # sqlite cannot create a db file in a missing directory - the service
+    # then crash-loops on startup (caught by the CI installer smoke test).
+    HOOKS_STATE_DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(HOOKS_STATE_DB))
     db.execute("PRAGMA journal_mode=WAL")
     init_hooks_state_db_schema(db)
