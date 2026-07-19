@@ -100,7 +100,9 @@ jobs:
           systemctl --user is-active missioncache-dashboard
           command -v missioncache-dashboard
           command -v missioncache-db
-          missioncache-db --help > /dev/null
+          # The CLI is command-based (bare run prints the reference, exit 1);
+          # grep the banner to prove the binary imports and runs.
+          missioncache-db 2>&1 | grep -q "Task Database Manager"
           echo "running: $(curl -s http://localhost:8787/api/version)"
           echo "tree:    $(grep '^version' "$GITHUB_WORKSPACE/missioncache-dashboard/pyproject.toml")"
 
@@ -190,14 +192,18 @@ jobs:
         run: |
           set -e
           export PATH="$HOME/.local/bin:$PATH"
-          grep -l "missioncache-dashboard autostart" "$HOME/.bash_profile" "$HOME/.profile" 2>/dev/null || {
+          # cat-then-grep, not grep-with-two-files: GNU grep exits 2 when ANY
+          # listed file is missing, even if the other one matches.
+          cat "$HOME/.bash_profile" "$HOME/.profile" 2>/dev/null | grep -q "missioncache-dashboard autostart" || {
             echo "profile autostart block missing"; exit 1; }
           if [ -f "$HOME/.config/systemd/user/missioncache-dashboard.service" ]; then
             echo "orphan systemd unit written on a systemd-less session"; exit 1
           fi
           command -v missioncache-dashboard
           command -v missioncache-db
-          missioncache-db --help > /dev/null
+          # The CLI is command-based (bare run prints the reference, exit 1);
+          # grep the banner to prove the binary imports and runs.
+          missioncache-db 2>&1 | grep -q "Task Database Manager"
 
       - name: Update re-run is clean
         env:
