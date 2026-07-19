@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-19.1
+
+Published package versions: missioncache-dashboard 1.0.8.
+
 ### Added - users now learn when a new MissionCache release is out, in three places (missioncache-dashboard, plugin commands)
 
 - MissionCache had no update discovery at all: nothing watched PyPI, so the only way to learn a release existed was reading the repo. Now a small stdlib-only checker compares the installed sentinel packages (missioncache-db, missioncache-dashboard, missioncache-auto - every release to date bumped at least one) against PyPI, cached 6 hours in `~/.missioncache/update-check.json`. A newer LOCAL version (the maintainer machine) does not count as an update, and a fetch failure keeps the previous answer while stamping the check time so offline machines do not re-fetch on every render.
