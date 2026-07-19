@@ -5718,10 +5718,19 @@
                     <button class="task-modal-rename-btn"
                             onclick="exportProject()"
                             title="Export project bundle">Export</button>
+                    <button class="task-modal-rename-btn"
+                            onclick="openCompleteForm()"
+                            title="Mark project completed">Complete</button>
                     <button class="task-modal-rename-btn task-modal-delete-btn"
                             onclick="openDeleteForm()"
                             title="Delete project">Delete</button>
                     <span id="taskActionStatus" class="settings-save-status" aria-live="polite"></span>
+                </div>
+                <div class="task-modal-delete-form" id="taskModalCompleteForm" style="display: none;">
+                    <div class="task-modal-delete-msg">Complete '<span id="taskCompleteName"></span>'? It moves to the completed list and its files move to completed/. Time history is kept, and a fork's shared context stays readable for its children. Reopen from the completed table undoes this.</div>
+                    <button class="settings-btn-primary" onclick="submitComplete()">Complete project</button>
+                    <button class="settings-btn-secondary" onclick="closeCompleteForm()">Cancel</button>
+                    <span id="taskCompleteStatus" class="settings-save-status" aria-live="polite"></span>
                 </div>
                 <div class="task-modal-rename-form" id="taskModalRenameForm" style="display: none;">
                     <input type="text" id="taskRenameInput"
@@ -8095,7 +8104,11 @@
                         <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
                         <td class="summary-cell" title="${escapeHtml(task.summary || '')}"><div class="desc-clamp">${escapeHtml(summary) || '-'}</div></td>
                         <td>${task.time_spent_formatted || '0m'}</td>
-                        <td style="color: var(--text-muted);">${task.completed_ago || '-'}</td>
+                        <td style="color: var(--text-muted);">${task.completed_ago || '-'}
+                            <button class="task-modal-rename-btn" style="margin-left: 8px;"
+                                    onclick="reopenProject(${task.id}, event)"
+                                    title="Reopen this project (moves it back to active)">Reopen</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -8504,6 +8517,7 @@
 
             // Reset any header sub-form left open from a previous project.
             closeRenameForm();
+            closeCompleteForm();
             closeDeleteForm();
 
             // Category selector reflects the STORED value (null shows as
@@ -8569,6 +8583,7 @@
             document.getElementById('taskModal').classList.remove('open');
             // Reset the rename form so a fresh open shows the title view.
             closeRenameForm();
+            closeCompleteForm();
             currentTaskFiles = null;
             currentTaskId = null;
         }
@@ -8663,6 +8678,7 @@
             status.className = 'settings-save-status';
             document.getElementById('taskModalTitleView').style.display = 'none';
             closeRenameForm();
+            closeCompleteForm();
             document.getElementById('taskModalDeleteForm').style.display = 'flex';
             syncDeleteConfirm();
         }
@@ -8733,6 +8749,71 @@
                 status.textContent = `Error: ${err}`;
                 status.className = 'settings-save-status error';
                 syncDeleteConfirm();
+            }
+        }
+
+        function openCompleteForm() {
+            if (!currentTaskId) return;
+            closeRenameForm();
+            closeDeleteForm();
+            document.getElementById('taskCompleteName').textContent =
+                document.getElementById('taskModalName').textContent;
+            document.getElementById('taskModalCompleteForm').style.display = 'flex';
+        }
+
+        function closeCompleteForm() {
+            const form = document.getElementById('taskModalCompleteForm');
+            if (form) form.style.display = 'none';
+            const status = document.getElementById('taskCompleteStatus');
+            if (status) { status.textContent = ''; status.className = 'settings-save-status'; }
+        }
+
+        async function submitComplete() {
+            if (!currentTaskId) return;
+            const status = document.getElementById('taskCompleteStatus');
+            status.textContent = 'Completing...';
+            status.className = 'settings-save-status';
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${currentTaskId}/complete`, { method: 'POST' });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const detail = body.detail || body;
+                    status.textContent = (detail && detail.message) || `HTTP ${res.status}`;
+                    status.className = 'settings-save-status error';
+                    return;
+                }
+                const notes = [];
+                if (body.warning) notes.push(body.warning);
+                if (Array.isArray(body.warnings)) notes.push(...body.warnings.filter(Boolean));
+                if (notes.length) {
+                    // Completed, but the user should read the fork/sync note
+                    // before the modal goes away.
+                    loadProjectsData();
+                    status.textContent = 'Completed. ' + notes.join('; ');
+                    status.className = 'settings-save-status warn';
+                    return;
+                }
+                closeTaskModal();
+                loadProjectsData();
+            } catch (err) {
+                status.textContent = `Error: ${err}`;
+                status.className = 'settings-save-status error';
+            }
+        }
+
+        async function reopenProject(taskId, ev) {
+            if (ev) ev.stopPropagation();
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${taskId}/reopen`, { method: 'POST' });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    const detail = body.detail || body;
+                    alert((detail && detail.message) || `Reopen failed: HTTP ${res.status}`);
+                    return;
+                }
+                loadProjectsData();
+            } catch (err) {
+                alert(`Reopen failed: ${err}`);
             }
         }
 

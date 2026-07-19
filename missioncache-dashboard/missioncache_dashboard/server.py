@@ -2924,6 +2924,49 @@ async def rename_task_endpoint(task_id: int, body: dict):
     return response
 
 
+@app.post("/api/tasks/{task_id}/complete")
+async def complete_task_endpoint(task_id: int):
+    """Complete a project from the dashboard.
+
+    Delegates to ``missioncache_db.TaskDB.complete_project`` - the same
+    single-source composition (status flip, active/ -> completed/ move,
+    fork advisory) the MCP complete_task tool uses, so the two surfaces
+    cannot drift. This is the administrative complete: it does not run
+    /missioncache:done's final context save; files move as-is.
+    """
+    sqlite_db = get_sqlite_db()
+    result = sqlite_db.complete_project(task_id)
+    if result.get("error"):
+        status = 404 if result.get("code") == "NOT_FOUND" else 409
+        raise HTTPException(status_code=status, detail=result)
+
+    warnings = []
+    sync_warning = _sync_read_path("complete")
+    if sync_warning:
+        warnings.append(sync_warning)
+    return {"success": True, **result, "warnings": warnings}
+
+
+@app.post("/api/tasks/{task_id}/reopen")
+async def reopen_task_endpoint(task_id: int):
+    """Reopen a completed project - the undo for a dashboard complete.
+
+    Delegates to ``missioncache_db.TaskDB.reopen_project`` (shared with the
+    MCP reopen_task tool).
+    """
+    sqlite_db = get_sqlite_db()
+    result = sqlite_db.reopen_project(task_id)
+    if result.get("error"):
+        status = 404 if result.get("code") == "NOT_FOUND" else 409
+        raise HTTPException(status_code=status, detail=result)
+
+    warnings = []
+    sync_warning = _sync_read_path("reopen")
+    if sync_warning:
+        warnings.append(sync_warning)
+    return {"success": True, **result, "warnings": warnings}
+
+
 @app.delete("/api/tasks/{task_id}")
 async def delete_task_endpoint(task_id: int, delete_files: bool = False):
     """Delete a project / task.

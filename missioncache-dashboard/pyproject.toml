@@ -23,7 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "missioncache-db>=1.0.12",
+    "missioncache-db>=1.0.14",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "duckdb>=1.1.0",
