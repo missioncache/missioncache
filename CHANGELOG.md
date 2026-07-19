@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-19.3
+
+Published package versions: missioncache-dashboard 1.0.10.
+
 ### Fixed - updating no longer stops to ask about its own port (missioncache-dashboard)
 
 - `install-service` treated ANY occupant of the dashboard port as a conflict and prompted interactively - including the machine's own running dashboard, which is the normal state during every update on a working install (hit on WSL via `wsl-update.sh`). The port probe now recognizes its own dashboard (`/api/version` answers) and continues; a foreign occupant still prompts. The running instance keeps serving until its next restart picks up the new version. missioncache-dashboard bumped to 1.0.10.
