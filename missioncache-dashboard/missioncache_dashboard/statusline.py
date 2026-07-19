@@ -2005,13 +2005,13 @@ def main() -> None:
     line_k8s.append(_item(COLORS["tokens"], ICONS["tokens"], "Tokens", tokens_str))
     ctx_pct = info["ctx_percent"]
     if ctx_pct >= 80:
-        line_k8s.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Ctx", f"{ctx_pct}% (Compact now!)"))
+        line_k8s.append(_item(COLORS["ctx_urgent"], "\U0001f534", "Context", f"{ctx_pct}% (Compact now!)"))
     elif ctx_pct >= 65:
-        line_k8s.append(_item(COLORS["ctx_warn"], "\U0001f7e1", "Ctx", f"{ctx_pct}% (Compact recommended)"))
+        line_k8s.append(_item(COLORS["ctx_warn"], "\U0001f7e1", "Context", f"{ctx_pct}% (Compact recommended)"))
     elif info["ctx_estimated"]:
-        line_k8s.append(_item(COLORS["ctx_est"], ICONS["context"], "Ctx", f"{ctx_pct}% (Estimated)"))
+        line_k8s.append(_item(COLORS["ctx_est"], ICONS["context"], "Context", f"{ctx_pct}% (Estimated)"))
     else:
-        line_k8s.append(_item(COLORS["ctx"], ICONS["context"], "Ctx", f"{ctx_pct}%"))
+        line_k8s.append(_item(COLORS["ctx"], ICONS["context"], "Context", f"{ctx_pct}%"))
 
     # Line Health: Version + Claude Status (appears after Codex, or in place of
     # it). Last Action moved to the top row alongside Project.
