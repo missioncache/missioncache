@@ -6,6 +6,11 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - the dashboard starts on a machine that never ran Claude Code (missioncache-dashboard)
+
+- Server startup connected to `~/.claude/hooks-state.db` without creating the directory, and sqlite cannot create a database file inside a missing directory - so on a host with no `~/.claude` yet (installed MissionCache before Claude Code, or a fresh CI runner) the service crash-looped silently on every start. The parent directory is created first now. missioncache-dashboard bumped to 1.0.9.
+- Found by the new CI installer smoke test on its first run: it installs MissionCache on a clean runner and asserts the dashboard actually serves, on both Linux service paths (systemd unit on the runner, profile-autostart fallback in a systemd-less container).
+
 ## 2026-07-19.1
 
 Published package versions: missioncache-dashboard 1.0.8.
