@@ -37,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from starlette.background import BackgroundTask
 
-from . import __version__
+from . import __version__, update_check
 from .statusline import ADDON_COLOR_ALLOW
 
 from missioncache_dashboard.lib import config
@@ -3252,6 +3252,17 @@ async def get_version():
     drifted to a stale 2.0.0.
     """
     return {"version": __version__}
+
+
+@app.get("/api/update-check")
+def api_update_check():
+    """MissionCache update discovery for the UI banner.
+
+    Sync def on purpose: FastAPI runs it in the threadpool, and the check
+    may do network I/O (PyPI, 6h-cached in ~/.missioncache/update-check.json,
+    shared with the statusline and the /missioncache:load notice).
+    """
+    return update_check.get_update_status()
 
 
 @app.get("/health")

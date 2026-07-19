@@ -203,7 +203,11 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 **Recent activity:** <1-2 line synthesis of digest recent_changes_last3>
 
 **Health:** <digest health_warnings, one line, only when non-empty>
+
+**Update:** MissionCache <pkg> <latest> is available - run `<command>` *(only when the update cache says so, see below)*
 ```
+
+**Update notice:** read `~/.missioncache/update-check.json` (written by the dashboard and statusline with a 6h TTL - do NOT fetch anything yourself). If the file exists, `update_available` is true, and `checked_at` is less than 7 days old, add the one-line **Update** field using the file's `command` value and the outdated package names. Otherwise omit the field silently - a missing or stale cache is normal on dashboard-less installs.
 
 Waiting on renders NEXT TO Next Steps by design - both are the "what now" surface. When a Waiting-on row's external reply has arrived (the user mentions it, or you see it in the conversation), act on what it gates and resolve the row via `/missioncache:save`'s `waiting_on_resolve`. Offer the full context file ("say 'full context' for the whole file") instead of dumping it.
 
