@@ -308,3 +308,30 @@ class TestStatusProfileAutostart:
         assert rc == 0
         assert "Installed: True" in out
         assert "Running:   True" in out
+
+
+class TestResolvePortSelfRecognition:
+    """resolve_port must not treat our own running dashboard as a conflict -
+    that is the normal state during an update on a working machine."""
+
+    def test_own_dashboard_on_port_is_not_a_conflict(self, monkeypatch, capsys):
+        from missioncache_dashboard import cli
+
+        monkeypatch.setattr(cli, "port_in_use", lambda port: True)
+        monkeypatch.setattr(cli, "_is_missioncache_dashboard", lambda port: True)
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda *a: (_ for _ in ()).throw(AssertionError("must not prompt")),
+        )
+
+        assert cli.resolve_port(8787) == 8787
+        assert "running MissionCache dashboard" in capsys.readouterr().out
+
+    def test_foreign_occupant_still_prompts(self, monkeypatch):
+        from missioncache_dashboard import cli
+
+        monkeypatch.setattr(cli, "port_in_use", lambda port: port == 8787)
+        monkeypatch.setattr(cli, "_is_missioncache_dashboard", lambda port: False)
+        monkeypatch.setattr("builtins.input", lambda *a: "8790")
+
+        assert cli.resolve_port(8787) == 8790

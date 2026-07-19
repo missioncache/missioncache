@@ -125,9 +125,34 @@ def port_in_use(port: int) -> bool:
     return False
 
 
+def _is_missioncache_dashboard(port: int) -> bool:
+    """True when the process on the port is a MissionCache dashboard."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/version", timeout=2
+        ) as resp:
+            return "version" in json.load(resp)
+    except Exception:
+        return False
+
+
 def resolve_port(requested: int) -> int:
-    """Return a free port, prompting if the requested one is taken."""
+    """Return a free port, prompting if the requested one is taken.
+
+    Our own running dashboard on the requested port is NOT a conflict -
+    that is the normal state during an update (the autostart/service is
+    doing its job). Registration proceeds and the running instance keeps
+    serving until its next restart picks up the new version.
+    """
     if not port_in_use(requested):
+        return requested
+    if _is_missioncache_dashboard(requested):
+        print(
+            f"  Port {requested} is the running MissionCache dashboard - continuing."
+        )
         return requested
     print(f"  Port {requested} is already in use.")
     while True:
