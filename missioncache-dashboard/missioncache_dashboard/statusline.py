@@ -39,6 +39,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+# In-package import (stdlib-only module, so the statusline's no-third-party
+# constraint holds). Guarded for the legacy bare-script invocation path
+# (a pre-M10 ~/.claude/scripts/statusline.py symlink runs without a package).
+try:
+    from missioncache_dashboard import update_check as _update_check
+except ImportError:
+    _update_check = None
+
 IS_MACOS = platform.system() == "Darwin"
 
 # ============ STDERR SUPPRESSION ============
@@ -1829,6 +1837,7 @@ def main() -> None:
     # Always fetch extra_usage from API (300s cache) - stdin doesn't include it
     f_extra = pool.submit(get_usage_data) if rate_limits else None
     f_codex = pool.submit(get_codex_usage)
+    f_mc_update = pool.submit(_update_check.get_update_status) if _update_check else None
 
     # User addons run on their own pool so they never starve the 6 core workers.
     addon_pool = ThreadPoolExecutor(max_workers=min(8, len(ADDONS))) if ADDONS else None
@@ -1877,6 +1886,12 @@ def main() -> None:
         codex_usage = f_codex.result(timeout=_FUTURE_TIMEOUT)
     except Exception:
         codex_usage = None
+    mc_update = None
+    if f_mc_update is not None:
+        try:
+            mc_update = f_mc_update.result(timeout=_FUTURE_TIMEOUT)
+        except Exception:
+            mc_update = None
 
     values_by_id: dict = {}
     for _aid, _fut in f_addons.items():
@@ -2000,6 +2015,14 @@ def main() -> None:
             line_health.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET} {COLORS['upgrade']}\u2192 {upgrade_link}{RESET}")
         else:
             line_health.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
+    if mc_update and mc_update.get("update_available"):
+        # Zero footprint when current; when a newer MissionCache release is on
+        # PyPI, an upgrade cell linking to the changelog. The exact upgrade
+        # command lives in the dashboard banner and the runbooks.
+        mc_link = _osc8_link(
+            "https://missioncache.dev/changelog/", "MissionCache update available"
+        )
+        line_health.append(f"{COLORS['upgrade']}\u2b06 {mc_link}{RESET}")
     for inc in health:
         if inc.get("service") == "OK":
             line_health.append(f"{COLORS['health_ok']}{ICONS['health_ok']} {_health_link('Claude Status: OK')}{RESET}")

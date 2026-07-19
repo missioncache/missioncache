@@ -2,9 +2,14 @@
 
 All notable changes to MissionCache are documented in this file. Dates are ISO 8601; sections are grouped by behavioral concern, not by sub-package version. Entries dated before the 2026-06 rebrand reference the project's former name (orbit) and its old package names (orbit-db, mcp-orbit, etc.); those are left as-is as accurate historical records.
 
+**Updating:** `uvx --refresh missioncache-install@latest --update` brings everything you have installed current (PyPI packages and the Claude Code plugin). Your data in `~/.missioncache/` is never touched by an update.
+
 ## Unreleased
 
-### Added - the statusline shows when the project's context was last saved (missioncache-dashboard)
+### Added - users now learn when a new MissionCache release is out, in three places (missioncache-dashboard, plugin commands)
+
+- MissionCache had no update discovery at all: nothing watched PyPI, so the only way to learn a release existed was reading the repo. Now a small stdlib-only checker compares the installed sentinel packages (missioncache-db, missioncache-dashboard, missioncache-auto - every release to date bumped at least one) against PyPI, cached 6 hours in `~/.missioncache/update-check.json`. A newer LOCAL version (the maintainer machine) does not count as an update, and a fetch failure keeps the previous answer while stamping the check time so offline machines do not re-fetch on every render.
+- Three surfaces consume the one cache: the dashboard shows a dismissible banner with the outdated packages and a copyable `uvx --refresh missioncache-install@latest --update` command (dismissal is keyed to the exact newer versions, so the banner returns for the next release; `/api/update-check` serves it); the statusline adds an upgrade cell to the Vitals line linking to the changelog, with zero footprint when current; and `/missioncache:load` adds a one-line Update field to the resume summary, reading the cache only - dashboard-less installs just never see it.
 
 - The Project row gains a "Saved" cell: the last time the project's own context file changed - a `/missioncache:save`, an MCP context update, a pre-compact snapshot, or a manual edit. It always shows the date, never a bare clock time, so a project resumed days after its last save does not read as saved today. The stamp links to the project's Context tab in the dashboard modal, and Last Action moved one cell right to make room. Forks show their own Saved stamp next to the existing "parent updated" signal - one is "my layer", the other is "the shared layer moved under me". missioncache-dashboard bumped to 1.0.8.
 

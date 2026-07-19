@@ -504,6 +504,46 @@
             white-space: nowrap;
         }
 
+        .update-banner {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding: 10px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--accent-yellow);
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .update-banner code {
+            font-family: var(--font-mono);
+            background: var(--bg-secondary);
+            padding: 3px 8px;
+            border-radius: 5px;
+            color: var(--accent-green);
+            user-select: all;
+        }
+        .update-banner button {
+            background: none;
+            border: 1px solid var(--text-muted);
+            color: var(--text-secondary);
+            border-radius: 5px;
+            padding: 3px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .update-banner button:hover {
+            color: var(--text-primary);
+            border-color: var(--text-secondary);
+        }
+        .update-banner .update-banner-dismiss {
+            border: none;
+            font-size: 16px;
+            padding: 0 6px;
+        }
+
         .theme-toggle {
             display: flex;
             align-items: center;
@@ -5125,6 +5165,14 @@
 
         <!-- Main Content Area -->
         <main class="main-content">
+            <!-- MissionCache update banner (hidden unless /api/update-check reports outdated packages) -->
+            <div class="update-banner" id="updateBanner" hidden>
+                <span id="updateBannerText"></span>
+                <code id="updateBannerCmd"></code>
+                <button id="updateBannerCopy" title="Copy the update command">Copy</button>
+                <button class="update-banner-dismiss" id="updateBannerDismiss" title="Dismiss until the next release">&times;</button>
+            </div>
+
             <!-- Dashboard Toolbar (shared) -->
             <div class="dashboard-toolbar">
                 <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
@@ -9561,6 +9609,46 @@
             }
         }
 
+        async function fetchUpdateCheck() {
+            try {
+                const res = await fetch(`${API_BASE}/api/update-check`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.update_available) return;
+                const outdatedEntries = Object.entries(data.packages || {})
+                    .filter(([, p]) => p.outdated);
+                // Dismissal is keyed to the exact set of newer versions, so a
+                // dismissed banner stays gone until the NEXT release changes it.
+                const sig = outdatedEntries
+                    .map(([name, p]) => `${name}:${p.latest}`)
+                    .sort()
+                    .join(',');
+                if (!sig || localStorage.getItem('mcUpdateDismissed') === sig) return;
+                const summary = outdatedEntries
+                    .map(([name, p]) => `${name.replace('missioncache-', '')} ${p.installed} → ${p.latest}`)
+                    .join(', ');
+                document.getElementById('updateBannerText').textContent =
+                    `MissionCache update available (${summary}). Run:`;
+                document.getElementById('updateBannerCmd').textContent = data.command;
+                const banner = document.getElementById('updateBanner');
+                banner.hidden = false;
+                const copyBtn = document.getElementById('updateBannerCopy');
+                copyBtn.onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(data.command);
+                        copyBtn.textContent = 'Copied';
+                        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+                    } catch (e) { /* clipboard unavailable - command is selectable */ }
+                };
+                document.getElementById('updateBannerDismiss').onclick = () => {
+                    localStorage.setItem('mcUpdateDismissed', sig);
+                    banner.hidden = true;
+                };
+            } catch (e) {
+                console.warn('Update check failed:', e);
+            }
+        }
+
         // Determine task category: stored value first, name heuristic as fallback
         function getTaskCategory(task) {
             // Priority 0: category stored in the DB (assigned at creation time)
@@ -9690,6 +9778,9 @@
 
             // Show which dashboard version is running in the sidebar footer.
             fetchVersion();
+
+            // Surface a newer MissionCache release, if any (6h-cached server-side).
+            fetchUpdateCheck();
 
             // Auto-refresh every 15 minutes
             setInterval(async () => {
