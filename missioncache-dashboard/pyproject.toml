@@ -29,6 +29,10 @@ dependencies = [
     "duckdb>=1.1.0",
     "httpx>=0.28.0",
     "sse-starlette>=2.0.0",
+    # FastAPI needs this for the Form/File/UploadFile routes; it is NOT pulled
+    # in transitively, and without it the server cannot even import on a clean
+    # install (caught by the CI installer smoke test).
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]

@@ -6,10 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
-### Fixed - the dashboard starts on a machine that never ran Claude Code (missioncache-dashboard)
+### Fixed - the dashboard actually starts on a clean machine (missioncache-dashboard)
 
-- Server startup connected to `~/.claude/hooks-state.db` without creating the directory, and sqlite cannot create a database file inside a missing directory - so on a host with no `~/.claude` yet (installed MissionCache before Claude Code, or a fresh CI runner) the service crash-looped silently on every start. The parent directory is created first now. missioncache-dashboard bumped to 1.0.9.
-- Found by the new CI installer smoke test on its first run: it installs MissionCache on a clean runner and asserts the dashboard actually serves, on both Linux service paths (systemd unit on the runner, profile-autostart fallback in a systemd-less container).
+- Three fresh-install bugs, all invisible on machines that already ran Claude Code or had a populated Python environment, all found by the new CI installer smoke test: (1) `python-multipart` was never declared as a dependency, and FastAPI refuses to even import the app's Form/File upload routes without it - on a clean pipx venv the server could not start at all; (2) server startup connected to `~/.claude/hooks-state.db` without creating the directory, and sqlite cannot create a database file inside a missing directory, so a host with no `~/.claude` yet crash-looped; (3) the statusline's stderr suppression ran at module import rather than in its own main(), so the dashboard server (which imports the statusline module) lost every startup traceback - which is why the two crashes above were SILENT. missioncache-dashboard bumped to 1.0.9.
+- The smoke test itself: installs MissionCache from the tree on a clean runner and asserts the dashboard actually serves, on both Linux service paths (systemd unit on the runner, profile-autostart fallback in a genuinely systemd-less container), then asserts the install shape and a clean `--update` re-run, with per-path failure diagnostics.
 
 ## 2026-07-19.1
 
