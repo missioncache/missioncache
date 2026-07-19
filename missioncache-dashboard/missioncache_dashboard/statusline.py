@@ -5,7 +5,7 @@ Reads JSON from stdin (Claude Code session data) and outputs
 a multi-line ANSI-colored status display.
 
 Layout:
-  Line 1: Project    - [project name + progress] [fork of?] [saved] [last action] (last action shows even with no active project)
+  Line 1: Project    - [project name + progress] [saved] [fork of?] [last action] (last action shows even with no active project)
   Line 2: Location   - [dir] [git branch+status]
   Line 3: Session    - [elapsed] [edits]
   Line 4: Metrics    - [model] [effort?]
@@ -87,6 +87,9 @@ COLORS = {
     "time": f"{ESC}[38;2;100;180;180m",
     "edit": f"{ESC}[38;2;200;160;120m",
     "datetime": f"{ESC}[38;2;160;160;180m",
+    # Deliberately distinct from "datetime": Saved and Last Action sit side by
+    # side on the Project row and looked identical in the same gray.
+    "saved": f"{ESC}[38;2;110;170;220m",
     "version": f"{ESC}[38;2;130;180;220m",
     "pipe": f"{ESC}[38;2;100;100;110m",
     "session_usage": f"{ESC}[38;2;100;160;200m",
@@ -1931,7 +1934,7 @@ def main() -> None:
     if pr_field:
         line1.append(pr_field)
 
-    # Line 2 (top row): Project [+ Fork of] [+ Saved] + Last Action. Last
+    # Line 2 (top row): Project [+ Saved] [+ Fork of] + Last Action. Last
     # Action trails the row; when no MissionCache project is loaded it takes
     # the row's first slot.
     line2: list[str] = []
@@ -1943,6 +1946,21 @@ def main() -> None:
         else:
             linked_value = linked_name
         line2.append(_item(COLORS["project"], ICONS["project"], "Project", linked_value))
+        if project.context_saved_mtime:
+            # Links to the project's Context tab in the dashboard modal.
+            saved_stamp = _format_saved_time(project.context_saved_mtime)
+            ctx_url = (
+                f"{_DASHBOARD_URL}/#projects"
+                f"?task={urllib.parse.quote(project_name, safe='')}&tab=context"
+            )
+            line2.append(
+                _item(
+                    COLORS["saved"],
+                    "\U0001f4be",
+                    "Saved",
+                    _osc8_link(ctx_url, saved_stamp),
+                )
+            )
         if project.fork_of:
             # Fork annotation: link to the parent's dashboard modal; a cyan dot
             # (the fork-family accent, matching the dashboard's fork tree) means
@@ -1959,21 +1977,6 @@ def main() -> None:
                     f"{RESET}{COLORS['project']}"
                 )
             line2.append(_item(COLORS["project"], "⤵", "Fork of", fork_value))
-        if project.context_saved_mtime:
-            # Links to the project's Context tab in the dashboard modal.
-            saved_stamp = _format_saved_time(project.context_saved_mtime)
-            ctx_url = (
-                f"{_DASHBOARD_URL}/#projects"
-                f"?task={urllib.parse.quote(project_name, safe='')}&tab=context"
-            )
-            line2.append(
-                _item(
-                    COLORS["datetime"],
-                    "\U0001f4be",
-                    "Saved",
-                    _osc8_link(ctx_url, saved_stamp),
-                )
-            )
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 

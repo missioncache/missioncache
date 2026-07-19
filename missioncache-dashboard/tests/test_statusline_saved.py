@@ -154,7 +154,7 @@ class TestSavedRenderAssembly:
             f"?task={urllib.parse.quote('my proj', safe='')}&tab=context"
         )
         line = mod._item(
-            mod.COLORS["datetime"], "\U0001f4be", "Saved", mod._osc8_link(url, stamp)
+            mod.COLORS["saved"], "\U0001f4be", "Saved", mod._osc8_link(url, stamp)
         )
         assert "Saved" in line
         assert stamp in line
