@@ -1,0 +1,122 @@
+name: Installer smoke test
+
+# Fresh-environment install of MissionCache on a clean ubuntu runner. The
+# runner's user session has no systemd bus (like default WSL), so this
+# exercises the profile-autostart fallback path that once crashed on WSL -
+# the dashboard must actually START, not just install.
+#
+# The tree under test: wheels are built from the checkout and offered via
+# PIP_FIND_LINKS/UV_FIND_LINKS, so pip/uv prefer them whenever their version
+# is newer than PyPI's (the repo convention bumps versions with the change).
+# When a tree version equals the published one the resolver may pick either -
+# equal version means unchanged code by the release pre-flight, so both are
+# the same bytes in practice.
+#
+# The installer itself must run from $HOME: running it from the checkout
+# auto-detects maintainer mode (.claude-plugin/plugin.json marker) and would
+# test editable installs instead of the user path.
+
+on:
+  pull_request:
+    paths:
+      - "missioncache-install/**"
+      - "missioncache-db/**"
+      - "missioncache-dashboard/**"
+      - "missioncache-auto/**"
+      - "mcp-server/**"
+      - ".github/workflows/installer-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "missioncache-install/**"
+      - "missioncache-db/**"
+      - "missioncache-dashboard/**"
+      - "missioncache-auto/**"
+      - "mcp-server/**"
+      - ".github/workflows/installer-smoke.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Build wheels from the tree
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/local-wheels"
+          for pkg in missioncache-db mcp-server missioncache-install missioncache-auto missioncache-dashboard; do
+            (cd "$pkg" && uv build --quiet)
+            cp "$pkg"/dist/*.whl "$GITHUB_WORKSPACE/local-wheels/"
+          done
+          ls -la "$GITHUB_WORKSPACE/local-wheels"
+
+      - name: Run the installer as a user would
+        env:
+          PIP_FIND_LINKS: ${{ github.workspace }}/local-wheels
+          UV_FIND_LINKS: ${{ github.workspace }}/local-wheels
+        run: |
+          cd "$HOME"
+          pipx install missioncache-install
+          # Exit code is the component-outcome contract: any failed component
+          # (as opposed to a genuine skip, e.g. no Claude/Codex CLI here)
+          # makes the installer exit 1 and fails this step.
+          missioncache-install --all --yes
+
+      - name: Assert the dashboard is actually running
+        run: |
+          # The systemd-less fallback does an immediate detached start; give
+          # the server a few seconds to bind.
+          for i in $(seq 1 15); do
+            if curl -sf "http://localhost:8787/health" > /dev/null; then
+              echo "dashboard is up"
+              break
+            fi
+            [ "$i" = "15" ] && { echo "dashboard never came up"; exit 1; }
+            sleep 2
+          done
+          curl -s "http://localhost:8787/api/version"
+
+      - name: Assert install shape
+        run: |
+          set -e
+          # Profile autostart block written (systemd-less path), no orphan unit.
+          grep -l "missioncache-dashboard autostart" "$HOME/.bash_profile" "$HOME/.profile" 2>/dev/null || {
+            echo "profile autostart block missing"; exit 1; }
+          if [ -f "$HOME/.config/systemd/user/missioncache-dashboard.service" ]; then
+            echo "orphan systemd unit written on a systemd-less session"; exit 1
+          fi
+          # CLIs on PATH.
+          command -v missioncache-dashboard
+          command -v missioncache-db
+          missioncache-db --help > /dev/null
+          # The running dashboard is the TREE's version when the tree is ahead
+          # of PyPI (see the find-links note at the top).
+          echo "running: $(curl -s http://localhost:8787/api/version)"
+          echo "tree:    $(grep '^version' "$GITHUB_WORKSPACE/missioncache-dashboard/pyproject.toml")"
+
+      - name: Update re-run is clean
+        env:
+          PIP_FIND_LINKS: ${{ github.workspace }}/local-wheels
+          UV_FIND_LINKS: ${{ github.workspace }}/local-wheels
+        run: |
+          cd "$HOME"
+          missioncache-install --update --yes
+
+      - name: Dump autostart log on failure
+        if: failure()
+        run: cat "$HOME/.claude/logs/missioncache-dashboard-autostart.log" 2>/dev/null || echo "no autostart log"
