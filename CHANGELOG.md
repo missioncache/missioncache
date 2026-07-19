@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-19.2
+
+Published package versions: missioncache-db 1.0.14, mcp-missioncache 1.0.17, missioncache-dashboard 1.0.9.
+
 ### Added - complete and reopen a project from the dashboard (missioncache-db, mcp-missioncache, missioncache-dashboard)
 
 - The project detail modal gains a Complete action with a confirmation step: the project moves to the completed list, its files move to `completed/`, time history is kept, and a fork parent's shared context stays readable for its children (the fork warning is surfaced after completion). Each row in the completed table gains a Reopen button - the undo, moving the project and its files back to active.
