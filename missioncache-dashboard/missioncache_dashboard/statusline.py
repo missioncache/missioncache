@@ -49,13 +49,20 @@ except ImportError:
 
 IS_MACOS = platform.system() == "Darwin"
 
-# ============ STDERR SUPPRESSION ============
-try:
-    _devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(_devnull_fd, 2)
-    os.close(_devnull_fd)
-except OSError:
-    pass
+
+def _suppress_stderr() -> None:
+    """Silence fd 2 for the statusline render - stray stderr from subprocesses
+    or libraries would corrupt the status display. Called from main(), NOT at
+    import: the dashboard server imports this module, and a module-level dup2
+    swallowed every service startup traceback, turning real crashes into
+    silent exit-1 loops (found via the CI installer smoke test)."""
+    try:
+        _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(_devnull_fd, 2)
+        os.close(_devnull_fd)
+    except OSError:
+        pass
+
 
 # ============ CONSTANTS ============
 
@@ -1789,6 +1796,7 @@ ADDON_LINE_COUNT = len(ADDON_ROW_GROUPS)
 
 
 def main() -> None:
+    _suppress_stderr()
     raw = sys.stdin.read()
     if not raw.strip():
         return

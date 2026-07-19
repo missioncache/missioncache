@@ -117,6 +117,18 @@ jobs:
         run: |
           systemctl --user status missioncache-dashboard --no-pager -l || true
           journalctl --user -u missioncache-dashboard --no-pager --lines 120 || true
+          # Import the server app with the venv's own python, traceback to
+          # stdout - catches import-time failures no matter what happens to
+          # stderr along the import chain.
+          PYBIN=$(sed -n '1s/^#!//p' "$(command -v missioncache-dashboard)")
+          "$PYBIN" -c "
+          import traceback, sys
+          try:
+              import missioncache_dashboard.server
+              print('server import OK')
+          except BaseException:
+              traceback.print_exc(file=sys.stdout)
+          " || true
 
   smoke-no-systemd:
     runs-on: ubuntu-latest
@@ -198,4 +210,15 @@ jobs:
 
       - name: Dump autostart log on failure
         if: failure()
-        run: cat "$HOME/.claude/logs/missioncache-dashboard-autostart.log" 2>/dev/null || echo "no autostart log"
+        run: |
+          cat "$HOME/.claude/logs/missioncache-dashboard-autostart.log" 2>/dev/null || echo "no autostart log"
+          export PATH="$HOME/.local/bin:$PATH"
+          PYBIN=$(sed -n '1s/^#!//p' "$(command -v missioncache-dashboard)")
+          "$PYBIN" -c "
+          import traceback, sys
+          try:
+              import missioncache_dashboard.server
+              print('server import OK')
+          except BaseException:
+              traceback.print_exc(file=sys.stdout)
+          " || true
