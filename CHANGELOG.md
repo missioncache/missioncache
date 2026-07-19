@@ -6,6 +6,16 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Added - complete and reopen a project from the dashboard (missioncache-db, mcp-missioncache, missioncache-dashboard)
+
+- The project detail modal gains a Complete action with a confirmation step: the project moves to the completed list, its files move to `completed/`, time history is kept, and a fork parent's shared context stays readable for its children (the fork warning is surfaced after completion). Each row in the completed table gains a Reopen button - the undo, moving the project and its files back to active.
+- The completion composition (status flip, file move, fork advisory) moved down into missioncache-db as `complete_project` / `reopen_project`, and BOTH the MCP tools (complete_task / reopen_task, unchanged behavior) and the new dashboard endpoints (`POST /api/tasks/{id}/complete`, `/reopen`) delegate to it - one source, two surfaces, no drift. The file-move source resolution also got more robust: the canonical `active/<name>` location is tried before the stored `full_path` (which can carry legacy shapes). missioncache-db bumped to 1.0.14, mcp-missioncache to 1.0.17 with a matching dependency floor, and the dashboard's floor raised to match.
+- Dashboard-complete is the administrative complete, same as the MCP tool: it does not run `/missioncache:done`'s final context save - files move as-is. Sessions still bound to a completed project resolve by task id, find nothing active, and drop it from the statusline.
+
+### Changed - statusline Saved cell gets its own color and position (missioncache-dashboard)
+
+- The Saved cell now renders in its own blue instead of sharing Last Action's gray (the two sat side by side and looked identical), and the Project row order is now Project, Saved, Fork of, Last Action.
+
 ### Fixed - the dashboard actually starts on a clean machine (missioncache-dashboard)
 
 - Three fresh-install bugs, all invisible on machines that already ran Claude Code or had a populated Python environment, all found by the new CI installer smoke test: (1) `python-multipart` was never declared as a dependency, and FastAPI refuses to even import the app's Form/File upload routes without it - on a clean pipx venv the server could not start at all; (2) server startup connected to `~/.claude/hooks-state.db` without creating the directory, and sqlite cannot create a database file inside a missing directory, so a host with no `~/.claude` yet crash-looped; (3) the statusline's stderr suppression ran at module import rather than in its own main(), so the dashboard server (which imports the statusline module) lost every startup traceback - which is why the two crashes above were SILENT. missioncache-dashboard bumped to 1.0.9.

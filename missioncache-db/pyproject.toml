@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-db"
-version = "1.0.13"
+version = "1.0.14"
 description = "SQLite-based task and time tracking database for the MissionCache Claude Code plugin"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -2070,6 +2070,131 @@ class TaskDB:
             conn.commit()
         return self.get_task(task_id)
 
+    def complete_project(self, task_id: int, move_files: bool = True) -> Dict[str, Any]:
+        """Complete a project: flip status, move its MissionCache directory to
+        completed/, report totals and any still-active forks.
+
+        Single source of truth for the composition - the MCP complete_task
+        tool and the dashboard's complete endpoint both delegate here so the
+        two surfaces cannot drift. Errors come back as dicts with a ``code``
+        (NOT_FOUND / INVALID_STATE); callers map them to their own error
+        surface (MCP error classes, HTTP status codes).
+
+        ``full_path`` deliberately stays as-is after the move (matching the
+        historical MCP behavior): every consumer resolves it by searching
+        active/ then completed/.
+        """
+        import shutil
+
+        task = self.get_task(task_id)
+        if not task:
+            return {
+                "error": True,
+                "code": "NOT_FOUND",
+                "message": f"Task {task_id} not found",
+            }
+        if task.status == "completed":
+            return {
+                "error": True,
+                "code": "INVALID_STATE",
+                "message": "Task is already completed",
+                "current_state": "completed",
+            }
+
+        previous_status = task.status
+        updated = self.update_task_status(task_id, "completed")
+
+        files_moved = False
+        if move_files and task.task_type == "coding":
+            # Canonical layout first (active/<name> - what create_missioncache_files
+            # writes and every resolver searches), then the stored full_path
+            # (which can carry legacy shapes like manual/<name>).
+            candidates = [
+                MISSIONCACHE_ROOT / "active" / task.name,
+                MISSIONCACHE_ROOT / task.full_path,
+            ]
+            source = next((c for c in candidates if c.exists()), None)
+            if source is not None:
+                dest = MISSIONCACHE_ROOT / "completed" / task.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(dest))
+                files_moved = True
+
+        time_total = self.get_task_time(task_id)
+        result: Dict[str, Any] = {
+            "task_id": task.id,
+            "task_name": task.name,
+            "previous_status": previous_status,
+            "new_status": "completed",
+            "completed_at": (updated.completed_at or "") if updated else "",
+            "time_total_seconds": time_total,
+            "time_total_formatted": self.format_duration(time_total),
+            "files_moved": files_moved,
+        }
+
+        # Fork awareness: completing a parent with active children is allowed
+        # (the shared context stays readable from completed/), but callers
+        # should surface it. Advisory only - the completion is committed
+        # above, so a failure here must NOT flip the result to an error.
+        try:
+            active_children = [
+                t for t in self.get_active_tasks() if t.parent_id == task.id
+            ]
+            result["active_children_count"] = len(active_children)
+            if active_children:
+                names = ", ".join(t.name for t in active_children)
+                result["warning"] = (
+                    f"This project has {len(active_children)} active fork(s) "
+                    f"({names}). Its context file stays readable and shared for "
+                    "them from completed/."
+                )
+        except Exception:
+            logger.warning(
+                "Active-children lookup failed after completing %s; "
+                "completion succeeded, fork warning unavailable",
+                task.name,
+                exc_info=True,
+            )
+            result["active_children_count"] = None
+        return result
+
+    def reopen_project(self, task_id: int, move_files: bool = True) -> Dict[str, Any]:
+        """Reopen a completed project: move its directory back to active/,
+        flip status back. Symmetric counterpart of complete_project and the
+        shared primitive under the MCP reopen_task tool and the dashboard's
+        reopen endpoint."""
+        import shutil
+
+        task = self.get_task(task_id)
+        if not task:
+            return {
+                "error": True,
+                "code": "NOT_FOUND",
+                "message": f"Task {task_id} not found",
+            }
+        if task.status != "completed":
+            return {
+                "error": True,
+                "code": "INVALID_STATE",
+                "message": "Task is not completed",
+                "current_state": task.status,
+            }
+
+        if move_files and task.task_type == "coding":
+            source = MISSIONCACHE_ROOT / "completed" / task.name
+            if source.exists():
+                dest = MISSIONCACHE_ROOT / "active" / task.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(dest))
+
+        self.reopen_task(task_id)
+        return {
+            "task_id": task.id,
+            "task_name": task.name,
+            "previous_status": "completed",
+            "new_status": "active",
+        }
+
     def rename_task(self, task_id: int, new_name: str) -> Dict[str, Any]:
         """Rename a project: update DB row, move directory, rename files, rewrite H1s.
 

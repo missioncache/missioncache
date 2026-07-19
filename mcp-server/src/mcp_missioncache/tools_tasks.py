@@ -1,7 +1,6 @@
 """Task lifecycle MCP tools - listing, retrieval, CRUD, non-coding updates."""
 
 import logging
-import shutil
 from typing import Annotated
 
 from pydantic import Field
@@ -35,11 +34,9 @@ from .helpers import (
     _validate_path,
 )
 from .models import (
-    CompleteTaskResult,
     CreateTaskResult,
     ListTasksResult,
     RenameTaskResult,
-    ReopenTaskResult,
     UpdateTaskResult,
 )
 
@@ -568,62 +565,17 @@ async def complete_task(
         if not task:
             raise TaskNotFoundError(task_id or project_name)
 
-        if task.status == "completed":
-            raise InvalidStateError(
-                "Task is already completed", current_state="completed"
-            )
-
-        previous_status = task.status
-
-        # Update status
-        updated_task = db.update_task_status(task.id, "completed")
-
-        # Move files if requested
-        if move_files and task.task_type == "coding":
-            source = settings.root / task.full_path
-            if source.exists():
-                dest = settings.root / settings.completed_dir_name / task.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(dest))
-                logger.info(f"Moved {source} to {dest}")
-
-        # Get final time
-        time_total = db.get_task_time(task.id)
-
-        result = CompleteTaskResult(
-            task_id=task.id,
-            task_name=task.name,
-            previous_status=previous_status,
-            new_status="completed",
-            completed_at=updated_task.completed_at or "",
-            time_total_formatted=db.format_duration(time_total),
-        ).model_dump()
-
-        # Fork awareness: completing a parent with active children is allowed
-        # (the shared context stays readable from completed/), but the caller
-        # should surface it. Strictly advisory - the completion is already
-        # committed above, so a failure here must NOT flip the result to an
-        # error (a retry would then see "already completed" and skip cleanup).
-        try:
-            active_children = [
-                t for t in db.get_active_tasks() if t.parent_id == task.id
-            ]
-            result["active_children_count"] = len(active_children)
-            if active_children:
-                names = ", ".join(t.name for t in active_children)
-                result["warning"] = (
-                    f"This project has {len(active_children)} active fork(s) "
-                    f"({names}). Its context file stays readable and shared for "
-                    "them from completed/."
+        # The composition (status flip, file move, fork advisory) lives in
+        # missioncache_db.complete_project - the single source shared with the
+        # dashboard's complete endpoint. This tool only resolves arguments
+        # and maps error dicts onto the MCP error surface.
+        result = db.complete_project(task.id, move_files=move_files)
+        if result.get("error"):
+            if result.get("code") == "INVALID_STATE":
+                raise InvalidStateError(
+                    "Task is already completed", current_state="completed"
                 )
-        except Exception:
-            logger.warning(
-                "Active-children lookup failed after completing %s; "
-                "completion succeeded, fork warning unavailable",
-                task.name,
-                exc_info=True,
-            )
-            result["active_children_count"] = None
+            raise TaskNotFoundError(task.id)
         return result
 
     except MissionCacheError as e:
@@ -667,33 +619,18 @@ async def reopen_task(
         if not task:
             raise TaskNotFoundError(task_id or project_name)
 
-        if task.status != "completed":
-            raise InvalidStateError(
-                "Task is not completed",
-                current_state=task.status,
-                expected_state="completed",
-            )
-
-        previous_status = task.status
-
-        # Move files back if requested
-        if move_files and task.task_type == "coding":
-            source = settings.root / settings.completed_dir_name / task.name
-            if source.exists():
-                dest = settings.root / settings.active_dir_name / task.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(dest))
-                logger.info(f"Moved {source} to {dest}")
-
-        # Reopen task
-        updated_task = db.reopen_task(task.id)
-
-        return ReopenTaskResult(
-            task_id=task.id,
-            task_name=task.name,
-            previous_status=previous_status,
-            new_status="active",
-        ).model_dump()
+        # Composition delegated to missioncache_db.reopen_project (shared with
+        # the dashboard's reopen endpoint), mirroring complete_task above.
+        result = db.reopen_project(task.id, move_files=move_files)
+        if result.get("error"):
+            if result.get("code") == "INVALID_STATE":
+                raise InvalidStateError(
+                    "Task is not completed",
+                    current_state=task.status,
+                    expected_state="completed",
+                )
+            raise TaskNotFoundError(task.id)
+        return result
 
     except MissionCacheError as e:
         return e.to_dict()
