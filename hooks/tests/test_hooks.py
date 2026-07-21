@@ -1469,6 +1469,337 @@ class TestTaskTracker:
         self._run_tracker(monkeypatch, dict(stdin), mock_db)
         assert "Task 2: Framework wiring review" in capsys.readouterr().out
 
+    def test_hierarchical_numbering_divergence(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Hierarchical task numbers (1.2.) match both pending and heading regexes."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [x] 1.1. Done sub\n- [ ] 1.2. Wire the thing\n",
+            context_content=(
+                "### Task 1.1: Done sub\nf\n### Task 1.2: Wire the thing\nf\n"
+            ),
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        out = capsys.readouterr().out
+        assert "Task 1.2: Wire the thing" in out
+        assert "Task 1.1:" not in out
+
+    # ── staleness signal (context saved after tasks last changed) ─────────
+
+    _STALE_TASKS = (
+        "# Fake - Tasks\n\n"
+        "**Last Updated:** 2026-07-21 10:00\n\n"
+        "- [ ] 1. First thing\n"
+        "- [ ] 2. Second thing\n"
+        "- [ ] Unnumbered extra\n"
+    )
+    _STALE_CONTEXT = (
+        "# Fake - Context\n"
+        "**Last Updated:** 2026-07-21 12:30\n\n"
+        "## Recent Changes\n\n"
+        "### 2026-07-21 12:30\nProgress recorded here\n"
+    )
+
+    def test_stale_fires_when_context_saved_after_tasks(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Context header newer than tasks header + pending items = staleness
+        reminder listing the pending tasks and both timestamps."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=self._STALE_CONTEXT,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        out = capsys.readouterr().out
+        assert "tasks file may be stale" in out
+        assert "2026-07-21 12:30" in out
+        assert "2026-07-21 10:00" in out
+        assert "Task 1: First thing" in out
+        assert "Task 2: Second thing" in out
+        assert "and 1 more unchecked item(s)" in out
+        assert "update_tasks_file" in out
+
+    def test_stale_silent_when_tasks_header_newer(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Tasks header newer than context header = silent, even though the
+        context file's MTIME is newer (headers take priority over mtime)."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS.replace(
+                "2026-07-21 10:00", "2026-07-21 13:00"
+            ),
+            context_content=self._STALE_CONTEXT,
+            context_newer=True,  # mtime says context is newer; header wins
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        assert capsys.readouterr().out == ""
+
+    def test_stale_deduped_per_context_stamp(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The staleness reminder fires once per context save, not per prompt."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=self._STALE_CONTEXT,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+    def test_stale_refires_after_new_context_save_and_clears_on_catchup(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Full lifecycle: fire -> tasks catch up (silent, marker cleared) ->
+        a later context save re-fires."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=self._STALE_CONTEXT,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+        project_dir = tmp_path / ".missioncache" / "active" / "fake-task"
+        tasks_file = project_dir / "fake-task-tasks.md"
+        context_file = project_dir / "fake-task-context.md"
+
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+        # Tasks file updated after the context save: silent.
+        tasks_file.write_text(
+            self._STALE_TASKS.replace("2026-07-21 10:00", "2026-07-21 12:45")
+        )
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+        # A later context save makes it stale again: re-fires.
+        context_file.write_text(
+            self._STALE_CONTEXT.replace("2026-07-21 12:30", "2026-07-21 14:00")
+        )
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+    def test_stale_mtime_fallback_when_headers_missing(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Without Last Updated headers, mtime ordering drives the signal."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [ ] 1. Only pending thing\n",
+            context_content="## Recent Changes\n\nsome progress\n",
+            context_newer=True,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        out = capsys.readouterr().out
+        assert "tasks file may be stale" in out
+        assert "Task 1: Only pending thing" in out
+
+    def test_precise_divergence_wins_over_staleness(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """When both signals are present, only the precise block is printed."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=self._STALE_CONTEXT
+            + "\n### Task 1: First thing\nfindings\n",
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        out = capsys.readouterr().out
+        assert "task tracking divergence" in out
+        assert "tasks file may be stale" not in out
+
+    def test_stale_equal_headers_tiebreak_on_mtime(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Equal minute-resolution headers fall back to mtime ordering."""
+        equal_tasks = self._STALE_TASKS.replace(
+            "2026-07-21 10:00", "2026-07-21 12:30"
+        )
+        # Context mtime newer than tasks: stale fires despite equal headers.
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=equal_tasks,
+            context_content=self._STALE_CONTEXT,
+            context_newer=True,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+        # Tasks mtime newer (the normal context-then-tasks save flow): silent.
+        project_dir = tmp_path / ".missioncache" / "active" / "fake-task"
+        os.utime(project_dir / "fake-task-tasks.md", (3000, 3000))
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s2", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+        assert capsys.readouterr().out == ""
+
+    def test_stale_refires_for_second_save_in_same_minute(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Two context saves sharing a header minute are distinct save
+        generations (mtime_ns dedup), so the second still gets its reminder."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=self._STALE_CONTEXT,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+        context_file = (
+            tmp_path / ".missioncache" / "active" / "fake-task"
+            / "fake-task-context.md"
+        )
+
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+        # Re-save the context with the SAME header stamp (new mtime_ns).
+        context_file.write_text(self._STALE_CONTEXT + "\nmore progress\n")
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert "tasks file may be stale" in capsys.readouterr().out
+
+    def test_stale_fires_after_ignored_precise_when_new_save_lands(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """An unchanged (ignored) precise divergence set must not starve the
+        staleness signal: a later context save still surfaces it."""
+        context_with_heading = (
+            self._STALE_CONTEXT + "\n### Task 1: First thing\nfindings\n"
+        )
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content=self._STALE_TASKS,
+            context_content=context_with_heading,
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+        stdin = {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"}
+        context_file = (
+            tmp_path / ".missioncache" / "active" / "fake-task"
+            / "fake-task-context.md"
+        )
+
+        # First prompt: precise block only (it stamps this save generation).
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        out = capsys.readouterr().out
+        assert "task tracking divergence" in out
+        assert "tasks file may be stale" not in out
+
+        # Same state again: fully silent.
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        assert capsys.readouterr().out == ""
+
+        # A NEW context save (same divergent set, still stale): the staleness
+        # reminder fires even though the precise set never changed.
+        context_file.write_text(
+            context_with_heading.replace("2026-07-21 12:30", "2026-07-21 14:00")
+        )
+        self._run_tracker(monkeypatch, dict(stdin), mock_db)
+        out = capsys.readouterr().out
+        assert "tasks file may be stale" in out
+        assert "task tracking divergence" not in out
+
+    def test_legacy_list_state_file_still_dedups(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """A pre-existing list-shaped dedup file (old format) suppresses the
+        same precise divergence set instead of being discarded."""
+        task = self._setup_project(
+            tmp_path,
+            monkeypatch,
+            tasks_content="- [ ] 2. Framework wiring review\n",
+            context_content="### Task 2: Framework wiring review\nfindings\n",
+            # Tasks mtime newer: keeps the staleness signal out of the
+            # picture so this test isolates the precise-signal dedup.
+            context_newer=False,
+        )
+        state_dir = tmp_path / ".claude" / "hooks" / "state"
+        state_dir.mkdir(parents=True)
+        (state_dir / "divergence-s1.json").write_text("[2]")
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = task
+
+        self._run_tracker(
+            monkeypatch,
+            {"session_id": "s1", "cwd": str(tmp_path), "prompt": "hello"},
+            mock_db,
+        )
+
+        assert capsys.readouterr().out == ""
+
 
 # ── session_start task discipline reminder ────────────────────────────────
 
