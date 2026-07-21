@@ -6,10 +6,16 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-21
+
+Plugin-only release: no PyPI packages changed. Claude Code plugin 1.0.6.
+
 ### Fixed - statusline task counter no longer sits stale between explicit saves (plugin hooks)
 
 - The statusline's `[X/Y]` progress counter is parsed from the tasks file's checkboxes, but the only thing that flipped checkboxes in practice was Step 3 of `/missioncache:save` - the automatic save paths (the PreCompact snapshot hook) only write to the context file, so real progress left the counter frozen until the next explicit save. The `task_tracker` divergence hook was built to close exactly this gap by reminding Claude to check off completed items, but its trigger required `### Task N` headings in the context file - a convention no current project uses (0 of 23 active projects have one), so it never fired.
 - `task_tracker` now carries a second signal: when the context file's `**Last Updated:**` is newer than the tasks file's (every managed write path stamps that header, including the PreCompact snapshot) while unchecked items remain, it injects a "tasks file may be stale" reminder listing the pending items, so Claude reconciles the checkboxes at the next prompt. Deduped per context save (mtime identity, so two saves in the same minute each get their chance) - an intentional "nothing completed yet" save is nagged at most once. Same-minute header ties are broken on file mtime, the precise `### Task N` signal still takes priority when present (without starving the staleness signal when its reminder is ignored), both signals now understand hierarchical task numbers (`1.2.`), and the old list-shaped per-session dedup file is still read.
+
+## 2026-07-19.3
 
 Published package versions: missioncache-dashboard 1.0.10.
 
