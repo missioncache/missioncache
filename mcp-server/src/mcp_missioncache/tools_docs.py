@@ -475,6 +475,13 @@ async def get_context_digest(
     a section index (name + line number) for targeted follow-up reads, the
     file size, and per-project health warnings.
 
+    Also carries the PM layer (DB-side, best-effort): ``due_date`` (the
+    project's target date or null) and ``action_items_open`` (open action
+    items with an ``overdue`` flag each), with PM health warnings (overdue
+    items, due-soon project) merged into ``health_warnings``. When the DB
+    is unavailable these degrade to null/empty - a resume never fails on
+    them.
+
     For a FORK (context header carries "**Fork of:** <parent>"), also returns
     a ``parent_digest`` block: the parent's name, context file path, Last
     Updated, current mtime, and - when ``seen_mtime`` is passed -
@@ -503,6 +510,43 @@ async def get_context_digest(
             own_mtime = path.stat().st_mtime
             content = path.read_text()
         digest = context_health.build_digest(content, path)
+
+        # PM layer extras (DB-side, best-effort). Inline import + broad
+        # except by design: an older missioncache-db or an unreachable DB
+        # degrades the digest to file-only rather than failing the resume.
+        digest["due_date"] = None
+        digest["action_items_open"] = []
+        try:
+            from missioncache_db import pm_items
+
+            db = get_db()
+            task = db.get_task_by_name(project_name)
+            if task is not None:
+                digest["due_date"] = getattr(task, "due_date", None)
+                digest["action_items_open"] = [
+                    {
+                        "id": item.id,
+                        "label": item.label,
+                        "what": item.what,
+                        "requested_by": item.requested_by,
+                        "assignee": item.assignee,
+                        "due_date": item.due_date,
+                        "overdue": item.is_overdue(),
+                        "source": item.source,
+                    }
+                    for item in pm_items.list_action_items(
+                        db, task_id=task.id, status="open", project_statuses=()
+                    )
+                ]
+                digest["health_warnings"] = digest["health_warnings"] + (
+                    pm_items.pm_health_warnings(db, task.id)
+                )
+        except Exception:
+            logger.warning(
+                "PM digest extras unavailable for %r; digest is file-only",
+                project_name,
+                exc_info=True,
+            )
 
         parent_digest = None
         # is_fork lets the caller tell "not a fork" (parent_digest null, no
