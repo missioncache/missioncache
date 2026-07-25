@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 36 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 42 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -50,7 +50,7 @@ The `async def` signature is required by FastMCP even though MissionCache's tool
 
 The `dict` return is also a FastMCP quirk. Tools could return Pydantic models directly, and they do internally (`ListTasksResult`, `TaskDetail`, etc. in `models.py`), but then call `.model_dump()` before returning. This is the cheapest way to get a stable JSON-serializable shape without depending on FastMCP's schema inference. The models are still useful as internal contracts - you get type checking, field validation, and one place to update when the shape changes.
 
-### The six modules
+### The seven modules
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
@@ -60,8 +60,9 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 | `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 7 | Parallel agent execution plans |
 | `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
+| `tools_pm.py` | 6 | Project management: action items, stakeholders, tickets, project due date |
 
-**Total: 36 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated 36 times.
+**Total: 42 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
@@ -281,6 +282,8 @@ The underlying writer (`project_files.update_context_file`) updates the "Last Up
 **Returns:** `{"success": True, "file": str, "last_updated": str | None, "hub": str | None, "fork_of": str | None, "related_projects": str | None, "waiting_on": str | None, "next_steps": str | None, "recent_changes_last3": list[str], "section_index": list[{"name", "line"}], "file_size_bytes": int, "health_warnings": list[str], "is_fork": bool, "parent_digest": dict | None, "fork_parent_error": str | None}`.
 
 `waiting_on` and `next_steps` are the verbatim section bodies. `section_index` gives every `## ` heading with its 1-based line number, so a follow-up targeted Read (offset/limit) can fetch one specific section without loading the file. `health_warnings` carries the same per-project findings as `missioncache-db health`.
+
+The digest also carries the PM layer (DB-side, best-effort): `due_date` (the project's target date or `None`) and `action_items_open` (open action items as `{"id", "label", "what", "requested_by", "assignee", "due_date", "overdue", "source"}`), with the PM health warnings merged into `health_warnings`. When the DB is unavailable these degrade to `None`/`[]` - a resume never fails on them.
 
 For a **fork** (its context header carries `**Fork of:** <parent>`), `is_fork` is `True` and `parent_digest` describes the parent's shared context: `{"name", "context_file", "last_updated", "context_mtime", "changed_since_seen"}`. The parent is resolved from `active/` then `completed/`, so a completed parent's shared layer stays reachable. If the parent cannot be read, `parent_digest` is `None` and `fork_parent_error` explains why - `is_fork` stays `True` so the caller can still show the fork and prompt a manual re-read rather than silently downgrading to a plain resume. `changed_since_seen` is `True`/`False` when `seen_mtime` was passed, else `None`.
 
@@ -548,6 +551,48 @@ The pointer auto-clears when `update_tasks_file` marks the pointed-at items `[x]
 - `session_id: str | None = None` - Same resolution rules as above.
 
 **Returns:** `{"success": True, "session_id", "cleared": bool}` (`cleared` is `False` when there was no pointer to remove).
+
+## Project management tools (`tools_pm.py`)
+
+Thin wrappers over `missioncache_db.pm_items` - the single write path shared with the dashboard's REST endpoints and the `missioncache-db` CLI. Every mutation writes SQLite (the source of truth) and re-renders the read-only mirror sections in the project's context file under the sidecar lock, so a change made here is visible in the dashboard immediately and on the next `/missioncache:load`.
+
+### `add_action_item`
+
+**When to use:** A meeting transcript or conversation produced a commitment - the user's or a colleague's. Blocking dependencies belong in Waiting on instead.
+
+**Parameters:** `project_name: str`, `what: str`, `requested_by: str | None = None`, `assignee: str = "me"`, `due_date: str | None = None` (YYYY-MM-DD), `source: str | None = None` (meeting + date, transcript path), `notes: str | None = None`.
+
+**Returns:** `{"success": True, "item": {...}}` - the item carries its stable id (rendered as `AI-<id>`).
+
+### `update_action_item`
+
+**When to use:** Complete (`status="done"`, record the outcome in `notes`), reopen, drop, reassign, or re-date an item. Only passed fields change; `due_date="none"` clears the date. `completed_at` is managed automatically on status transitions.
+
+**Parameters:** `item_id: int`, then optional `status`, `what`, `requested_by`, `assignee`, `due_date`, `notes`.
+
+### `list_action_items`
+
+**When to use:** Project-scoped with `project_name`, or omit it for the cross-project scope ("what's due this week, anywhere") - each item then carries its `project_name`. Filters: `status`, `assignee` (case-insensitive; `me` = the user's own commitments), `overdue_only`, `due_within_days`.
+
+**Returns:** `{"success": True, "count": int, "items": [...]}` with an `overdue` flag per item.
+
+### `set_stakeholder`
+
+**When to use:** Record who matters to this project and in what role. Upserts on (project, name); `remove=True` deletes. Renders into `## Stakeholders`.
+
+**Parameters:** `project_name: str`, `name: str`, `role: str | None = None`, `notes: str | None = None`, `remove: bool = False`.
+
+### `set_ticket`
+
+**When to use:** Link an external ticket. System-agnostic: `label` + `url` is the whole contract; `system` ("jira", "monday", ...) is a display hint never branched on; `status` is a free-text cache MissionCache never fetches. Upserts on (project, label); `remove=True` unlinks. When `url` is omitted, a JIRA-style label gets its URL from the user's prefix map if one matches.
+
+**Parameters:** `project_name: str`, `label: str`, `url: str | None = None`, `system: str | None = None`, `status: str | None = None`, `notes: str | None = None`, `remove: bool = False`.
+
+### `set_project_due_date`
+
+**When to use:** Committed work got a target date (never fabricate one onto uncommitted backlog - the estimation discipline applies). Renders a `**Due:**` header line; health flags it within 7 days of the date. Pass `"none"` (or omit) to clear.
+
+**Parameters:** `project_name: str`, `due_date: str | None = None` (YYYY-MM-DD).
 
 ## Error handling
 
