@@ -69,9 +69,15 @@ def project(tmp_path, monkeypatch):
     """A real project under a tmp settings.root shared by all consumers.
 
     ``config.settings`` is the same object bound in project_files and
-    tools_docs, so patching the attribute redirects every module.
+    tools_docs, so patching the attribute redirects every module. The DB
+    path is redirected too (and the get_db singleton reset): the digest's
+    PM extras open the DB, and tests must never touch the user's live one.
     """
+    from mcp_missioncache import db as db_module
+
     monkeypatch.setattr(config.settings, "root", tmp_path / "mc")
+    monkeypatch.setattr(config.settings, "db_path", tmp_path / "tasks.db")
+    monkeypatch.setattr(db_module, "_db", None)
     project_dir = tmp_path / "mc" / "active" / "demo-project"
     project_dir.mkdir(parents=True)
     ctx = project_dir / "demo-project-context.md"
@@ -126,6 +132,57 @@ class TestGetContextDigest:
         # waiting row; both should surface without the caller asking.
         result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
         assert isinstance(result["health_warnings"], list)
+
+
+class TestDigestPmExtras:
+    """Spec: missioncache-pm-layer DoD bullet 2 - the resume digest carries
+    the project due date and open action items with overdue flags, merges
+    PM health warnings, and degrades to null/empty when no DB row exists."""
+
+    def test_defaults_without_db_row(self, project):
+        result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
+        assert result["due_date"] is None
+        assert result["action_items_open"] == []
+
+    def test_populated_from_db(self, project, tmp_path):
+        from datetime import date, timedelta
+
+        from missioncache_db import pm_items
+
+        from mcp_missioncache import db as db_module
+
+        db = db_module.get_db()
+        task = db.create_task("demo-project", task_type="coding", repo_id=None)
+        pm_items.set_project_due_date(db, task.id, "2099-06-30", refresh_mirror=False)
+        pm_items.add_action_item(
+            db, task.id, "chase the numbers", requested_by="Lior",
+            due_date=(date.today() - timedelta(days=2)).isoformat(),
+            refresh_mirror=False,
+        )
+
+        result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
+        assert result["due_date"] == "2099-06-30"
+        items = result["action_items_open"]
+        assert len(items) == 1
+        assert items[0]["label"] == "AI-1"
+        assert items[0]["what"] == "chase the numbers"
+        assert items[0]["requested_by"] == "Lior"
+        assert items[0]["overdue"] is True
+        assert any("2 days overdue" in w for w in result["health_warnings"])
+
+    def test_done_items_excluded(self, project):
+        from missioncache_db import pm_items
+
+        from mcp_missioncache import db as db_module
+
+        db = db_module.get_db()
+        task = db.create_task("demo-project", task_type="coding", repo_id=None)
+        item = pm_items.add_action_item(
+            db, task.id, "already handled", refresh_mirror=False
+        )
+        pm_items.complete_action_item(db, item.id, refresh_mirror=False)
+        result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
+        assert result["action_items_open"] == []
 
 
 # ── shared-seen auto-stamp (digest-read clears the fork staleness dot) ────
