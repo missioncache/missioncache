@@ -26,6 +26,7 @@ import tempfile
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -53,7 +54,7 @@ from missioncache_dashboard.lib.analytics_db import (
     import_tasks_md,
 )
 
-# Import SQLite MissionCacheDB for auto execution queries (these tables are only in SQLite)
+# Import SQLite MissionCacheDB for the SQLite-only tables (auto executions and the PM layer)
 from missioncache_db import (
     CATEGORIES,
     AutoExecution,
@@ -74,7 +75,11 @@ from missioncache_db.portability import (
 
 
 def get_sqlite_db() -> TaskDB:
-    """Get a MissionCacheDB instance for auto execution queries."""
+    """Get a MissionCacheDB instance for the SQLite-only surfaces.
+
+    Auto-execution tables and the whole PM layer live only in SQLite, so both
+    read and write through here rather than the DuckDB analytics mirror.
+    """
     return TaskDB()
 
 
@@ -3322,6 +3327,465 @@ async def health_check():
         "duckdb_path": str(db.db_path),
         "duckdb_exists": db.db_path.exists(),
         "timestamp": datetime.now().isoformat(),
+    }
+
+
+# =============================================================================
+# Project management (action items / stakeholders / tickets / due dates)
+#
+# All reads and writes go through missioncache_db.pm_items - the same write
+# path the MCP tools and the CLI use - against SQLite directly (these
+# tables are deliberately not mirrored into DuckDB). Every mutation also
+# re-renders the read-only sections in the project's context file, so a
+# dashboard click is visible to the next /missioncache:load.
+# =============================================================================
+
+
+class ActionItemPayload(BaseModel):
+    what: str
+    requested_by: str | None = None
+    assignee: str = "me"
+    due_date: str | None = None
+    source: str | None = None
+    notes: str | None = None
+
+
+class ActionItemUpdatePayload(BaseModel):
+    """Partial update; only provided fields change. ``clear_due_date`` exists
+    because JSON null and "field omitted" are indistinguishable here."""
+
+    status: str | None = None
+    what: str | None = None
+    requested_by: str | None = None
+    assignee: str | None = None
+    due_date: str | None = None
+    clear_due_date: bool = False
+    notes: str | None = None
+
+
+class StakeholderPayload(BaseModel):
+    name: str
+    role: str | None = None
+    notes: str | None = None
+
+
+class TicketPayload(BaseModel):
+    label: str
+    url: str | None = None
+    system: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class DueDatePayload(BaseModel):
+    due_date: str | None = None
+
+
+def _pm_task_or_404(sqlite_db: TaskDB, task_id: int):
+    task = sqlite_db.get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": True, "code": "NOT_FOUND", "message": f"Task {task_id} not found"},
+        )
+    return task
+
+
+@app.get("/api/tasks/{task_id}/pm")
+async def get_task_pm(task_id: int):
+    """Everything the project page's PM surfaces need in one call."""
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    task = _pm_task_or_404(sqlite_db, task_id)
+    items = pm_items.list_action_items(sqlite_db, task_id=task_id, project_statuses=())
+    return {
+        "task_id": task_id,
+        "due_date": task.due_date,
+        "action_items": [
+            {**asdict(i), "label": i.label, "overdue": i.is_overdue()} for i in items
+        ],
+        "stakeholders": [asdict(s) for s in pm_items.list_stakeholders(sqlite_db, task_id)],
+        "tickets": [asdict(t) for t in pm_items.list_tickets(sqlite_db, task_id)],
+    }
+
+
+@app.post("/api/tasks/{task_id}/action-items")
+async def create_action_item(task_id: int, payload: ActionItemPayload):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    try:
+        item = pm_items.add_action_item(
+            sqlite_db, task_id, payload.what, requested_by=payload.requested_by,
+            assignee=payload.assignee, due_date=payload.due_date,
+            source=payload.source, notes=payload.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": True, "message": str(e)})
+    return {"success": True, "item": {**asdict(item), "label": item.label}}
+
+
+@app.put("/api/action-items/{item_id}")
+async def update_action_item_endpoint(item_id: int, payload: ActionItemUpdatePayload):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    kwargs: dict = {}
+    for field in ("status", "what", "requested_by", "assignee", "notes"):
+        value = getattr(payload, field)
+        if value is not None:
+            kwargs[field] = value
+    if payload.clear_due_date:
+        kwargs["due_date"] = None
+    elif payload.due_date is not None:
+        kwargs["due_date"] = payload.due_date
+    try:
+        item = pm_items.update_action_item(sqlite_db, item_id, **kwargs)
+    except ValueError as e:
+        status = 404 if "not found" in str(e).lower() else 422
+        raise HTTPException(status_code=status, detail={"error": True, "message": str(e)})
+    return {
+        "success": True,
+        "item": {**asdict(item), "label": item.label, "overdue": item.is_overdue()},
+    }
+
+
+@app.post("/api/tasks/{task_id}/stakeholders")
+async def upsert_stakeholder(task_id: int, payload: StakeholderPayload):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    try:
+        stakeholder = pm_items.add_stakeholder(
+            sqlite_db, task_id, payload.name, role=payload.role, notes=payload.notes
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": True, "message": str(e)})
+    return {"success": True, "stakeholder": asdict(stakeholder)}
+
+
+@app.delete("/api/tasks/{task_id}/stakeholders/{name}")
+async def delete_stakeholder(task_id: int, name: str):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    removed = pm_items.remove_stakeholder(sqlite_db, task_id, name)
+    return {"success": True, "removed": removed}
+
+
+@app.post("/api/tasks/{task_id}/tickets")
+async def upsert_ticket(task_id: int, payload: TicketPayload):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    url = payload.url if payload.url is not None else pm_items.jira_url_for(payload.label)
+    try:
+        ticket = pm_items.add_ticket(
+            sqlite_db, task_id, payload.label, url=url, system=payload.system,
+            status=payload.status, notes=payload.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": True, "message": str(e)})
+    return {"success": True, "ticket": asdict(ticket)}
+
+
+@app.delete("/api/tasks/{task_id}/tickets/{label}")
+async def delete_ticket(task_id: int, label: str):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    removed = pm_items.remove_ticket(sqlite_db, task_id, label)
+    return {"success": True, "removed": removed}
+
+
+class WaitingOnResolvePayload(BaseModel):
+    """Positional identity, verified. The Waiting-on table is hand-editable
+    markdown with no per-row id, so the row's own identity cells are sent back
+    as proof the caller is resolving the row it thinks it is.
+
+    `who` and `since` are required alongside `what`: two rows reading "access
+    approval" from two different people is the normal shape of a blockers
+    table, and verifying `what` alone would resolve the wrong person's row.
+    """
+
+    row_index: int
+    what: str
+    who: str
+    since: str
+    outcome: str | None = None
+
+
+@app.post("/api/tasks/{task_id}/waiting-on/resolve")
+async def resolve_waiting_on(task_id: int, payload: WaitingOnResolvePayload):
+    """Resolve one Waiting-on row from the UI.
+
+    409 when the table shifted under the user (someone edited the file, or
+    another session resolved a row) - the write is refused rather than
+    landing on the wrong row.
+    """
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    try:
+        row = pm_items.resolve_waiting_on_row(
+            sqlite_db, task_id, payload.row_index,
+            {"what": payload.what, "who": payload.who, "since": payload.since},
+            payload.outcome,
+        )
+    except pm_items.WaitingOnConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": True, "code": "STALE_VIEW", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": True, "message": str(e)})
+    return {"success": True, "row": row}
+
+
+@app.put("/api/tasks/{task_id}/due-date")
+async def set_due_date(task_id: int, payload: DueDatePayload):
+    from missioncache_db import pm_items
+
+    sqlite_db = get_sqlite_db()
+    _pm_task_or_404(sqlite_db, task_id)
+    raw = payload.due_date
+    if raw is not None and raw.strip().lower() in ("", "none"):
+        raw = None
+    try:
+        value = pm_items.set_project_due_date(sqlite_db, task_id, raw)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": True, "message": str(e)})
+    return {"success": True, "task_id": task_id, "due_date": value}
+
+
+@app.get("/api/today")
+async def get_today():
+    """The Today view: cross-project attention data in one call.
+
+    Split by WHO OWES THE WORK, not by which record type stored it.
+
+    ``on_me`` is your own open action items, bucketed overdue / due-soon /
+    other. ``on_others`` unifies the two records that both mean "someone
+    else owes something": open action items assigned to anyone but you
+    (``kind: commitment``) and Waiting-on rows (``kind: blocker``). Those
+    two stay separate at rest - different shapes, different lifecycles,
+    different write paths, one DB-canonical and one file-canonical - and
+    are joined only here, for reading.
+
+    Sorting across that seam uses one scale, "days past the line": a
+    commitment's line is its due date, a blocker's line is the 7-day
+    staleness threshold. Rows that have not crossed a line yet sort below,
+    oldest first. Blocker rows carry a verified ``row_index`` so the UI can
+    resolve one through ``POST /api/tasks/{id}/waiting-on/resolve``.
+
+    Per-project attention blocks carry typed counts and a DERIVED at_risk
+    flag - never a manually set status.
+    """
+    from datetime import date as _date
+
+    from missioncache_db import MISSIONCACHE_ROOT, context_health, pm_items
+
+    sqlite_db = get_sqlite_db()
+    today = _date.today()
+    horizon = 7
+
+    def _age_days(iso: str | None) -> int | None:
+        if not iso:
+            return None
+        try:
+            return (today - _date.fromisoformat(iso[:10])).days
+        except ValueError:
+            return None
+
+    mine_overdue: list[dict] = []
+    mine_due_soon: list[dict] = []
+    mine_other: list[dict] = []
+    on_others: list[dict] = []
+    per_task: dict[int, dict] = {}
+
+    # The project block mirrors the two lists: open/overdue count the on_me
+    # list, on_others/stale_on_others count the on_others list (an overdue
+    # commitment and a stale blocker are both "past the line").
+    def _stats_for(task_id: int) -> dict:
+        return per_task.setdefault(
+            task_id,
+            {"open_count": 0, "overdue_count": 0, "on_others_count": 0,
+             "stale_on_others_count": 0},
+        )
+
+    for item in pm_items.list_action_items(sqlite_db, status="open"):
+        stats = _stats_for(item.task_id)
+        overdue = item.is_overdue(today)
+        if item.assignee.strip().lower() == "me":
+            stats["open_count"] += 1
+            if overdue:
+                stats["overdue_count"] += 1
+            entry = {**asdict(item), "label": item.label, "overdue": overdue,
+                     "mine": True}
+            due_in = None
+            if item.due_date:
+                age = _age_days(item.due_date)
+                due_in = None if age is None else -age
+            if overdue:
+                mine_overdue.append(entry)
+            elif due_in is not None and due_in <= horizon:
+                mine_due_soon.append(entry)
+            else:
+                mine_other.append(entry)
+        else:
+            stats["on_others_count"] += 1
+            if overdue:
+                stats["stale_on_others_count"] += 1
+            on_others.append({
+                "kind": "commitment",
+                "what": item.what,
+                "who": item.assignee,
+                "why": item.source or item.requested_by or "",
+                "project_name": item.project_name,
+                "task_id": item.task_id,
+                "days_past_line": _age_days(item.due_date) if overdue else None,
+                "age_days": _age_days(item.created_at),
+                "id": item.id,
+                "label": item.label,
+                "due_date": item.due_date,
+                "since": None,
+                "row_index": None,
+            })
+
+    projects = []
+    for task in sqlite_db.get_active_tasks():
+        stats = _stats_for(task.id)
+        due_date = task.due_date
+        days_to_due = None
+        if due_date:
+            age = _age_days(due_date)
+            days_to_due = None if age is None else -age
+
+        # Waiting-on rows are file-side truth; read the context file once
+        # and take both the display rows and the staleness count from it.
+        content = None
+        for candidate in (
+            MISSIONCACHE_ROOT / "active" / task.name,
+            MISSIONCACHE_ROOT / task.full_path,
+        ):
+            ctx = candidate / f"{task.name}-context.md"
+            if ctx.exists():
+                try:
+                    content = ctx.read_text()
+                except (OSError, UnicodeDecodeError):
+                    content = None
+                break
+        if content:
+            for row_index, row in enumerate(context_health.parse_waiting_on(content)):
+                # A row with no What has no identity: it cannot be resolved
+                # (the resolve verifies that cell) and it cannot be read. A
+                # blank row in the hand-edited table would otherwise parse as
+                # a blocker aged from an empty Since, fabricating a permanent
+                # at-risk flag and sorting to the top of its project group.
+                if not row["what"].strip():
+                    continue
+                since = context_health.parse_since_date(row["since"])
+                age = (today - since).days if since is not None else None
+                stale = age is not None and age > horizon
+                if stale:
+                    stats["stale_on_others_count"] += 1
+                stats["on_others_count"] += 1
+                on_others.append({
+                    "kind": "blocker",
+                    "what": row["what"],
+                    "who": row["who"],
+                    "why": row["gates"],
+                    "project_name": task.name,
+                    "task_id": task.id,
+                    "days_past_line": (age - horizon) if stale else None,
+                    "age_days": age,
+                    "id": None,
+                    "label": None,
+                    "due_date": None,
+                    "since": row["since"],
+                    # Identity handle for the resolve endpoint: the table has
+                    # no per-row id, so position is verified against `what`.
+                    "row_index": row_index,
+                })
+
+        at_risk = bool(
+            stats["overdue_count"]
+            or stats["stale_on_others_count"]
+            or (days_to_due is not None and days_to_due <= horizon)
+        )
+        if stats["open_count"] or stats["on_others_count"] or due_date:
+            projects.append({
+                "task_id": task.id,
+                "name": task.name,
+                "due_date": due_date,
+                "days_to_due": days_to_due,
+                "open_count": stats["open_count"],
+                "overdue_count": stats["overdue_count"],
+                "on_others_count": stats["on_others_count"],
+                "stale_on_others_count": stats["stale_on_others_count"],
+                "at_risk": at_risk,
+            })
+
+    # Grouped by project, because a flat cross-project list of everything
+    # anyone owes runs to dozens of rows and stops being readable.
+    #
+    # GROUPS sort by their newest row first: a project someone was asked
+    # about yesterday is live, one whose asks have all sat for two months
+    # is archaeology. WITHIN a group, most-past-the-line first, so each
+    # project's most urgent row is the one you see at its top.
+    groups: dict[int, dict] = {}
+    for row in on_others:
+        groups.setdefault(row["task_id"], {
+            "task_id": row["task_id"],
+            "project_name": row["project_name"],
+            "rows": [],
+        })["rows"].append(row)
+
+    on_others_groups = []
+    for group in groups.values():
+        group["rows"].sort(key=lambda r: (
+            r["days_past_line"] is None,
+            -(r["days_past_line"] or 0),
+            -(r["age_days"] or 0),
+        ))
+        ages = [r["age_days"] for r in group["rows"] if r["age_days"] is not None]
+        group["count"] = len(group["rows"])
+        group["stale_count"] = sum(
+            1 for r in group["rows"] if r["days_past_line"] is not None
+        )
+        group["newest_age_days"] = min(ages) if ages else None
+        on_others_groups.append(group)
+    on_others_groups.sort(key=lambda g: (
+        g["newest_age_days"] is None, g["newest_age_days"] or 0
+    ))
+
+    projects.sort(key=lambda p: (
+        not p["at_risk"], p["days_to_due"] is None, p["days_to_due"]
+    ))
+
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "on_me": {
+            "overdue": mine_overdue,
+            "due_soon": mine_due_soon,
+            "other_open": mine_other,
+        },
+        "on_others": on_others_groups,
+        "counts": {
+            "on_me": len(mine_overdue) + len(mine_due_soon) + len(mine_other),
+            "overdue": len(mine_overdue),
+            "on_others": len(on_others),
+            "on_others_projects": len(on_others_groups),
+            "stale": sum(1 for r in on_others if r["days_past_line"] is not None),
+        },
+        "projects": projects,
     }
 
 
