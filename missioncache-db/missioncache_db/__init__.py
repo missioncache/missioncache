@@ -36,6 +36,19 @@ Non-Coding Task Management:
     python missioncache_db.py get-updates <task_id> [limit]                     # Get task updates
     python missioncache_db.py today-updates [task_id]                           # Get today's updates
 
+Project Management (<task> = task id or project name):
+    python missioncache_db.py action-item add <task> <what...> [--from WHO] [--owner WHO] [--due YYYY-MM-DD] [--source SRC] [--notes NOTES]
+    python missioncache_db.py action-item list [<task>] [--status open|done|dropped] [--owner WHO] [--overdue] [--due-within DAYS]
+    python missioncache_db.py action-item done <item_id> [outcome...]
+    python missioncache_db.py action-item update <item_id> [--what W] [--status S] [--due YYYY-MM-DD|none] [--owner WHO] [--from WHO] [--notes N] [--source SRC]
+    python missioncache_db.py stakeholder add <task> <name> [--role ROLE] [--notes NOTES]
+    python missioncache_db.py stakeholder remove <task> <name>
+    python missioncache_db.py stakeholder list <task>
+    python missioncache_db.py ticket add <task> <label> [--url URL] [--system SYS] [--status STATUS] [--notes NOTES]
+    python missioncache_db.py ticket remove <task> <label>
+    python missioncache_db.py ticket list <task>
+    python missioncache_db.py due-date <task> <YYYY-MM-DD|none>
+
 Migration:
     python missioncache_db.py migrate-orbit-docs [--dry-run]  # Move docs to ~/.missioncache/
 
@@ -700,6 +713,54 @@ CREATE INDEX IF NOT EXISTS idx_auto_executions_task ON auto_executions(task_id);
 CREATE INDEX IF NOT EXISTS idx_auto_executions_status ON auto_executions(status);
 CREATE INDEX IF NOT EXISTS idx_auto_execution_logs_exec ON auto_execution_logs(execution_id);
 CREATE INDEX IF NOT EXISTS idx_auto_execution_logs_time ON auto_execution_logs(execution_id, timestamp);
+
+-- Project-management layer: action items, stakeholders, external tickets.
+-- SQLite is the source of truth; a read-only markdown mirror is rendered
+-- into the project's context file by pm_items (never parsed back).
+CREATE TABLE IF NOT EXISTS action_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    what TEXT NOT NULL,
+    requested_by TEXT,
+    assignee TEXT NOT NULL DEFAULT 'me',
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'done', 'dropped')),
+    source TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stakeholders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    role TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(task_id, name)
+);
+
+-- Ticket-system agnostic by contract: label + url is the whole interface.
+-- system is a display hint (jira, monday, github, ...) never branched on;
+-- status is a free-text cache the user/session updates, never fetched.
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    url TEXT,
+    system TEXT,
+    status TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(task_id, label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_items_task ON action_items(task_id);
+CREATE INDEX IF NOT EXISTS idx_action_items_status_due ON action_items(status, due_date);
+CREATE INDEX IF NOT EXISTS idx_stakeholders_task ON stakeholders(task_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_task ON tickets(task_id);
 """
 
 
@@ -806,6 +867,7 @@ class Task:
     last_worked_on: Optional[str]
     origin_uuid: Optional[str] = None  # stable cross-machine project identity
     category: Optional[str] = None  # one of CATEGORIES; NULL = uncategorized
+    due_date: Optional[str] = None  # ISO date; NULL = no committed due date
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -837,6 +899,7 @@ class Task:
             last_worked_on=row["last_worked_on"],
             origin_uuid=row["origin_uuid"] if "origin_uuid" in keys else None,
             category=row["category"] if "category" in keys else None,
+            due_date=row["due_date"] if "due_date" in keys else None,
         )
 
 
@@ -964,8 +1027,8 @@ class TaskDB:
             self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.execute("PRAGMA busy_timeout = 5000")
             # Auto-init schema on first open. SCHEMA_SQL is fully idempotent
-            # (28 CREATE ... IF NOT EXISTS clauses), so this is safe for both
-            # fresh and existing DBs. Without this, the bare `missioncache-db` CLI
+            # (every clause is CREATE ... IF NOT EXISTS), so this is safe for
+            # both fresh and existing DBs. Without this, the bare `missioncache-db` CLI
             # and any other first-time caller would crash on "no such table"
             # errors because __init__ only ever created an empty DB file.
             self._connection.executescript(SCHEMA_SQL)
@@ -1014,12 +1077,16 @@ class TaskDB:
         as a "different project" on re-import. Existing rows stay
         category=NULL: the dashboard falls back to its name heuristic for
         NULL, and NULLs can be filled by hand via the set-category CLI.
+        Existing rows stay due_date=NULL: no due date is the correct
+        default for uncommitted work.
         """
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
         if "origin_uuid" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN origin_uuid TEXT")
         if "category" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN category TEXT")
+        if "due_date" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
 
     def initialize(self) -> None:
         """Initialize the database schema and default config."""
@@ -4149,6 +4216,226 @@ def render_task_tree(db: TaskDB, hierarchy: Dict[str, Any]) -> List[str]:
 # =============================================================================
 
 
+def _pop_flag(args: List[str], flag: str) -> Optional[str]:
+    """Remove ``--flag value`` from args in place; return the value or None."""
+    if flag not in args:
+        return None
+    i = args.index(flag)
+    if i + 1 >= len(args):
+        print(f"Missing value for {flag}")
+        sys.exit(1)
+    value = args[i + 1]
+    del args[i : i + 2]
+    return value
+
+
+def _cli_resolve_task(db: "TaskDB", ref: str) -> Task:
+    """Resolve a CLI task reference (numeric id or project name) or exit."""
+    task = db.get_task(int(ref)) if ref.isdigit() else None
+    if task is None:
+        task = db.get_task_by_name(ref)
+    if task is None:
+        print(f"Task not found: {ref}")
+        sys.exit(1)
+    return task
+
+
+def _pm_command(db: "TaskDB", command: str) -> None:
+    """The action-item / stakeholder / ticket / due-date CLI groups.
+
+    Extracted from main() so the four groups share ONE error boundary:
+    the pm_items validators raise ValueError for a malformed date, an
+    unknown status or a non-http ticket URL, and main() has no except of
+    its own, so every one of those printed a traceback instead of the
+    message. The caller maps ValueError to the print+exit(1) shape the
+    rest of the CLI already uses (see create-task, set-category).
+    """
+    if command == "action-item":
+        from missioncache_db import pm_items
+
+        sub = sys.argv[2] if len(sys.argv) > 2 else ""
+        args = sys.argv[3:]
+
+        if sub == "add":
+            requested_by = _pop_flag(args, "--from")
+            assignee = _pop_flag(args, "--owner") or "me"
+            due = _pop_flag(args, "--due")
+            source = _pop_flag(args, "--source")
+            notes = _pop_flag(args, "--notes")
+            if len(args) < 2:
+                print(
+                    "Usage: missioncache-db action-item add <task> <what...> "
+                    "[--from WHO] [--owner WHO] [--due YYYY-MM-DD] "
+                    "[--source SRC] [--notes NOTES]"
+                )
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            what = " ".join(args[1:])
+            item = pm_items.add_action_item(
+                db, task.id, what, requested_by=requested_by,
+                assignee=assignee, due_date=due, source=source, notes=notes,
+            )
+            print(json.dumps(asdict(item), indent=2))
+
+        elif sub == "list":
+            status = _pop_flag(args, "--status")
+            owner = _pop_flag(args, "--owner")
+            due_within = _pop_flag(args, "--due-within")
+            overdue = "--overdue" in args
+            if overdue:
+                args.remove("--overdue")
+            task_id = _cli_resolve_task(db, args[0]).id if args else None
+            items = pm_items.list_action_items(
+                db, task_id=task_id, status=status, assignee=owner,
+                overdue_only=overdue,
+                due_within_days=int(due_within) if due_within else None,
+            )
+            print(json.dumps([asdict(i) for i in items], indent=2))
+
+        elif sub == "done":
+            if not args:
+                print("Usage: missioncache-db action-item done <item_id> [outcome...]")
+                sys.exit(1)
+            outcome = " ".join(args[1:]) or None
+            item = pm_items.complete_action_item(db, int(args[0]), outcome=outcome)
+            print(json.dumps(asdict(item), indent=2))
+
+        elif sub == "update":
+            if not args:
+                print(
+                    "Usage: missioncache-db action-item update <item_id> "
+                    "[--what W] [--status S] [--due YYYY-MM-DD|none] "
+                    "[--owner WHO] [--from WHO] [--notes N] [--source SRC]"
+                )
+                sys.exit(1)
+            item_id = int(args[0])
+            kwargs: Dict[str, Any] = {}
+            for flag, field in (
+                ("--what", "what"), ("--status", "status"),
+                ("--owner", "assignee"), ("--from", "requested_by"),
+                ("--notes", "notes"), ("--source", "source"),
+            ):
+                value = _pop_flag(args, flag)
+                if value is not None:
+                    kwargs[field] = value
+            due = _pop_flag(args, "--due")
+            if due is not None:
+                kwargs["due_date"] = None if due.lower() == "none" else due
+            item = pm_items.update_action_item(db, item_id, **kwargs)
+            print(json.dumps(asdict(item), indent=2))
+
+        else:
+            print("Usage: missioncache-db action-item <add|list|done|update> ...")
+            sys.exit(1)
+
+    elif command == "stakeholder":
+        from missioncache_db import pm_items
+
+        sub = sys.argv[2] if len(sys.argv) > 2 else ""
+        args = sys.argv[3:]
+
+        if sub == "add":
+            role = _pop_flag(args, "--role")
+            notes = _pop_flag(args, "--notes")
+            if len(args) < 2:
+                print(
+                    "Usage: missioncache-db stakeholder add <task> <name> "
+                    "[--role ROLE] [--notes NOTES]"
+                )
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            stakeholder = pm_items.add_stakeholder(
+                db, task.id, " ".join(args[1:]), role=role, notes=notes
+            )
+            print(json.dumps(asdict(stakeholder), indent=2))
+
+        elif sub == "remove":
+            if len(args) < 2:
+                print("Usage: missioncache-db stakeholder remove <task> <name>")
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            removed = pm_items.remove_stakeholder(db, task.id, " ".join(args[1:]))
+            print(json.dumps({"removed": removed}, indent=2))
+
+        elif sub == "list":
+            if not args:
+                print("Usage: missioncache-db stakeholder list <task>")
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            stakeholders = pm_items.list_stakeholders(db, task.id)
+            print(json.dumps([asdict(s) for s in stakeholders], indent=2))
+
+        else:
+            print("Usage: missioncache-db stakeholder <add|remove|list> ...")
+            sys.exit(1)
+
+    elif command == "ticket":
+        from missioncache_db import pm_items
+
+        sub = sys.argv[2] if len(sys.argv) > 2 else ""
+        args = sys.argv[3:]
+
+        if sub == "add":
+            url = _pop_flag(args, "--url")
+            system = _pop_flag(args, "--system")
+            status = _pop_flag(args, "--status")
+            notes = _pop_flag(args, "--notes")
+            if len(args) < 2:
+                print(
+                    "Usage: missioncache-db ticket add <task> <label> "
+                    "[--url URL] [--system SYS] [--status STATUS] [--notes NOTES]"
+                )
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            label = args[1]
+            # Convenience only: when no --url is given, try the user's
+            # JIRA prefix map. Still label+url underneath - nothing
+            # downstream branches on how the url was produced.
+            if url is None:
+                url = pm_items.jira_url_for(label)
+            ticket = pm_items.add_ticket(
+                db, task.id, label, url=url, system=system,
+                status=status, notes=notes,
+            )
+            print(json.dumps(asdict(ticket), indent=2))
+
+        elif sub == "remove":
+            if len(args) < 2:
+                print("Usage: missioncache-db ticket remove <task> <label>")
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            removed = pm_items.remove_ticket(db, task.id, args[1])
+            print(json.dumps({"removed": removed}, indent=2))
+
+        elif sub == "list":
+            if not args:
+                print("Usage: missioncache-db ticket list <task>")
+                sys.exit(1)
+            task = _cli_resolve_task(db, args[0])
+            tickets = pm_items.list_tickets(db, task.id)
+            print(json.dumps([asdict(t) for t in tickets], indent=2))
+
+        else:
+            print("Usage: missioncache-db ticket <add|remove|list> ...")
+            sys.exit(1)
+
+    elif command == "due-date":
+        from missioncache_db import pm_items
+
+        if len(sys.argv) < 4:
+            print("Usage: missioncache-db due-date <task> <YYYY-MM-DD|none>")
+            sys.exit(1)
+        task = _cli_resolve_task(db, sys.argv[2])
+        raw = sys.argv[3]
+        due = pm_items.set_project_due_date(
+            db, task.id, None if raw.lower() == "none" else raw
+        )
+        print(json.dumps(
+            {"task_id": task.id, "name": task.name, "due_date": due}, indent=2
+        ))
+
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -4865,6 +5152,12 @@ def main():
             if dry_run:
                 print("\n  Run without --dry-run to apply changes.")
 
+        elif command in ("action-item", "stakeholder", "ticket", "due-date"):
+            try:
+                _pm_command(db, command)
+            except ValueError as e:
+                print(str(e))
+                sys.exit(1)
         elif command == "health":
             from missioncache_db import context_health
 
@@ -4898,6 +5191,14 @@ def main():
                     total_warnings += 1
                     continue
                 warnings = context_health.check_context_health(content, context_file)
+                # DB-side PM warnings (overdue action items, due dates)
+                # merge into the same per-project report. A project dir
+                # with no DB row just skips them - report-only contract.
+                task = db.get_task_by_name(name)
+                if task is not None:
+                    from missioncache_db import pm_items
+
+                    warnings = warnings + pm_items.pm_health_warnings(db, task.id)
                 if warnings:
                     print(f"{name}:")
                     for w in warnings:

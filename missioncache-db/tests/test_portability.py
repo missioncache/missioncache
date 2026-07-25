@@ -1238,6 +1238,118 @@ class TestImportIdempotent:
         assert count == 1
 
 
+# ============ PM layer portability (missioncache-pm-layer, task 19) ============
+
+
+class TestPmPortability:
+    """Spec: the missioncache-pm-layer design - due date, action items,
+    stakeholders and tickets travel in the bundle (additive `pm` manifest
+    block, ids dropped as machine-local), restore idempotently on
+    re-import, and hostile values degrade with warnings, never failures."""
+
+    def _bundle_with_pm(self, mc, tmp_path):
+        from missioncache_db import pm_items
+
+        name = "pm-proj"
+        _seed_files(mc, name, _plain_md(name))
+        _insert_task(mc.db, name=name)
+        task = mc.db.get_task_by_name(name)
+        pm_items.set_project_due_date(mc.db, task.id, "2099-06-30", refresh_mirror=False)
+        pm_items.add_action_item(
+            mc.db, task.id, "chase numbers", requested_by="Lior",
+            due_date="2099-01-01", source="weekly", refresh_mirror=False,
+        )
+        done = pm_items.add_action_item(mc.db, task.id, "old one", refresh_mirror=False)
+        pm_items.complete_action_item(mc.db, done.id, outcome="did it", refresh_mirror=False)
+        pm_items.add_stakeholder(mc.db, task.id, "Keren", role="SIA lead", refresh_mirror=False)
+        pm_items.add_ticket(
+            mc.db, task.id, "GC-9", url="https://j/GC-9", system="jira",
+            refresh_mirror=False,
+        )
+        return _export(mc, name, out=str(tmp_path / "bundle"))["bundle_path"]
+
+    def test_manifest_carries_pm_block(self, mc, tmp_path):
+        bundle = self._bundle_with_pm(mc, tmp_path)
+        man = json.loads((Path(bundle) / "missioncache.json").read_text())
+        assert man["project"]["due_date"] == "2099-06-30"
+        assert len(man["pm"]["action_items"]) == 2
+        assert len(man["pm"]["stakeholders"]) == 1
+        assert len(man["pm"]["tickets"]) == 1
+        # ids are machine-local and must not travel.
+        assert "id" not in man["pm"]["action_items"][0]
+
+    def test_round_trip_restores_pm_data(self, mc, mc_b, tmp_path, monkeypatch):
+        from missioncache_db import pm_items
+
+        bundle = self._bundle_with_pm(mc, tmp_path)
+        report = _import(mc_b, monkeypatch, bundle)
+        assert report["exit_code"] == 0
+
+        row = mc_b.db.get_task_by_name("pm-proj")
+        assert row.due_date == "2099-06-30"
+        items = pm_items.list_action_items(mc_b.db, task_id=row.id, project_statuses=())
+        by_what = {i.what: i for i in items}
+        assert set(by_what) == {"chase numbers", "old one"}
+        assert by_what["chase numbers"].status == "open"
+        assert by_what["chase numbers"].requested_by == "Lior"
+        assert by_what["old one"].status == "done"
+        assert by_what["old one"].notes == "did it"
+        assert by_what["old one"].completed_at is not None
+        stakeholders = pm_items.list_stakeholders(mc_b.db, row.id)
+        assert [(s.name, s.role) for s in stakeholders] == [("Keren", "SIA lead")]
+        tickets = pm_items.list_tickets(mc_b.db, row.id)
+        assert [(t.label, t.url) for t in tickets] == [("GC-9", "https://j/GC-9")]
+        assert any(e["kind"] == "pm" for e in report["resolved"])
+
+    def test_re_import_does_not_duplicate_pm_rows(self, mc, mc_b, tmp_path, monkeypatch):
+        from missioncache_db import pm_items
+
+        bundle = self._bundle_with_pm(mc, tmp_path)
+        _import(mc_b, monkeypatch, bundle)
+        _import(mc_b, monkeypatch, bundle)
+        row = mc_b.db.get_task_by_name("pm-proj")
+        assert len(pm_items.list_action_items(mc_b.db, task_id=row.id, project_statuses=())) == 2
+        assert len(pm_items.list_stakeholders(mc_b.db, row.id)) == 1
+        assert len(pm_items.list_tickets(mc_b.db, row.id)) == 1
+
+    def test_hostile_pm_values_degrade_with_warnings(self, mc, mc_b, tmp_path, monkeypatch):
+        from missioncache_db import pm_items
+
+        bundle = self._bundle_with_pm(mc, tmp_path)
+        man_path = Path(bundle) / "missioncache.json"
+        man = json.loads(man_path.read_text())
+        man["pm"]["action_items"][0]["status"] = "exploded"
+        man["pm"]["action_items"][0]["due_date"] = "not-a-date"
+        man["project"]["due_date"] = "someday"
+        man_path.write_text(json.dumps(man))
+
+        report = _import(mc_b, monkeypatch, bundle)
+        assert report["exit_code"] == 0
+        row = mc_b.db.get_task_by_name("pm-proj")
+        assert row.due_date is None
+        items = pm_items.list_action_items(mc_b.db, task_id=row.id, project_statuses=())
+        hostile = next(i for i in items if i.what == "chase numbers")
+        assert hostile.status == "open"
+        assert hostile.due_date is None
+        joined = " ".join(report["warnings"])
+        assert "unknown status" in joined
+        assert "malformed due date" in joined
+        assert "due_date 'someday' is malformed" in joined
+
+    def test_old_bundle_without_pm_block_imports_clean(self, mc, mc_b, tmp_path, monkeypatch):
+        name = "plain-proj"
+        bundle = _build_bundle(mc, name, tmp_path / "bundle")
+        man_path = Path(bundle) / "missioncache.json"
+        man = json.loads(man_path.read_text())
+        del man["pm"]
+        del man["project"]["due_date"]
+        man_path.write_text(json.dumps(man))
+
+        report = _import(mc_b, monkeypatch, bundle)
+        assert report["exit_code"] == 0
+        assert mc_b.db.get_task_by_name(name) is not None
+
+
 # ============ placement failure rolls the DB write back ============
 
 
