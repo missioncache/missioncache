@@ -115,6 +115,11 @@ Ask the user or infer from conversation:
 - Any key decisions made?
 - Any gotchas discovered?
 - **Waiting on changes:** Did this session send an ask that now gates work (a message to a colleague, a ticket assigned out, a CI run someone else owns)? Add it as a `waiting_on_add` row. Did an external reply/event arrive that a Waiting-on row was tracking? Resolve it via `waiting_on_resolve` - the resolution is recorded in Recent Changes automatically, do NOT also add it as a recent_changes entry.
+- **Action item changes (propose, then apply on approval):**
+  - *Completed:* did the session's work finish an open action item (check the load digest's `action_items_open`)? Propose marking it done: `mcp__plugin_missioncache_pm__update_action_item(item_id=<n>, status="done", notes="<how it was resolved>")`.
+  - *New commitments:* did anyone commit to anything this session - the user promised a colleague something, a meeting transcript assigned items (to the user OR to others)? Propose each as `mcp__plugin_missioncache_pm__add_action_item(project_name=..., what=..., requested_by=..., assignee=..., due_date=..., source=...)`. `assignee` is "me" for the user's own commitments, the person's name for items you are tracking on others. `source` names where it came from (meeting + date, transcript path).
+  - Rule of thumb: an action item is a commitment with an owner; a Waiting-on row is a dependency that blocks work. When both apply (a colleague promised something that gates the next step), prefer Waiting-on and skip the action item.
+  - These tools write the DB AND re-render the context sections themselves - do NOT also describe the same change in `recent_changes` (that would duplicate the auto-written line).
 
 ### Step 3: Update Files Atomically
 
