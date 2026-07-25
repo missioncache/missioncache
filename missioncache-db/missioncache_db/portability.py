@@ -592,6 +592,7 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "created_at": task.created_at,
             "origin_uuid": task.origin_uuid,
             "category": task.category,
+            "due_date": getattr(task, "due_date", None),
             "time_total_seconds": time_total,
         }
     else:
@@ -604,8 +605,35 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "tags": [], "priority": None, "jira_key": None, "branch": None,
             "pr_url": None, "full_path": full_path, "parent": None,
             "created_at": None, "origin_uuid": None, "category": None,
-            "time_total_seconds": 0,
+            "due_date": None, "time_total_seconds": 0,
         }
+
+    # PM layer rides along additively (old importers ignore it; ids are
+    # machine-local autoincrements so they are deliberately dropped).
+    pm_block = {"action_items": [], "stakeholders": [], "tickets": []}
+    if task is not None:
+        try:
+            from dataclasses import asdict
+
+            from missioncache_db import pm_items
+
+            pm_block["action_items"] = [
+                {k: v for k, v in asdict(i).items()
+                 if k not in ("id", "task_id", "project_name")}
+                for i in pm_items.list_action_items(
+                    db, task_id=task.id, project_statuses=()
+                )
+            ]
+            pm_block["stakeholders"] = [
+                {k: v for k, v in asdict(s).items() if k not in ("id", "task_id")}
+                for s in pm_items.list_stakeholders(db, task.id)
+            ]
+            pm_block["tickets"] = [
+                {k: v for k, v in asdict(t).items() if k not in ("id", "task_id")}
+                for t in pm_items.list_tickets(db, task.id)
+            ]
+        except Exception as e:
+            warnings.append(f"PM data not exported ({e.__class__.__name__}: {e})")
 
     manifest = {
         "manifest_version": MANIFEST_VERSION,
@@ -618,6 +646,7 @@ def _build_manifest(db: Any, task: Any, name: str, full_path: str,
             "platform": sys.platform,
         },
         "project": project,
+        "pm": pm_block,
         "references": {
             "repo": repo_ref,
             "vaults": vaults,
@@ -1518,6 +1547,121 @@ def _trigger_duckdb_sync() -> Optional[str]:
                 "next dashboard start")
 
 
+def _import_pm_block(
+    db: Any, task_id: int, due_date: Any, pm_block: dict
+) -> tuple[list, dict]:
+    """Restore the bundle's PM layer onto the imported task row.
+
+    Untrusted-input contract (same as category): a malformed field degrades
+    with a warning, never fails the import. Idempotent on re-import:
+    stakeholders/tickets upsert on their natural UNIQUE keys; action items
+    dedupe on (what, created_at) since their ids are machine-local. Mirror
+    refreshes are skipped - the bundle's markdown already carries the
+    exporting machine's render.
+    """
+    import sqlite3
+
+    from missioncache_db import pm_items
+
+    warnings: list = []
+    counts = {"action_items": 0, "stakeholders": 0, "tickets": 0}
+
+    # A bundle is untrusted input and this runs AFTER files are placed and the
+    # task row is committed, so nothing here may propagate: a non-string field
+    # (a dict, a list) reaches sqlite3 binding and raises ProgrammingError,
+    # which is neither a ValueError nor caught by import_bundle's handler, and
+    # the user would see a raw traceback on an import that otherwise succeeded.
+    _ROW_ERRORS = (ValueError, TypeError, sqlite3.Error)
+
+    def _text(value: Any) -> Optional[str]:
+        """Bundle scalars only; a dict/list field is dropped with a warning."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return None if value is None else str(value)
+        raise TypeError(f"expected a text value, got {type(value).__name__}")
+
+    if due_date:
+        try:
+            pm_items.set_project_due_date(
+                db, task_id, _text(due_date), refresh_mirror=False
+            )
+        except _ROW_ERRORS:
+            warnings.append(f"bundle due_date {due_date!r} is malformed; skipped")
+
+    for s in pm_block.get("stakeholders") or []:
+        if not isinstance(s, dict) or not s.get("name"):
+            warnings.append(f"stakeholder entry skipped (no name): {s!r:.60}")
+            continue
+        try:
+            pm_items.add_stakeholder(
+                db, task_id, str(s["name"]), role=_text(s.get("role")),
+                notes=_text(s.get("notes")), refresh_mirror=False,
+            )
+            counts["stakeholders"] += 1
+        except _ROW_ERRORS as e:
+            warnings.append(f"stakeholder {s.get('name')!r} skipped: {e}")
+
+    for t in pm_block.get("tickets") or []:
+        if not isinstance(t, dict) or not t.get("label"):
+            warnings.append(f"ticket entry skipped (no label): {t!r:.60}")
+            continue
+        try:
+            pm_items.add_ticket(
+                db, task_id, str(t["label"]), url=_text(t.get("url")),
+                system=_text(t.get("system")), status=_text(t.get("status")),
+                notes=_text(t.get("notes")), refresh_mirror=False,
+            )
+            counts["tickets"] += 1
+        except _ROW_ERRORS as e:
+            warnings.append(f"ticket {t.get('label')!r} skipped: {e}")
+
+    items = pm_block.get("action_items") or []
+    if items:
+        existing = {
+            (i.what, i.created_at)
+            for i in pm_items.list_action_items(db, task_id=task_id, project_statuses=())
+        }
+        with db.connection() as conn:
+            for item in items:
+                if not isinstance(item, dict) or not item.get("what"):
+                    continue
+                what = str(item["what"])
+                created_at = item.get("created_at")
+                if (what, created_at) in existing:
+                    continue
+                status = item.get("status")
+                if status not in pm_items.ACTION_ITEM_STATUSES:
+                    warnings.append(
+                        f"action item {what[:40]!r}: unknown status {status!r}, importing as open"
+                    )
+                    status = "open"
+                due = item.get("due_date")
+                if due is not None:
+                    try:
+                        due = pm_items._validate_due_date(str(due))
+                    except ValueError:
+                        warnings.append(
+                            f"action item {what[:40]!r}: malformed due date {due!r} dropped"
+                        )
+                        due = None
+                conn.execute(
+                    """INSERT INTO action_items
+                       (task_id, what, requested_by, assignee, due_date, status,
+                        source, notes, created_at, completed_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                               COALESCE(?, datetime('now', 'localtime')), ?)""",
+                    (
+                        task_id, what, item.get("requested_by"),
+                        str(item.get("assignee") or "me"), due, status,
+                        item.get("source"), item.get("notes"),
+                        created_at, item.get("completed_at"),
+                    ),
+                )
+                counts["action_items"] += 1
+            conn.commit()
+
+    return warnings, counts
+
+
 def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
                   force: bool = False, rewrite: bool = False,
                   dry_run: bool = False) -> dict:
@@ -1752,6 +1896,28 @@ def import_bundle(db: Any, bundle: str, *, repo_override: Optional[str] = None,
                 report["resolved"].append(
                     _entry("resolved", "portable", field, None, str(val))
                 )
+
+        # --- PM layer (due date, action items, stakeholders, tickets) ---
+        pm_block = manifest.get("pm")
+        if not isinstance(pm_block, dict):
+            pm_block = {}
+        incoming_due = project.get("due_date")
+        if not dry_run and task is not None and (pm_block or incoming_due):
+            pm_warns, pm_counts = _import_pm_block(db, task.id, incoming_due, pm_block)
+            report["warnings"].extend(pm_warns)
+            imported_bits = [f"{v} {k}" for k, v in pm_counts.items() if v]
+            if incoming_due:
+                imported_bits.append(f"due date {incoming_due}")
+            if imported_bits:
+                report["resolved"].append(
+                    _entry("resolved", "pm", ", ".join(imported_bits), None)
+                )
+        elif dry_run and (pm_block or incoming_due):
+            sizes = {k: len(v) for k, v in (pm_block or {}).items() if isinstance(v, list)}
+            report["notes"].append(
+                f"dry-run: PM data present (would import {sizes}, "
+                f"due_date={incoming_due!r})"
+            )
 
         # --- time (display-only origin metadata) ---
         origin = int(project.get("time_total_seconds") or 0)

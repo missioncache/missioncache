@@ -151,3 +151,25 @@ class TestHealthCommand:
         out = capsys.readouterr().out
         assert "Last Updated" in out
         assert "1 active projects checked" in out
+
+    def test_pm_warnings_merged_into_report(self, monkeypatch, tmp_path, capsys):
+        """DB-side PM warnings (overdue action items) appear in the same
+        per-project report as the file-side warnings (missioncache-pm-layer
+        DoD bullet 4)."""
+        from datetime import date, timedelta
+
+        from missioncache_db import TaskDB, pm_items
+
+        _write_project(tmp_path, "pm-proj", _fresh())
+        db = TaskDB(db_path=tmp_path / "tasks.db")
+        task = db.create_task("pm-proj", task_type="coding", repo_id=None)
+        pm_items.add_action_item(
+            db, task.id, "chase the numbers",
+            due_date=(date.today() - timedelta(days=4)).isoformat(),
+            refresh_mirror=False,
+        )
+        db.close()
+        _run_health(monkeypatch, tmp_path)
+        out = capsys.readouterr().out
+        assert "pm-proj:" in out
+        assert "4 days overdue" in out
