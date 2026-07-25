@@ -148,5 +148,19 @@
       "title": "/pulls",
       "uniques": 1
     }
+  ],
+  "2026-07-25": [
+    {
+      "count": 6,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 4
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/pulls",
+      "title": "/pulls",
+      "uniques": 1
+    }
   ]
 }
