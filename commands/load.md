@@ -115,7 +115,7 @@ Do NOT read the full context file - call the digest tool instead:
 mcp__plugin_missioncache_pm__get_context_digest(project_name="<name>")
 ```
 
-It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name + line number), `file_size_bytes`, and `health_warnings`.
+It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name + line number), `file_size_bytes`, and `health_warnings`. On mcp-missioncache 1.0.18+ it also carries the PM layer: `due_date` (project target date or null) and `action_items_open` (open action items, each with an `overdue` flag), with PM warnings (overdue items, due-soon project) already merged into `health_warnings`.
 
 Checklist progress comes from `get_task`'s `progress` field (Step 1) - no need to read the tasks file either.
 
@@ -188,8 +188,14 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 **Related projects:** <digest related_projects line, if any>
 
 **Progress:** <X/Y tasks complete (Z%)>
+**Due:** <digest due_date - append "(in N days)" or "(OVERDUE by N days)"> *(only when due_date is set)*
 
 **Dashboard:** http://localhost:8787/#projects?task=<name> *(only if probe emitted a line)*
+
+**Action items:** <N> open<, M overdue> *(from digest action_items_open; omit the whole block when empty)*
+| ID | What | From | Owner | Due |
+|----|------|------|-------|-----|
+<rows - append " (overdue)" to the Due cell of items whose overdue flag is true>
 
 **Waiting on:** *(from digest waiting_on; omit if the table is empty)*
 | What | Who | Since | Gates |
@@ -210,6 +216,8 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 **Update notice:** read `~/.missioncache/update-check.json` (written by the dashboard and statusline with a 6h TTL - do NOT fetch anything yourself). If the file exists, `update_available` is true, and `checked_at` is less than 7 days old, add the one-line **Update** field using the file's `command` value and the outdated package names. Otherwise omit the field silently - a missing or stale cache is normal on dashboard-less installs.
 
 Waiting on renders NEXT TO Next Steps by design - both are the "what now" surface. When a Waiting-on row's external reply has arrived (the user mentions it, or you see it in the conversation), act on what it gates and resolve the row via `/missioncache:save`'s `waiting_on_resolve`. Offer the full context file ("say 'full context' for the whole file") instead of dumping it.
+
+Action items render ABOVE Waiting on: they are the commitments ledger (who promised what, by when), distinct from Waiting on (what blocks work). During the session, when the conversation shows an open action item was completed, mark it via `mcp__plugin_missioncache_pm__update_action_item(item_id=<n>, status="done", notes="<how it was resolved>")` - propose it to the user first. New commitments (yours or a colleague's, e.g. from a meeting transcript) go in via `mcp__plugin_missioncache_pm__add_action_item` with `requested_by`, `assignee`, `due_date`, and `source`.
 
 <!-- claude-code-only -->
 ### Step 4: Register Session for Time Tracking

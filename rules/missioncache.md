@@ -81,14 +81,18 @@ Every context file shares one structure so a fresh session can rely on where thi
 ```
 # <Name> - Context
 **Last Updated:** <ts>
+**Due:** YYYY-MM-DD                   <- optional; DB-managed mirror of tasks.due_date, set via PM tools
 Hub: [[vault-hub]]                    <- optional, when a vault hub exists
 **Related projects:** [[x]] (why)     <- optional, when a real relationship exists
 
 ## Description
 ## Definition of Done                 <- acceptance criteria; estimates stay gated until it exists
 ## Key People                         <- optional; only when colleagues own parts of the work
+## Stakeholders                       <- DB-managed mirror; appears on first stakeholder (structured successor of Key People)
+## Tickets                            <- DB-managed mirror; appears on first ticket reference
 ## <project-specific sections>        <- free-form, any number
 ## Gotchas
+## Action Items                       <- DB-managed mirror; appears on first action item, sits right above Waiting on
 ## Waiting on
 ## Next Steps
 ## Recent Changes                     <- capped at 12 dated subsections
@@ -97,6 +101,12 @@ Hub: [[vault-hub]]                    <- optional, when a vault hub exists
 ```
 
 The resume-critical tail (Gotchas, Waiting on, Next Steps, Recent Changes) is the fixed contract that `/missioncache:load`'s digest and `/missioncache:save`'s automation rely on. Section names are exact - code targets them by name.
+
+The DB-managed mirror sections (Stakeholders, Tickets, Action Items, plus the `**Due:**` header line) are rendered from SQLite by the PM tools and marked with a managed-section comment. Never hand-edit them - edit via the MCP tools (`add_action_item`, `update_action_item`, `set_stakeholder`, `set_ticket`, `set_project_due_date`), the dashboard, or the `missioncache-db` CLI; hand edits are overwritten on the next sync. They are deliberately absent until they have data (the template does not carry them; they self-heal into position on first write).
+
+### Action items vs Waiting on
+
+Action items are the commitments ledger: who promised what, by when (`requested_by`, `assignee`, `due_date`, `source`). Waiting on is the blockers table: what gates work. When both could apply (a colleague promised something that blocks the next step), prefer Waiting on. Action items with `assignee: me` are your commitments; any other name is a follow-up you chase. Open items surface on every `/missioncache:load` with overdue flags; the save flow proposes completions and captures new commitments (including from meeting transcripts).
 
 ### Waiting on
 
