@@ -8,15 +8,17 @@ If you are just trying to *use* the dashboard, the short version is: run `missio
 
 ## What the dashboard shows
 
-The frontend has three top-level views, all hash-routed:
+The frontend's top-level views, all hash-routed:
 
 | Hash | View | What it shows |
 |------|------|---------------|
-| `#projects` (default) | Projects | Active and completed projects in two tables, with click-through to a per-project modal |
+| `#today` (default) | Today | Cross-project attention, split by who owes the work: "On me" (your open action items, bucketed overdue / due this week / other, with inline mark-done and change-due) and "On other people" (one list merging commitments assigned to colleagues with Waiting-on rows), plus projects needing attention with a derived at-risk flag |
+| `#projects` | Projects | Active and completed projects in two tables (with due dates, action-item badges, and at-risk dots), with click-through to the project page |
+| `#project/<name>` | Project page | Full page per project: Overview (description, Definition of Done, due date, stakeholders, tickets) and Action Items tabs, plus Tasks/Structure/Context/Plan/Updates |
 | `#activity` | Activity | Today's time and LOC stats, hourly timeline, and a multi-week activity history with heatmap, trends, and top projects |
 | `#auto` | Auto | Live graph of active MissionCache Auto executions (DAG visualization, worker status, per-task state) |
 
-There are no pages beyond these three. All data is fetched lazily on first view switch and cached in-browser for the remainder of the session (a refresh button on each card forces a re-fetch).
+All data is fetched lazily on first view switch and cached in-browser for the remainder of the session (a refresh button on each card forces a re-fetch).
 
 ### Projects view
 
@@ -24,22 +26,22 @@ The Projects view is built from two API calls: `GET /api/tasks/active` and `GET 
 
 A fork whose parent has left the active set (the parent was completed or deleted) surfaces top-level in this view rather than disappearing under its now-absent parent - so an active fork is always visible even after its parent is done. (Note "orphan" is overloaded here: this parent-left-the-set case is distinct from a task whose DB status is active but whose files were moved to `completed/`.)
 
-Clicking a row opens a modal with four tabs:
+Clicking a row opens the project page (`#project/<name>`). Beyond Overview and Action Items it carries:
 
 - **Tasks** - rendered markdown of `<project>-tasks.md`, with the checklist styled as aligned checkboxes.
 - **Context** - rendered markdown of `<project>-context.md`, including the "Next Steps" and "Recent Changes" sections.
 - **Plan** - rendered markdown of `<project>-plan.md` if it exists, empty otherwise.
 - **Structure** - a D3.js graph visualization of per-task modes (interactive vs auto) and their dependencies, with a zoomable viewport. Only meaningful if `/missioncache:mode` has been run on the project.
 
-The modal is driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the MissionCache files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up on the next modal open.
+Those tabs are driven by `GET /api/task/{id}/files` (for markdown content) and `GET /api/task/{id}/structure` (for the graph). Both re-parse the MissionCache files on the server side on every request - there is no caching of file contents, only of the DuckDB row, so edits outside the dashboard show up the next time the page is opened.
 
-The modal header also carries an inline category selector (icon + dropdown next to the repo badge). It shows the STORED category - "uncategorized" for NULL rows, even when the row icon renders a name-heuristic guess - because the selector edits what the database holds, not the guess. The value paints from the client cache first, then refreshes from the `/api/task/{id}/files` response (which reads it from SQLite), so it stays correct even when the category changed via the MCP tool or CLI since the tables were loaded. Changing it PUTs to `/api/tasks/{id}/category`; on success the modal icon, the table row icons, and the filter-bar chips all update in place without a refetch. A sync warning in the response surfaces as "Saved (list refresh delayed)" in the status text.
+The project page header also carries an inline category selector (icon + dropdown next to the repo badge). It shows the STORED category - "uncategorized" for NULL rows, even when the row icon renders a name-heuristic guess - because the selector edits what the database holds, not the guess. The value paints from the client cache first, then refreshes from the `/api/task/{id}/files` response (which reads it from SQLite), so it stays correct even when the category changed via the MCP tool or CLI since the tables were loaded. Changing it PUTs to `/api/tasks/{id}/category`; on success the page icon, the table row icons, and the filter-bar chips all update in place without a refetch. A sync warning in the response surfaces as "Saved (list refresh delayed)" in the status text.
 
 #### Custom categories
 
-The Settings view's "Custom categories" section extends the built-in taxonomy: each custom category is a kebab-case name (built-in names and the `none` clear sentinel are reserved), an emoji, and a palette color. Custom categories render their emoji (in the chosen color) wherever built-ins render SVG icons - table rows, filter chips, the modal selector - and every category write path accepts them, because validation lives in `TaskDB` against built-ins plus the `custom_categories` table. The color is validated server-side as strict `#RRGGBB` (it lands in `style` attributes); the emoji is content-validated (non-ASCII required, HTML metacharacters rejected) and renders through text nodes and escaping, never as markup. The category map refreshes with the 15-minute auto-refresh, so categories created from another tab or the CLI catch up without a manual reload.
+The Settings view's "Custom categories" section extends the built-in taxonomy: each custom category is a kebab-case name (built-in names and the `none` clear sentinel are reserved), an emoji, and a palette color. Custom categories render their emoji (in the chosen color) wherever built-ins render SVG icons - table rows, filter chips, the page selector - and every category write path accepts them, because validation lives in `TaskDB` against built-ins plus the `custom_categories` table. The color is validated server-side as strict `#RRGGBB` (it lands in `style` attributes); the emoji is content-validated (non-ASCII required, HTML metacharacters rejected) and renders through text nodes and escaping, never as markup. The category map refreshes with the 15-minute auto-refresh, so categories created from another tab or the CLI catch up without a manual reload.
 
-Deletion always succeeds and orphans degrade: projects keeping a deleted value render with default styling, the value stays selectable on those projects (a modal save cannot wipe it), and re-adding the name restores its look. The API surface is `GET /api/categories` (built-in names + custom rows), `POST /api/categories` (400 on validation, 409 on duplicate), and `DELETE /api/categories/{name}` (404 for unknown names) - all reading and writing SQLite directly, no DuckDB sync involved.
+Deletion always succeeds and orphans degrade: projects keeping a deleted value render with default styling, the value stays selectable on those projects (a save from the page cannot wipe it), and re-adding the name restores its look. The API surface is `GET /api/categories` (built-in names + custom rows), `POST /api/categories` (400 on validation, 409 on duplicate), and `DELETE /api/categories/{name}` (404 for unknown names) - all reading and writing SQLite directly, no DuckDB sync involved.
 
 The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
@@ -173,6 +175,15 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/tasks/active` | Active tasks with task progress, effective time, and subtasks. Filters out orphans. |
 | GET | `/api/tasks/completed` | Completed tasks plus orphans. Accepts `days` query param (default 30). |
 | GET | `/api/task/{id}/files` | Parsed markdown content of `-plan.md`, `-context.md`, `-tasks.md`. |
+| GET | `/api/today` | Cross-project attention, split by who owes the work: `on_me` (bucketed overdue / due-soon / other), `on_others` (commitments + Waiting-on rows, grouped by project), counts, and per-project derived at-risk flags. |
+| POST | `/api/tasks/{id}/waiting-on/resolve` | Resolve one Waiting-on row from the UI. Body `{row_index, what, outcome}`; 409 when the table shifted since the view loaded. |
+| GET | `/api/tasks/{id}/pm` | One-call PM bundle: due date, action items (with overdue flags), stakeholders, tickets. |
+| POST | `/api/tasks/{id}/action-items` | Create an action item (what, requested_by, assignee, due_date, source, notes). |
+| PUT | `/api/action-items/{id}` | Partial update: status/what/owner/notes, due_date (or `clear_due_date: true`). |
+| POST / DELETE | `/api/tasks/{id}/stakeholders[/{name}]` | Upsert / remove a stakeholder. |
+| POST / DELETE | `/api/tasks/{id}/tickets[/{label}]` | Upsert / remove a ticket reference (label + url contract). |
+| PUT | `/api/tasks/{id}/due-date` | Set or clear (null/"none") the project due date. |
+
 | GET | `/api/task/{id}/structure` | Per-task mode assignments (interactive/auto) + dependency adjacency for the Structure tab graph. |
 | GET | `/api/task/{id}/updates` | Append-only `task_updates` rows for non-coding tasks. |
 | GET | `/api/task/{id}/prompt/{subtask_id}` | Contents of a specific `prompts/task-NN-prompt.md` file. |
@@ -182,6 +193,20 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/categories` | Built-in taxonomy names plus custom categories (`{name, emoji, color}` rows). |
 | POST | `/api/categories` | Create a custom category. Body `{"name", "emoji", "color"}`; 400 on validation, 409 on duplicate. |
 | DELETE | `/api/categories/{name}` | Delete a custom category (404 for unknown names). Projects keeping the value render with default styling. |
+
+All PM writes go through `missioncache_db.pm_items` - the same path as the MCP tools and CLI - so a dashboard click also re-renders the project's context-file mirror sections. PM tables live in SQLite only (not mirrored to DuckDB).
+
+### The two records behind "On other people"
+
+Two different things mean "someone else owes something", and they stay separate at rest because their shapes and lifecycles differ. An **action item assigned to a colleague** is a commitment: it has an owner, a due date, and a done/dropped end state, and it lives in SQLite with a stable id. A **Waiting-on row** is a dependency: it has an age and a `Gates` cell naming what it blocks, and it lives in the context file's markdown table, maintained by the save flow.
+
+`/api/today` joins them for reading only. Each row carries `kind` (`commitment` or `blocker`) and a shared `days_past_line` score so one list can sort honestly across the seam: a commitment's line is its due date, a blocker's line is the 7-day staleness threshold, and rows that have not crossed a line sort below, oldest first.
+
+Rows come **grouped by project**, because a flat cross-project list runs to dozens of entries and stops being readable. Groups sort by their newest row first (`newest_age_days` ascending): a project someone was asked about yesterday is live, one whose asks have all sat for two months is archaeology. Within a group, most-past-the-line first, so each project's most urgent row sits at its top.
+
+Both kinds are resolvable from the UI, by different mechanisms. A commitment has a stable id, so it completes through `PUT /api/action-items/{id}`. A Waiting-on row has no per-row id - it is a hand-editable markdown table - so `POST /api/tasks/{id}/waiting-on/resolve` identifies it positionally via `row_index` and **verifies** the row's `what` text before removing it, answering 409 rather than resolving the wrong row when the table has shifted. The resolution lands in Recent Changes exactly as the save flow's `waiting_on_resolve` does. That resolve is identity-keyed by design; the save flow's substring match is the right shape for "the egress one came back" in conversation and the wrong one for a button press.
+
+Which one to file into at write time is unchanged: if it blocks your next step, it is a Waiting-on row; otherwise it is an action item.
 
 Both write endpoints return `{"success": true, ...}` with a `warnings` list; a warning means the SQLite write succeeded but the DuckDB read-path refresh failed or was incomplete, so the list view may lag until the sync issue clears.
 

@@ -269,7 +269,7 @@ An optional terminal display showing the active project with progress fraction, 
 
 ### A full MCP tool suite for Claude
 
-MissionCache's MCP server exposes tools across five categories: task lifecycle, file operations, time tracking, iteration logging, and repository management. Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
+MissionCache's MCP server exposes tools across six categories: task lifecycle, file operations, time tracking, iteration logging, and repository management. Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
 
 ### Lifecycle hooks
 
@@ -416,7 +416,7 @@ Deep dives for each component live in `docs/`:
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**Forks**](docs/forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness
 - [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
-- [**MCP Tools**](docs/mcp-tools.md) - all 36 tools by module, error handling, extension patterns
+- [**MCP Tools**](docs/mcp-tools.md) - all 42 tools by module, error handling, extension patterns
 - [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks

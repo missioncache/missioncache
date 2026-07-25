@@ -69,13 +69,33 @@ missioncache-db cleanup [--dry-run]
 
 `cleanup` is the broader housekeeping pass, in four phases: archive orphaned active tasks whose files no longer exist on disk, move stray repo-local MissionCache files into the centralized `~/.missioncache/` layout, resolve duplicate task names, and normalize non-standard paths. Run it with `--dry-run` first - it prints exactly what each phase would touch.
 
+## Project management (action items, stakeholders, tickets, due dates)
+
+`<task>` accepts a numeric task id or a project name.
+
+```bash
+missioncache-db action-item add <task> "send the numbers" --from Lior --due 2026-08-01 --source "weekly sync"
+missioncache-db action-item list [<task>] [--status open|done|dropped] [--owner me] [--overdue] [--due-within 7]
+missioncache-db action-item done <item_id> [outcome...]
+missioncache-db action-item update <item_id> [--status S] [--due YYYY-MM-DD|none] [--owner WHO] [--what W] [--from WHO] [--notes N] [--source SRC]
+missioncache-db stakeholder add <task> <name> [--role ROLE] [--notes NOTES]
+missioncache-db stakeholder remove <task> <name>
+missioncache-db stakeholder list <task>
+missioncache-db ticket add <task> <label> [--url URL] [--system SYS] [--status STATUS] [--notes NOTES]
+missioncache-db ticket remove <task> <label>
+missioncache-db ticket list <task>
+missioncache-db due-date <task> <YYYY-MM-DD|none>
+```
+
+SQLite is the source of truth; every mutation also re-renders the read-only `## Action Items` / `## Stakeholders` / `## Tickets` sections (and the `**Due:**` header line) in the project's context file, plus a Recent Changes line. The same write path serves the MCP tools and the dashboard, so all three surfaces stay consistent. `action-item list` without a task spans every active/paused project (each item carries its project name). Ticket references are system-agnostic: `label` + `--url` is the whole contract; when `--url` is omitted a JIRA-style label gets its URL from the dashboard's prefix map if one matches. An `owner` of `me` means your own commitment; any other name is a follow-up you are tracking on someone else.
+
 ## Health / diagnostics
 
 ```bash
 missioncache-db health
 ```
 
-Scans every active project's context file and reports, per project: a stale `Last Updated` (older than 14 days), stale Waiting-on rows (`Since` older than 7 days), a context file over the 100KB size budget, missing core sections (`Description`, `Gotchas`, `Waiting on`, `Next Steps`, `Recent Changes`), and a Recent Changes section over its 12-entry cap (meaning a journal rollover is pending on the next save). A project directory without a context file is itself a finding.
+Scans every active project's context file and reports, per project: a stale `Last Updated` (older than 14 days), stale Waiting-on rows (`Since` older than 7 days), a context file over the 100KB size budget, missing core sections (`Description`, `Gotchas`, `Waiting on`, `Next Steps`, `Recent Changes`), and a Recent Changes section over its 12-entry cap (meaning a journal rollover is pending on the next save). A project directory without a context file is itself a finding. Projects with a DB row also get the PM checks: overdue open action items, a project due date within 7 days (or past), and items open more than 14 days with no due date.
 
 Report-only: exit code is always 0, warnings or not. The thresholds are constants in `missioncache_db/context_health.py`, not config keys. The same warnings surface per-project in the `/missioncache:load` digest, so `health` is mainly the fleet-wide sweep.
 

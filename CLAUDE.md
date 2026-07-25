@@ -27,7 +27,9 @@
 | `mcp-server/src/mcp_missioncache/tools_tracking.py` | Time tracking tools |
 | `mcp-server/src/mcp_missioncache/tools_iteration.py` | Iteration logging tools |
 | `mcp-server/src/mcp_missioncache/tools_planning.py` | Planning tools |
+| `mcp-server/src/mcp_missioncache/tools_pm.py` | PM tools: action items, stakeholders, tickets, due dates |
 | `missioncache-db/missioncache_db/__init__.py` | Core database layer (~4600 lines) |
+| `missioncache-db/missioncache_db/pm_items.py` | PM layer: CRUD + context-file mirror render (single write path for MCP/dashboard/CLI) |
 | `missioncache-auto/missioncache_auto/cli.py` | MissionCache Auto CLI entry point |
 | `missioncache-dashboard/missioncache_dashboard/server.py` | FastAPI dashboard backend |
 | `hooks/hooks.json` | Hook definitions |
