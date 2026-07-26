@@ -4697,7 +4697,7 @@
         }
 
         /* The dense variant, for the waiting-on rows inside a project panel.
-           Keeps .pm-item-row so pmRowError's closest() still resolves.
+           Keeps .pm-item-row as the row hook for the project page.
 
            Three columns on ONE line at a fixed 36px, because these arrive in
            runs of up to 19 and a predictable row pitch is what makes a run
@@ -7007,15 +7007,6 @@
         </main>
     </div><!-- End App Layout -->
 
-    <!-- Document Viewer Overlay -->
-    <div class="document-viewer" id="documentViewer">
-        <div class="viewer-header">
-            <span class="viewer-title" id="viewerTitle" dir="auto"></span>
-            <button class="viewer-close" onclick="closeDocumentViewer()">&times;</button>
-        </div>
-        <iframe id="documentFrame" src="about:blank"></iframe>
-    </div>
-
     <!-- Timeline Bar Tooltip -->
     <div class="timeline-tooltip" id="timelineTooltip">
         <div class="timeline-tooltip-header">
@@ -7029,35 +7020,6 @@
         <div class="timeline-tooltip-duration">
             <svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
             <span>Duration: <strong id="tooltipDuration"></strong></span>
-        </div>
-    </div>
-
-    <!-- Document Edit Modal -->
-    <div class="doc-edit-modal" id="docEditModal">
-        <div class="doc-edit-content">
-            <div class="doc-edit-header">
-                <h3>Edit Document</h3>
-                <button class="doc-edit-close" onclick="closeDocEditModal()">&times;</button>
-            </div>
-            <div class="doc-edit-body">
-                <input type="hidden" id="docEditId">
-                <div class="doc-edit-field">
-                    <label>Document Title</label>
-                    <input type="text" id="docEditTitle" dir="auto" placeholder="Enter document title">
-                </div>
-                <div class="doc-edit-field">
-                    <label>Topics</label>
-                    <div class="tags-editor" id="tagsEditor">
-                        <div class="tag-input-wrapper">
-                            <input type="text" id="tagInput" placeholder="Type and press Enter to add topic...">
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="doc-edit-footer">
-                <button class="doc-edit-btn-cancel" onclick="closeDocEditModal()">Cancel</button>
-                <button class="doc-edit-btn-save" id="docEditSaveBtn" onclick="saveDocEdit()">Save Changes</button>
-            </div>
         </div>
     </div>
 
@@ -8561,30 +8523,6 @@ function renderAttention(data) {
             if (el) el.innerHTML = bdStrip();
         }
 
-        // A row in the "On me" sections - always the user's own item, so it
-        // carries no owner badge (the section title already says whose it is).
-        function renderPmItemRow(item) {
-            const due = pmFormatDue(item.due_date);
-            const projLink = `<a class="pm-item-project" href="${projectHref(item.project_name, item.task_id, 'action-items')}">${escapeHtml(item.project_name || '')}</a>`;
-            const fromMeta = item.requested_by ? `from ${escapeHtml(item.requested_by)}` : '';
-            return `<div class="pm-item-row ${item.overdue ? 'is-overdue' : ''}">
-                <div class="pm-item-main">
-                    <div class="pm-item-what"><span class="pm-id-chip">${escapeHtml(item.label)}</span> ${escapeHtml(item.what)}</div>
-                    <div class="pm-item-meta">
-                        ${projLink}
-                        ${fromMeta ? `<span>${fromMeta}</span>` : ''}
-                        <span class="${due.cls}">due ${due.text}</span>
-                    </div>
-                    <div class="pm-row-error" role="alert" style="display:none;"></div>
-                </div>
-                <div class="pm-item-actions">
-                    <input type="date" value="${escapeHtml(item.due_date || '')}" title="Change due date"
-                           aria-label="Due date for ${escapeHtml(item.what || '')}"
-                           onchange="pmChangeDue(${item.id}, this.value, this)">
-                    <button class="pm-mini-btn" onclick="pmMarkDone(${item.id}, this)">Done</button>
-                </div>
-            </div>`;
-        }
 
         // One tick per ask instead of a solid bar. The bar's length was the
         // project's share of the largest project, which at this data's range
@@ -8610,13 +8548,6 @@ function renderAttention(data) {
 
 
 
-        // Click the text to see the whole sentence plus what it gates. Bound to
-        // the text rather than the row so it cannot swallow clicks meant for
-        // the Resolve button or the outcome field.
-        function pmToggleWaitRow(el) {
-            const row = el.closest('.pm-wait-row');
-            if (row) row.classList.toggle('is-open');
-        }
 
         // True only for a parseable http(s) URL. Ticket URLs can arrive from a
         // bundle import or an MCP tool call, and this origin can register a
@@ -8632,88 +8563,11 @@ function renderAttention(data) {
             }
         }
 
-        // Lives on the card, not the row, so it survives a body re-render.
-        function pmShowOnOthersBanner(message) {
-            const banner = document.getElementById('todayOnOthersBanner');
-            if (!banner) return;
-            banner.innerHTML = `${escapeHtml(message)} <button class="pm-mini-btn" onclick="pmReloadOnOthers()">Reload the list</button>`;
-            banner.style.display = 'block';
-        }
 
-        function pmClearOnOthersBanner() {
-            const banner = document.getElementById('todayOnOthersBanner');
-            if (banner) { banner.style.display = 'none'; banner.innerHTML = ''; }
-        }
 
-        async function pmReloadOnOthers() {
-            pmClearOnOthersBanner();
-            await loadTodayData();
-        }
 
-        function pmOpenResolve(rowId) {
-            const form = document.getElementById(`${rowId}-form`);
-            if (!form) return;
-            form.style.display = 'flex';
-            const input = document.getElementById(`${rowId}-outcome`);
-            if (input) input.focus();
-        }
 
-        function pmCloseResolve(rowId) {
-            const form = document.getElementById(`${rowId}-form`);
-            if (form) form.style.display = 'none';
-            const err = document.getElementById(`${rowId}-error`);
-            if (err) { err.style.display = 'none'; err.textContent = ''; }
-        }
 
-        // Resolving a Waiting-on row rewrites the project's context file, so
-        // the request carries the row's position AND its text; a 409 means the
-        // table moved under us and the only correct fix is to re-read it.
-        async function pmResolveWaiting(rowId) {
-            const rowEl = document.getElementById(rowId);
-            if (!rowEl) return;
-            const input = document.getElementById(`${rowId}-outcome`);
-            const err = document.getElementById(`${rowId}-error`);
-            const taskId = Number(rowEl.dataset.taskId);
-            // The server verifies the WHOLE row, not just `what`: two rows
-            // reading "access approval" from two people is normal, and
-            // matching on text alone resolved the wrong person's.
-            const payload = {
-                row_index: Number(rowEl.dataset.rowIndex),
-                what: rowEl.dataset.what || '',
-                who: rowEl.dataset.who || '',
-                since: rowEl.dataset.since || '',
-                outcome: (input && input.value.trim()) ? input.value.trim() : null,
-            };
-            try {
-                const res = await fetch(`${API_BASE}/api/tasks/${taskId}/waiting-on/resolve`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                });
-                if (!res.ok) {
-                    let message = 'HTTP ' + res.status;
-                    try {
-                        const data = await res.json();
-                        message = data?.detail?.message || message;
-                    } catch (_) { /* non-JSON error body */ }
-                    if (res.status === 409) {
-                        // The row moved under us. Refetching here would wipe
-                        // the inline error before it could be read, so put the
-                        // message on the card (outside the re-rendered body)
-                        // and let the user trigger the reload.
-                        pmShowOnOthersBanner(message);
-                    } else if (err) {
-                        err.textContent = message;
-                        err.style.display = 'block';
-                    }
-                    return;
-                }
-                await loadTodayData();
-            } catch (e) {
-                console.error('Resolve failed:', e);
-                if (err) { err.textContent = 'Could not reach the server.'; err.style.display = 'block'; }
-            }
-        }
 
         // Inline mutations from the Attention view - refetch after each.
         // Puts the failure on the row instead of only the console, and blocks
@@ -8729,50 +8583,8 @@ function renderAttention(data) {
             if (el) { el.style.display = 'none'; el.textContent = ''; }
         }
 
-        function pmRowError(el, message) {
-            // .attn-own is the compact row form used in the On-you card; it
-            // carries its own .pm-row-error slot and must resolve here too, or a
-            // failed Done reports only to the console.
-            const row = el && el.closest ? el.closest('.pm-item-row, .attn-own') : null;
-            const err = row ? row.querySelector('.pm-row-error') : null;
-            if (err) { err.textContent = message; err.style.display = 'block'; }
-            else console.error(message);
-        }
 
-        async function pmMarkDone(itemId, btn) {
-            if (btn) btn.disabled = true;
-            try {
-                const res = await fetch(`${API_BASE}/api/action-items/${itemId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'done' }),
-                });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                await loadTodayData();
-            } catch (e) {
-                console.error('Mark-done failed:', e);
-                if (btn) btn.disabled = false;
-                pmRowError(btn, 'Could not mark this done. ' + e.message);
-            }
-        }
 
-        async function pmChangeDue(itemId, value, inputEl) {
-            if (inputEl) inputEl.disabled = true;
-            try {
-                const body = value ? { due_date: value } : { clear_due_date: true };
-                const res = await fetch(`${API_BASE}/api/action-items/${itemId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                await loadTodayData();
-            } catch (e) {
-                console.error('Change-due failed:', e);
-                if (inputEl) inputEl.disabled = false;
-                pmRowError(inputEl, 'Could not change the due date. ' + e.message);
-            }
-        }
 
         // ---- Project detail page ----------------------------------------------
         async function openProjectPage(name, tab, taskId) {
@@ -9039,10 +8851,6 @@ function renderAttention(data) {
             `;
         }
 
-        async function pmRefreshProjectPanels() {
-            if (currentProjectPageTab === 'action-items') await renderProjectActionItems();
-            else await renderProjectOverview();
-        }
 
         async function pmPost(url, body, method) {
             const res = await fetch(API_BASE + url, {
