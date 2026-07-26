@@ -782,6 +782,7 @@
       <a href="#compare">Compare</a>
       <a href="#how">How it works</a>
       <a href="#statusline">Statusline</a>
+      <a href="#attention">Attention</a>
       <a href="#features">Features</a>
       <a href="{{DOCS_URL}}">Docs</a>
       <a href="{{CHANGELOG_URL}}">Changelog</a>
@@ -799,6 +800,7 @@
       <a href="#compare">Compare</a>
       <a href="#how">How it works</a>
       <a href="#statusline">Statusline</a>
+      <a href="#attention">Attention</a>
       <a href="#features">Features</a>
       <a href="#install">Install</a>
       <a href="{{DOCS_URL}}">Docs</a>
@@ -1156,6 +1158,39 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     <div class="wn rv">
       <span class="wn-cmd">/whats-new</span>
       <p>The installer also sets up <strong>/whats-new</strong>: it reads what changed in Claude Code since you last checked and proposes tailored upgrades to your own setup, with before/after diffs.</p>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ============ ATTENTION ============ -->
+<section id="attention">
+  <div class="wrap">
+    <div class="head rv">
+      <span class="eyebrow">The Attention view</span>
+      <h2>What needs you today, and who owes you what.</h2>
+      <p class="lede">The dashboard opens here. <strong>Work you owe</strong>, <strong>what you are waiting on from other people</strong>, and <strong>every active project with its next step</strong>. Nothing on this page is a separate list you have to maintain - it is your project files and your action items, read together.</p>
+    </div>
+
+    <div class="frame rv" style="margin-top:38px">
+      <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787/#attention</span></div>
+      <img src="{{IMG_ATTENTION}}" alt="The MissionCache Attention view: a work-you-owe list, people grouped by how long they have owed you something, and every active project with its next step">
+    </div>
+
+    <div class="sl-grid rv">
+      <div class="card">
+        <h3>Work you owe, from both places it hides</h3>
+        <p>Action items assigned to you, <strong>plus</strong> rows in any project's <span class="mono" style="font-size:.85em">Waiting on</span> table whose Who column names you. The second kind is easy to lose: it sits in a file under someone else's heading.</p>
+      </div>
+      <div class="card">
+        <h3>Chase by how long it has been quiet</h3>
+        <p>People are grouped by the age of what they owe you: <strong>asked this week, one to two weeks, two to four, over a month</strong>. Someone who owes you two things of different ages shows up in both groups, so a fresh ask is never hidden behind an old one.</p>
+      </div>
+      <div class="card">
+        <h3>Every project, with its next step</h3>
+        <p>What is next, checklist progress, what is on you, and how long since you touched it. Filter by category, or search what you last did. Resolving something writes straight back to the project file.</p>
+      </div>
     </div>
   </div>
 </section>
