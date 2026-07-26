@@ -6248,6 +6248,28 @@
 .bd-bar i.b3 { background: var(--b3); }
 
 .bd-asks { background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+
+/* ---------- row-level error slot ----------
+   A failed Done used to go to console.error and nowhere else, so the row sat
+   unchanged and the honest readings were "the click didn't register" (click
+   again) or "it worked" (it did not). Both row kinds are 3-column grids, so the
+   slot spans the whole row on an implicit second line rather than fighting for
+   a column. role="alert" is on the element from first render, empty, so filling
+   it later is announced; adding the role at the same time as the text is not
+   reliably picked up by screen readers. */
+.bd-err {
+  display: none; grid-column: 1 / -1;
+  margin: 3px 0 1px; padding: 5px 8px; border-radius: var(--r-sm);
+  background: var(--late-bg); color: var(--late);
+  font-size: 11.5px; line-height: 1.45; white-space: normal;
+}
+.bd-err.is-on { display: block; }
+.bd-err button {
+  margin-left: 6px; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; text-decoration: underline; cursor: pointer;
+}
+.bd-err button:hover { opacity: .78; }
+.bd-err button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bd-ask {
   /* 116px, not 92: Resolve + a 4px gap + Nudge measures ~110, so at 92 the
      buttons overflowed their own grid column and overflow-x:hidden clipped
@@ -7918,7 +7940,7 @@ function bdPersonRow(o, bi, uid) {
     // completes through the action-item endpoint, a Waiting-on row has none and
     // resolves positionally with the server verifying its text.
     const done = r.id != null
-      ? `attnDoneItem(${Number(r.id)})`
+      ? `attnDoneItem(${Number(r.id)}, this)`
       : `attnDoneWaiting(${Number(r.task_id)}, ${Number(r.row_index)}, this)`;
     return `
     <div class="bd-ask">
@@ -7928,6 +7950,7 @@ function bdPersonRow(o, bi, uid) {
       </div>
       <div class="bd-num ${isQuiet(r) ? 'is-late' : ''}" ${r.age_days == null ? 'title="No readable date in the Since cell"' : ''}>${r.age_days == null ? '?' : r.age_days + 'd'}</div>
       <div class="bd-acts"><button class="bd-btn" type="button" onclick="event.stopPropagation();${done}">Resolve</button></div>
+      <div class="bd-err" role="alert"></div>
     </div>`;
   }).join('');
   return `<div class="bd-row bd-person" role="button" tabindex="0" aria-expanded="false"
@@ -8229,7 +8252,7 @@ function renderAttention(data) {
       ? '<span class="bd-kind">action item</span>'
       : '<span class="bd-kind is-wait">waiting on you</span>';
     const done = it.id != null
-      ? `attnDoneItem(${Number(it.id)})`
+      ? `attnDoneItem(${Number(it.id)}, this)`
       : `attnDoneWaiting(${Number(it.task_id)}, ${Number(it.row_index)}, this)`;
     // Two lines, not one. Inline, the kind badge and the project link competed
     // with the title inside a single nowrap+ellipsis cell, so adding the badge
@@ -8241,6 +8264,7 @@ function renderAttention(data) {
       </div>
       <div class="bd-num ${late ? 'is-late' : ''}">${escapeHtml(when)}</div>
       <div class="bd-acts"><button class="bd-btn" type="button" onclick="${done}">Done</button></div>
+      <div class="bd-err" role="alert"></div>
     </div>`;
   }).join('') : `<div class="bd-empty"><b>Nothing is on you.</b><br>Everything open is with someone else.</div>`;
 
@@ -8333,11 +8357,49 @@ function renderAttention(data) {
         // (it is hand-editable markdown) so it resolves positionally and the
         // server verifies the row's own text before removing it, answering 409
         // rather than resolving the wrong row when the table has shifted.
-        async function attnDoneItem(itemId) {
+        // Put a failure on the row the user clicked. Without this a failed Done
+        // is invisible: the row does not move, so it reads either as "the click
+        // did not register" (they click again) or as "it worked" (it did not,
+        // and the item is still open, still counted, and back on the next load
+        // after they have moved on). Falls back to the console only when the
+        // row has no slot, which is the pre-rebuild behaviour for everything.
+        function bdRowError(btn, message, opts) {
+            const row = btn && btn.closest ? btn.closest('.bd-row, .bd-ask') : null;
+            const slot = row ? row.querySelector('.bd-err') : null;
+            if (!slot) { console.error(message); return; }
+            slot.textContent = message;
+            if (opts && opts.reload) {
+                // Deliberately NOT an automatic reload. Re-rendering here would
+                // destroy this element before the message could be read, which
+                // is exactly the trap the pre-rebuild resolve path documented
+                // and then the rebuild walked into. The user reloads when they
+                // have read it.
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = 'Refresh the board';
+                b.addEventListener('click', () => loadTodayData());
+                slot.appendChild(b);
+            }
+            slot.classList.add('is-on');
+        }
+
+        function bdClearRowError(btn) {
+            const row = btn && btn.closest ? btn.closest('.bd-row, .bd-ask') : null;
+            const slot = row ? row.querySelector('.bd-err') : null;
+            if (slot) { slot.textContent = ''; slot.classList.remove('is-on'); }
+        }
+
+        async function attnDoneItem(itemId, btn) {
+            bdClearRowError(btn);
+            if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
             try {
                 await pmPost(`/api/action-items/${itemId}`, { status: 'done' }, 'PUT');
                 await loadTodayData();
-            } catch (e) { console.error('Could not complete item:', e); }
+            } catch (e) {
+                console.error('Could not complete item:', e);
+                if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
+                bdRowError(btn, 'Could not mark this done. ' + (e.message || e));
+            }
         }
 
         async function attnDoneWaiting(taskId, rowIndex, btn) {
@@ -8350,7 +8412,18 @@ function renderAttention(data) {
             // that mismatch would surface as a 409 rather than a wrong write,
             // but it would make Done fail on exactly the rows it matters for.
             const row = group && (group.rows || []).find(r => r.row_index === rowIndex);
-            if (!row) { console.error('Waiting row no longer in the payload'); return; }
+            if (!row) {
+                // A mutation handler that returns with no visible effect is the
+                // same silent no-op as a swallowed error, so say it rather than
+                // leaving the click looking unregistered.
+                bdRowError(btn, 'This row is no longer in the loaded data.', { reload: true });
+                return;
+            }
+            bdClearRowError(btn);
+            // Remember the label rather than hardcoding it on restore: this same
+            // handler serves the ask rows, whose button says "Resolve", and the
+            // waiting-on-you rows in My work, whose button says "Done".
+            const label = btn ? btn.textContent : '';
             if (btn) { btn.disabled = true; btn.textContent = 'Resolving...'; }
             try {
                 const res = await fetch(`${API_BASE}/api/tasks/${taskId}/waiting-on/resolve`, {
@@ -8362,17 +8435,35 @@ function renderAttention(data) {
                     }),
                 });
                 if (res.status === 409) {
-                    // The table moved under the view. Reloading is the honest
-                    // answer: the row the user pointed at is not where it was.
-                    if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
-                    await loadTodayData();
+                    // The server verified this row's what/who/since against the
+                    // file and they did not match, so NOTHING was written -
+                    // someone edited the context file and the rows shifted. That
+                    // explanation is in the response body, and the previous
+                    // version discarded it and silently reloaded, which looked
+                    // identical to a dead button. Show it, and let the user
+                    // reload once they have read why.
+                    let msg = 'This row moved in the project file, so nothing was changed.';
+                    try {
+                        const j = await res.json();
+                        msg = (j.detail && j.detail.message) || j.message || msg;
+                    } catch (err) { /* keep the default wording */ }
+                    if (btn) { btn.disabled = false; btn.textContent = label; }
+                    bdRowError(btn, msg, { reload: true });
                     return;
                 }
-                if (!res.ok) throw new Error('HTTP ' + res.status);
+                if (!res.ok) {
+                    let msg = 'HTTP ' + res.status;
+                    try {
+                        const j = await res.json();
+                        msg = (j.detail && j.detail.message) || j.message || msg;
+                    } catch (err) { /* keep the status */ }
+                    throw new Error(msg);
+                }
                 await loadTodayData();
             } catch (e) {
                 console.error('Could not resolve waiting row:', e);
-                if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
+                if (btn) { btn.disabled = false; btn.textContent = label; }
+                bdRowError(btn, 'Could not resolve this. ' + (e.message || e));
             }
         }
 
