@@ -119,7 +119,12 @@
   .md hr { border: 0; border-top: 1px solid var(--border); margin: 30px 0; }
   .md blockquote { margin: 0 0 14px; padding: 10px 16px; border-left: 2px solid var(--signal); background: var(--surface-2); border-radius: 0 8px 8px 0; }
   .md blockquote p { margin: 0; }
-  .md code { font-size: 0.85em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 1.5px 6px; color: var(--ink); overflow-wrap: anywhere; }
+  /* break-word, not anywhere: `anywhere` also lets a token count as
+     one character wide when a table works out its column widths, which
+     collapsed the hash column and split `#attention` into "#attenti / on".
+     break-word still stops a long path or URL overflowing, it just will not
+     shrink the column to do it. */
+  .md code { font-size: 0.85em; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 1.5px 6px; color: var(--ink); overflow-wrap: break-word; }
   .md pre { background: var(--con-bg); border: 1px solid var(--con-border); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 0 0 16px; }
   .md pre code { background: none; border: 0; padding: 0; color: var(--con-ink); font-size: 0.84rem; line-height: 1.65; }
   .md .tbl { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 10px; }
