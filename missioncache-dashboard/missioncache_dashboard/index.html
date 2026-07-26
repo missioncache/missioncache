@@ -8180,23 +8180,30 @@ function renderAttention(data) {
   // accusation.
   const hour = new Date().getHours();
   const partOfDay = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
-  const NAME = 'Tomer';
+  // The name comes from the payload (git's global user.name, first token) and
+  // is genuinely optional: a machine with no git identity has none to show. It
+  // used to be a hardcoded "Tomer", which greeted every other installer of this
+  // by the author's name. `hi` and `you` fold the name in where there is one
+  // and read as ordinary sentences where there is not.
+  const name = data.user_name ? escapeHtml(data.user_name) : '';
+  const hi = name ? `${partOfDay}, ${name}.` : `${partOfDay}.`;
+  const you = name ? `, ${name}` : '';
   const opts = [];
   if (lateCount) {
-    opts.push(`${partOfDay}, ${NAME}. <em>${lateCount}</em> thing${lateCount === 1 ? '' : 's'} to clear first.`,
-              `Let's start with the <em>${lateCount}</em> that slipped, ${NAME}.`,
+    opts.push(`${hi} <em>${lateCount}</em> thing${lateCount === 1 ? '' : 's'} to clear first.`,
+              `Let's start with the <em>${lateCount}</em> that slipped${you}.`,
               `${partOfDay}. <em>${lateCount}</em> item${lateCount === 1 ? '' : 's'} past its date, then you're clear.`);
   } else if (myWork.length) {
-    opts.push(`${partOfDay}, ${NAME}. <em>${myWork.length}</em> on your plate, nothing overdue.`,
-              `Nothing is late, ${NAME}. <em>${myWork.length}</em> waiting when you're ready.`,
+    opts.push(`${hi} <em>${myWork.length}</em> on your plate, nothing overdue.`,
+              `Nothing is late${you}. <em>${myWork.length}</em> waiting when you're ready.`,
               `${partOfDay}. You're on top of it - <em>${myWork.length}</em> open.`);
   } else {
-    opts.push(`Your plate is <em>clear</em>, ${NAME}.`,
-              `${partOfDay}, ${NAME}. Nothing is on you today.`,
-              `All clear, ${NAME}. Good day to pick something up.`);
+    opts.push(`Your plate is <em>clear</em>${you}.`,
+              `${hi} Nothing is on you today.`,
+              `All clear${you}. Good day to pick something up.`);
   }
   if (theirs.length && totalQuiet > theirs.length * 0.5) {
-    opts.push(`${partOfDay}, ${NAME}. Most of your work is with <em>other people</em> right now.`);
+    opts.push(`${hi} Most of your work is with <em>other people</em> right now.`);
   }
   // One emoji, at the end, and only on the greeting - it is prose, not chrome.
   // Everything functional on this board is a stroke icon so it can theme; an

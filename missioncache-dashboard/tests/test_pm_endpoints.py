@@ -1070,3 +1070,60 @@ class TestLeftOff:
         )
         db.close()
         assert asyncio.run(server.get_today())["projects"][0]["left_off"] is None
+
+
+class TestDisplayName:
+    """Spec: the greeting addresses the reader by name, and MissionCache is
+    installed by people who are not its author. The name therefore has to come
+    from the machine, and "no name" has to be a supported state rather than a
+    blank in the sentence.
+
+    Git's global user.name is the source because it is the one place a
+    developer has already written their own name down.
+    """
+
+    def _run(self, monkeypatch, returncode, stdout, raises=None):
+        import subprocess as sp
+
+        def fake_run(*a, **kw):
+            if raises:
+                raise raises
+            return sp.CompletedProcess(a[0] if a else [], returncode, stdout, "")
+
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+        server._display_name.cache_clear()
+        try:
+            return server._display_name()
+        finally:
+            server._display_name.cache_clear()
+
+    def test_first_token_only(self, monkeypatch):
+        """A full name in a greeting reads like a form letter."""
+        assert self._run(monkeypatch, 0, "Tomer Brami\n") == "Tomer"
+
+    def test_single_word_name(self, monkeypatch):
+        assert self._run(monkeypatch, 0, "ada\n") == "ada"
+
+    def test_unset_git_name_gives_none(self, monkeypatch):
+        """git exits non-zero when the key is unset. None is the answer, and
+        the view has nameless wording for it."""
+        assert self._run(monkeypatch, 1, "") is None
+
+    def test_blank_git_name_gives_none(self, monkeypatch):
+        assert self._run(monkeypatch, 0, "   \n") is None
+
+    def test_missing_git_binary_gives_none(self, monkeypatch):
+        """No git on the box is a normal state for a dashboard-only install,
+        not an error worth failing the board over."""
+        assert self._run(monkeypatch, 0, "", raises=FileNotFoundError("git")) is None
+
+    def test_timeout_gives_none(self, monkeypatch):
+        import subprocess as sp
+
+        assert self._run(
+            monkeypatch, 0, "", raises=sp.TimeoutExpired("git", 2)
+        ) is None
+
+    def test_today_payload_carries_the_name(self, sandboxed, monkeypatch):
+        monkeypatch.setattr(server, "_display_name", lambda: "Ada")
+        assert asyncio.run(server.get_today())["user_name"] == "Ada"

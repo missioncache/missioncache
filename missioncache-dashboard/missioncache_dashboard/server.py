@@ -13,6 +13,7 @@ Port: 8787 (override with MISSIONCACHE_DASHBOARD_PORT env var)
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib.resources
 import json
 import logging
@@ -3603,6 +3604,34 @@ def _who_names(raw: str | None) -> list[str]:
     return names
 
 
+@functools.lru_cache(maxsize=1)
+def _display_name() -> str | None:
+    """The reader's first name, for the greeting, or None if we cannot tell.
+
+    Git's global user.name is the one place a developer has already written
+    their own name down, so it needs no new setting and no onboarding step. The
+    greeting was shipping a hardcoded "Tomer", which is correct for exactly one
+    person and wrong for everyone who installs this.
+
+    None is a supported answer, not a failure: the greeting has nameless
+    wording for it. Cached because it cannot change without a restart mattering,
+    and this runs on every board render.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "config", "--global", "user.name"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    first = out.stdout.strip().split()
+    # First token only. "Tomer Brami" greets as "Tomer"; a full name in a
+    # greeting reads like a form letter.
+    return first[0] if first else None
+
+
 def _left_off(content: str) -> str | None:
     """The newest Recent Changes bullet: what was last actually done here.
 
@@ -3988,6 +4017,9 @@ async def get_today():
 
     return {
         "generated_at": datetime.now().isoformat(),
+        # For the greeting. None when git has no global user.name configured,
+        # which the view renders as its nameless wording rather than a blank.
+        "user_name": _display_name(),
         "on_me": {
             "overdue": mine_overdue,
             "due_soon": mine_due_soon,
