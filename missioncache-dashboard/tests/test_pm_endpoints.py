@@ -1091,11 +1091,11 @@ class TestDisplayName:
             return sp.CompletedProcess(a[0] if a else [], returncode, stdout, "")
 
         monkeypatch.setattr(server.subprocess, "run", fake_run)
-        server._display_name.cache_clear()
+        server._DISPLAY_NAME_CACHE = None
         try:
             return server._display_name()
         finally:
-            server._display_name.cache_clear()
+            server._DISPLAY_NAME_CACHE = None
 
     def test_first_token_only(self, monkeypatch):
         """A full name in a greeting reads like a form letter."""
@@ -1123,6 +1123,34 @@ class TestDisplayName:
         assert self._run(
             monkeypatch, 0, "", raises=sp.TimeoutExpired("git", 2)
         ) is None
+
+    def test_undecodable_git_output_does_not_escape(self, monkeypatch):
+        """Regression: text=True decodes with the preferred encoding and
+        errors='strict', so a non-ASCII user.name on a non-UTF-8 machine raised
+        UnicodeDecodeError. That is a ValueError, not a SubprocessError, so it
+        escaped the helper and 500'd the whole /api/today endpoint - blanking
+        the board over a greeting. None is the contract here, always."""
+        boom = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        assert self._run(monkeypatch, 0, "", raises=boom) is None
+
+    def test_a_failed_lookup_is_not_cached_forever(self, monkeypatch):
+        """A transient failure used to be pinned by lru_cache, leaving every
+        later render nameless until the process restarted."""
+        server._DISPLAY_NAME_CACHE = None
+        try:
+            monkeypatch.setattr(
+                server.subprocess, "run",
+                lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("git")),
+            )
+            assert server._display_name() is None
+            import subprocess as sp
+            monkeypatch.setattr(
+                server.subprocess, "run",
+                lambda *a, **k: sp.CompletedProcess([], 0, "Ada Lovelace\n", ""),
+            )
+            assert server._display_name() == "Ada"
+        finally:
+            server._DISPLAY_NAME_CACHE = None
 
     def test_today_payload_carries_the_name(self, sandboxed, monkeypatch):
         monkeypatch.setattr(server, "_display_name", lambda: "Ada")

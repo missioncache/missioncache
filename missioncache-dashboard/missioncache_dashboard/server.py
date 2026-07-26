@@ -3604,7 +3604,9 @@ def _who_names(raw: str | None) -> list[str]:
     return names
 
 
-@functools.lru_cache(maxsize=1)
+_DISPLAY_NAME_CACHE: str | None = None
+
+
 def _display_name() -> str | None:
     """The reader's first name, for the greeting, or None if we cannot tell.
 
@@ -3614,22 +3616,38 @@ def _display_name() -> str | None:
     person and wrong for everyone who installs this.
 
     None is a supported answer, not a failure: the greeting has nameless
-    wording for it. Cached because it cannot change without a restart mattering,
-    and this runs on every board render.
+    wording for it. That contract is why this catches broadly - it must never be
+    the reason the board fails to load.
+
+    Only a successful lookup is cached. lru_cache pinned None too, so a single
+    transient timeout left every later render nameless until the process
+    restarted, which is a long punishment for a hiccup.
     """
+    global _DISPLAY_NAME_CACHE
+    if _DISPLAY_NAME_CACHE is not None:
+        return _DISPLAY_NAME_CACHE
     try:
         out = subprocess.run(
             ["git", "config", "--global", "user.name"],
             capture_output=True, text=True, timeout=2,
+            # A name with non-ASCII characters on a machine whose preferred
+            # encoding is not UTF-8 (LC_ALL=C, say) makes text=True raise
+            # UnicodeDecodeError while decoding. That is a ValueError, so it is
+            # not a SubprocessError and was not caught: it escaped this helper
+            # and 500'd the whole /api/today endpoint, blanking the board over
+            # a greeting. Replacing undecodable bytes keeps a mangled name,
+            # which is a far better outcome than no dashboard.
+            errors="replace",
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
     if out.returncode != 0:
         return None
     first = out.stdout.strip().split()
     # First token only. "Tomer Brami" greets as "Tomer"; a full name in a
     # greeting reads like a form letter.
-    return first[0] if first else None
+    _DISPLAY_NAME_CACHE = first[0] if first else None
+    return _DISPLAY_NAME_CACHE
 
 
 def _left_off(content: str) -> str | None:
