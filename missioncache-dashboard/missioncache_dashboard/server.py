@@ -3603,6 +3603,49 @@ def _who_names(raw: str | None) -> list[str]:
     return names
 
 
+def _left_off(content: str) -> str | None:
+    """The newest Recent Changes bullet: what was last actually done here.
+
+    The view needs one line of orientation before it proposes what to do next,
+    and "last worked 2 days ago" does not supply it. Recent Changes is already
+    the per-session journal, its newest subsection is the last session, and its
+    first real bullet is that session's headline.
+
+    Bullets are written by hand and by the save flow, so the leading noise comes
+    in several shapes and all of it is stripped: a markdown heading nested inside
+    the bullet (`- ### 2026-07-24 - ...`, which is real in the live files and is
+    why the hashes go before the dates), then a date with or without a time, then
+    a bare time. The 12-character floor drops fragments like "- done" that orient
+    nobody.
+    """
+    # Imported here rather than at module scope, matching get_today: this module
+    # is loaded by the CLI paths too, and missioncache_db is not a hard import
+    # for those.
+    from missioncache_db import context_health
+
+    if not content:
+        return None
+    subs = context_health.parse_recent_changes_subsections(content)
+    if not subs:
+        return None
+    _heading, body = subs[0]
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith(("- ", "* ")):
+            continue
+        text = line[2:].strip()
+        text = re.sub(r"^#{1,6}\s*", "", text)
+        text = re.sub(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2})?\s*[-:]?\s*", "", text)
+        text = re.sub(r"^\d{2}:\d{2}:?\s*", "", text)
+        # The card renders escaped plain text, so bold markers would show as
+        # literal asterisks. Only the paired forms go: a lone `*` can be a real
+        # character in these bullets, `**` and `__` never are.
+        text = text.replace("**", "").replace("__", "")
+        if len(text) > 12:
+            return text
+    return None
+
+
 @app.get("/api/today")
 async def get_today():
     """The Attention view: cross-project attention data in one call.
@@ -3848,6 +3891,13 @@ async def get_today():
                 "total_count": progress["total_count"],
                 "completion_pct": progress["completion_pct"],
                 "next_up": next_up,
+                # The view groups and marks projects by kind; the column already
+                # exists and was simply never forwarded.
+                "category": task.category,
+                # Derived from the context file already read above for the
+                # Waiting-on rows, so it costs no extra I/O. Pairs with next_up:
+                # one line of where you left off, one line of what is next.
+                "left_off": _left_off(content),
                 # The tickets table is the current home; task.jira_key is the
                 # legacy column, still readable, that migrates into a row on the
                 # project's first PM mutation. Prefer the row, fall back.
