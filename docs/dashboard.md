@@ -4,7 +4,7 @@ This document covers the MissionCache Dashboard: a FastAPI backend plus a single
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (dual-DB pattern, heartbeats, sessions, `claude_session_cache`, `full_path`, MissionCache file layout). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* the dashboard, the short version is: run `missioncache-dashboard serve` (the pip-installed console entry point, or have launchd/systemd do it for you via `missioncache-dashboard install-service`), open `http://localhost:8787`, and the two screens you will spend time on are **Projects** and **Activity**. The rest of this doc is for when you want to understand what you are looking at, hit the API directly, or extend the dashboard.
+If you are just trying to *use* the dashboard, the short version is: run `missioncache-dashboard serve` (the pip-installed console entry point, or have launchd/systemd do it for you via `missioncache-dashboard install-service`), open `http://localhost:8787`, and it opens on **Attention**, which is where most of the time goes; **Projects** and **Activity** are the other two you will live in. The rest of this doc is for when you want to understand what you are looking at, hit the API directly, or extend the dashboard.
 
 ## What the dashboard shows
 

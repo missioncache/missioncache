@@ -7780,7 +7780,14 @@ const BANDS = [
   { key: 'b2', label: '14-29d',   heading: 'Waiting two to four weeks', test: a => a >= 14 && a < 30 },
   { key: 'b3', label: '30d+',     heading: 'Waiting over a month',      test: a => a >= 30 },
 ];
-const bandOf = a => BANDS.findIndex(b => b.test(a ?? 0));
+// An ask whose Since cell could not be parsed has age_days null. Coercing that
+// to 0 filed it under "Asked in the last week" - the freshest band - so an ask
+// rotting for months with a fat-fingered date sat at the top looking new and
+// escaped the no-reply-7d+ filter entirely. On a view whose whole job is age
+// triage, unknown has to read as "look at this", so it goes to the oldest band.
+const bandOf = a => (a === null || a === undefined)
+  ? BANDS.length - 1
+  : BANDS.findIndex(b => b.test(a));
 const isQuiet = r => r.days_past_line !== null && r.days_past_line !== undefined;
 
 // The same ask can arrive twice. Two task records pointing at one context file
@@ -7919,7 +7926,7 @@ function bdPersonRow(o, bi, uid) {
         <div class="bd-what" title="${escapeHtml(r.what)}">${escapeHtml(bdCut(r.what, 68))}</div>
         <div class="bd-sub"><a href="${projectHref(r.project_name, r.task_id)}">${escapeHtml(r.project_name || '')}</a>${r.why ? ' &middot; blocks ' + escapeHtml(bdCut(r.why, 28)) : ''}</div>
       </div>
-      <div class="bd-num ${isQuiet(r) ? 'is-late' : ''}">${r.age_days ?? ''}d</div>
+      <div class="bd-num ${isQuiet(r) ? 'is-late' : ''}" ${r.age_days == null ? 'title="No readable date in the Since cell"' : ''}>${r.age_days == null ? '?' : r.age_days + 'd'}</div>
       <div class="bd-acts"><button class="bd-btn" type="button" onclick="event.stopPropagation();${done}">Resolve</button></div>
     </div>`;
   }).join('');
@@ -7983,7 +7990,7 @@ function bdProjRowHtml(p) {
       ${p.overdue_count ? '<span class="bd-dot" title="You are late on this project"></span>' : ''}
     </div>
     <div class="bd-next" title="${escapeHtml(next)}">
-      <span class="bd-next-l">${p.next_up ? 'next' : 'last did'}</span>${escapeHtml(bdCut(next, 150))}</div>
+      <span class="bd-next-l">${next ? (p.next_up ? 'next' : 'last did') : ''}</span>${escapeHtml(bdCut(next, 150))}</div>
     <div class="bd-progwrap" title="${p.completed_count} of ${p.total_count} checklist items done">
       <div class="bd-prog"><i style="width:${pct}%"></i></div>
       <span class="bd-progn">${p.total_count ? pct + '%' : '-'}</span></div>
@@ -8397,12 +8404,6 @@ function renderAttention(data) {
 
 
 
-        function attnWorkedLabel(days) {
-            if (days === null || days === undefined) return 'never worked';
-            if (days === 0) return 'today';
-            if (days === 1) return 'yesterday';
-            return `${days}d ago`;
-        }
 
         // The strip's tracked-time half. It arrives on its own fetch because
         // /api/stats/today reads Claude transcript files and takes 1517-2640ms
@@ -8461,40 +8462,6 @@ function renderAttention(data) {
             </div>`;
         }
 
-        // The projects table. One row per project, built from `projects[]` and
-        // NOT from the on_others groups: a project can have items on him and
-        // nothing on anyone else, and rendering the groups meant such a project
-        // appeared nowhere at all - the one he was working in was invisible.
-        //
-        // The server pre-sorts both projects[] and the rows inside each group;
-        // never re-sort here.
-        //
-        // Which projects are open, by task_id. Held across re-renders: every
-        // mutation refetches, and deriving expansion from array position
-        // collapsed the row the user was working in on each action.
-        let onOthersExpanded = null;
-
-
-
-
-        // His own rows first, then everyone else's. That ordering IS his
-        // complaint answered: the panel used to show only what other people owed.
-        function attnPanel(project, rows) {
-            const mine = rows.filter(r => r.mine);
-            const theirs = rows.filter(r => !r.mine);
-            if (!mine.length && !theirs.length) {
-                return '<div class="pm-empty" style="padding:12px 0;">Nothing outstanding on this project.</div>';
-            }
-            const head = t => `<div class="attn-sub" style="margin:6px 0 2px;">${t}</div>`;
-            return (mine.length ? head('On you') + mine.map(renderOnOthersRow).join('') : '')
-                 + (theirs.length ? head('On other people') + theirs.map(renderOnOthersRow).join('') : '')
-                 + `<div class="attn-sub" style="margin:8px 0 0;">
-                        last worked ${attnWorkedLabel(project.days_since_worked)} &middot;
-                        <a class="pm-item-project" href="${projectHref(project.name, project.task_id)}">open project</a>
-                        ${attnTicketLink(project)}
-                    </div>`;
-        }
-
         // One tick per ask instead of a solid bar. The bar's length was the
         // project's share of the largest project, which at this data's range
         // cannot be read: 1 ask and 3 asks both render as a stub a few pixels
@@ -8513,52 +8480,10 @@ function renderAttention(data) {
         // long one whatever the drawing.
         const COMB_MAX_TICKS = 20;
 
-        // The project's tracker reference, in the panel rather than the row: 7 of
-        // 12 projects have one, so as a row column it would be a mostly-empty
-        // 12th object in a table this pass spent its time decluttering. Here it
-        // sits with the other per-project links, where you look once you have
-        // decided to act on the project.
-        function attnTicketLink(project) {
-            const label = (project.ticket_label || '').trim();
-            if (!label) return '';
-            const url = (project.ticket_url || '').trim();
-            const inner = url
-                ? `<a class="pm-item-project" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
-                : escapeHtml(label);
-            return ` &middot; ${inner}`;
-        }
 
 
 
 
-        function toggleOnOthersGroup(btn, bodyId) {
-            const el = document.getElementById(bodyId);
-            const open = el.style.display === 'none';
-            const taskId = Number(btn.dataset.taskId);
-            // Build the panel on first open. Measured: rendering all twelve
-            // panels eagerly and hiding them cost 142KB of markup and 1,039 DOM
-            // nodes on every mutation, about a thousand of them invisible and
-            // 61% of the whole page's DOM. Lazily it is 12KB and 146 nodes.
-            if (open && !el.innerHTML.trim() && !Number.isNaN(taskId)) {
-                const project = todayProjectsById[taskId];
-                const group = todayGroupsByTask[taskId];
-                if (project) el.innerHTML = attnPanel(project, group ? (group.rows || []) : []);
-            }
-            el.style.display = open ? 'block' : 'none';
-            btn.setAttribute('aria-expanded', String(open));
-            // The label is the caret's only accessible name, so it has to track
-            // the state it describes.
-            const label = btn.getAttribute('aria-label');
-            if (label) {
-                btn.setAttribute('aria-label',
-                    (open ? 'Collapse' : 'Expand') + label.replace(/^(Expand|Collapse)/, ''));
-            }
-            // Remember it so the next refetch does not collapse this group.
-            if (onOthersExpanded && !Number.isNaN(taskId)) {
-                if (open) onOthersExpanded.add(taskId);
-                else onOthersExpanded.delete(taskId);
-            }
-        }
 
 
         // Click the text to see the whole sentence plus what it gates. Bound to
