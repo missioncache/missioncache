@@ -6264,6 +6264,16 @@
   font-size: 11.5px; line-height: 1.45; white-space: normal;
 }
 .bd-err.is-on { display: block; }
+
+/* The failure card. It borrows .bd-tile/.bd-empty rather than inventing a
+   parallel set, so it inherits the board's surface, spacing and theming. */
+.bd-fail { max-width: 640px; }
+.bd-fail-msg {
+  margin: 12px 0; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--late-bg); color: var(--late);
+  font-size: 11.5px; line-height: 1.5; word-break: break-word;
+}
+.bd-fail-retry { display: inline-block; }
 .bd-err button {
   margin-left: 6px; padding: 0; border: 0; background: none;
   color: inherit; font: inherit; text-decoration: underline; cursor: pointer;
@@ -7738,24 +7748,31 @@
                 // opposite of unknown on the one number this view exists for.
                 const root = document.getElementById('attnRoot');
                 if (root) {
-                    root.classList.remove('attn-is-calm');
+                    // Built from .bd-* primitives, which have styling. The
+                    // previous version emitted .attn-wrap / .attn-card /
+                    // .attn-act and eight more, none of which has a CSS rule
+                    // anywhere in this file - so the failure state of the view
+                    // most likely to fail rendered as unstyled raw markup. The
+                    // dropped `classList.remove('attn-is-calm')` removed a
+                    // class nothing adds and nothing styles.
                     root.innerHTML = `
-                      <div class="attn-wrap">
-                        <header class="attn-masthead">
-                          <div class="attn-date">${escapeHtml(
-                              new Date().toLocaleDateString(undefined,
-                                  { weekday: 'long', day: 'numeric', month: 'long' }))}</div>
-                          <h1 class="attn-finding">Couldn't load what needs your <em class="attn-late">attention</em>.</h1>
-                        </header>
-                        <section>
-                          <div class="attn-card">
-                            <div class="attn-mx-line">${escapeHtml(String(e && e.message || e))}</div>
-                            <div class="attn-mx-line attn-mx-quiet-n" style="margin-top:8px">
-                              <button class="attn-act attn-primary" onclick="loadTodayData()">Try again</button>
-                            </div>
+                      <div class="bd-hello">
+                        <h1>Couldn't load what needs your <em>attention</em>.</h1>
+                        <span class="when mono">${escapeHtml(
+                            new Date().toLocaleDateString(undefined,
+                                { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
+                      </div>
+                      <section class="bd-tile bd-fail">
+                        <div class="bd-tile-head">${BD_ICON.mine}<h3>Nothing could be loaded</h3></div>
+                        <div class="bd-tile-body">
+                          <div class="bd-empty">
+                            <b>The dashboard could not reach its own API.</b><br>
+                            This is not "you have nothing to do" - it is "we do not know what you have to do".
+                            <div class="bd-fail-msg mono">${escapeHtml(String(e && e.message || e))}</div>
+                            <button class="bd-btn bd-fail-retry" type="button" onclick="loadTodayData()">Try again</button>
                           </div>
-                        </section>
-                      </div>`;
+                        </div>
+                      </section>`;
                 }
                 return false;
             }
@@ -7905,7 +7922,7 @@ const BD_ICON = {
 
 const BD_FILTERS = {
   all:   { label: 'All',           fn: () => true },
-  quiet: { label: 'No reply 7d+',  fn: o => o.quiet > 0 },
+  quiet: { label: 'No reply over 7d',  fn: o => o.quiet > 0 },
   old:   { label: '30d+',          fn: o => o.oldest >= 30 },
   many:  { label: '3 or more',     fn: o => o.asks.length >= 3 },
 };
@@ -7927,7 +7944,14 @@ let bdState = {
 // The slow half of the page. /api/stats/today takes 1517-2640ms against
 // /api/today's 26-44ms, so it arrives separately and drops into the strip that
 // is already on screen rather than blocking the board on it.
+//
+// The state is tracked separately from the data because "not here yet" and
+// "asked and it failed" are different things to a reader and used to render
+// identically: both showed the same dot, so a permanent failure looked like a
+// request still in flight and the user waited for a number that was never
+// coming. Vocabulary: · means still loading, ? means we asked and do not know.
 let bdTodayStats = null;
+let bdStatsState = 'pending';   // 'pending' | 'failed' | 'ok'
 
 function bdPersonRow(o, bi, uid) {
   const inBand = o.asks.filter(r => bandOf(r.age_days) === bi);
@@ -8117,22 +8141,30 @@ function bdStrip() {
   </div>`;
   const hourly = (t && t.hourly) || [];
   const maxH = Math.max(1, ...hourly);
-  // A dash rather than a zero while the slow request is in flight: "0 commits"
-  // is a claim about your day, and it would be wrong for the second or two
-  // before the real number lands.
-  const pend = v => t ? v : '·';
+  // Neither a zero nor a blank while we do not know. "0 commits" is a claim
+  // about your day and would be wrong both before the slow request lands and
+  // after it fails, which are now told apart: · is in flight, ? is unknown.
+  const unknown = bdStatsState === 'failed' ? '?' : '·';
+  const known = v => (bdStatsState === 'ok' && v !== null && v !== undefined) ? v : unknown;
+  const failTip = bdStatsState === 'failed'
+    ? ' Today\'s stats could not be loaded, so this is unknown rather than zero.' : '';
   return [
-    stat(t ? escapeHtml(t.total_formatted || '0m') : '·', 'tracked', 'Time MissionCache recorded against any project today.'),
-    stat(pend(t && t.commits), 'commits', 'Commits you authored today across all tracked repos.'),
-    stat(t ? `+${t.loc_added}/-${t.loc_removed}` : '·', 'lines', 'Lines added and removed in today’s commits.'),
+    stat(known(t && t.total_formatted), 'tracked', 'Time MissionCache recorded against any project today.' + failTip),
+    stat(known(t && t.commits), 'commits', 'Commits you authored today across all tracked repos.' + failTip),
+    stat(bdStatsState === 'ok' ? `+${t.loc_added}/-${t.loc_removed}` : unknown, 'lines', 'Lines added and removed in today’s commits.' + failTip),
     stat(myWork.length, 'on you', 'Work YOU owe: your open action items, plus rows in a project’s Waiting-on table where the Who column names you.', lateCount ? 'is-late' : ''),
     stat(lateCount, 'late', 'Of the "on you" items: an action item past its due date, or an ask of yours with no movement for more than 7 days.', lateCount ? 'is-late' : ''),
     stat(theirs.length, 'out', `Asks sitting with other people - ${people.length} of them. Their latency, not yours.`),
-    stat(totalQuiet, 'no reply 7d+', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', totalQuiet ? 'is-warn' : ''),
+    stat(totalQuiet, 'no reply over 7d', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', totalQuiet ? 'is-warn' : ''),
     // The floor applies to real activity only, so a small hour stays visible
     // while an empty one stays empty. Flooring every bar drew a solid row of
     // stubs across a day that was mostly idle.
-    `<div class="bd-stat"><div class="bd-spark">${hourly.map((h, i) => `<i style="height:${h ? Math.max(7, Math.round(h / maxH * 100)) : 0}%" title="${String(i).padStart(2, '0')}:00 &middot; ${Math.round(h / 60)}m"></i>`).join('')}</div><div class="bd-stat-l">by hour</div></div>`,
+    // An empty track is not "a flat day", it is "no data". Rendering the bars
+    // with nothing in them made a failed fetch look like a day with no work,
+    // which is a positive claim the view cannot back.
+    hourly.length
+      ? `<div class="bd-stat"><div class="bd-spark">${hourly.map((h, i) => `<i style="height:${h ? Math.max(7, Math.round(h / maxH * 100)) : 0}%" title="${String(i).padStart(2, '0')}:00 &middot; ${Math.round(h / 60)}m"></i>`).join('')}</div><div class="bd-stat-l">by hour</div></div>`
+      : `<div class="bd-stat"><div class="bd-stat-v mono">${unknown}</div><div class="bd-stat-l">by hour${bdStatsState === 'failed' ? '<button class="bd-i" type="button" aria-label="Why by hour is unknown">i</button>' : ''}</div>${bdStatsState === 'failed' ? `<div class="bd-tip" role="tooltip">Today's stats could not be loaded, so the hourly breakdown is unknown - not empty.</div>` : ''}</div>`,
   ].join('');
 }
 
@@ -8514,6 +8546,7 @@ function renderAttention(data) {
         // every row right now while `claude_seconds` holds the real time, so
         // the larger of the two is the honest read.
         function renderAttnToday(stats) {
+            bdStatsState = stats ? 'ok' : 'failed';
             bdTodayStats = stats && {
                 total_formatted: stats.total_formatted || '0m',
                 commits: stats.commit_count || 0,
