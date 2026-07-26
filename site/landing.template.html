@@ -518,6 +518,26 @@
 
   /* hero screenshot composition */
   .hero-shot { position: relative; }
+
+  /* Two screens in the hero slot, on the tab pattern the install card already
+     uses. The generic .panel is a card body, so the screenshot panel drops its
+     padding and the tab strip loses the card's bottom rule - here the tabs sit
+     above a floating frame rather than inside a bordered box. */
+  .shot-tabs { display: flex; gap: 8px; border-bottom: 0; margin-bottom: 12px; justify-content: center; }
+  .shot-tabs .tab {
+    flex: 0 0 auto; padding: 8px 16px; border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface); text-align: center; transition: border-color .15s, background .15s;
+  }
+  .shot-tabs .tab .tt { font-size: 0.82rem; }
+  .shot-tabs .tab .ts { font-size: 0.7rem; margin-top: 1px; }
+  .shot-tabs .tab[aria-selected="true"] {
+    background: var(--surface-2); border-color: var(--signal); box-shadow: none;
+  }
+  .shot-panel { padding: 0; }
+  @media (max-width: 560px) {
+    .shot-tabs { flex-direction: column; }
+    .shot-tabs .tab { text-align: left; }
+  }
   @media (prefers-reduced-motion: no-preference) {
     .hero-shot { animation: floaty 7s ease-in-out infinite alternate; }
     @keyframes floaty { from { transform: translateY(0); } to { transform: translateY(-9px); } }
@@ -945,11 +965,32 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
     </div>
 
     <div class="hero-shot rv">
-      <div class="frame">
-        <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787</span></div>
-        <img src="{{IMG_PROJECTS}}" alt="MissionCache dashboard showing active and completed projects with progress bars and per-project time tracking">
+      <div class="shot-tabs" role="tablist" aria-label="Dashboard screens">
+        <button class="tab" role="tab" id="tab-shot-attention" aria-controls="panel-shot-attention" aria-selected="true" data-panel="shot-attention">
+          <span class="tt">Attention</span>
+          <span class="ts">what needs you today</span>
+        </button>
+        <button class="tab" role="tab" id="tab-shot-projects" aria-controls="panel-shot-projects" aria-selected="false" tabindex="-1" data-panel="shot-projects">
+          <span class="tt">Projects</span>
+          <span class="ts">every project, with its state</span>
+        </button>
       </div>
-      <div class="chip-float"><span class="ok-mark">&#10003;</span> state saved &middot; nothing lost in re-entry</div>
+
+      <div class="panel shot-panel on" id="panel-shot-attention" role="tabpanel" aria-labelledby="tab-shot-attention" tabindex="0">
+        <div class="frame">
+          <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787/#attention</span></div>
+          <img src="{{IMG_ATTENTION}}" alt="The MissionCache Attention view: work you owe, people grouped by how long they have owed you something, and every active project with its next step">
+        </div>
+      </div>
+
+      <div class="panel shot-panel" id="panel-shot-projects" role="tabpanel" aria-labelledby="tab-shot-projects" tabindex="0">
+        <div class="frame">
+          <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787/#projects</span></div>
+          <img src="{{IMG_PROJECTS}}" alt="MissionCache dashboard showing active and completed projects with progress bars and per-project time tracking" loading="lazy">
+        </div>
+      </div>
+
+      <div class="chip-float"><span class="ok-mark">&#10003;</span> opens on what needs you &middot; nothing lost in re-entry</div>
     </div>
   </div>
 </section>
@@ -1173,12 +1214,7 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       <p class="lede">The dashboard opens here. <strong>Work you owe</strong>, <strong>what you are waiting on from other people</strong>, and <strong>every active project with its next step</strong>. Nothing on this page is a separate list you have to maintain - it is your project files and your action items, read together.</p>
     </div>
 
-    <div class="frame rv" style="margin-top:38px">
-      <div class="frame-bar"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="u">localhost:8787/#attention</span></div>
-      <img src="{{IMG_ATTENTION}}" alt="The MissionCache Attention view: a work-you-owe list, people grouped by how long they have owed you something, and every active project with its next step">
-    </div>
-
-    <div class="sl-grid rv">
+    <div class="sl-grid rv" style="margin-top:34px">
       <div class="card">
         <h3>Work you owe, from both places it hides</h3>
         <p>Action items assigned to you, <strong>plus</strong> rows in any project's <span class="mono" style="font-size:.85em">Waiting on</span> table whose Who column names you. The second kind is easy to lose: it sits in a file under someone else's heading.</p>
@@ -1505,27 +1541,35 @@ record_heartbeat          log_iteration   <b>+30 more</b></div>
       window.addEventListener('resize', function () { if (!kitPanel.hidden) kitClose(); });
     }
 
-    /* ---------- install tabs (ARIA tab pattern with roving tabindex) ---------- */
-    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
-    function selectTab(t, focus) {
-      tabs.forEach(function (x) {
-        var on = x === t;
-        x.setAttribute('aria-selected', on ? 'true' : 'false');
-        x.setAttribute('tabindex', on ? '0' : '-1');
-        var p = document.getElementById('panel-' + x.getAttribute('data-panel'));
-        if (p) p.classList.toggle('on', on);
-      });
-      if (focus) t.focus();
-    }
-    tabs.forEach(function (t, i) {
-      t.addEventListener('click', function () { selectTab(t, false); });
-      t.addEventListener('keydown', function (e) {
-        var next = null;
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = tabs[(i + 1) % tabs.length];
-        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = tabs[(i - 1 + tabs.length) % tabs.length];
-        else if (e.key === 'Home') next = tabs[0];
-        else if (e.key === 'End') next = tabs[tabs.length - 1];
-        if (next) { e.preventDefault(); selectTab(next, true); }
+    /* ---------- tabs (ARIA tab pattern with roving tabindex) ----------
+       Scoped per tablist. This used to collect `.tab` across the whole
+       document, which was fine while the install card was the only tablist
+       and wrong the moment a second one existed: arrow keys walked out of
+       one group into the other, and selecting a tab in either closed the
+       other's panel, because one flat list drove both. */
+    Array.prototype.slice.call(document.querySelectorAll('[role="tablist"]')).forEach(function (list) {
+      var tabs = Array.prototype.slice.call(list.querySelectorAll('.tab'));
+      if (!tabs.length) return;
+      function selectTab(t, focus) {
+        tabs.forEach(function (x) {
+          var on = x === t;
+          x.setAttribute('aria-selected', on ? 'true' : 'false');
+          x.setAttribute('tabindex', on ? '0' : '-1');
+          var p = document.getElementById('panel-' + x.getAttribute('data-panel'));
+          if (p) p.classList.toggle('on', on);
+        });
+        if (focus) t.focus();
+      }
+      tabs.forEach(function (t, i) {
+        t.addEventListener('click', function () { selectTab(t, false); });
+        t.addEventListener('keydown', function (e) {
+          var next = null;
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = tabs[(i + 1) % tabs.length];
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = tabs[(i - 1 + tabs.length) % tabs.length];
+          else if (e.key === 'Home') next = tabs[0];
+          else if (e.key === 'End') next = tabs[tabs.length - 1];
+          if (next) { e.preventDefault(); selectTab(next, true); }
+        });
       });
     });
 
