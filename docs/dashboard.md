@@ -12,13 +12,23 @@ The frontend's top-level views, all hash-routed:
 
 | Hash | View | What it shows |
 |------|------|---------------|
-| `#attention` (default) | Attention | Where attention is owed, across projects. A greeting, a stats strip (tracked time, commits, LOC, work on you, late, out with others, no-reply-7d+, and an hourly sparkline), then three gadgets sized to one viewport, each scrolling inside itself rather than growing the page. **My work**: everything you owe, joined from both places it is recorded - your open action items, plus Waiting-on rows whose `who` names you - with Done on each row. **Waiting on people**: the asks grouped by age band (under 7d, 7-13d, 14-29d, 30d+), and within a band by person, most asks first; a person holding asks in several bands appears in each of them showing only that band's asks, with an "+N elsewhere" badge, so a recent ask is never hidden behind an old one. Filters (all / no-reply-7d+ / 30d+ / 3-or-more), a text search over person, project and ask text, and a band-order toggle. **Projects**: every active project with what is next (or, when there is no next step, what you last did), checklist progress, items on you, asks out over 7 days, and when it was last worked, filterable by category and searchable. `#today` redirects here. |
+| `#attention` (default) | Attention | Where attention is owed, across projects: what you owe, who owes you what, and every active project with its next step. [Detailed below](#attention-view). `#today` redirects here. |
 | `#projects` | Projects | Active and completed projects in two tables (with due dates, action-item badges, and at-risk dots), with click-through to the project page |
 | `#project/<name>[?tid=<task id>]` | Project page | Full page per project: Overview (description, Definition of Done, due date, stakeholders, tickets) and Action Items tabs, plus Tasks/Structure/Context/Plan/Updates. `tid` is optional and only disambiguates duplicate project names (a fork and its parent, or a stale row left by a rename); without it the name resolves to whichever task sorts first, which is the pre-`tid` behaviour every older link still gets. |
 | `#activity` | Activity | Today's time and LOC stats, hourly timeline, and a multi-week activity history with heatmap, trends, and top projects |
 | `#auto` | Auto | Live graph of active MissionCache Auto executions (DAG visualization, worker status, per-task state) |
 
 All data is fetched lazily on first view switch and cached in-browser for the remainder of the session (a refresh button on each card forces a re-fetch).
+
+### Attention view
+
+The default view, and the answer to "what needs me today". A greeting, a stats strip, then three gadgets sized to one viewport - each scrolls inside itself rather than growing the page, so the whole picture stays on one screen.
+
+- **My work** - everything you owe, joined from both places it is recorded: your open action items, plus Waiting-on rows whose `who` cell names you. The second kind is easy to lose, because it sits in a project file under someone else's heading. Each row has a Done button.
+- **Waiting on people** - asks grouped by age band (under 7d, 7-13d, 14-29d, 30d+), and within a band by person, most asks first. Someone holding asks in several bands appears in each one, showing only that band's asks, with a `+N elsewhere` badge - so a recent ask is never hidden behind an old one. Filters (all, no reply 7d+, 30d+, 3 or more), a text search across person, project and ask text, and a toggle for band order.
+- **Projects** - every active project with what is next (or, when there is no next step, what you last did), checklist progress, items on you, asks out over 7 days, and when it was last worked. Filterable by category, searchable.
+
+The strip carries tracked time, commits, lines added and removed, work on you, how much of it is late, how much is out with other people, how much has had no reply in 7 days, and an hourly sparkline. Its tracked-time half arrives on a second request, so the board renders before it and fills in.
 
 ### Projects view
 
