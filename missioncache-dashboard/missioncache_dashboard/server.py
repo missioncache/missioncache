@@ -892,7 +892,12 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
         "inter_remaining": 0,
     }
 
-    if not repo_path or not task_full_path:
+    # Only task_full_path is required. repo_path builds the LEGACY repo-local
+    # candidates below; the centralized root - the primary location, and where
+    # every migrated project lives - is found from the task name alone. Bailing
+    # on a missing repo_path made a task with repo_id NULL report 0 of 0 items
+    # even with its files sitting in ~/.missioncache/active/<name>/.
+    if not task_full_path:
         return result
 
     try:
@@ -907,12 +912,13 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
         candidate_dirs.append(MISSIONCACHE_ROOT / "completed" / task_name)
 
         # Legacy: repo-local paths for unmigrated tasks
-        repo = Path(repo_path)
-        candidate_dirs.append(repo / task_full_path)
-        if "dev/active/" in task_full_path:
-            candidate_dirs.append(repo / "dev" / "completed" / task_name)
-        elif "dev/completed/" in task_full_path:
-            candidate_dirs.append(repo / "dev" / "active" / task_name)
+        if repo_path:
+            repo = Path(repo_path)
+            candidate_dirs.append(repo / task_full_path)
+            if "dev/active/" in task_full_path:
+                candidate_dirs.append(repo / "dev" / "completed" / task_name)
+            elif "dev/completed/" in task_full_path:
+                candidate_dirs.append(repo / "dev" / "active" / task_name)
 
         # Find first existing candidate
         task_dir = None
@@ -3565,9 +3571,41 @@ async def set_due_date(task_id: int, payload: DueDatePayload):
     return {"success": True, "task_id": task_id, "due_date": value}
 
 
+# Names in a Waiting-on `who` cell that mean the owner himself. Such a row is
+# work he owes, so it belongs on his side of the split even though it lives in
+# the same markdown table as everyone else's.
+_WHO_SELF = frozenset({"me", "myself", "tomer"})
+
+
+def _who_names(raw: str | None) -> list[str]:
+    """Owner first-names in a hand-typed `who` cell, lowercased, in order.
+
+    The cell is prose, so it needs normalizing before it can group at all:
+    drop parentheticals ("Ilya (on vacation til Wed)" -> ilya), drop a trailing
+    note after " - " ("Itai Sela (IT) - I said I would handle it" -> itai), then
+    split a multi-owner cell on / + and comma.
+
+    Measured over the 63 live rows this exists to group: 47 distinct exact
+    strings collapse to 34 owners, and the top one holds 12 of them. Counting
+    exact strings says the field cannot group, which is the wrong measurement -
+    it measures string equality, not owners.
+
+    Returns [] when nothing parses, so callers fall back to the raw string
+    rather than inventing an owner.
+    """
+    text = re.sub(r"\([^)]*\)", " ", raw or "")
+    text = text.split(" - ")[0]
+    names = []
+    for part in re.split(r"[/+,]", text):
+        words = part.split()
+        if words:
+            names.append(words[0].lower())
+    return names
+
+
 @app.get("/api/today")
 async def get_today():
-    """The Today view: cross-project attention data in one call.
+    """The Attention view: cross-project attention data in one call.
 
     Split by WHO OWES THE WORK, not by which record type stored it.
 
@@ -3584,6 +3622,16 @@ async def get_today():
     staleness threshold. Rows that have not crossed a line yet sort below,
     oldest first. Blocker rows carry a verified ``row_index`` so the UI can
     resolve one through ``POST /api/tasks/{id}/waiting-on/resolve``.
+
+    "Late" follows that same scale on BOTH sides of the seam, so
+    ``counts.overdue`` and ``overdue_count`` count everything of HIS that has
+    crossed its line - an action item past its due date, and equally a
+    Waiting-on row naming him that has gone past the 7-day threshold. His late
+    work lives in two lists (action items in ``on_me``, waiting rows in
+    ``on_others``, where they stay because the resolve path addresses them by
+    task_id + row_index), so both counts reach across both lists. A colleague
+    sitting on an ask is THEIR latency and counts into ``stale``, never into
+    overdue: red is reserved for "you are late".
 
     Per-project attention blocks carry typed counts and a DERIVED at_risk
     flag - never a manually set status.
@@ -3647,6 +3695,12 @@ async def get_today():
                 "kind": "commitment",
                 "what": item.what,
                 "who": item.assignee,
+                # Reaching this branch means assignee is not "me", so a
+                # commitment here is never his. Both keys must be present on
+                # EVERY row in this list: the group aggregation and the
+                # by-person rollup read them unconditionally.
+                "who_primary": (_who_names(item.assignee) or [item.assignee or ""])[0].title(),
+                "mine": False,
                 "why": item.source or item.requested_by or "",
                 "project_name": item.project_name,
                 "task_id": item.task_id,
@@ -3660,6 +3714,9 @@ async def get_today():
             })
 
     projects = []
+    # One query, not one per project: the progress parse below needs each task's
+    # repo path to find its files.
+    repos_by_id = {repo.id: repo for repo in sqlite_db.get_repos()}
     for task in sqlite_db.get_active_tasks():
         stats = _stats_for(task.id)
         due_date = task.due_date
@@ -3694,13 +3751,45 @@ async def get_today():
                 since = context_health.parse_since_date(row["since"])
                 age = (today - since).days if since is not None else None
                 stale = age is not None and age > horizon
-                if stale:
-                    stats["stale_on_others_count"] += 1
-                stats["on_others_count"] += 1
+                # A row whose `who` names HIM is work he owes, so it counts on
+                # his side. Before this, every row in the table counted against
+                # "on other people" regardless of the cell, which under-reported
+                # his own plate roughly 4x and filed his own asks under someone
+                # else's label. It stays in this list because the resolve path
+                # addresses it by task_id + row_index either way.
+                names = _who_names(row["who"])
+                mine = any(n in _WHO_SELF for n in names)
+                if mine:
+                    stats["open_count"] += 1
+                    # A row that names HIM and has crossed its line is late, and
+                    # it has to count as such. Before this it incremented
+                    # open_count only, so nothing on the page could report it:
+                    # overdue_count skipped it here and counts.overdue is built
+                    # from the action items alone, which are the only rows that
+                    # carry a due_date. The result was a header asserting
+                    # "0 overdue" on a day he was the blocker - measured live on
+                    # a row 2 days past its line with a named colleague waiting.
+                    #
+                    # "Late" spans both kinds by this endpoint's own contract:
+                    # a commitment's line is its due date, a blocker's line is
+                    # the 7-day threshold, and days_past_line is the one scale
+                    # over both. The kinds stay distinguishable downstream via
+                    # `kind`, so the UI can still word them differently.
+                    if stale:
+                        stats["overdue_count"] += 1
+                else:
+                    stats["on_others_count"] += 1
+                    if stale:
+                        stats["stale_on_others_count"] += 1
                 on_others.append({
                     "kind": "blocker",
                     "what": row["what"],
                     "who": row["who"],
+                    # Grouping key for the by-person rollup. Falls back to the
+                    # raw cell so an unparseable owner is still shown, never
+                    # silently dropped or merged into someone else.
+                    "who_primary": names[0].title() if names else (row["who"] or ""),
+                    "mine": mine,
                     "why": row["gates"],
                     "project_name": task.name,
                     "task_id": task.id,
@@ -3721,6 +3810,30 @@ async def get_today():
             or (days_to_due is not None and days_to_due <= horizon)
         )
         if stats["open_count"] or stats["on_others_count"] or due_date:
+            # Where the project stands and what comes next - the two things the
+            # view showed nothing about, so a row said who owes what but not
+            # whether the work was nearly done or barely started.
+            #
+            # `task_modes` is deliberately NOT forwarded. It is the full parsed
+            # checklist (481 items across the active projects) and the row needs
+            # exactly one line out of it, so the pick happens here rather than
+            # shipping the list for the client to search.
+            repo = repos_by_id.get(task.repo_id)
+            progress = parse_missioncache_progress(
+                repo.path if repo else "", task.full_path or ""
+            )
+            next_up = next(
+                (
+                    item.get("title", "").strip()
+                    for item in progress["task_modes"]
+                    if not item.get("completed") and item.get("title", "").strip()
+                ),
+                None,
+            )
+            # First ticket only. A row has space for one reference, and tickets
+            # are ordered by insertion so the first is the project's primary one.
+            tickets = pm_items.list_tickets(sqlite_db, task.id)
+            ticket = tickets[0] if tickets else None
             projects.append({
                 "task_id": task.id,
                 "name": task.name,
@@ -3731,15 +3844,35 @@ async def get_today():
                 "on_others_count": stats["on_others_count"],
                 "stale_on_others_count": stats["stale_on_others_count"],
                 "at_risk": at_risk,
+                "completed_count": progress["completed_count"],
+                "total_count": progress["total_count"],
+                "completion_pct": progress["completion_pct"],
+                "next_up": next_up,
+                # The tickets table is the current home; task.jira_key is the
+                # legacy column, still readable, that migrates into a row on the
+                # project's first PM mutation. Prefer the row, fall back.
+                "ticket_label": ticket.label if ticket else task.jira_key,
+                "ticket_url": (
+                    ticket.url if ticket else get_jira_url(task.jira_key)
+                ),
+                # Recency, so the view can tell a project whose asks are rotting
+                # while he works in it (chase them) from one whose asks are
+                # rotting because the project stopped (close them). Tracked time
+                # cannot answer this: only 33 minutes of a 5h48m day attributes
+                # to a project at all, and the most-owed project reads 0m on a
+                # day he worked in it. None when the project was never worked.
+                "last_worked_on": task.last_worked_on,
+                "days_since_worked": _age_days(task.last_worked_on),
             })
 
     # Grouped by project, because a flat cross-project list of everything
     # anyone owes runs to dozens of rows and stops being readable.
     #
-    # GROUPS sort by their newest row first: a project someone was asked
-    # about yesterday is live, one whose asks have all sat for two months
-    # is archaeology. WITHIN a group, most-past-the-line first, so each
-    # project's most urgent row is the one you see at its top.
+    # GROUPS sort by how much has gone stale, most first. Sorting by newest
+    # activity instead put the freshest project on top, which is the opposite
+    # of urgent: it buried a project whose every ask had gone stale below one
+    # with nothing stale at all. WITHIN a group, most-past-the-line first, so
+    # each project's most urgent row is the one you see at its top.
     groups: dict[int, dict] = {}
     for row in on_others:
         groups.setdefault(row["task_id"], {
@@ -3755,19 +3888,52 @@ async def get_today():
             -(r["days_past_line"] or 0),
             -(r["age_days"] or 0),
         ))
-        ages = [r["age_days"] for r in group["rows"] if r["age_days"] is not None]
-        group["count"] = len(group["rows"])
+        # The counts describe the OTHER-PEOPLE side only, because that is what
+        # the meter means. His own rows stay in `rows` so the expanded panel can
+        # show them first, but they must not inflate a bar that reads as
+        # "someone else is slow".
+        theirs = [r for r in group["rows"] if not r["mine"]]
+        ages = [r["age_days"] for r in theirs if r["age_days"] is not None]
+        group["count"] = len(theirs)
+        group["mine_count"] = len(group["rows"]) - len(theirs)
         group["stale_count"] = sum(
-            1 for r in group["rows"] if r["days_past_line"] is not None
+            1 for r in theirs if r["days_past_line"] is not None
         )
         group["newest_age_days"] = min(ages) if ages else None
         on_others_groups.append(group)
+    # Freshest reply first, projects nobody has answered at all last. The two
+    # tiebreaks after that exist for the same reason the projects sort below
+    # names one: on the current data two projects tie at 3 days and two more tie
+    # at 12, and with the age alone as the key their relative order fell out of
+    # dict insertion order. That is deterministic for one process but it shifts
+    # whenever the underlying rows are re-ordered, so the same day's list could
+    # come back differently after a rename or a new task. Volume breaks the tie
+    # first because a project holding more quiet asks is the more useful one to
+    # look at, then name so the result is total.
     on_others_groups.sort(key=lambda g: (
-        g["newest_age_days"] is None, g["newest_age_days"] or 0
+        g["newest_age_days"] is None,
+        g["newest_age_days"] or 0,
+        -g["stale_count"],
+        -g["count"],
+        g["project_name"] or "",
     ))
 
+    # This list, not on_others_groups, is what the per-project view renders,
+    # because a project can have items on YOU and nothing on anyone else - and
+    # rendering the groups meant such a project appeared nowhere at all.
+    #
+    # Urgency order: your own lateness first (the only thing that earns red),
+    # then an imminent project deadline, then how much has gone idle with
+    # someone else, then volume. Name last so the order is stable across
+    # requests when everything else ties.
     projects.sort(key=lambda p: (
-        not p["at_risk"], p["days_to_due"] is None, p["days_to_due"]
+        -p["overdue_count"],
+        p["days_to_due"] is None,
+        p["days_to_due"] if p["days_to_due"] is not None else 0,
+        -p["stale_on_others_count"],
+        -p["on_others_count"],
+        -p["open_count"],
+        p["name"],
     ))
 
     return {
@@ -3779,11 +3945,24 @@ async def get_today():
         },
         "on_others": on_others_groups,
         "counts": {
-            "on_me": len(mine_overdue) + len(mine_due_soon) + len(mine_other),
-            "overdue": len(mine_overdue),
-            "on_others": len(on_others),
+            # on_me counts his action items PLUS the waiting-on rows whose `who`
+            # names him; on_others and stale exclude those, so the two sides add
+            # up and neither claims the same row.
+            "on_me": (len(mine_overdue) + len(mine_due_soon) + len(mine_other)
+                      + sum(1 for r in on_others if r["mine"])),
+            # Same shape as on_me above, and for the same reason: his own late
+            # work lives in TWO lists. mine_overdue holds the action items whose
+            # due_date has passed; the waiting-on rows that name him sit in
+            # on_others (they stay there because the resolve path addresses them
+            # by task_id + row_index), so they have to be added back here or a
+            # row of his that is past the 7-day line reports as not late.
+            "overdue": (len(mine_overdue)
+                        + sum(1 for r in on_others
+                              if r["mine"] and r["days_past_line"] is not None)),
+            "on_others": sum(1 for r in on_others if not r["mine"]),
             "on_others_projects": len(on_others_groups),
-            "stale": sum(1 for r in on_others if r["days_past_line"] is not None),
+            "stale": sum(1 for r in on_others
+                         if not r["mine"] and r["days_past_line"] is not None),
         },
         "projects": projects,
     }
