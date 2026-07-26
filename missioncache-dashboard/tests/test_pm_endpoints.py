@@ -992,3 +992,81 @@ class TestGroupOrderIsTotal:
         )
         groups = asyncio.run(server.get_today())["on_others"]
         assert [g["project_name"] for g in groups] == ["has-ages", "no-ages"]
+
+
+class TestLeftOff:
+    """Spec: the Attention view proposes one project to sit in, and a proposal
+    needs orientation before it is actionable. "last worked 2 days ago" does not
+    supply that; the newest Recent Changes bullet is the last session's headline
+    and does.
+
+    Bullets are hand-written and save-flow-written, so they carry assorted
+    leading timestamps. Those are noise in a card about the last few days.
+    """
+
+    def _with_recent(self, sandboxed, name, body):
+        db = missioncache_db.TaskDB()
+        db.create_task(name, task_type="coding", repo_id=None)
+        (sandboxed / "active" / name).mkdir(parents=True)
+        ctx = CONTEXT.replace("- created", body)
+        # a waiting row so the project reaches projects[] at all
+        ctx = ctx.replace(
+            "|------|-----|-------|-------|",
+            "|------|-----|-------|-------|\n| A thing | Mor | 2026-07-01 | gates |",
+        )
+        (sandboxed / "active" / name / f"{name}-context.md").write_text(ctx)
+        db.close()
+
+    def _left_off(self, sandboxed, name, body):
+        self._with_recent(sandboxed, name, body)
+        result = asyncio.run(server.get_today())
+        return result["projects"][0]["left_off"]
+
+    def test_newest_bullet_is_returned(self, sandboxed):
+        assert self._left_off(
+            sandboxed, "lo1", "- Wired the export path end to end"
+        ) == "Wired the export path end to end"
+
+    def test_date_and_time_prefix_is_stripped(self, sandboxed):
+        assert self._left_off(
+            sandboxed, "lo2", "- 2026-07-10 11:00 Wired the export path end to end"
+        ) == "Wired the export path end to end"
+
+    def test_bare_date_prefix_is_stripped(self, sandboxed):
+        """`2026-07-25 - did the thing` is a real shape in the live files, and an
+        earlier version stripped only the with-time form, so the date showed."""
+        assert self._left_off(
+            sandboxed, "lo3", "- 2026-07-25 - Wired the export path end to end"
+        ) == "Wired the export path end to end"
+
+    def test_heading_nested_in_the_bullet_is_stripped(self, sandboxed):
+        """`- ### 2026-07-24 - did the thing` is real in the live files. The
+        hashes have to come off before the date strip can fire, or the card
+        shows the raw markdown."""
+        assert self._left_off(
+            sandboxed, "lo6", "- ### 2026-07-24 - Wired the export path end to end"
+        ) == "Wired the export path end to end"
+
+    def test_bold_markers_are_stripped(self, sandboxed):
+        """The card renders escaped plain text, so `**x**` would show its
+        asterisks. Real live shape: `- **26PI03 ... Review** - summary`."""
+        assert self._left_off(
+            sandboxed, "lo7", "- **26PI03 Plan Review** - wired the export path"
+        ) == "26PI03 Plan Review - wired the export path"
+
+    def test_short_fragments_are_skipped(self, sandboxed):
+        """A bullet that orients nobody is worse than none: it fills the line."""
+        assert self._left_off(
+            sandboxed, "lo4", "- done\n- Wired the export path end to end"
+        ) == "Wired the export path end to end"
+
+    def test_no_recent_changes_gives_none(self, sandboxed):
+        db = missioncache_db.TaskDB()
+        db.create_task("lo5", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "lo5").mkdir(parents=True)
+        (sandboxed / "active" / "lo5" / "lo5-context.md").write_text(
+            _with_waiting_rows("| A thing | Mor | 2026-07-01 | gates |")
+            .split("## Recent Changes")[0]
+        )
+        db.close()
+        assert asyncio.run(server.get_today())["projects"][0]["left_off"] is None
