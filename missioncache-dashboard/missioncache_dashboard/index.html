@@ -10,7 +10,10 @@
     <script>(function(){var p=localStorage.getItem('missioncache-theme')||'auto';var t=p==='auto'?(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):p;document.documentElement.setAttribute('data-theme-pref',p);if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Weight 300 was requested and never declared anywhere in this file, so
+         it downloaded on every load and rendered nothing. Inter Tight ships
+         only the three weights the display sizes use. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
@@ -62,7 +65,45 @@
             --bg-tertiary: rgba(18, 18, 30, 0.9);
             --bg-hover: rgba(30, 30, 50, 0.5);
 
+            /* PM signal set (Today view). Separate from --accent-* because
+               those have no light-theme override and so fail WCAG AA on a
+               light surface at these text sizes: yellow 1.29:1, green 1.44:1,
+               blue 2.33:1, red 2.91:1. Each --pm-* below clears 4.5:1 in both
+               themes. The --accent-* set stays as-is for glows and gradients,
+               where contrast does not apply.
+
+               Every light-theme ratio quoted here and below is against
+               --bg-primary #f4f4f8. That is the conservative reference: the
+               light .glass-card is white at 0.9 alpha over it, so the real
+               backdrop sits between #f4f4f8 and near-white, and a whiter
+               backdrop only improves these numbers. State the reference when
+               re-deriving them, or two people get answers 10% apart and both
+               are right.
+
+               --pm-alert is reserved for "you are late", nothing else. When
+               two thirds of the rows were red for being stale, red stopped
+               carrying a warning. Staleness is a temperature, so it reads
+               amber, and only at project level. */
+            --pm-ok: #3de8a0;
+            --pm-alert: #ff5252;
+            --pm-heat: #ffb03a;
+            --pm-link: #4da6ff;
+            --pm-heat-fill: rgba(255, 176, 58, 0.85);
+            --pm-heat-track: rgba(120, 120, 160, 0.22);
+            /* For a value that is legitimately absent. --text-muted was doing
+               this job and fails AA in BOTH themes (2.72:1 on the dark card,
+               3.43:1 on the light one), and a "no value" mark is content, not
+               decoration, so 4.5:1 binds. 4.77:1 dark / 5.20:1 light. */
+            --pm-nil: #80809c;
+
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            /* Inter Tight for 22px and up only. Inter's spacing is tuned for
+               small UI text, so the same string set at 32px reads slack. Tight
+               is the same skeleton drawn closer, so it does not clash with the
+               body text the way a second typeface would, and it falls back to
+               Inter (then the system stack) if fonts.googleapis.com is
+               unreachable - no failure mode Inter did not already have. */
+            --font-display: 'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
         }
 
@@ -91,6 +132,16 @@
             --fork-family-bg: rgba(10, 143, 143, 0.06);
             --fork-family-bg-hover: rgba(10, 143, 143, 0.10);
             --fork-badge-bg: rgba(10, 143, 143, 0.12);
+            /* Darkened for the light surface, same reasoning as --fork-accent
+               above. Against #f4f4f8: ok 4.89:1, alert 5.28:1, heat 4.72:1,
+               link 4.96:1. All clear AA 4.5:1, heat with the least room. */
+            --pm-ok: #0b7a50;
+            --pm-alert: #c62020;
+            --pm-heat: #a35b00;
+            --pm-link: #1668c9;
+            --pm-heat-fill: rgba(163, 91, 0, 0.75);
+            --pm-heat-track: rgba(0, 0, 0, 0.10);
+            --pm-nil: #6a6a84;
         }
 
         [data-theme="light"] .sidebar {
@@ -341,6 +392,16 @@
             25% { transform: scale(1.05) rotate(0.5deg); opacity: 0.9; }
             50% { transform: scale(1.1) rotate(0deg); opacity: 1; }
             75% { transform: scale(1.05) rotate(-0.5deg); opacity: 0.9; }
+        }
+
+        /* The file had no reduced-motion handling at all, while drifting this
+           background forever. The two decorative animations stop and transitions
+           collapse to instant. Spinners are deliberately NOT touched: they are
+           progress feedback, and a frozen spinner reads as a hung page rather
+           than as a respected preference. */
+        @media (prefers-reduced-motion: reduce) {
+            .bg-gradient { animation: none; }
+            *, *::before, *::after { transition-duration: 0.01ms !important; }
         }
 
         /* ============================================
@@ -4540,7 +4601,7 @@
             gap: 4px;
             padding: 1px 7px;
             border-radius: 10px;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
             background: var(--bg-secondary);
             color: var(--text-secondary);
@@ -4552,18 +4613,13 @@
             color: var(--accent-red);
             border-color: rgba(255, 82, 82, 0.4);
         }
-        .pm-badge.pm-badge-wait {
-            background: rgba(255, 213, 79, 0.12);
-            color: var(--accent-yellow);
-            border-color: rgba(255, 213, 79, 0.4);
-        }
         .pm-id-chip {
             font-family: var(--font-mono, monospace);
             font-size: 10px;
             padding: 1px 6px;
             border-radius: 4px;
             background: var(--bg-secondary);
-            color: var(--text-muted);
+            color: var(--text-secondary);
             border: 1px solid var(--border);
         }
         .pm-risk-dot {
@@ -4576,31 +4632,32 @@
             background: var(--accent-red);
             box-shadow: 0 0 6px rgba(255, 82, 82, 0.5);
         }
-        .due-cell-past { color: var(--accent-red); font-weight: 600; }
-        .due-cell-soon { color: var(--accent-yellow); }
+        /* Due soon is pressure, not lateness, so it reads amber. */
+        .pm-risk-dot.is-soon {
+            background: var(--pm-heat);
+            box-shadow: 0 0 6px rgba(255, 176, 58, 0.5);
+        }
+        /* Pointed at the PM tokens because these two mean exactly what those
+           tokens mean, and the raw accents are unreadable on a light surface:
+           against #f4f4f8, --accent-yellow measures 1.29:1 and --accent-red
+           2.91:1, both under AA, because neither has a light-theme override.
+           Used on other views too, so this fixes their due cells as well. */
+        .due-cell-past { color: var(--pm-alert); font-weight: 600; }
+        .due-cell-soon { color: var(--pm-heat); }
         .due-cell-none { color: var(--text-muted); }
 
         /* Today view */
         .today-section { margin-bottom: 24px; }
-        .today-section-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin: 0 0 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
         .count-pill {
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 600;
+            font-variant-numeric: tabular-nums;
             padding: 1px 8px;
             border-radius: 10px;
             background: var(--bg-secondary);
-            color: var(--text-muted);
+            color: var(--text-secondary);
             border: 1px solid var(--border);
         }
-        .today-section.overdue .today-section-title { color: var(--accent-red); }
         .pm-item-row {
             display: flex;
             align-items: center;
@@ -4611,25 +4668,95 @@
             background: var(--bg-secondary);
             margin-bottom: 8px;
         }
-        .pm-item-row.is-overdue,
-        .pm-item-row.is-stale { border-left: 3px solid var(--accent-red); }
+        /* Only "you are late" gets the red rail. Staleness used to claim it on
+           two thirds of the rows at once, which left red marking the majority
+           state instead of warning about anything. */
+        .pm-item-row.is-overdue { border-left: 3px solid var(--pm-alert); }
         .pm-item-main { flex: 1 1 auto; min-width: 0; }
         .pm-item-what {
-            font-size: 13px;
+            font-size: 14px;
             color: var(--text-primary);
             margin-bottom: 3px;
             overflow-wrap: anywhere;
         }
         .pm-item-meta {
-            font-size: 11px;
-            color: var(--text-muted);
+            font-size: 12px;
+            /* --text-secondary rather than --text-muted: muted measures
+               2.73:1 on the dark card and 3.41:1 on the light one, so every
+               meta line was under AA in both themes. */
+            color: var(--text-secondary);
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
             align-items: center;
         }
+
+        /* The dense variant, for the waiting-on rows inside a project panel.
+           Keeps .pm-item-row so pmRowError's closest() still resolves.
+
+           Three columns on ONE line at a fixed 36px, because these arrive in
+           runs of up to 19 and a predictable row pitch is what makes a run
+           scannable. The action column stays reserved while the button is
+           hidden, so revealing it on hover cannot reflow the text under the
+           cursor. */
+        .pm-wait-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto 90px;
+            column-gap: 12px;
+            padding: 7px 12px;
+            border-radius: 6px;
+            background: transparent;
+            margin-bottom: 4px;
+        }
+        .pm-wait-row:hover { background: var(--bg-hover); }
+        .pm-wait-row .pm-item-what {
+            margin-bottom: 0;
+            opacity: 0.92;
+            /* `what` is a full sentence (median 98 chars, longest 304), so it
+               is clamped rather than wrapped. Full text lives in the title
+               attribute and in the expanded state. */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pm-wait-row .pm-item-meta { white-space: nowrap; flex-wrap: nowrap; }
+        .pm-wait-row .pm-item-what { cursor: pointer; }
+        .pm-wait-row .pm-item-actions {
+            justify-content: flex-end;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+        .pm-wait-row:hover .pm-item-actions,
+        .pm-wait-row:focus-within .pm-item-actions { opacity: 1; }
+        /* Expanded: the row gives up its fixed height to show the whole
+           sentence, why it matters, and the resolve form. */
+        .pm-wait-row.is-open { background: var(--bg-hover); }
+        .pm-wait-row.is-open .pm-item-what {
+            white-space: normal;
+            overflow: visible;
+            overflow-wrap: anywhere;
+        }
+        .pm-wait-row.is-open .pm-item-actions { opacity: 1; }
+        /* display, not opacity: an invisible `why` would still claim its line
+           height on all 60-odd rows, which is the height this row exists to
+           avoid spending. */
+        .pm-item-why {
+            display: none;
+            grid-column: 1 / -1;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        .pm-wait-row.is-open .pm-item-why { display: block; }
+        .pm-heat-text { color: var(--pm-heat); }
+        .pm-alert-text { color: var(--pm-alert); }
+        .pm-wait-row .pm-resolve-form,
+        .pm-wait-row .pm-row-error { grid-column: 1 / -1; }
+        /* --pm-link, not --accent-blue: the accent has no light-theme override
+           and measures 2.53:1 on the light card, which fails AA on live link
+           text. --pm-link is the same blue family and clears 4.5:1 in both. */
         .pm-item-project {
-            color: var(--accent-blue);
+            color: var(--pm-link);
             text-decoration: none;
             cursor: pointer;
         }
@@ -4656,71 +4783,627 @@
             padding: 40px 20px;
             font-size: 14px;
         }
-        .today-attention-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--border);
-        }
-        .today-attention-item:last-child { border-bottom: none; }
-        .today-attention-main { flex: 1 1 auto; min-width: 0; }
         .today-card-help {
             font-size: 12px;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             margin: -4px 0 14px;
         }
         .pm-toggle-link {
             background: none;
             border: none;
-            color: var(--accent-blue);
-            font-size: 11px;
+            color: var(--pm-link);
+            font-size: 12px;
             cursor: pointer;
             padding: 0;
             font-family: inherit;
         }
         .pm-toggle-link:hover { text-decoration: underline; }
 
-        /* "On other people" - grouped per project */
-        .pm-group { border-top: 1px solid var(--border); }
-        .pm-group:first-child { border-top: none; }
-        .pm-group-header {
+        /* ---- Attention type scale ----------------------------------------
+           Measured before this change: 130 text elements, 124 of them (95.4%)
+           between 10px and 13px, and ONE style - 11px/400 - carrying 71 of
+           them. Everything was the same size, so nothing was emphasised and
+           the eye had no entry point.
+
+           Six sizes, eight roles. Three roles share 14px and separate by
+           weight and figure style rather than by a 1.04x size step, because a
+           13-to-14 step is not a distinction anyone can see:
+
+             32/700 display  hero count            .attn-count
+             22/600 display  strip metric          .attn-strip-value
+             17/600          card title            .card-title (this view)
+             14/600          row name              .pm-group-name
+             14/500 tnum     row figure            .pm-group-count
+             14/400          row body              .attn-own-what
+             12/400          secondary             .attn-num, .pm-group-touched, ...
+             10/600 caps     eyebrow               .attn-label, .attn-col-head, ...
+
+           11px leaves the Inter text entirely: its 71 elements split into 12px
+           secondary, 10px eyebrow, and the 14px figures that are actually the
+           content. That includes the expanded panel's rows, whose three shared
+           sizes (.pm-item-what / -meta / -why) are on the ramp too - they were
+           the reason a row's text SHRANK when you opened it. Those three also
+           drive the project page's Action Items tab, which had the same problem.
+
+           Two things sit outside the ramp on purpose. Native date inputs keep
+           11px - they are width-sensitive, and one already only fits its row
+           expanded. .pm-id-chip keeps 10px mono: a different family at a smaller
+           x-height already reads as a chip rather than as text, and it is shared
+           with a table on another view.
+
+           Weight 500 exists in this file but was never used on this view; it
+           is the figure weight now, sitting between body 400 and name 600. */
+
+        /* ---- Attention surfaces ------------------------------------------
+           Five identically-styled cards gave the view no focal plane, so two
+           elevations: the three summary cards and the Today strip sit flat on
+           the page, and the projects table - the object the view exists for -
+           is the only raised surface.
+
+           Three effects come off these cards.
+
+           backdrop-filter: blur(10px), five layers' worth. Verified invisible
+           here rather than assumed: the cards are 20% transparent (15% light)
+           over .bg-gradient, which is five viewport-wide radial gradients with
+           no detail finer than a few hundred pixels. Blurring a smooth gradient
+           returns the same gradient. Zoomed captures of the same card with and
+           without it are indistinguishable, so the layers bought nothing.
+
+           The ::after purple wash, plus the ::before gradient bar, on hover.
+           Decoration on a surface whose whole job is to be read, and the wash
+           tints the text it sits over.
+
+           transform: translateY(-2px) on hover. This one was actively harmful:
+           the projects table is inside a glass card, so moving the pointer
+           anywhere over it lifted all twelve rows by 2px while the user was
+           aiming at one of them. The row gets the hover instead - the thing
+           actually being pointed at. */
+        #attentionView .glass-card {
+            backdrop-filter: none;
+        }
+        #attentionView .glass-card::after { display: none; }
+        #attentionView .glass-card:hover {
+            transform: none;
+            border-color: var(--border);
+            box-shadow: none;
+        }
+        #attentionView .glass-card:hover::before { opacity: 0; }
+        /* The raised plane. --bg-card-solid is the opaque form of --bg-card, so
+           the table reads as a surface sitting ON the page while the summary
+           cards read as part of it. */
+        #attentionView #todayOnOthersCard {
+            background: var(--bg-card-solid);
+            border-color: var(--border-light);
+            box-shadow: 0 6px 28px rgba(0, 0, 0, 0.22);
+        }
+        [data-theme="light"] #attentionView #todayOnOthersCard {
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.07);
+        }
+
+        /* The projects table's own title. Global .card-title is 15px, which
+           lands 1px above the 14px row names below it - the exact
+           non-distinction this scale exists to remove, so it has to move.
+           Scoped rather than raised globally: .card-title has five other use
+           sites on the Projects and Activity views, whose body text is still
+           11px, so a 17px title there widens the gap without the intermediate
+           steps that make it read as a ramp here. Unscope it when those views
+           get the same treatment. */
+        #attentionView .card-title {
+            font-size: 17px;
+            letter-spacing: -0.2px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Three cards in one row above the projects table. Replaces the four
+           stat cards, which spent 129px on four integers - the loudest objects
+           on the page carrying its least actionable numbers. Each card answers
+           a different question and none of them grows with the backlog. */
+        .attn-hero {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+            align-items: stretch;
+        }
+        @media (max-width: 1400px) {
+            .attn-hero { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 900px) {
+            .attn-hero { grid-template-columns: 1fr; }
+        }
+        .attn-hero > .glass-card { margin: 0; }
+        /* Eyebrow. Goes DOWN from 11px, against the direction of everything
+           else here: a label above a 32px number should name it, not compete
+           with it. Uppercase at 600 keeps it findable at 10px. */
+        .attn-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.9px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        /* Icon plus words as one unit. .attn-label is baseline-aligned so that
+           the 32px count shares a baseline with the 10px caps; an SVG has no
+           baseline of its own, so putting it directly in that line would align
+           its bottom edge to the text baseline and float it high. */
+        .attn-label-head {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+        }
+        .attn-icon {
+            width: 13px;
+            height: 13px;
+            flex: 0 0 auto;
+            /* Optically matched to the 10px caps beside it rather than set to
+               their cap height: a 13px box on a 7px cap band reads as the
+               section's marker, a 7px one reads as a speck. */
+            opacity: 0.75;
+        }
+        /* Must follow .attn-icon, not precede it: equal specificity, so source
+           order decides and the 13px above would otherwise win. Scales with the
+           17px card title rather than with the 10px eyebrows. */
+        .attn-icon-title { width: 17px; height: 17px; opacity: 0.6; }
+        .attn-count {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 700;
+            /* Proportional figures, NOT tabular. Equal-width digits exist so
+               numbers line up down a column; on a standalone display figure they
+               only make a narrow digit sit in a wide box, so "11" reads loose.
+               tabular-nums stays where it earns its keep: the table's columns,
+               where the figures do align vertically. */
+            font-variant-numeric: proportional-nums;
+            letter-spacing: -1.5px;
+            line-height: 1;
+            color: var(--pm-ok);
+        }
+        .attn-count.is-alert { color: var(--pm-alert); }
+        /* Which of two states a card is showing. The Stalled card flips between
+           chase-the-people and the-project-is-parked, and those need opposite
+           actions - the old label encoded that as ", live" / ", parked" tacked
+           onto the title, which is exactly the wording that was unclear. */
+        .attn-state {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.9px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: var(--pm-heat-track);
+            color: var(--pm-heat);
+            white-space: nowrap;
+        }
+        /* --pm-heat measures 4.09:1 here and fails AA, because the chip's own
+           10%-black track darkens its backdrop to rgb(229,229,229) - the colour
+           clears 4.5:1 on the bare card but not through its own background. A
+           deeper amber for the chip only: 4.98:1. Same situation as
+           --fork-accent's light-theme value above. */
+        [data-theme="light"] .attn-state { color: #8a4d00; }
+        .attn-note {
+            margin-left: auto;
+            font-size: 12px;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .attn-sub {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: -6px 0 12px;
+        }
+
+        /* A row in the On-you card. The full-width .pm-item-row does not fit a
+           third-of-the-screen card: its date input and button forced the text
+           into a column and clamped it to "D...". Two stacked lines instead, so
+           the text gets the whole width and the controls get their own line. */
+        /* No border box. Four boxed rows inside a bordered card is three nested
+           frames deep, and the border was drawing a rectangle around every item
+           to separate items that a gap already separates. The overdue rail
+           stays - that one carries meaning - and now has nothing competing with
+           it, so it reads as the only marked row. */
+        .attn-own {
+            border-left: 3px solid transparent;
+            border-radius: 0 6px 6px 0;
+            padding: 6px 10px;
+            margin-bottom: 4px;
+        }
+        .attn-own.is-overdue { border-left-color: var(--pm-alert); }
+        .attn-own:hover { background: var(--bg-hover); }
+        .attn-own-what {
+            font-size: 14px;
+            line-height: 1.45;
+            color: var(--text-primary);
+            cursor: pointer;
+            /* Two lines, then ellipsis. These are full sentences and a variable
+               row height in a fixed-height card pushes the rest off the card. */
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .attn-own.is-open .attn-own-what {
+            display: block;
+            overflow: visible;
+            overflow-wrap: anywhere;
+        }
+        .attn-own-foot {
             display: flex;
             align-items: center;
+            gap: 8px;
+            margin-top: 5px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 0;
+        }
+        .attn-own-foot .pm-item-project {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .attn-own-foot .attn-own-actions { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+        /* The date input only appears once the row is expanded: it is 110px wide
+           and would eat the footer line at this card width. */
+        .attn-own-extra { display: none; margin-top: 6px; }
+        .attn-own.is-open .attn-own-extra { display: flex; gap: 6px; align-items: center; }
+        .attn-own .pm-item-why { display: none; }
+        .attn-own.is-open .pm-item-why {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        /* Owed-by-person. The 63 asks collapse onto the few people who actually
+           hold them, which turns a backlog into an agenda: one conversation
+           clears a fifth of it. The bar shares the projects table's absolute
+           scale, so a person's bar and a project's bar are comparable. */
+        .attn-person {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 28px 28px 64px;
+            align-items: center;
             gap: 10px;
+            padding: 5px 0;
+            font-size: 14px;
             width: 100%;
-            padding: 10px 0;
             background: none;
             border: none;
             color: var(--text-primary);
             font-family: inherit;
-            font-size: 13px;
             text-align: left;
             cursor: pointer;
         }
-        .pm-group-header:hover { color: var(--accent-purple); }
+        .attn-person:hover { color: var(--pm-link); }
+        .attn-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .attn-num {
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            color: var(--text-secondary);
+        }
+
+        /* Stalled: the join of attention owed against when the project was last
+           worked. Flips between the chase and parked states instead of ever
+           rendering empty, which is what earns it a permanent slot. */
+        .attn-rot-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: baseline;
+            padding: 4px 0;
+            font-size: 14px;
+        }
+        .attn-rot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .attn-rot-when {
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        /* Today strip: the only genuinely daily thing on the view, and the one
+           data source the old design ignored completely. */
+        .attn-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 28px;
+            align-items: baseline;
+        }
+        .attn-strip-item { display: flex; flex-direction: column; gap: 2px; }
+        .attn-strip-value {
+            font-family: var(--font-display);
+            font-size: 22px;
+            /* 600, not the 700 it was: these four sit on the same screen as the
+               32px hero count, and two competing 700s read as two headlines. */
+            font-weight: 600;
+            letter-spacing: -0.4px;
+            line-height: 1.1;
+            color: var(--text-primary);
+            /* Same reason as .attn-count: these four sit side by side in a row,
+               not stacked in a column, so nothing needs to align vertically. */
+            font-variant-numeric: proportional-nums;
+        }
+        .attn-strip-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.9px;
+            color: var(--text-secondary);
+        }
+        /* Hourly bars as divs, not a canvas: renderHourlyChart hardcodes its
+           axis colours and applyTheme never touches a Chart instance, so a
+           canvas here would be the one element ignoring the theme toggle. */
+        .attn-spark {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 28px;
+            margin-left: auto;
+        }
+        .attn-spark-bar {
+            width: 7px;
+            min-height: 2px;
+            border-radius: 1px;
+            background: var(--pm-heat-fill);
+        }
+        .attn-spark-bar.is-empty { background: var(--pm-heat-track); }
+
+        /* "On other people" - grouped per project */
+        .pm-group { border-top: 1px solid var(--border); }
+        .pm-group:first-child { border-top: none; }
+        /* The header IS the chart. Merging the per-project comparison into the
+           row you click means the comparison and the navigation are one
+           object, so neither costs the other any vertical space, and the list
+           of projects doubles as the distribution across them. */
+        .pm-group-header {
+            display: grid;
+            /* caret | name | MINE | ASKS | no-reply meter | 7D+ | WORKED |
+               PROGRESS | NEXT UP
+               Every column except the last is capped, and NEXT UP takes what is
+               left - it is a sentence, so it is the one cell that should absorb
+               the slack and ellipsis out. The name column used to BE the
+               flexible track, which on a wide monitor grew it to ~790px and left
+               each project's name that far from its own first number. Handing
+               the slack to the meter instead just moved the problem: the meter
+               went to 1132px and pushed "worked" 1600px out. */
+            grid-template-columns: 14px minmax(180px, 280px) 34px 34px minmax(140px, 240px) 34px 74px 84px minmax(140px, 1fr);
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            /* 30px pitch, not 33: twelve rows at 33 pushed the table's last two
+               projects past the fold. 5px, not the 6px it was, so growing the
+               row text from 13px to 14px stays height-neutral. */
+            padding: 5px 0 5px 6px;
+            border-left: 2px solid transparent;
+            color: var(--text-primary);
+            font-size: 14px;
+            /* Explicit, not `normal`. The grid children now run 14px at three
+               different weights, and whichever one has the tallest line box
+               sets the row pitch - so with `normal` the pitch moves whenever a
+               child's size changes. Pinning it here makes the pitch a function
+               of this rule alone: 14 x 1.15 = 16.1px + 10px padding = 26.1px,
+               against the 27.5px it measured before. */
+            line-height: 1.15;
+            text-align: left;
+            cursor: pointer;
+        }
+        /* Worked within 3 days and still has asks going idle: the case worth
+           chasing. Amber, not red - red stays on "you are late", and nothing
+           here is late, somebody else is quiet. */
+        .pm-group-header.is-stalled { border-left-color: var(--pm-heat); }
+        /* One header row for the four numeric columns. Four unlabelled numbers
+           was the failure mode of the previous design - even the meter needed a
+           sentence of help text to explain itself. */
+        .attn-col-head {
+            display: grid;
+            /* Must stay identical to .pm-group-header's tracks or the headings
+               stop sitting over their columns. */
+            grid-template-columns: 14px minmax(180px, 280px) 34px 34px minmax(140px, 240px) 34px 74px 84px minmax(140px, 1fr);
+            gap: 12px;
+            padding: 0 0 6px 6px;
+            border-left: 2px solid transparent;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.9px;
+            color: var(--text-secondary);
+        }
+        /* Figures right, the two cells whose content starts at the left edge
+           (the meter and the next-up sentence) left. Both exceptions are listed
+           together so adding a column means editing one line, not discovering
+           that nth-child arithmetic silently mis-aligned a heading. */
+        .attn-col-head span:nth-child(n+3) { text-align: right; }
+        .attn-col-head span:nth-child(5),
+        .attn-col-head span:nth-child(9) { text-align: left; }
+        /* The row is the hover target now that the card no longer moves. A
+           background rather than a colour change, because recolouring the text
+           also recolours the figures, and their colour carries meaning here
+           (green mine, amber idle, grey nil). */
+        .pm-group-header:hover {
+            background: var(--bg-hover);
+        }
+        /* The expand control, and now the row's only <button> - the row itself
+           had to become a div so the project name could be an <a>.
+
+           An SVG chevron rather than the &rsaquo; it was. The character is a
+           quotation mark doing duty as an arrow: its weight and its position in
+           the line come from the font, so it grew with the row text and sat off
+           the vertical centre. A 11px path does neither. */
         .pm-group-caret {
             flex: 0 0 auto;
-            width: 10px;
-            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            padding: 0;
+            background: none;
+            border: none;
+            color: var(--pm-nil);
+            cursor: pointer;
             transition: transform 0.15s;
         }
-        .pm-group-header[aria-expanded="true"] .pm-group-caret { transform: rotate(90deg); }
+        .pm-group-caret svg { width: 11px; height: 11px; display: block; }
+        /* aria-expanded moved onto the caret with the button role, so this no
+           longer keys off the row. */
+        .pm-group-caret[aria-expanded="true"] { transform: rotate(90deg); }
+        .pm-group-header:hover .pm-group-caret { color: var(--text-secondary); }
         .pm-group-name {
             font-weight: 600;
             color: inherit;
             text-decoration: none;
+            /* The column is capped at 300px now, so a long name has to clip
+               rather than push the numbers out of their tracks. */
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
-        .pm-group-name:hover { text-decoration: underline; }
+        /* Only the name turns purple, not the whole row on row-hover: the two
+           hovers mean different things now. Background on the row says "this
+           expands"; purple and underlined on the name says "this navigates". */
+        .pm-group-name:hover {
+            color: var(--accent-purple);
+            text-decoration: underline;
+        }
         .pm-group-meta {
-            margin-left: auto;
             display: flex;
             align-items: center;
+            justify-content: flex-end;
             gap: 8px;
-            font-size: 11px;
-            color: var(--text-muted);
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
         }
-        .pm-group-rows { padding-bottom: 8px; }
+        /* Bar length is on ONE absolute scale across every project, so length
+           compares volume between rows; the filled part is that project's
+           stale share. Normalising each bar to its own width instead would
+           draw a 1-of-1-stale project identically to a 16-of-16 one. */
+        .pm-group-meter { display: flex; align-items: center; }
+        .pm-group-meter-bar {
+            height: 6px;
+            min-width: 4px;          /* a 1-row project stays visible */
+            border-radius: 3px;
+            background: var(--pm-heat-track);
+            overflow: hidden;
+        }
+        .pm-group-meter-fill {
+            display: block;
+            height: 100%;
+            border-radius: 3px;
+            background: var(--pm-heat-fill);
+        }
+        /* These numbers ARE the row's content, and at 11px they were set
+           smaller than the caret next to them. 500 rather than 600 so the
+           project name still leads the row. */
+        /* One tick per ask. 9px wide with a 3px gap is the smallest pair that
+           stays countable at a glance; at 20 ticks that is 237px, which is what
+           sets both the column's max width and the fallback threshold. */
+        .attn-comb {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .attn-comb-tick {
+            width: 9px;
+            height: 8px;
+            flex: 0 0 auto;
+            border-radius: 1px;
+            background: var(--pm-heat-track);
+        }
+        .attn-comb-tick.is-idle { background: var(--pm-heat-fill); }
+
+        .pm-group-count {
+            font-size: 14px;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        /* A middot rather than "0": eleven zeros down a column is noise, and a
+           middot reads as "nothing here" without competing for attention. At
+           14px the middot would be the loudest thing in an empty cell, so it
+           drops back to the eyebrow size - a zero should not gain weight just
+           because the figures around it did. */
+        .pm-group-count.is-zero { color: var(--pm-nil); font-size: 12px; }
+        .pm-group-count.is-mine { color: var(--pm-ok); font-weight: 600; }
+        .pm-group-touched {
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-secondary);
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        /* Checklist progress. Green, not the meter's amber: amber on this view
+           means "waiting on somebody" and progress is the opposite signal. The
+           bar is thinner than the no-reply meter (4px vs 6px) so the two are
+           never confused at a glance. */
+        .attn-done {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: flex-end;
+        }
+        .attn-done-bar {
+            flex: 1 1 auto;
+            min-width: 18px;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--pm-heat-track);
+            overflow: hidden;
+        }
+        .attn-done-fill {
+            display: block;
+            height: 100%;
+            border-radius: 2px;
+            background: var(--pm-ok);
+        }
+        .attn-done-text {
+            flex: 0 0 auto;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-secondary);
+        }
+        /* The one cell that is a sentence rather than a figure, so it takes the
+           row's slack and clips. 12 of these wrapping would cost the fold. */
+        .attn-next {
+            font-size: 12px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .attn-next.is-none { color: var(--pm-nil); }
+        .attn-next.is-done { color: var(--pm-ok); }
+        .pm-group-rows { padding: 2px 0 10px 26px; }
+
+        /* Every interactive thing on this view is a <button> or an <a>, and the
+           default UA focus ring is drawn over by the custom backgrounds above,
+           so keyboard users had nothing to follow through twelve rows. :focus-
+           visible rather than :focus, so a mouse click does not leave a ring
+           behind. outline-offset keeps it clear of the row's own background. */
+        .pm-group-caret:focus-visible,
+        .attn-person:focus-visible,
+        .pm-toggle-link:focus-visible,
+        .pm-mini-btn:focus-visible,
+        #attentionView a:focus-visible,
+        .attn-own-what:focus-visible {
+            outline: 2px solid var(--pm-link);
+            outline-offset: 2px;
+            border-radius: 3px;
+        }
         .pm-resolve-form {
             display: flex;
             flex-wrap: wrap;
@@ -4905,7 +5588,7 @@
             border: 1px solid var(--border);
             border-radius: 4px;
             color: var(--text-secondary);
-            font-size: 11px;
+            font-size: 12px;
             padding: 3px 8px;
             cursor: pointer;
             font-family: inherit;
@@ -5375,12 +6058,13 @@
                 <img id="sidebarLogo" src="/static/missioncache_logo_white.png" alt="MissionCache Dashboard" style="height: 28px; width: auto;">
             </div>
             <div class="sidebar-nav">
-                <a class="nav-item active" data-view="today" href="#today">
+                <a class="nav-item active" data-view="attention" href="#attention">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2"/>
-                        <path d="M16 2v4M8 2v4M3 10h18"/>
+                        <circle cx="12" cy="12" r="9"/>
+                        <circle cx="12" cy="12" r="4"/>
+                        <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
                     </svg>
-                    Today
+                    Attention
                 </a>
                 <a class="nav-item" data-view="projects" href="#projects">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5464,34 +6148,40 @@
                 <div class="last-refresh" id="lastRefresh">Last updated: --</div>
             </div>
 
-            <!-- Today View (DEFAULT) -->
-            <div class="view active" id="todayView">
+            <!-- Attention View (DEFAULT). Renamed from "Today": nothing in
+                 /api/today is scoped to a day - open commitments carry any
+                 date, the waiting-on asks run 0 to 69 days old, and projects[]
+                 is portfolio state. The endpoint's own docstring already called
+                 its output "cross-project attention data". -->
+            <div class="view active" id="attentionView">
                 <div class="container">
-                    <div class="page-header">
-                        <h2>Today</h2>
-                        <p class="page-subtitle">What needs your attention right now, split by who owes the work.</p>
+                    <!-- No .page-header here: the sidebar already says Today and
+                         marks it active, so an h2 plus a subtitle spent 81px of
+                         the most expensive space on the app restating it. The
+                         hero cards below carry their own labels. -->
+                    <div class="attn-hero">
+                        <div class="glass-card" id="attnMineCard"></div>
+                        <div class="glass-card" id="attnPeopleCard"></div>
+                        <div class="glass-card" id="attnStalledCard"></div>
                     </div>
-
-                    <div class="stats-header" id="todayStats"></div>
-
-                    <div id="todayActionItems"></div>
 
                     <div class="glass-card today-section" id="todayOnOthersCard">
                         <div class="card-header">
-                            <span class="card-title">On other people</span>
+                            <span class="card-title">
+                                <svg class="attn-icon attn-icon-title" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                                Projects
+                            </span>
                             <span class="count-pill" id="todayOnOthersCount">0</span>
                         </div>
-                        <p class="today-card-help">Commitments other people made, and what you are waiting on, grouped by project with the most recently active first.</p>
+                        <p class="today-card-help" id="todayOnOthersHelp"></p>
                         <div class="pm-card-banner" id="todayOnOthersBanner" role="alert" style="display:none;"></div>
                         <div id="todayOnOthersBody"></div>
                     </div>
 
-                    <div class="glass-card" id="todayAttentionCard">
-                        <div class="card-header">
-                            <span class="card-title">Projects needing attention</span>
-                        </div>
-                        <div id="todayAttentionBody"></div>
-                    </div>
+                    <!-- Hidden until its data lands, which takes ~2s (the
+                         endpoint reads Claude transcript files). An empty glass
+                         card sitting there for two seconds reads as broken. -->
+                    <div class="glass-card" id="attnTodayCard" style="display:none;"></div>
                 </div>
             </div><!-- End Today View -->
 
@@ -6243,8 +6933,9 @@
 
             const currentView = getCurrentView();
             let ok = true;
-            if (currentView === 'today' || currentView === '') {
+            if (currentView === 'attention' || currentView === '') {
                 ok = await loadTodayData();
+                loadAttnStrip();
             } else if (currentView === 'projects') {
                 dataLoaded.projects = false;
                 ok = await loadProjectsData();
@@ -6253,7 +6944,10 @@
                 ok = await loadActivityData();
             } else if (currentView.startsWith('project/')) {
                 const name = decodeURIComponent(currentView.substring('project/'.length).split('?')[0]);
-                await openProjectPage(name, currentProjectPageTab);
+                // Re-resolve by the id already on screen, not by the name: on a
+                // duplicated name a refresh would otherwise land on the OTHER
+                // project, which reads as the refresh button losing your place.
+                await openProjectPage(name, currentProjectPageTab, currentProjectPage && currentProjectPage.id);
             }
             if (ok) updateLastRefresh();
             else markRefreshStale();
@@ -6262,7 +6956,7 @@
         }
 
         function getCurrentView() {
-            return window.location.hash.slice(1) || 'today';
+            return window.location.hash.slice(1) || 'attention';
         }
 
         // =============================================================================
@@ -6549,11 +7243,17 @@
         }
 
         function handleHashChange() {
-            let rawHash = window.location.hash.slice(1) || 'today';
+            let rawHash = window.location.hash.slice(1) || 'attention';
 
             // Legacy hash redirects - catch all productivity/* variants
             if (rawHash === 'productivity' || rawHash.startsWith('productivity/')) {
                 window.location.hash = rawHash.startsWith('productivity/activity') ? 'activity' : 'projects';
+                return;
+            }
+            // #today was this view's name before it became Attention. Keep old
+            // bookmarks and any saved links working.
+            if (rawHash === 'today') {
+                window.location.hash = 'attention';
                 return;
             }
 
@@ -6566,11 +7266,13 @@
                 hashParams = Object.fromEntries(new URLSearchParams(rawHash.substring(qIndex + 1)));
             }
 
-            // Project detail page: #project/<name>[?ptab=...]
+            // Project detail page: #project/<name>[?ptab=...][&tid=<task id>]
+            // tid is optional and only disambiguates duplicate names, so every
+            // link written before it existed still resolves the same way.
             if (hash.startsWith('project/')) {
                 const projectName = decodeURIComponent(hash.substring('project/'.length));
                 switchView('project');
-                openProjectPage(projectName, hashParams.ptab || 'overview');
+                openProjectPage(projectName, hashParams.ptab || 'overview', hashParams.tid);
                 return;
             }
 
@@ -6616,24 +7318,31 @@
             window.location.hash = '#projects';
         }
 
-        async function findTaskByName(taskName, endpoint) {
+        async function findTask(matches, endpoint) {
             const response = await fetch(API_BASE + endpoint);
             if (!response.ok) {
                 console.error(`API ${endpoint} returned ${response.status}`);
                 return null;
             }
             const data = await response.json();
-            const tasks = data.tasks || [];
-            for (const task of tasks) {
-                if (task.name === taskName) return task;
-                if (task.subtasks) {
-                    for (const sub of task.subtasks) {
-                        if (sub.name === taskName) return sub;
-                    }
+            for (const task of (data.tasks || [])) {
+                if (matches(task)) return task;
+                for (const sub of (task.subtasks || [])) {
+                    if (matches(sub)) return sub;
                 }
             }
             return null;
         }
+
+        const findTaskByName = (taskName, endpoint) =>
+            findTask(t => t.name === taskName, endpoint);
+
+        // Two active projects can carry the same name (a fork and its parent, or
+        // a stale row left behind by a rename), and name lookup returns whichever
+        // sorts first - so both rows in the projects table opened the same page.
+        // Rows that know their task id pass it, and it wins over the name.
+        const findTaskById = (taskId, endpoint) =>
+            findTask(t => String(t.id) === String(taskId), endpoint);
 
         function switchView(viewId) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -6646,16 +7355,19 @@
             if (nav) nav.classList.add('active');
 
             // Lazy load data for each view
-            if (viewId === 'today') {
+            if (viewId === 'attention') {
                 // Always refetch on entry - action items change from other
-                // sessions and the MCP tools; a stale Today view misleads.
+                // sessions and the MCP tools; a stale view misleads.
                 loadTodayData().then(ok => {
                     ok ? updateLastRefresh() : markRefreshStale();
-                    // Today is the default view but does not drive the
+                    // Attention is the default view but does not drive the
                     // LoadingManager step counter, so dismiss the initial
                     // full-screen overlay here (also flips isInitialLoad,
                     // which gates the auto-refresh interval).
                     if (LoadingManager.isInitialLoad) LoadingManager.hide();
+                    // Only after the view has painted: this request blocks the
+                    // server for ~2s (see loadAttnStrip).
+                    loadAttnStrip();
                 });
             }
             if (viewId === 'projects' && !dataLoaded.projects) {
@@ -6685,6 +7397,10 @@
         // task_id -> the /api/today per-project attention entry; the projects
         // list joins against this so it never re-derives at-risk client-side.
         let todayProjectsById = {};
+        // task_id -> that project's on_others group, so a panel can be built on
+        // first open rather than up front for all twelve. Same lifetime and same
+        // population point as todayProjectsById.
+        let todayGroupsByTask = {};
         let currentProjectPage = null;      // { id, name, repo_name, category }
         let currentProjectPageTab = 'overview';
         let currentProjectPmData = null;
@@ -6701,75 +7417,446 @@
             return { text: escapeHtml(dueStr) + suffix, cls };
         }
 
+        // The Today strip's data, fetched SEPARATELY from the PM state and not
+        // on every mutation. Two measured reasons:
+        //
+        // 1. /api/stats/today takes 1517-2640ms against /api/today's 26-44ms,
+        //    almost all of it in get_claude_hourly_activity (729ms measured)
+        //    reading Claude transcript files.
+        // 2. The endpoint is `async def` while doing entirely blocking work, so
+        //    it stalls the whole event loop: /api/today served alone takes 50ms,
+        //    but fired 50ms after the stats call it takes 1.82s and lands with
+        //    it. Concurrency does not help - only ordering does.
+        //
+        // So it runs after the PM view has painted, and only on view entry or an
+        // explicit refresh. Resolving an ask cannot change today's tracked time,
+        // so a mutation has no reason to pay 2s for it.
+        async function loadAttnStrip() {
+            try {
+                const res = await fetch(API_BASE + '/api/stats/today');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                renderAttnToday(await res.json());
+            } catch (e) {
+                console.warn('Today stats unavailable, hiding the strip:', e);
+                renderAttnToday(null);
+            }
+        }
+
         async function loadTodayData() {
+            let pmData;
             try {
                 const res = await fetch(API_BASE + '/api/today');
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                renderToday(await res.json());
-                dataLoaded.today = true;
-                return true;
+                pmData = await res.json();
             } catch (e) {
-                console.error('Error loading Today:', e);
-                // Fill ALL three regions. Leaving the count pill at its markup
+                console.error('Error loading Attention:', e);
+                // Fill EVERY region. Leaving the count pill at its markup
                 // default of "0" over an empty body reads as "nothing is owed",
                 // which is the opposite of unknown on the one number this view
                 // exists to surface.
                 const retry = '<button class="pm-mini-btn" onclick="loadTodayData()">Retry</button>';
-                document.getElementById('todayActionItems').innerHTML =
-                    `<div class="glass-card"><div class="pm-empty">Couldn't load Today. ${retry}</div></div>`;
+                const oops = label =>
+                    `<div class="pm-empty" style="padding:8px 0;">Couldn't load ${label}. ${retry}</div>`;
+                document.getElementById('attnMineCard').innerHTML = oops('what is on you');
+                document.getElementById('attnPeopleCard').innerHTML = oops('who owes you');
+                document.getElementById('attnStalledCard').innerHTML = oops('project health');
                 document.getElementById('todayOnOthersCount').textContent = '-';
+                document.getElementById('todayOnOthersHelp').textContent = '';
                 document.getElementById('todayOnOthersBody').innerHTML =
-                    `<div class="pm-empty">Couldn't load. ${retry}</div>`;
-                document.getElementById('todayAttentionBody').innerHTML =
                     `<div class="pm-empty">Couldn't load. ${retry}</div>`;
                 return false;
             }
+            renderToday(pmData);
+            dataLoaded.today = true;
+            return true;
         }
 
         function renderToday(data) {
             const c = data.counts || {};
-            const alertStyle = n => (n > 0 ? 'color:var(--accent-red)' : '');
-            document.getElementById('todayStats').innerHTML = `
-                <div class="stat-card"><div class="stat-label">On me</div><div class="stat-value">${c.on_me || 0}</div></div>
-                <div class="stat-card"><div class="stat-label">Overdue</div><div class="stat-value" style="${alertStyle(c.overdue || 0)}">${c.overdue || 0}</div></div>
-                <div class="stat-card"><div class="stat-label">On other people</div><div class="stat-value">${c.on_others || 0}</div></div>
-                <div class="stat-card"><div class="stat-label">Stale</div><div class="stat-value" style="${alertStyle(c.stale || 0)}">${c.stale || 0}</div></div>
-            `;
-            const mine = data.on_me || { overdue: [], due_soon: [], other_open: [] };
-            const total = mine.overdue.length + mine.due_soon.length + mine.other_open.length;
-            const container = document.getElementById('todayActionItems');
-            if (total === 0) {
-                container.innerHTML = '<div class="glass-card"><div class="pm-empty">Nothing on your plate. Your action items are all done or unscheduled.</div></div>';
-            } else {
-                let html = '';
-                if (mine.overdue.length) html += renderTodaySection('Overdue', mine.overdue, 'overdue');
-                if (mine.due_soon.length) html += renderTodaySection('Due this week', mine.due_soon, '');
-                if (mine.other_open.length) {
-                    html += `<div class="glass-card today-section">
-                        <button class="pm-toggle-link" data-count-label="${mine.other_open.length} other open item${mine.other_open.length !== 1 ? 's' : ''}" onclick="toggleTodayOther(this)">Show ${mine.other_open.length} other open item${mine.other_open.length !== 1 ? 's' : ''}</button>
-                        <div id="todayOtherOpen" style="display:none;margin-top:12px;">${mine.other_open.map(renderPmItemRow).join('')}</div>
-                    </div>`;
-                }
-                container.innerHTML = html;
-            }
-            renderOnOthers(data.on_others || [], c);
+            // Populated before the table renders: each row reads its project's
+            // due date, at-risk flag and recency from here.
             todayProjectsById = {};
             (data.projects || []).forEach(p => { todayProjectsById[p.task_id] = p; });
-            renderTodayAttention(data.projects || []);
+            const groups = data.on_others || [];
+            todayGroupsByTask = {};
+            groups.forEach(g => { todayGroupsByTask[g.task_id] = g; });
+            const mine = data.on_me || { overdue: [], due_soon: [], other_open: [] };
+            // Waiting-on rows whose `who` names him. The server flags these; the
+            // old design filed them under "on other people", which under-reported
+            // his own plate roughly 4x.
+            const mineRows = groups.flatMap(g => (g.rows || []).filter(r => r.mine));
+            renderAttnMine(mine, mineRows, c);
+            renderAttnPeople(groups, c);
+            renderAttnStalled(data.projects || []);
+            renderOnOthers(data.projects || [], groups, c);
         }
 
-        function renderTodaySection(title, items, extraClass) {
-            return `<div class="glass-card today-section ${extraClass}">
-                <div class="today-section-title">${escapeHtml(title)} <span class="count-pill">${items.length}</span></div>
-                ${items.map(renderPmItemRow).join('')}
+        // The DOM-id scheme the resolve helpers address a row by. They build
+        // `${rowId}-form`, `-outcome` and `-error` from it and read the row's
+        // data-* attributes, so this is the addressing contract rather than a
+        // convenience helper - two renderers emit rows and both must agree with
+        // pmResolveWaiting on the id, or Resolve silently targets nothing.
+        function pmRowDomId(row, prefix) {
+            return row.kind === 'commitment'
+                ? `${prefix}Item-${row.id}`
+                : `${prefix}Wait-${row.task_id}-${row.row_index}`;
+        }
+
+        // Card 1: what he owes. Action items plus the waiting-on rows that name
+        // him, which is the whole point - those were previously invisible on his
+        // side while sitting one card lower under someone else's label.
+        // One place that knows the project URL's shape. It was built inline at
+        // seven call sites, and adding the task id would have meant getting the
+        // same string right seven times. The id is what disambiguates duplicate
+        // project names, so every caller holding one passes it.
+        function projectHref(name, taskId, ptab) {
+            const q = [];
+            if (taskId !== null && taskId !== undefined && taskId !== '') {
+                q.push('tid=' + encodeURIComponent(taskId));
+            }
+            if (ptab) q.push('ptab=' + encodeURIComponent(ptab));
+            return '#project/' + encodeURIComponent(name || '') + (q.length ? '?' + q.join('&') : '');
+        }
+
+        // One icon per section, five in total, each used exactly once - they are
+        // section markers, not decoration, so a repeat would stop marking
+        // anything. Deliberately NONE on rows: twelve rows times four columns
+        // would add 48 objects competing with the numbers they sit beside, which
+        // is the noise this view was redesigned to remove.
+        //
+        // Same shape as the nav icons above (Feather geometry on a 24x24 box,
+        // fill none, stroke currentColor) so they inherit the theme for free.
+        // None of the five repeats a nav glyph: the Today card is a calendar
+        // rather than the pulse line, which is the Activity nav item.
+        //
+        // Four here, not five - the projects table's layers icon sits inline in
+        // its static card header, since that title is markup rather than
+        // rendered by any of these functions.
+        const ATTN_ICONS = {
+            // On you - an inbox, the things landed in front of him
+            inbox: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+            // Waiting on - other people
+            users: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+            // Stalled - time passing with nothing happening
+            hourglass: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2h12M6 22h12"/><path d="M6 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V2"/><path d="M6 22v-5a6 6 0 0 1 6-6 6 6 0 0 1 6 6v5"/></svg>',
+            // Today
+            calendar: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+        };
+
+        // The icon and its words are one object, so they get their own centred
+        // flex line. The label around them stays baseline-aligned, which is what
+        // sets the 32px count on the same baseline as the 10px caps.
+        function attnHead(icon, text) {
+            return `<span class="attn-label-head">${ATTN_ICONS[icon]}${text}</span>`;
+        }
+
+        function renderAttnMine(mine, mineRows, counts) {
+            const el = document.getElementById('attnMineCard');
+            const items = [...mine.overdue, ...mine.due_soon, ...mine.other_open];
+            const total = items.length + mineRows.length;
+            const overdue = counts.overdue || 0;
+            if (!total) {
+                el.innerHTML = `<div class="attn-label">${attnHead('inbox', 'On you')}</div>
+                    <div class="pm-empty" style="padding:8px 0;">Nothing on your plate.</div>`;
+                return;
+            }
+            // Overdue renders only when non-zero: a card reading "0 overdue" is
+            // the least informative thing the view can carry.
+            const note = overdue
+                ? `<span class="attn-note pm-alert-text">${overdue} overdue</span>`
+                : '';
+            // Two, not three. These rows are two lines each, so a third pushed
+            // the hero to 364px and dragged the other two cards up with it (the
+            // grid equalises heights), which cost the projects table the fold.
+            const SHOWN = 2;
+            const rows = [
+                ...items.map(renderAttnOwnItem),
+                ...mineRows.map(renderAttnMineWaitRow),
+            ];
+            const visible = rows.slice(0, SHOWN).join('');
+            const hidden = rows.length > SHOWN
+                ? `<div id="attnMineMore" style="display:none;">${rows.slice(SHOWN).join('')}</div>
+                   <button class="pm-toggle-link" onclick="attnToggleMineMore(this)"
+                           data-more="${rows.length - SHOWN}">+${rows.length - SHOWN} more</button>`
+                : '';
+            el.innerHTML = `
+                <div class="attn-label">
+                    ${attnHead('inbox', 'On you')}
+                    <span class="attn-count ${overdue ? 'is-alert' : ''}">${total}</span>
+                    ${note}
+                </div>
+                ${visible}${hidden}`;
+        }
+
+        // An action item of his, compact. The due-date input moves into the
+        // expanded state; on the footer line it would leave no room for the
+        // project name.
+        function renderAttnOwnItem(item) {
+            const due = pmFormatDue(item.due_date);
+            const what = escapeHtml(item.what || '');
+            return `<div class="attn-own ${item.overdue ? 'is-overdue' : ''}">
+                <div class="attn-own-what" title="${what}" onclick="attnToggleOwn(this)">
+                    <span class="pm-id-chip">${escapeHtml(item.label)}</span> ${what}
+                </div>
+                <div class="attn-own-foot">
+                    <a class="pm-item-project" href="${projectHref(item.project_name, item.task_id, 'action-items')}">${escapeHtml(item.project_name || '')}</a>
+                    <span class="${due.cls}">${due.text}</span>
+                    <span class="attn-own-actions">
+                        <button class="pm-mini-btn" onclick="pmMarkDone(${item.id}, this)">Done</button>
+                    </span>
+                </div>
+                <div class="attn-own-extra">
+                    <input type="date" value="${escapeHtml(item.due_date || '')}" title="Change due date"
+                           aria-label="Due date for ${what}"
+                           onchange="pmChangeDue(${item.id}, this.value, this)">
+                </div>
+                <div class="pm-row-error" role="alert" style="display:none;"></div>
             </div>`;
         }
+
+        // A self-owned waiting-on row, shown on his side of the split. It has no
+        // action-item id, so it resolves by verified row position exactly like
+        // any other waiting row - only the label differs.
+        function renderAttnMineWaitRow(row) {
+            const rowId = pmRowDomId(row, 'onOthers');
+            const what = escapeHtml(row.what || '');
+            // Past its line on a row of HIS means he is late, which the server
+            // now counts into overdue. Two consequences the row was missing:
+            // it gets the same red rail an overdue action item gets, so the
+            // count in the card header has something to point AT, and the age
+            // goes red rather than amber. Amber on this view means "someone
+            // else is slow"; on his own row that is the wrong claim.
+            const pastLine = row.days_past_line !== null && row.days_past_line !== undefined;
+            const age = (row.age_days !== null && row.age_days !== undefined)
+                ? `<span class="${pastLine ? 'pm-alert-text' : ''}">${row.age_days}d</span>`
+                : '';
+            return `<div class="attn-own ${pastLine ? 'is-overdue' : ''}" id="${rowId}"
+                         data-task-id="${row.task_id}"
+                         data-row-index="${row.row_index === null || row.row_index === undefined ? '' : row.row_index}"
+                         data-what="${what}"
+                         data-who="${escapeHtml(row.who || '')}"
+                         data-since="${escapeHtml(row.since || '')}">
+                <div class="attn-own-what" title="${what}" onclick="attnToggleOwn(this)">${what}</div>
+                <div class="attn-own-foot">
+                    <a class="pm-item-project" href="${projectHref(row.project_name, row.task_id)}">${escapeHtml(row.project_name || '')}</a>
+                    ${age}
+                    <span class="attn-own-actions">
+                        <button class="pm-mini-btn" onclick="pmOpenResolve('${rowId}')">Resolve</button>
+                    </span>
+                </div>
+                ${row.why ? `<div class="pm-item-why">gates ${escapeHtml(row.why)}</div>` : ''}
+                <div class="pm-resolve-form" id="${rowId}-form" style="display:none;">
+                    <input type="text" id="${rowId}-outcome" placeholder="What happened? (optional)"
+                           aria-label="Outcome for ${what} (optional)"
+                           aria-describedby="${rowId}-error"
+                           onkeydown="if(event.key==='Enter'){pmResolveWaiting('${rowId}');}">
+                    <button class="pm-mini-btn" onclick="pmResolveWaiting('${rowId}')">Confirm</button>
+                    <button class="pm-mini-btn" onclick="pmCloseResolve('${rowId}')">Cancel</button>
+                </div>
+                <div class="pm-row-error" id="${rowId}-error" role="alert" style="display:none;"></div>
+            </div>`;
+        }
+
+        // Click the text for the whole sentence, what it gates, and the
+        // due-date input.
+        function attnToggleOwn(el) {
+            const row = el.closest('.attn-own');
+            if (row) row.classList.toggle('is-open');
+        }
+
+        function attnToggleMineMore(btn) {
+            const el = document.getElementById('attnMineMore');
+            const open = el.style.display === 'none';
+            el.style.display = open ? 'block' : 'none';
+            btn.textContent = open ? 'Show fewer' : `+${btn.dataset.more} more`;
+        }
+
+        // Card 2: who owes him, most first. This is what turns 63 individual
+        // chases into an agenda - one conversation with the top name clears a
+        // fifth of the backlog. Grouping needs `who_primary` from the server,
+        // because the raw cell is prose: 47 distinct strings, 34 real owners.
+        function renderAttnPeople(groups, counts) {
+            const el = document.getElementById('attnPeopleCard');
+            const rows = groups.flatMap(g => (g.rows || []).filter(r => !r.mine));
+            if (!rows.length) {
+                el.innerHTML = `<div class="attn-label">${attnHead('users', 'Waiting on')}</div>
+                    <div class="pm-empty" style="padding:8px 0;">You are not waiting on anyone.</div>`;
+                return;
+            }
+            const by = new Map();
+            rows.forEach(r => {
+                const key = r.who_primary || r.who || '(unknown)';
+                const e = by.get(key)
+                    || { name: key, total: 0, idle: 0, oldest: 0, raw: new Set(), tasks: new Set() };
+                e.total += 1;
+                if (r.days_past_line !== null && r.days_past_line !== undefined) e.idle += 1;
+                e.oldest = Math.max(e.oldest, r.age_days || 0);
+                if (r.who) e.raw.add(r.who);
+                // Which projects to open when this person is clicked. Collected
+                // here because this is where the rows are; the click handler then
+                // needs no snapshot of the payload to consult.
+                e.tasks.add(r.task_id);
+                by.set(key, e);
+            });
+            const people = [...by.values()].sort((a, b) => b.total - a.total || b.idle - a.idle);
+            // The widget's claim is that a head exists. If the top holder has
+            // fewer than 3, there is no head and the list would assert a
+            // structure the data does not have, so it says so instead.
+            if (people[0].total < 3) {
+                el.innerHTML = `<div class="attn-label">${attnHead('users', 'Waiting on')}
+                        <span class="attn-note">${people.length} people, nobody with more than ${people[0].total} asks</span></div>
+                    <div class="pm-empty" style="padding:8px 0;">Spread thin, so there is no one person to chase.</div>`;
+                return;
+            }
+            const SHOWN = 4;
+            const top = people.slice(0, SHOWN);
+            const max = people[0].total;
+            const tailPeople = people.length - top.length;
+            const tailRows = people.slice(SHOWN).reduce((n, p) => n + p.total, 0);
+            const body = top.map(p => {
+                const pct = max ? Math.round((p.total / max) * 100) : 0;
+                const fill = p.total ? Math.round((p.idle / p.total) * 100) : 0;
+                // The merge is shown, not hidden: a first-name key can fuse two
+                // people who share one, and the raw cells are the only evidence.
+                const title = `${p.total} asks, ${p.idle} with no reply for 7d+, oldest is ${p.oldest}d old\n${[...p.raw].join('\n')}`;
+                return `<button class="attn-person" title="${escapeHtml(title)}"
+                                data-tasks="${[...p.tasks].join(',')}"
+                                onclick="attnFilterPerson(this)">
+                    <span class="attn-person-name">${escapeHtml(p.name)}</span>
+                    <span class="attn-num">${p.total}</span>
+                    <span class="attn-num ${p.idle ? 'pm-heat-text' : ''}">${p.idle || '·'}</span>
+                    <span class="pm-group-meter" aria-hidden="true">
+                        <span class="pm-group-meter-bar" style="width:${pct}%;">
+                            <span class="pm-group-meter-fill" style="width:${fill}%;"></span>
+                        </span>
+                    </span>
+                </button>`;
+            }).join('');
+            el.innerHTML = `
+                <div class="attn-label">${attnHead('users', 'Waiting on')}
+                    <span class="attn-note">${counts.on_others || rows.length} asks &middot; ${counts.stale || 0} with no reply 7d+</span>
+                </div>
+                <div class="attn-sub">asks &middot; no reply 7d+ &middot; share of all asks</div>
+                ${body}
+                ${tailPeople ? `<div class="attn-sub" style="margin:8px 0 0;">+${tailRows} more across ${tailPeople} other ${tailPeople === 1 ? 'person' : 'people'}</div>` : ''}`;
+        }
+
+        // Clicking a person expands every project holding one of their asks, so
+        // the table below becomes the detail view rather than a second list.
+        // Marks the projects, then refetches: onOthersExpanded survives a
+        // re-render by design, so the normal load path does the rest and no
+        // snapshot of the last payload has to be kept around to go stale.
+        async function attnFilterPerson(btn) {
+            (btn.dataset.tasks || '').split(',').filter(Boolean)
+                .forEach(id => onOthersExpanded.add(Number(id)));
+            await loadTodayData();
+            const first = document.querySelector('.pm-group-rows[style*="block"]');
+            if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        // Card 3: the join of attention owed against when the project was last
+        // worked. Two states needing opposite actions, which is why one list of
+        // "needs attention" would be wrong: chase the live ones, close the dead
+        // ones. Tracked minutes cannot tell them apart - only 33 minutes of a
+        // 5h48m day attributes to a project, and the most-owed project reads 0m
+        // on a day it was worked.
+        function renderAttnStalled(projects) {
+            const el = document.getElementById('attnStalledCard');
+            const idle = projects.filter(p => (p.stale_on_others_count || 0) > 0);
+            const d = p => p.days_since_worked;
+            const worked = p => d(p) !== null && d(p) !== undefined;
+            // The two sets partition `idle` exactly: worked in the last 3 days,
+            // or not. The parked side used to test > 7, which left a project
+            // worked 4 to 7 days ago in NEITHER set, so it appeared nowhere on
+            // the card. Nothing sits in that window today, so this was latent
+            // rather than visible - but the same bound has to draw both sides or
+            // the card silently drops rows. Never-worked counts as parked: a
+            // project with no last_worked_on is the most parked thing there is.
+            const RECENT_DAYS = 3;
+            const live = idle.filter(p => worked(p) && d(p) <= RECENT_DAYS);
+            const parked = idle.filter(p => !worked(p) || d(p) > RECENT_DAYS);
+            const chasing = live.length > 0;
+            const set = (chasing ? live : parked)
+                .sort((a, b) => b.stale_on_others_count - a.stale_on_others_count);
+            if (!set.length) {
+                el.innerHTML = `<div class="attn-label">${attnHead('hourglass', 'Stalled')}</div>
+                    <div class="pm-empty" style="padding:8px 0;">No ask has gone 7 days without a reply.</div>`;
+                return;
+            }
+            const SHOWN = 3;
+            const body = set.slice(0, SHOWN).map(p => `
+                <div class="attn-rot-row">
+                    <span class="attn-rot-name">
+                        <a class="pm-item-project" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a>
+                    </span>
+                    <span class="attn-rot-when">
+                        <span class="pm-heat-text">${p.stale_on_others_count}/${p.on_others_count}</span>
+                        &middot; ${attnWorkedLabel(p.days_since_worked)}
+                    </span>
+                </div>`).join('');
+            const more = set.length - SHOWN;
+            el.innerHTML = `
+                <div class="attn-label">${attnHead('hourglass', 'Stalled')}
+                    <span class="attn-state">${chasing ? 'chase' : 'parked'}</span>
+                    <span class="attn-note">${chasing
+                        ? 'you worked these in the last 3 days, so chase the people'
+                        : 'untouched more than 3 days too, so close or drop them'}</span>
+                </div>
+                <div class="attn-sub">no reply 7d+ / all asks &middot; last worked</div>
+                ${body}
+                ${more > 0 ? `<div class="attn-sub" style="margin:8px 0 0;">and ${more} more</div>` : ''}`;
+        }
+
+        function attnWorkedLabel(days) {
+            if (days === null || days === undefined) return 'never worked';
+            if (days === 0) return 'today';
+            if (days === 1) return 'yesterday';
+            return `${days}d ago`;
+        }
+
+        // Card 4: the only genuinely daily thing on the view, from the one data
+        // source the old design ignored entirely.
+        function renderAttnToday(stats) {
+            const el = document.getElementById('attnTodayCard');
+            if (!stats) { el.style.display = 'none'; return; }
+            el.style.display = '';
+            const hours = stats.hourly_activity || [];
+            const max = hours.reduce((m, h) => Math.max(m, h.total_seconds || 0), 0);
+            const spark = hours.map(h => {
+                const s = h.total_seconds || 0;
+                const pct = max ? Math.max(6, Math.round((s / max) * 100)) : 0;
+                const label = `${h.hour !== undefined ? String(h.hour).padStart(2, '0') + ':00' : ''} ${Math.round(s / 60)}m`;
+                return `<span class="attn-spark-bar ${s ? '' : 'is-empty'}" style="height:${s ? pct : 8}%" title="${escapeHtml(label.trim())}"></span>`;
+            }).join('');
+            // Only 9% of today's tracked time attributes to a project, so the
+            // unattributed remainder is stated rather than left to look like
+            // idleness. It is the one number here he cannot get elsewhere.
+            const unbound = (stats.tasks_today || [])
+                .filter(t => t.is_untracked)
+                .reduce((n, t) => n + (t.time_seconds || 0), 0);
+            const item = (v, l) => `<div class="attn-strip-item"><span class="attn-strip-value">${v}</span><span class="attn-strip-label">${l}</span></div>`;
+            const loc = (stats.loc_added || stats.loc_removed)
+                ? `+${formatNumber(stats.loc_added || 0)}/-${formatNumber(stats.loc_removed || 0)}`
+                : '0';
+            el.innerHTML = `
+                <div class="attn-label">${attnHead('calendar', 'Today')}
+                    ${unbound ? `<span class="attn-note">${formatDuration(unbound)} not bound to a project</span>` : ''}
+                </div>
+                <div class="attn-strip">
+                    ${item(escapeHtml(stats.total_formatted || '0m'), 'tracked')}
+                    ${item(stats.commit_count || 0, 'commits')}
+                    ${item(loc, 'lines')}
+                    ${item(stats.task_count || 0, 'projects')}
+                    ${spark ? `<span class="attn-spark" aria-hidden="true">${spark}</span>` : ''}
+                </div>`;
+        }
+
 
         // A row in the "On me" sections - always the user's own item, so it
         // carries no owner badge (the section title already says whose it is).
         function renderPmItemRow(item) {
             const due = pmFormatDue(item.due_date);
-            const projLink = `<a class="pm-item-project" href="#project/${encodeURIComponent(item.project_name)}?ptab=action-items">${escapeHtml(item.project_name || '')}</a>`;
+            const projLink = `<a class="pm-item-project" href="${projectHref(item.project_name, item.task_id, 'action-items')}">${escapeHtml(item.project_name || '')}</a>`;
             const fromMeta = item.requested_by ? `from ${escapeHtml(item.requested_by)}` : '';
             return `<div class="pm-item-row ${item.overdue ? 'is-overdue' : ''}">
                 <div class="pm-item-main">
@@ -6790,80 +7877,268 @@
             </div>`;
         }
 
-        // "On other people" merges two records that both mean someone else
-        // owes something: action items assigned to a colleague (commitment)
-        // and Waiting-on rows (blocker). Both are actionable here - a
-        // commitment by id, a blocker by verified row position.
+        // The projects table. One row per project, built from `projects[]` and
+        // NOT from the on_others groups: a project can have items on him and
+        // nothing on anyone else, and rendering the groups meant such a project
+        // appeared nowhere at all - the one he was working in was invisible.
         //
-        // The server groups by project and pre-sorts BOTH levels (groups by
-        // newest activity, rows by days past the line); never re-sort here.
-        // Only the two most recently active groups start expanded - the flat
-        // list ran to dozens of rows across a dozen projects.
-        // Which project groups are open, by task_id. Held across re-renders:
-        // every mutation refetches, and deriving expansion from array position
-        // collapsed the group the user was working in on each action.
+        // The server pre-sorts both projects[] and the rows inside each group;
+        // never re-sort here.
+        //
+        // Which projects are open, by task_id. Held across re-renders: every
+        // mutation refetches, and deriving expansion from array position
+        // collapsed the row the user was working in on each action.
         let onOthersExpanded = null;
 
-        function renderOnOthers(groups, counts) {
+        function renderOnOthers(projects, groups, counts) {
             // A fresh payload supersedes any stale-view notice.
             pmClearOnOthersBanner();
-            const totalRows = counts.on_others || 0;
-            const projectCount = counts.on_others_projects || groups.length;
-            document.getElementById('todayOnOthersCount').textContent = projectCount
-                ? `${totalRows} across ${projectCount} project${projectCount !== 1 ? 's' : ''}`
+            const byTask = new Map(groups.map(g => [g.task_id, g]));
+            document.getElementById('todayOnOthersCount').textContent = projects.length
+                ? `${projects.length} active`
                 : '0';
+            const help = document.getElementById('todayOnOthersHelp');
             const body = document.getElementById('todayOnOthersBody');
-            if (!groups.length) {
-                body.innerHTML = '<div class="pm-empty">Nothing sitting with anyone else.</div>';
+            if (!projects.length) {
+                if (help) help.textContent = '';
+                body.innerHTML = '<div class="pm-empty">No project has an open item or an outstanding ask.</div>';
                 return;
             }
-            // Seed on the first render only: the two most recently active
-            // groups. After that the user's own toggles decide.
+            if (help) help.textContent = attnTableHelp(counts);
             if (onOthersExpanded === null) {
-                onOthersExpanded = new Set(groups.slice(0, 2).map(g => g.task_id));
+                // Everything starts closed. Auto-expanding filled the screen
+                // with rows from whichever project happened to sort first, so
+                // the list of projects never fit on screen at all.
+                onOthersExpanded = new Set();
             } else {
-                // Drop groups that no longer exist (all their rows resolved).
-                const live = new Set(groups.map(g => g.task_id));
+                // Drop projects that no longer exist (all their rows resolved).
+                const live = new Set(projects.map(p => p.task_id));
                 for (const id of [...onOthersExpanded]) {
                     if (!live.has(id)) onOthersExpanded.delete(id);
                 }
             }
-            body.innerHTML = groups
-                .map(g => renderOnOthersGroup(g, onOthersExpanded.has(g.task_id)))
+            const maxCount = projects.reduce((m, p) => Math.max(m, p.on_others_count || 0), 0);
+            // "idle" was the heading on two different columns - the meter and
+            // the count - so neither said what it measured. The meter is a
+            // share, the count is a number of asks, and both are about the same
+            // 7-day threshold, so the threshold is what they are named after.
+            const head = `<div class="attn-col-head" aria-hidden="true">
+                <span></span><span></span><span>mine</span><span>asks</span>
+                <span>one tick per ask</span><span>7d+</span><span>worked</span>
+                <span>done</span><span>next up</span>
+            </div>`;
+            body.innerHTML = head + projects
+                .map(p => renderOnOthersGroup(p, byTask.get(p.task_id),
+                                              onOthersExpanded.has(p.task_id), maxCount))
                 .join('');
         }
 
-        function renderOnOthersGroup(group, expanded) {
-            const name = group.project_name || '';
-            const bodyId = `onOthersGroup-${group.task_id}`;
-            const stale = group.stale_count
-                ? `<span class="due-cell-past">${group.stale_count} stale</span>`
-                : '';
-            const newest = (group.newest_age_days !== null && group.newest_age_days !== undefined)
-                ? `<span>newest ${group.newest_age_days}d ago</span>`
-                : '';
+        // One line under the title. It has to explain the meter, which is novel,
+        // and carry the one fact the columns cannot: how much of the whole is
+        // idle. An age histogram was the alternative and it says less per pixel.
+        function attnTableHelp(counts) {
+            const stale = counts.stale || 0;
+            const total = counts.on_others || 0;
+            // The mechanism now lives in the column heading ("one tick per ask"),
+            // so this line only has to say what amber means and carry the total.
+            const scale = 'Amber ticks are the ones with no reply.';
+            if (!stale) return `Every ask has had a reply inside 7 days. ${scale}`;
+            return `${stale} of ${total} asks have had no reply for 7 days or more. ${scale}`;
+        }
+
+        function renderOnOthersGroup(project, group, expanded, maxCount) {
+            const name = project.name || '';
+            const bodyId = `onOthersGroup-${project.task_id}`;
+            const rows = group ? (group.rows || []) : [];
+            const count = project.on_others_count || 0;
+            const staleCount = project.stale_on_others_count || 0;
+            const mineCount = project.open_count || 0;
+            const due = project.due_date ? pmFormatDue(project.due_date) : null;
+            // Deliberately NOT project.at_risk: that is true whenever anything
+            // is stale, which the meter already says, so it would repeat the
+            // meter in the one colour reserved for lateness. Only the reasons
+            // this row does not otherwise carry get a dot.
+            const overdueCount = project.overdue_count || 0;
+            const dueSoon = project.days_to_due !== null && project.days_to_due !== undefined
+                && project.days_to_due <= 7;
+            const dot = overdueCount
+                ? `<span class="pm-risk-dot" title="${overdueCount === 1 ? 'One of your own items is late' : overdueCount + ' of your own items are late'}"></span>`
+                : (dueSoon ? '<span class="pm-risk-dot is-soon" title="Project due within 7 days"></span>' : '');
+            // Same predicate as the Stalled card, so the card is a shortcut into
+            // rows he can already find by eye.
+            const worked = project.days_since_worked;
+            const isStalled = staleCount > 0 && worked !== null && worked !== undefined && worked <= 3;
+            const num = (n, cls) => n
+                ? `<span class="pm-group-count ${cls || ''}">${n}</span>`
+                : '<span class="pm-group-count is-zero">&middot;</span>';
+            const meter = attnAskMeter(count, staleCount, maxCount);
+            // The row was a single <button> wrapping everything, which is why
+            // there was no way to open a project from here: an <a> cannot live
+            // inside a <button>, so the name could not be a link. Split into
+            // two controls with distinct jobs - the caret expands, the name
+            // navigates - and the row itself is a plain div whose click is
+            // delegated to the caret, so clicking any of the numbers still
+            // expands. The href carries the task id because names repeat.
+            const href = projectHref(name, project.task_id);
             return `<div class="pm-group">
-                <button class="pm-group-header" aria-expanded="${expanded}"
-                        aria-controls="${bodyId}" data-task-id="${group.task_id}"
-                        onclick="toggleOnOthersGroup(this, '${bodyId}')">
-                    <span class="pm-group-caret" aria-hidden="true">&rsaquo;</span>
-                    <span class="pm-group-name">${escapeHtml(name)}</span>
-                    <span class="count-pill">${group.count}</span>
-                    <span class="pm-group-meta">${stale}${newest}</span>
-                </button>
+                <div class="pm-group-header ${isStalled ? 'is-stalled' : ''}"
+                     onclick="attnRowClick(event, '${bodyId}')">
+                    <button class="pm-group-caret" aria-expanded="${expanded}" aria-controls="${bodyId}"
+                            data-task-id="${project.task_id}"
+                            aria-label="${expanded ? 'Collapse' : 'Expand'} ${escapeHtml(name)}"
+                            onclick="toggleOnOthersGroup(this, '${bodyId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
+                    <a class="pm-group-name" href="${href}">${escapeHtml(name)}${dot}</a>
+                    ${num(mineCount, 'is-mine')}
+                    ${num(count)}
+                    ${meter}
+                    ${num(staleCount, 'pm-heat-text')}
+                    <span class="pm-group-touched">${due ? `<span class="${due.cls}">${due.text}</span>` : attnWorkedLabel(worked)}</span>
+                    ${attnProgress(project)}
+                    ${attnNextUp(project)}
+                </div>
                 <div class="pm-group-rows" id="${bodyId}" style="display:${expanded ? 'block' : 'none'};">
-                    ${group.rows.map(renderOnOthersRow).join('')}
+                    ${expanded ? attnPanel(project, rows) : ''}
                 </div>
             </div>`;
+        }
+
+        // His own rows first, then everyone else's. That ordering IS his
+        // complaint answered: the panel used to show only what other people owed.
+        function attnPanel(project, rows) {
+            const mine = rows.filter(r => r.mine);
+            const theirs = rows.filter(r => !r.mine);
+            if (!mine.length && !theirs.length) {
+                return '<div class="pm-empty" style="padding:12px 0;">Nothing outstanding on this project.</div>';
+            }
+            const head = t => `<div class="attn-sub" style="margin:6px 0 2px;">${t}</div>`;
+            return (mine.length ? head('On you') + mine.map(renderOnOthersRow).join('') : '')
+                 + (theirs.length ? head('On other people') + theirs.map(renderOnOthersRow).join('') : '')
+                 + `<div class="attn-sub" style="margin:8px 0 0;">
+                        last worked ${attnWorkedLabel(project.days_since_worked)} &middot;
+                        <a class="pm-item-project" href="${projectHref(project.name, project.task_id)}">open project</a>
+                        ${attnTicketLink(project)}
+                    </div>`;
+        }
+
+        // One tick per ask instead of a solid bar. The bar's length was the
+        // project's share of the largest project, which at this data's range
+        // cannot be read: 1 ask and 3 asks both render as a stub a few pixels
+        // long, and 5 vs 3 is a difference of about 20px on a 300px scale. Ticks
+        // are countable, so 3 amber ticks IS "3 asks, all waiting".
+        //
+        // The absolute scale survives, which is the property that made the bar
+        // worth having: a tick is a fixed width, so total width still stays
+        // proportional to the number of asks and lengths compare between rows.
+        // Idle ticks go first so they read as one amber quantity rather than as a
+        // dotted line.
+        //
+        // Above 20 asks the comb stops being countable AND stops fitting (20
+        // ticks is 237px), so it falls back to the bar - which is fine at that
+        // end of the range, because a project with 20+ asks is unambiguously the
+        // long one whatever the drawing.
+        const COMB_MAX_TICKS = 20;
+        function attnAskMeter(count, staleCount, maxCount) {
+            // Nothing at all when nothing is with anyone else. The 4px min-width
+            // that keeps a one-ask project visible would otherwise draw a stub on
+            // a project with zero, reading as "a tiny amount" rather than "none".
+            if (!count) return '<span></span>';
+            const label = `${count} asks with other people, ${staleCount} with no reply for 7 days or more`;
+            if (count > COMB_MAX_TICKS) {
+                // Bar length on one absolute scale across every project, so
+                // length compares volume between rows; the fill is this
+                // project's no-reply share.
+                const lengthPct = maxCount ? Math.round((count / maxCount) * 100) : 0;
+                const fillPct = Math.round((staleCount / count) * 100);
+                return `<span class="pm-group-meter" title="${escapeHtml(label)}">
+                        <span class="pm-group-meter-bar" style="width:${lengthPct}%;">
+                            <span class="pm-group-meter-fill" style="width:${fillPct}%;"></span>
+                        </span>
+                    </span>`;
+            }
+            const ticks = Array.from({ length: count }, (_, i) =>
+                `<span class="attn-comb-tick${i < staleCount ? ' is-idle' : ''}"></span>`).join('');
+            return `<span class="attn-comb" title="${escapeHtml(label)}">${ticks}</span>`;
+        }
+
+        // The project's tracker reference, in the panel rather than the row: 7 of
+        // 12 projects have one, so as a row column it would be a mostly-empty
+        // 12th object in a table this pass spent its time decluttering. Here it
+        // sits with the other per-project links, where you look once you have
+        // decided to act on the project.
+        function attnTicketLink(project) {
+            const label = (project.ticket_label || '').trim();
+            if (!label) return '';
+            const url = (project.ticket_url || '').trim();
+            const inner = url
+                ? `<a class="pm-item-project" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
+                : escapeHtml(label);
+            return ` &middot; ${inner}`;
+        }
+
+        // How far through the checklist the project is. The row said who owed
+        // what but nothing about whether the work was nearly done or barely
+        // started, so "3 asks outstanding" read the same on a project at 86% as
+        // on one at 0%. A bar plus the fraction: the bar is for comparing rows
+        // at a glance, the fraction is the number you act on.
+        function attnProgress(project) {
+            const total = project.total_count || 0;
+            if (!total) return '<span class="pm-group-count is-zero">&middot;</span>';
+            const done = project.completed_count || 0;
+            const pct = project.completion_pct || 0;
+            return `<span class="attn-done" title="${done} of ${total} checklist items done">
+                <span class="attn-done-bar"><span class="attn-done-fill" style="width:${pct}%"></span></span>
+                <span class="attn-done-text">${done}/${total}</span>
+            </span>`;
+        }
+
+        // The next unchecked item, which is the "what is next on the plate" half
+        // of the row - its partner is the `worked` column saying when the project
+        // was last touched. One line, ellipsised, full text in the tooltip: these
+        // are whole sentences and twelve of them wrapping would cost the fold.
+        function attnNextUp(project) {
+            const next = (project.next_up || '').trim();
+            if (!next) {
+                // 100% complete is a different statement from "no checklist".
+                const done = (project.total_count || 0) > 0
+                    && project.completed_count === project.total_count;
+                return `<span class="attn-next ${done ? 'is-done' : 'is-none'}">${done ? 'all done' : '&middot;'}</span>`;
+            }
+            return `<span class="attn-next" title="${escapeHtml(next)}">${escapeHtml(next)}</span>`;
+        }
+
+        // The whole row stays clickable to expand, so the numbers and the meter
+        // are not dead space. The two real controls inside it opt out: the name
+        // link navigates, the caret already has its own handler and would
+        // otherwise toggle twice.
+        function attnRowClick(ev, bodyId) {
+            if (ev.target.closest('a, button')) return;
+            const caret = ev.currentTarget.querySelector('.pm-group-caret');
+            if (caret) toggleOnOthersGroup(caret, bodyId);
         }
 
         function toggleOnOthersGroup(btn, bodyId) {
             const el = document.getElementById(bodyId);
             const open = el.style.display === 'none';
+            const taskId = Number(btn.dataset.taskId);
+            // Build the panel on first open. Measured: rendering all twelve
+            // panels eagerly and hiding them cost 142KB of markup and 1,039 DOM
+            // nodes on every mutation, about a thousand of them invisible and
+            // 61% of the whole page's DOM. Lazily it is 12KB and 146 nodes.
+            if (open && !el.innerHTML.trim() && !Number.isNaN(taskId)) {
+                const project = todayProjectsById[taskId];
+                const group = todayGroupsByTask[taskId];
+                if (project) el.innerHTML = attnPanel(project, group ? (group.rows || []) : []);
+            }
             el.style.display = open ? 'block' : 'none';
             btn.setAttribute('aria-expanded', String(open));
+            // The label is the caret's only accessible name, so it has to track
+            // the state it describes.
+            const label = btn.getAttribute('aria-label');
+            if (label) {
+                btn.setAttribute('aria-label',
+                    (open ? 'Collapse' : 'Expand') + label.replace(/^(Expand|Collapse)/, ''));
+            }
             // Remember it so the next refetch does not collapse this group.
-            const taskId = Number(btn.dataset.taskId);
             if (onOthersExpanded && !Number.isNaN(taskId)) {
                 if (open) onOthersExpanded.add(taskId);
                 else onOthersExpanded.delete(taskId);
@@ -6873,34 +8148,45 @@
         function renderOnOthersRow(row) {
             const pastLine = row.days_past_line !== null && row.days_past_line !== undefined;
             const isCommitment = row.kind === 'commitment';
-            const kindChip = isCommitment
-                ? '<span class="pm-badge">commitment</span>'
-                : '<span class="pm-badge pm-badge-wait">blocker</span>';
+            // A chip only on the minority kind. Every row in this list is a
+            // blocker in practice, and 60-odd identical "blocker" badges carry
+            // no information while costing a column - the card's help line says
+            // it once instead. A commitment among them is genuinely worth
+            // marking, so it keeps its chip.
+            const kindChip = isCommitment ? '<span class="pm-badge">commitment</span>' : '';
             const idChip = row.label ? `<span class="pm-id-chip">${escapeHtml(row.label)}</span> ` : '';
 
             let timing = '';
             if (isCommitment) {
                 if (pastLine) {
-                    timing = `<span class="due-cell-past">${row.days_past_line}d overdue</span>`;
+                    timing = `<span class="pm-alert-text">${row.days_past_line}d overdue</span>`;
                 } else if (row.due_date) {
                     timing = `<span class="due-cell-soon">due ${escapeHtml(row.due_date)}</span>`;
                 }
             } else if (row.age_days !== null && row.age_days !== undefined) {
+                // Amber, not red, and no "(stale)" word: the project's meter
+                // right above already says how much has gone idle, and
+                // repeating it per row is what turned two thirds of the list
+                // red and left red meaning nothing.
                 timing = pastLine
-                    ? `<span class="due-cell-past">asked ${row.age_days}d ago (stale)</span>`
-                    : `<span class="due-cell-none">asked ${row.age_days}d ago</span>`;
+                    ? `<span class="pm-heat-text">${row.age_days}d</span>`
+                    : `<span>${row.age_days}d</span>`;
             }
 
+            // Moved out of the collapsed row: it is the single largest source
+            // of per-row noise, and it only matters once you are deciding about
+            // that one item.
+            // "gates" and "from" are both terse to the point of ambiguity - the
+            // first is jargon, the second could mean who asked or where it came
+            // from. Say the relationship.
             const why = row.why
-                ? `<span>${isCommitment ? 'from' : 'gates'} ${escapeHtml(row.why)}</span>`
+                ? `<div class="pm-item-why">${isCommitment ? 'asked by' : 'blocks'} ${escapeHtml(row.why)}</div>`
                 : '';
 
             // A commitment acts by its action-item id. A blocker has no id -
             // it acts by row position, verified server-side against its own
             // text, so the exact `what` travels with the request.
-            const rowId = isCommitment
-                ? `onOthersItem-${row.id}`
-                : `onOthersWait-${row.task_id}-${row.row_index}`;
+            const rowId = pmRowDomId(row, 'onOthers');
             const actions = isCommitment
                 ? `<div class="pm-item-actions">
                     <input type="date" value="${escapeHtml(row.due_date || '')}" title="Change due date"
@@ -6921,24 +8207,31 @@
                     <button class="pm-mini-btn" onclick="pmCloseResolve('${rowId}')">Cancel</button>
                 </div>`;
 
-            return `<div class="pm-item-row ${pastLine ? 'is-stale' : ''}" id="${rowId}"
+            const what = escapeHtml(row.what || '');
+            return `<div class="pm-item-row pm-wait-row" id="${rowId}"
                          data-task-id="${row.task_id}" data-row-index="${row.row_index === null || row.row_index === undefined ? '' : row.row_index}"
-                         data-what="${escapeHtml(row.what || '')}"
+                         data-what="${what}"
                          data-who="${escapeHtml(row.who || '')}"
                          data-since="${escapeHtml(row.since || '')}">
-                <div class="pm-item-main">
-                    <div class="pm-item-what">${idChip}${escapeHtml(row.what)}</div>
-                    <div class="pm-item-meta">
-                        ${kindChip}
-                        <span>${escapeHtml(row.who || '')}</span>
-                        ${timing}
-                        ${why}
-                    </div>
-                    ${resolveForm}
-                    <div class="pm-row-error" id="${rowId}-error" role="alert" style="display:none;"></div>
+                <div class="pm-item-what" title="${what}" onclick="pmToggleWaitRow(this)">${idChip}${what}</div>
+                <div class="pm-item-meta">
+                    ${kindChip}
+                    <span>${escapeHtml(row.who || '')}</span>
+                    ${timing}
                 </div>
                 ${actions}
+                ${why}
+                ${resolveForm}
+                <div class="pm-row-error" id="${rowId}-error" role="alert" style="display:none;"></div>
             </div>`;
+        }
+
+        // Click the text to see the whole sentence plus what it gates. Bound to
+        // the text rather than the row so it cannot swallow clicks meant for
+        // the Resolve button or the outcome field.
+        function pmToggleWaitRow(el) {
+            const row = el.closest('.pm-wait-row');
+            if (row) row.classList.toggle('is-open');
         }
 
         // True only for a parseable http(s) URL. Ticket URLs can arrive from a
@@ -7038,44 +8331,7 @@
             }
         }
 
-        function renderTodayAttention(projects) {
-            const body = document.getElementById('todayAttentionBody');
-            if (!projects.length) {
-                body.innerHTML = '<div class="pm-empty">No projects need attention right now.</div>';
-                return;
-            }
-            body.innerHTML = projects.map(p => {
-                const due = p.due_date ? pmFormatDue(p.due_date) : null;
-                const dot = p.at_risk ? '<span class="pm-risk-dot" title="At risk"></span>' : '';
-                const counts = [];
-                if (p.open_count) counts.push(`${p.open_count} open`);
-                if (p.overdue_count) counts.push(`<span class="due-cell-past">${p.overdue_count} overdue</span>`);
-                if (p.on_others_count) counts.push(`${p.on_others_count} on others`);
-                if (p.stale_on_others_count) counts.push(`<span class="due-cell-past">${p.stale_on_others_count} stale</span>`);
-                return `<div class="today-attention-item">
-                    <div class="today-attention-main">
-                        <a class="pm-item-project" href="#project/${encodeURIComponent(p.name)}">${escapeHtml(p.name)}</a>${dot}
-                        <div class="pm-item-meta" style="margin-top:4px;">
-                            ${due ? `<span class="${due.cls}">due ${due.text}</span>` : ''}
-                            ${counts.length ? `<span>${counts.join(', ')}</span>` : ''}
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
-        }
-
-        function toggleTodayOther(btn) {
-            const el = document.getElementById('todayOtherOpen');
-            const open = el.style.display === 'none';
-            el.style.display = open ? 'block' : 'none';
-            // Read the count off the element; rebuilding from the current label
-            // dropped it permanently after the first collapse.
-            const label = btn.dataset.countLabel || 'other open items';
-            btn.textContent = `${open ? 'Hide' : 'Show'} ${label}`;
-            btn.setAttribute('aria-expanded', String(open));
-        }
-
-        // Inline mutations from the Today view - refetch Today after each.
+        // Inline mutations from the Attention view - refetch after each.
         // Puts the failure on the row instead of only the console, and blocks
         // the double-click that a silent no-op invites.
         function pmFormError(slotId, message) {
@@ -7090,7 +8346,10 @@
         }
 
         function pmRowError(el, message) {
-            const row = el && el.closest ? el.closest('.pm-item-row') : null;
+            // .attn-own is the compact row form used in the On-you card; it
+            // carries its own .pm-row-error slot and must resolve here too, or a
+            // failed Done reports only to the console.
+            const row = el && el.closest ? el.closest('.pm-item-row, .attn-own') : null;
             const err = row ? row.querySelector('.pm-row-error') : null;
             if (err) { err.textContent = message; err.style.display = 'block'; }
             else console.error(message);
@@ -7132,7 +8391,7 @@
         }
 
         // ---- Project detail page ----------------------------------------------
-        async function openProjectPage(name, tab) {
+        async function openProjectPage(name, tab, taskId) {
             // Dismiss the initial full-screen overlay when a project page is
             // the entry point (deep link), the same way the Today view does.
             if (LoadingManager.isInitialLoad) LoadingManager.hide();
@@ -7153,8 +8412,20 @@
             }
 
             // Resolve the task (id + repo + category) from the list endpoints.
-            let task = await findTaskByName(name, '/api/tasks/active');
-            if (!task) task = await findTaskByName(name, '/api/tasks/completed?days=365');
+            // By id when the caller knew one, since names are not unique; the
+            // name is still what the URL and the heading show.
+            const find = taskId
+                ? ep => findTaskById(taskId, ep)
+                : ep => findTaskByName(name, ep);
+            let task = await find('/api/tasks/active');
+            if (!task) task = await find('/api/tasks/completed?days=365');
+            // An id that resolves to nothing means the row is stale (deleted or
+            // archived since it rendered). Fall back to the name rather than
+            // showing "not found" for a project that does still exist.
+            if (!task && taskId) {
+                task = await findTaskByName(name, '/api/tasks/active')
+                    || await findTaskByName(name, '/api/tasks/completed?days=365');
+            }
             if (!task) {
                 document.getElementById('projectPageOverview').innerHTML =
                     `<div class="glass-card"><div class="pm-empty">Project "${escapeHtml(name)}" not found.</div></div>`;
@@ -7292,7 +8563,7 @@
                     <div class="pm-item-meta" style="margin:12px 0;">
                         <span>Due: <span class="${due.cls}">${due.text}</span></span>
                         ${task.priority != null ? `<span>Priority: ${escapeHtml(String(task.priority))}</span>` : ''}
-                        <span><a class="pm-item-project" href="#project/${encodeURIComponent(task.name)}?ptab=action-items">${openCount} open action item${openCount !== 1 ? 's' : ''}</a></span>
+                        <span><a class="pm-item-project" href="${projectHref(task.name, task.id, 'action-items')}">${openCount} open action item${openCount !== 1 ? 's' : ''}</a></span>
                     </div>
                     <div class="pm-inline-form">
                         <input type="date" id="projPageDueInput" aria-label="Project due date"
@@ -10959,7 +12230,7 @@
                 if (!LoadingManager.isInitialLoad) {
                     const view = getCurrentView();
                     let ok = true;
-                    if (view === 'today' || view === '') {
+                    if (view === 'attention' || view === '') {
                         ok = await loadTodayData();
                     } else if (view === 'projects') {
                         // Categories too: another tab/machine/CLI may have

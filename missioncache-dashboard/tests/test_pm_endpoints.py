@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+import sqlite3
 from datetime import date, timedelta
 
 import pytest
@@ -67,6 +68,13 @@ def sandboxed(tmp_path, monkeypatch):
     monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
     monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
+    # server.py binds its OWN MISSIONCACHE_ROOT at import time from the real
+    # home, so patching Path.home and missioncache_db's copy leaves it pointing
+    # at the developer's actual ~/.missioncache. The endpoint re-imports the
+    # patched value locally, but parse_missioncache_progress reads this global -
+    # without this line the progress assertions below silently measure real
+    # projects instead of the sandbox.
+    monkeypatch.setattr(server, "MISSIONCACHE_ROOT", mc_root)
     return mc_root
 
 
@@ -384,14 +392,15 @@ class TestTodayEndpoint:
         assert result["counts"]["stale"] == 0
 
     def test_groups_sort_by_newest_row_not_by_staleness(self, sandboxed):
-        """Grouping spec: a project asked about yesterday is live; one whose
-        asks have all sat for months is archaeology, even though its rows are
-        further past the line."""
-        from missioncache_db import pm_items
-
+        """Grouping spec (user instruction, 2026-07-24): "sort them from the
+        project with the newest action items". A project someone was asked
+        about yesterday is live; one whose asks have all sat for months is
+        archaeology, even though its rows are further past the line. Ordering
+        is recency; urgency is carried by the per-row stale marks instead.
+        """
         db = missioncache_db.TaskDB()
-        ancient = db.create_task("ancient-proj", task_type="coding", repo_id=None)
-        fresh = db.create_task("fresh-proj", task_type="coding", repo_id=None)
+        db.create_task("ancient-proj", task_type="coding", repo_id=None)
+        db.create_task("fresh-proj", task_type="coding", repo_id=None)
         for name in ("ancient-proj", "fresh-proj"):
             (sandboxed / "active" / name).mkdir(parents=True)
         (sandboxed / "active" / "ancient-proj" / "ancient-proj-context.md").write_text(
@@ -489,3 +498,497 @@ class TestTodayEndpoint:
         db.close()
 
         assert asyncio.run(server.get_today())["projects"][0]["name"] == "risky-proj"
+
+
+class TestSelfOwnedWaitingRows:
+    """Spec: the split is by WHO OWES THE WORK, not by which table stored the
+    row. A Waiting-on row whose `who` cell names the owner is work he owes, so
+    it counts on his side.
+
+    Before this, every row in the table counted against "on other people"
+    regardless of the cell, which under-reported his own plate roughly 4x on
+    live data and filed his own asks under someone else's label.
+    """
+
+    def _project_with(self, sandboxed, name, *rows):
+        db = missioncache_db.TaskDB()
+        task = db.create_task(name, task_type="coding", repo_id=None)
+        (sandboxed / "active" / name).mkdir(parents=True)
+        (sandboxed / "active" / name / f"{name}-context.md").write_text(
+            _with_waiting_rows(*rows)
+        )
+        db.close()
+        return task
+
+    def test_row_naming_the_owner_counts_on_his_side(self, sandboxed):
+        self._project_with(
+            sandboxed, "selfown",
+            "| Merge the PRs | Tomer | 2026-07-01 | the release |",
+            "| Access approval | Mor | 2026-07-01 | the cluster |",
+        )
+        result = asyncio.run(server.get_today())
+        rows = result["on_others"][0]["rows"]
+        mine = [r for r in rows if r["mine"]]
+        theirs = [r for r in rows if not r["mine"]]
+
+        assert [r["what"] for r in mine] == ["Merge the PRs"]
+        assert [r["what"] for r in theirs] == ["Access approval"]
+        # His row counts once, on his side only.
+        assert result["counts"]["on_me"] == 1
+        assert result["counts"]["on_others"] == 1
+        project = result["projects"][0]
+        assert project["open_count"] == 1
+        assert project["on_others_count"] == 1
+
+    def test_first_person_who_also_counts_as_his(self, sandboxed):
+        """"Me (Jose is blocked on it)" is a real live value."""
+        self._project_with(
+            sandboxed, "selfown2",
+            "| Deliver the YAMLs | Me (Jose is blocked on it) | 2026-07-01 | Jose |",
+        )
+        rows = asyncio.run(server.get_today())["on_others"][0]["rows"]
+        assert rows[0]["mine"] is True
+
+    def test_trailing_note_does_not_make_someone_elses_row_his(self, sandboxed):
+        """"Itai Sela (IT) - I said I would handle it" names Itai in the who
+        cell. The note is ambiguous, so the cell wins and the row stays theirs
+        rather than being guessed onto his plate."""
+        self._project_with(
+            sandboxed, "selfown3",
+            "| Confluence access | Itai Sela (IT) - I said I would handle it | 2026-07-01 | the map |",
+        )
+        rows = asyncio.run(server.get_today())["on_others"][0]["rows"]
+        assert rows[0]["mine"] is False
+        assert rows[0]["who_primary"] == "Itai"
+
+    def test_his_stale_row_does_not_inflate_the_idle_meter(self, sandboxed):
+        """The meter reads as "someone else is slow", so his own overdue row
+        must not fill it."""
+        old = (date.today() - timedelta(days=30)).isoformat()
+        self._project_with(
+            sandboxed, "selfown4",
+            f"| My own late thing | Tomer | {old} | the release |",
+        )
+        result = asyncio.run(server.get_today())
+        group = result["on_others"][0]
+        assert group["count"] == 0
+        assert group["stale_count"] == 0
+        assert group["mine_count"] == 1
+        assert result["counts"]["stale"] == 0
+        assert result["projects"][0]["stale_on_others_count"] == 0
+
+
+class TestWhoPrimary:
+    """Spec: the by-person rollup needs a grouping key, and the `who` cell is
+    hand-typed prose. Counting distinct exact strings says the field cannot
+    group; that measures string equality, not owners.
+    """
+
+    def test_variants_of_one_person_share_a_key(self, sandboxed):
+        db = missioncache_db.TaskDB()
+        db.create_task("whoproj", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "whoproj").mkdir(parents=True)
+        (sandboxed / "active" / "whoproj" / "whoproj-context.md").write_text(
+            _with_waiting_rows(
+                "| First | Lior | 2026-07-01 | a |",
+                "| Second | Lior Ben Naon | 2026-07-01 | b |",
+                "| Third | Lior (with Adam) | 2026-07-01 | c |",
+            )
+        )
+        db.close()
+        rows = asyncio.run(server.get_today())["on_others"][0]["rows"]
+        assert {r["who_primary"] for r in rows} == {"Lior"}
+        # The raw cell survives untouched, so a merge stays inspectable.
+        assert sorted(r["who"] for r in rows) == [
+            "Lior", "Lior (with Adam)", "Lior Ben Naon",
+        ]
+
+    def test_multi_owner_cell_keys_on_the_first_named(self, sandboxed):
+        db = missioncache_db.TaskDB()
+        db.create_task("multi", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "multi").mkdir(parents=True)
+        (sandboxed / "active" / "multi" / "multi-context.md").write_text(
+            _with_waiting_rows("| Shared | Dima / Lior | 2026-07-01 | a |")
+        )
+        db.close()
+        rows = asyncio.run(server.get_today())["on_others"][0]["rows"]
+        assert rows[0]["who_primary"] == "Dima"
+
+    def test_unparseable_owner_falls_back_to_the_raw_cell(self, sandboxed):
+        """A non-person owner is shown as written rather than dropped or
+        merged into somebody."""
+        db = missioncache_db.TaskDB()
+        db.create_task("cron", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "cron").mkdir(parents=True)
+        (sandboxed / "active" / "cron" / "cron-context.md").write_text(
+            _with_waiting_rows("| Nightly | (nobody) | 2026-07-01 | a |")
+        )
+        db.close()
+        rows = asyncio.run(server.get_today())["on_others"][0]["rows"]
+        assert rows[0]["who_primary"] == "(nobody)"
+
+
+class TestProjectRecency:
+    """Spec: the view distinguishes a project whose asks rot while he works in
+    it (chase them) from one whose asks rot because the project stopped (close
+    them). Tracked minutes cannot tell those apart - only 9% of a measured day
+    attributes to a project at all - so recency carries it.
+    """
+
+    def test_days_since_worked_is_exposed_and_none_when_never_worked(self, sandboxed):
+        db = missioncache_db.TaskDB()
+        worked = db.create_task("worked-proj", task_type="coding", repo_id=None)
+        db.create_task("never-proj", task_type="coding", repo_id=None)
+        for name in ("worked-proj", "never-proj"):
+            (sandboxed / "active" / name).mkdir(parents=True)
+            (sandboxed / "active" / name / f"{name}-context.md").write_text(CONTEXT)
+        from missioncache_db import pm_items
+        pm_items.add_action_item(db, worked.id, "a", due_date="2099-01-01")
+        pm_items.add_action_item(
+            db, [t for t in db.get_active_tasks() if t.name == "never-proj"][0].id,
+            "b", due_date="2099-01-01",
+        )
+        db.close()
+        # last_worked_on is stamped by heartbeat recording, so set it directly
+        # rather than simulating a session just to age one row.
+        four_days_ago = (date.today() - timedelta(days=4)).isoformat()
+        raw = sqlite3.connect(missioncache_db.DB_PATH)
+        raw.execute(
+            "UPDATE tasks SET last_worked_on = ? WHERE id = ?",
+            (f"{four_days_ago} 09:00:00", worked.id),
+        )
+        raw.commit()
+        raw.close()
+
+        by_name = {p["name"]: p for p in asyncio.run(server.get_today())["projects"]}
+        assert by_name["worked-proj"]["days_since_worked"] == 4
+        assert by_name["worked-proj"]["last_worked_on"].startswith(four_days_ago)
+        # Never worked must be None, not 0 - a project nobody has opened is the
+        # opposite of one worked today, and 0 would read as "today".
+        assert by_name["never-proj"]["days_since_worked"] is None
+        assert by_name["never-proj"]["last_worked_on"] is None
+
+
+class TestProjectProgressAndNextUp:
+    """Spec: a row says who owes what, but "3 asks outstanding" reads the same on
+    a project at 86% as on one at 0%, and the view showed nothing about what the
+    user should pick up next. The payload carries checklist progress and the next
+    unchecked item - derived server-side, because the parsed checklist runs to
+    hundreds of items across the active projects and a row needs one line of it.
+    """
+
+    TASKS_FILE = """# Prog Proj - Tasks
+
+**Last Updated:** 2026-07-10 12:00
+
+## Tasks
+
+- [x] 1. Write the parser
+- [x] 2. Wire it to the endpoint
+- [ ] 3. Cover it with tests
+- [ ] 4. Document the payload
+"""
+
+    def _project(self, sandboxed, name, tasks_body):
+        db = missioncache_db.TaskDB()
+        task = db.create_task(name, task_type="coding", repo_id=None)
+        d = sandboxed / "active" / name
+        d.mkdir(parents=True)
+        (d / f"{name}-context.md").write_text(CONTEXT)
+        if tasks_body is not None:
+            (d / f"{name}-tasks.md").write_text(tasks_body)
+        from missioncache_db import pm_items
+        pm_items.add_action_item(db, task.id, "keep the project in the payload",
+                                 due_date="2099-01-01")
+        db.close()
+        return task
+
+    def test_counts_and_next_up_come_from_the_checklist(self, sandboxed):
+        self._project(sandboxed, "prog-proj", self.TASKS_FILE)
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["completed_count"] == 2
+        assert p["total_count"] == 4
+        assert p["completion_pct"] == 50
+        # The FIRST unchecked item, not the last completed one and not a join of
+        # all of them: this is what the user picks up next.
+        assert p["next_up"] == "Cover it with tests"
+
+    def test_task_modes_is_never_shipped(self, sandboxed):
+        """The parsed checklist is the input to next_up, not part of the payload.
+
+        Forwarding it would put every item of every project on the wire so the
+        client could pick one line, which is the whole reason the pick happens
+        server-side.
+        """
+        self._project(sandboxed, "prog-proj", self.TASKS_FILE)
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert "task_modes" not in p
+        assert "project_mode" not in p
+
+    def test_all_items_done_reports_no_next_up(self, sandboxed):
+        """100% complete has to be distinguishable from "no checklist at all",
+        so next_up is None while the counts still show the work.
+        """
+        self._project(sandboxed, "done-proj", """# Done Proj - Tasks
+
+## Tasks
+
+- [x] 1. Only item
+""")
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["completed_count"] == p["total_count"] == 1
+        assert p["completion_pct"] == 100
+        assert p["next_up"] is None
+
+    def test_project_with_no_tasks_file_reports_zeroes_not_errors(self, sandboxed):
+        """A project can exist with action items and no tasks file; the row still
+        has to render.
+        """
+        self._project(sandboxed, "bare-proj", None)
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["total_count"] == 0
+        assert p["completed_count"] == 0
+        assert p["completion_pct"] == 0
+        assert p["next_up"] is None
+
+
+class TestProjectTicketReference:
+    """Spec: tickets are system-agnostic - label + url is the whole interface.
+    The tickets table is the current home; tasks.jira_key is the legacy column
+    that migrates into a row on the first PM mutation and stays readable.
+    """
+
+    def _project(self, sandboxed, name):
+        db = missioncache_db.TaskDB()
+        task = db.create_task(name, task_type="coding", repo_id=None)
+        d = sandboxed / "active" / name
+        d.mkdir(parents=True)
+        (d / f"{name}-context.md").write_text(CONTEXT)
+        from missioncache_db import pm_items
+        pm_items.add_action_item(db, task.id, "keep it in the payload",
+                                 due_date="2099-01-01")
+        db.close()
+        return task
+
+    def test_tickets_row_wins_over_the_legacy_column(self, sandboxed):
+        task = self._project(sandboxed, "tkt-proj")
+        raw = sqlite3.connect(missioncache_db.DB_PATH)
+        raw.execute("UPDATE tasks SET jira_key = ? WHERE id = ?", ("OLD-1", task.id))
+        raw.commit()
+        raw.close()
+        db = missioncache_db.TaskDB()
+        from missioncache_db import pm_items
+        pm_items.add_ticket(db, task.id, "NEW-2", url="https://tracker/NEW-2")
+        db.close()
+
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["ticket_label"] == "NEW-2"
+        assert p["ticket_url"] == "https://tracker/NEW-2"
+
+    def test_legacy_column_is_the_fallback(self, sandboxed):
+        task = self._project(sandboxed, "legacy-proj")
+        raw = sqlite3.connect(missioncache_db.DB_PATH)
+        raw.execute("UPDATE tasks SET jira_key = ? WHERE id = ?", ("OLD-1", task.id))
+        raw.commit()
+        raw.close()
+
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["ticket_label"] == "OLD-1"
+
+    def test_no_ticket_anywhere_is_none_not_empty_string(self, sandboxed):
+        """The UI branches on falsiness to decide whether to render the link at
+        all, so an absent reference must not arrive as a renderable value.
+        """
+        self._project(sandboxed, "no-tkt-proj")
+        p = asyncio.run(server.get_today())["projects"][0]
+        assert p["ticket_label"] is None
+        assert p["ticket_url"] is None
+
+
+class TestOwnLateWorkCountsAsOverdue:
+    """Spec: /api/today's own contract states that "days past the line" is ONE
+    scale across both record kinds - a commitment's line is its due date, a
+    Waiting-on row's line is the 7-day threshold. So anything of his that has
+    crossed its line is late, whichever table it came from.
+
+    The bug this pins: a Waiting-on row whose `who` names him incremented
+    open_count only. overdue_count skipped it, and counts.overdue is built from
+    the action items, which are the only rows carrying a due_date. Measured on
+    live data, the header reported "0 overdue" while a row of his sat 2 days
+    past its line with a named colleague blocked on it. A count that cannot
+    represent the case is worse than a wrong number, because the page asserts
+    the good news in a headline.
+    """
+
+    def _project_with(self, sandboxed, name, *rows):
+        db = missioncache_db.TaskDB()
+        task = db.create_task(name, task_type="coding", repo_id=None)
+        (sandboxed / "active" / name).mkdir(parents=True)
+        (sandboxed / "active" / name / f"{name}-context.md").write_text(
+            _with_waiting_rows(*rows)
+        )
+        db.close()
+        return task
+
+    def test_his_row_past_the_line_is_counted_overdue(self, sandboxed):
+        since = (date.today() - timedelta(days=9)).isoformat()
+        self._project_with(
+            sandboxed, "latemine",
+            f"| Deliver the preset YAMLs | Tomer | {since} | Jose is blocked |",
+        )
+        result = asyncio.run(server.get_today())
+        assert result["counts"]["overdue"] == 1
+        assert result["projects"][0]["overdue_count"] == 1
+
+    def test_his_row_inside_the_line_is_not_overdue(self, sandboxed):
+        """The threshold has to bite in both directions, or the count is just
+        'anything of his', which is open_count under another name.
+        """
+        since = (date.today() - timedelta(days=2)).isoformat()
+        self._project_with(
+            sandboxed, "freshmine",
+            f"| Reply to the thread | Tomer | {since} | nothing yet |",
+        )
+        result = asyncio.run(server.get_today())
+        assert result["counts"]["overdue"] == 0
+        assert result["projects"][0]["overdue_count"] == 0
+        assert result["counts"]["on_me"] == 1      # still on his plate
+
+    def test_someone_elses_late_row_is_not_his_overdue(self, sandboxed):
+        """A colleague sitting on an ask is THEIR latency, not his lateness. It
+        belongs to stale, and must not leak into overdue - red is reserved for
+        "you are late" and nothing else.
+        """
+        since = (date.today() - timedelta(days=20)).isoformat()
+        self._project_with(
+            sandboxed, "theirlate",
+            f"| Access approval | Mor | {since} | the cluster |",
+        )
+        result = asyncio.run(server.get_today())
+        assert result["counts"]["overdue"] == 0
+        assert result["projects"][0]["overdue_count"] == 0
+        assert result["counts"]["stale"] == 1
+
+    def test_both_kinds_of_his_late_work_add_up(self, sandboxed):
+        """The two live in different lists (action items in on_me, waiting rows
+        in on_others), so the count has to reach across both without
+        double-counting either.
+        """
+        since = (date.today() - timedelta(days=9)).isoformat()
+        task = self._project_with(
+            sandboxed, "bothkinds",
+            f"| Deliver the YAMLs | Tomer | {since} | Jose is blocked |",
+        )
+        db = missioncache_db.TaskDB()
+        from missioncache_db import pm_items
+        pm_items.add_action_item(
+            db, task.id, "ship the fix", assignee="me",
+            due_date=(date.today() - timedelta(days=3)).isoformat(),
+        )
+        db.close()
+
+        result = asyncio.run(server.get_today())
+        assert result["counts"]["overdue"] == 2
+        assert result["projects"][0]["overdue_count"] == 2
+        # and neither row is counted twice into on_me
+        assert result["counts"]["on_me"] == 2
+
+    def test_a_late_row_of_his_makes_the_project_at_risk(self, sandboxed):
+        """at_risk is derived from overdue_count, so fixing the count has to fix
+        the flag with it - otherwise a project where he is the blocker still
+        reads as healthy.
+        """
+        since = (date.today() - timedelta(days=11)).isoformat()
+        self._project_with(
+            sandboxed, "riskmine",
+            f"| Sign off the plan | Tomer | {since} | the whole suite |",
+        )
+        result = asyncio.run(server.get_today())
+        assert result["projects"][0]["at_risk"] is True
+
+
+class TestGroupOrderIsTotal:
+    """Spec: the sibling projects.sort in the same function documents the
+    convention - "Name last so the order is stable across requests when
+    everything else ties." The group list is the same kind of list rendered on
+    the same page, so it owes the reader the same guarantee.
+
+    Ordering on newest_age_days alone left ties resolved by dict insertion
+    order. That is deterministic within one process but it is not a property of
+    the data, so the same day's list can come back in a different order after a
+    rename or a new task shifts the row order underneath it.
+    """
+
+    def _project_with(self, sandboxed, name, *rows):
+        db = missioncache_db.TaskDB()
+        db.create_task(name, task_type="coding", repo_id=None)
+        (sandboxed / "active" / name).mkdir(parents=True)
+        (sandboxed / "active" / name / f"{name}-context.md").write_text(
+            _with_waiting_rows(*rows)
+        )
+        db.close()
+
+    def test_projects_tied_on_age_are_ordered_by_quiet_volume(self, sandboxed):
+        """Same freshest-ask age, different amounts gone quiet. The one holding
+        more quiet asks is the more useful one to look at, so it comes first."""
+        old = (date.today() - timedelta(days=40)).isoformat()
+        same = (date.today() - timedelta(days=40)).isoformat()
+        self._project_with(
+            sandboxed, "zzz-few",
+            f"| One thing | Mor | {same} | a |",
+        )
+        self._project_with(
+            sandboxed, "aaa-many",
+            f"| First thing | Mor | {same} | a |",
+            f"| Second thing | Gal | {old} | b |",
+            f"| Third thing | Yuval | {old} | c |",
+        )
+        groups = asyncio.run(server.get_today())["on_others"]
+        names = [g["project_name"] for g in groups]
+        # Both tie at the same newest age, so volume decides - NOT the
+        # alphabetical or insertion order, either of which would put zzz-few
+        # somewhere else.
+        assert names == ["aaa-many", "zzz-few"]
+
+    def test_projects_tied_on_age_and_volume_are_ordered_by_name(self, sandboxed):
+        """Fully tied, so the name makes the order total and repeatable."""
+        same = (date.today() - timedelta(days=40)).isoformat()
+        for name in ("charlie", "alpha", "bravo"):
+            self._project_with(
+                sandboxed, name, f"| A thing | Mor | {same} | gates |",
+            )
+        groups = asyncio.run(server.get_today())["on_others"]
+        assert [g["project_name"] for g in groups] == ["alpha", "bravo", "charlie"]
+
+    def test_freshest_still_wins_over_volume(self, sandboxed):
+        """The tiebreaks must not outrank the primary key: a project answered
+        recently stays ahead of a busier one that has gone quiet longer."""
+        fresh = (date.today() - timedelta(days=1)).isoformat()
+        old = (date.today() - timedelta(days=40)).isoformat()
+        self._project_with(
+            sandboxed, "busy-but-old",
+            f"| One | Mor | {old} | a |",
+            f"| Two | Gal | {old} | b |",
+            f"| Three | Yuval | {old} | c |",
+        )
+        self._project_with(
+            sandboxed, "quiet-but-fresh",
+            f"| Only one | Mor | {fresh} | a |",
+        )
+        groups = asyncio.run(server.get_today())["on_others"]
+        assert [g["project_name"] for g in groups] == ["quiet-but-fresh", "busy-but-old"]
+
+    def test_projects_with_no_answered_ask_sort_last(self, sandboxed):
+        """None means nothing has come back at all, which must not read as
+        "age zero" and jump the queue."""
+        fresh = (date.today() - timedelta(days=2)).isoformat()
+        self._project_with(
+            sandboxed, "has-ages", f"| A thing | Mor | {fresh} | gates |",
+        )
+        # A row that names HIM has no other-people age, so the group's
+        # newest_age_days is None.
+        self._project_with(
+            sandboxed, "no-ages", f"| My own thing | Tomer | {fresh} | gates |",
+        )
+        groups = asyncio.run(server.get_today())["on_others"]
+        assert [g["project_name"] for g in groups] == ["has-ages", "no-ages"]
