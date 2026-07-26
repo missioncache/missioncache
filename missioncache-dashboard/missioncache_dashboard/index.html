@@ -8050,7 +8050,7 @@ function bdRefreshProjects() {
   const sub = document.getElementById('projSub');
   if (pill) pill.textContent = shown;
   if (sub) sub.textContent = shown === bdState.projects.length
-    ? 'everything active, most recently worked first'
+    ? 'projects with something outstanding, most recently worked first'
     : `${shown} of ${bdState.projects.length} projects`;
 }
 
@@ -8282,7 +8282,7 @@ function renderAttention(data) {
     <section class="bd-tile" style="grid-column:1 / -1">
       <div class="bd-tile-head">${BD_ICON.proj}<h3>Projects</h3>
         <span class="bd-pill" id="projPill">${projects.length}</span>
-        <span class="bd-tile-sub" id="projSub">everything active, most recently worked first</span></div>
+        <span class="bd-tile-sub" id="projSub">projects with something outstanding, most recently worked first</span></div>
       <div class="bd-filters">
         <button class="bd-chip" type="button" data-pc="all" aria-pressed="${bdState.pcat === 'all'}" onclick="bdSetPcat(this.dataset.pc)">All ${projects.length}</button>
         ${/* The category goes in a data- attribute and is read back off the

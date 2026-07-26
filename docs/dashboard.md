@@ -12,7 +12,7 @@ The frontend's top-level views, all hash-routed:
 
 | Hash | View | What it shows |
 |------|------|---------------|
-| `#attention` (default) | Attention | Where attention is owed, across projects: what you owe, who owes you what, and every active project with its next step. [Detailed below](#attention-view). `#today` redirects here. |
+| `#attention` (default) | Attention | Where attention is owed, across projects: what you owe, who owes you what, and every project with something outstanding. [Detailed below](#attention-view). `#today` redirects here. |
 | `#projects` | Projects | Active and completed projects in two tables (with due dates, action-item badges, and at-risk dots), with click-through to the project page |
 | `#project/<name>[?tid=<task id>]` | Project page | Full page per project: Overview (description, Definition of Done, due date, stakeholders, tickets) and Action Items tabs, plus Tasks/Structure/Context/Plan/Updates. `tid` is optional and only disambiguates duplicate project names (a fork and its parent, or a stale row left by a rename); without it the name resolves to whichever task sorts first, which is the pre-`tid` behaviour every older link still gets. |
 | `#activity` | Activity | Today's time and LOC stats, hourly timeline, and a multi-week activity history with heatmap, trends, and top projects |
@@ -26,7 +26,7 @@ The default view, and the answer to "what needs me today". A greeting, a stats s
 
 - **My work** - everything you owe, joined from both places it is recorded: your open action items, plus Waiting-on rows whose `who` cell names you. The second kind is easy to lose, because it sits in a project file under someone else's heading. Each row has a Done button.
 - **Waiting on people** - asks grouped by age band (under 7d, 7-13d, 14-29d, 30d+), and within a band by person, most asks first. Someone holding asks in several bands appears in each one, showing only that band's asks, with a `+N elsewhere` badge - so a recent ask is never hidden behind an old one. Filters (all, no reply 7d+, 30d+, 3 or more), a text search across person, project and ask text, and a toggle for band order.
-- **Projects** - every active project with what is next (or, when there is no next step, what you last did), checklist progress, items on you, asks out over 7 days, and when it was last worked. Filterable by category, searchable.
+- **Projects** - what is next (or, when there is no next step, what you last did), checklist progress, items on you, asks out over 7 days, and when it was last worked. Filterable by category, searchable. This is **not** every active project: a project earns a row by having something outstanding, meaning an open item assigned to you, an ask out with someone, or a due date. On the live data as this was written that is 11 rows out of 26 active projects; the other 15 have nothing owed in either direction and are in the Projects view instead.
 
 The strip carries tracked time, commits, lines added and removed, work on you, how much of it is late, how much is out with other people, how much has had no reply in 7 days, and an hourly sparkline. Its tracked-time half arrives on a second request, so the board renders before it and fills in.
 
