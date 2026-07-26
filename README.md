@@ -249,7 +249,7 @@ Some work splits into parallel lanes that all lean on the same body of knowledge
 
 ### Local analytics dashboard
 
-A FastAPI + vanilla JS single-page app at `localhost:8787`. Shows active and completed projects with time tracking, per-repo breakdowns, hourly heatmaps, a weekly activity view, MissionCache Auto execution monitoring with DAG visualization, and untracked Claude Code sessions alongside the tracked ones. Dual-database under the hood: SQLite for writes, DuckDB for analytics reads.
+A FastAPI + vanilla JS single-page app at `localhost:8787`. It opens on the **Attention** view: what you owe (your action items plus the Waiting-on rows that name you), who owes you what grouped by how long it has been quiet, and every active project with its next step. The rest shows active and completed projects with time tracking, per-repo breakdowns, hourly heatmaps, a weekly activity view, MissionCache Auto execution monitoring with DAG visualization, and untracked Claude Code sessions alongside the tracked ones. Dual-database under the hood: SQLite for writes, DuckDB for analytics reads.
 
 ![Dashboard Projects view with active and completed projects, descriptions, progress, and time tracking](assets/dashboard_projects_screenshot.jpg)
 
