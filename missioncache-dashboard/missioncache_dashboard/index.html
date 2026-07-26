@@ -10,10 +10,12 @@
     <script>(function(){var p=localStorage.getItem('missioncache-theme')||'auto';var t=p==='auto'?(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):p;document.documentElement.setAttribute('data-theme-pref',p);if(t!=='dark')document.documentElement.setAttribute('data-theme',t);})()</script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Weight 300 was requested and never declared anywhere in this file, so
-         it downloaded on every load and rendered nothing. Inter Tight ships
-         only the three weights the display sizes use. -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- Weight ranges, not a list of cuts. An earlier version listed weights by
+         hand and asked for a 300 that nothing declared, so it downloaded on
+         every load and rendered nothing. `wght@400..800` serves one variable
+         file per unicode subset covering every weight in between, so the list
+         cannot drift out of step with the CSS again. -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
@@ -96,15 +98,18 @@
                decoration, so 4.5:1 binds. 4.77:1 dark / 5.20:1 light. */
             --pm-nil: #80809c;
 
-            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            /* Inter Tight for 22px and up only. Inter's spacing is tuned for
-               small UI text, so the same string set at 32px reads slack. Tight
-               is the same skeleton drawn closer, so it does not clash with the
-               body text the way a second typeface would, and it falls back to
-               Inter (then the system stack) if fonts.googleapis.com is
-               unreachable - no failure mode Inter did not already have. */
-            --font-display: 'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-mono: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+            --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            /* One family across both roles. Plus Jakarta Sans has enough
+               contrast between 500 and 800 to carry the display sizes on its
+               own, so a second face would be decoration rather than a job. Every
+               name here after the first is a real fallback: if
+               fonts.googleapis.com is unreachable the page renders in the system
+               UI face rather than in whatever the browser defaults to. */
+            --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            /* JetBrains Mono first, then the local stack. Its digits are the
+               reason: this dashboard sets numbers in columns that have to align,
+               and the fallbacks are the ones that were already here. */
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
         }
 
         /* Light theme overrides */
@@ -4900,18 +4905,9 @@
            stat cards, which spent 129px on four integers - the loudest objects
            on the page carrying its least actionable numbers. Each card answers
            a different question and none of them grows with the backlog. */
-        .attn-hero {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            margin-bottom: 20px;
-            align-items: stretch;
-        }
         @media (max-width: 1400px) {
-            .attn-hero { grid-template-columns: 1fr 1fr; }
         }
         @media (max-width: 900px) {
-            .attn-hero { grid-template-columns: 1fr; }
         }
         .attn-hero > .glass-card { margin: 0; }
         /* Eyebrow. Goes DOWN from 11px, against the direction of everything
@@ -4932,24 +4928,9 @@
            the 32px count shares a baseline with the 10px caps; an SVG has no
            baseline of its own, so putting it directly in that line would align
            its bottom edge to the text baseline and float it high. */
-        .attn-label-head {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-        }
-        .attn-icon {
-            width: 13px;
-            height: 13px;
-            flex: 0 0 auto;
-            /* Optically matched to the 10px caps beside it rather than set to
-               their cap height: a 13px box on a 7px cap band reads as the
-               section's marker, a 7px one reads as a speck. */
-            opacity: 0.75;
-        }
         /* Must follow .attn-icon, not precede it: equal specificity, so source
            order decides and the 13px above would otherwise win. Scales with the
            17px card title rather than with the 10px eyebrows. */
-        .attn-icon-title { width: 17px; height: 17px; opacity: 0.6; }
         .attn-count {
             font-family: var(--font-display);
             font-size: 32px;
@@ -4969,32 +4950,12 @@
            chase-the-people and the-project-is-parked, and those need opposite
            actions - the old label encoded that as ", live" / ", parked" tacked
            onto the title, which is exactly the wording that was unclear. */
-        .attn-state {
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.9px;
-            padding: 2px 7px;
-            border-radius: 4px;
-            background: var(--pm-heat-track);
-            color: var(--pm-heat);
-            white-space: nowrap;
-        }
         /* --pm-heat measures 4.09:1 here and fails AA, because the chip's own
            10%-black track darkens its backdrop to rgb(229,229,229) - the colour
            clears 4.5:1 on the bare card but not through its own background. A
            deeper amber for the chip only: 4.98:1. Same situation as
            --fork-accent's light-theme value above. */
         [data-theme="light"] .attn-state { color: #8a4d00; }
-        .attn-note {
-            margin-left: auto;
-            font-size: 12px;
-            font-weight: 400;
-            text-transform: none;
-            letter-spacing: 0;
-            color: var(--text-secondary);
-            text-align: right;
-        }
         .attn-sub {
             font-size: 12px;
             color: var(--text-secondary);
@@ -5035,24 +4996,13 @@
             overflow: visible;
             overflow-wrap: anywhere;
         }
-        .attn-own-foot {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 5px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            min-width: 0;
-        }
         .attn-own-foot .pm-item-project {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .attn-own-foot .attn-own-actions { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
         /* The date input only appears once the row is expanded: it is 110px wide
            and would eat the footer line at this card width. */
-        .attn-own-extra { display: none; margin-top: 6px; }
         .attn-own.is-open .attn-own-extra { display: flex; gap: 6px; align-items: center; }
         .attn-own .pm-item-why { display: none; }
         .attn-own.is-open .pm-item-why {
@@ -5066,23 +5016,6 @@
            hold them, which turns a backlog into an agenda: one conversation
            clears a fifth of it. The bar shares the projects table's absolute
            scale, so a person's bar and a project's bar are comparable. */
-        .attn-person {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 28px 28px 64px;
-            align-items: center;
-            gap: 10px;
-            padding: 5px 0;
-            font-size: 14px;
-            width: 100%;
-            background: none;
-            border: none;
-            color: var(--text-primary);
-            font-family: inherit;
-            text-align: left;
-            cursor: pointer;
-        }
-        .attn-person:hover { color: var(--pm-link); }
-        .attn-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .attn-num {
             font-size: 12px;
             font-variant-numeric: tabular-nums;
@@ -5093,31 +5026,9 @@
         /* Stalled: the join of attention owed against when the project was last
            worked. Flips between the chase and parked states instead of ever
            rendering empty, which is what earns it a permanent slot. */
-        .attn-rot-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 10px;
-            align-items: baseline;
-            padding: 4px 0;
-            font-size: 14px;
-        }
-        .attn-rot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .attn-rot-when {
-            font-size: 12px;
-            font-variant-numeric: tabular-nums;
-            color: var(--text-secondary);
-            white-space: nowrap;
-        }
 
         /* Today strip: the only genuinely daily thing on the view, and the one
            data source the old design ignored completely. */
-        .attn-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 28px;
-            align-items: baseline;
-        }
-        .attn-strip-item { display: flex; flex-direction: column; gap: 2px; }
         .attn-strip-value {
             font-family: var(--font-display);
             font-size: 22px;
@@ -5131,74 +5042,18 @@
                not stacked in a column, so nothing needs to align vertically. */
             font-variant-numeric: proportional-nums;
         }
-        .attn-strip-label {
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.9px;
-            color: var(--text-secondary);
-        }
         /* Hourly bars as divs, not a canvas: renderHourlyChart hardcodes its
            axis colours and applyTheme never touches a Chart instance, so a
            canvas here would be the one element ignoring the theme toggle. */
-        .attn-spark {
-            display: flex;
-            align-items: flex-end;
-            gap: 2px;
-            height: 28px;
-            margin-left: auto;
-        }
-        .attn-spark-bar {
-            width: 7px;
-            min-height: 2px;
-            border-radius: 1px;
-            background: var(--pm-heat-fill);
-        }
-        .attn-spark-bar.is-empty { background: var(--pm-heat-track); }
 
         /* "On other people" - grouped per project */
-        .pm-group { border-top: 1px solid var(--border); }
-        .pm-group:first-child { border-top: none; }
         /* The header IS the chart. Merging the per-project comparison into the
            row you click means the comparison and the navigation are one
            object, so neither costs the other any vertical space, and the list
            of projects doubles as the distribution across them. */
-        .pm-group-header {
-            display: grid;
-            /* caret | name | MINE | ASKS | no-reply meter | 7D+ | WORKED |
-               PROGRESS | NEXT UP
-               Every column except the last is capped, and NEXT UP takes what is
-               left - it is a sentence, so it is the one cell that should absorb
-               the slack and ellipsis out. The name column used to BE the
-               flexible track, which on a wide monitor grew it to ~790px and left
-               each project's name that far from its own first number. Handing
-               the slack to the meter instead just moved the problem: the meter
-               went to 1132px and pushed "worked" 1600px out. */
-            grid-template-columns: 14px minmax(180px, 280px) 34px 34px minmax(140px, 240px) 34px 74px 84px minmax(140px, 1fr);
-            align-items: center;
-            gap: 12px;
-            width: 100%;
-            /* 30px pitch, not 33: twelve rows at 33 pushed the table's last two
-               projects past the fold. 5px, not the 6px it was, so growing the
-               row text from 13px to 14px stays height-neutral. */
-            padding: 5px 0 5px 6px;
-            border-left: 2px solid transparent;
-            color: var(--text-primary);
-            font-size: 14px;
-            /* Explicit, not `normal`. The grid children now run 14px at three
-               different weights, and whichever one has the tallest line box
-               sets the row pitch - so with `normal` the pitch moves whenever a
-               child's size changes. Pinning it here makes the pitch a function
-               of this rule alone: 14 x 1.15 = 16.1px + 10px padding = 26.1px,
-               against the 27.5px it measured before. */
-            line-height: 1.15;
-            text-align: left;
-            cursor: pointer;
-        }
         /* Worked within 3 days and still has asks going idle: the case worth
            chasing. Amber, not red - red stays on "you are late", and nothing
            here is late, somebody else is quiet. */
-        .pm-group-header.is-stalled { border-left-color: var(--pm-heat); }
         /* One header row for the four numeric columns. Four unlabelled numbers
            was the failure mode of the previous design - even the meter needed a
            sentence of help text to explain itself. */
@@ -5229,9 +5084,6 @@
            background rather than a colour change, because recolouring the text
            also recolours the figures, and their colour carries meaning here
            (green mine, amber idle, grey nil). */
-        .pm-group-header:hover {
-            background: var(--bg-hover);
-        }
         /* The expand control, and now the row's only <button> - the row itself
            had to become a div so the project name could be an <a>.
 
@@ -5275,15 +5127,6 @@
         .pm-group-name:hover {
             color: var(--accent-purple);
             text-decoration: underline;
-        }
-        .pm-group-meta {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 8px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            white-space: nowrap;
         }
         /* Bar length is on ONE absolute scale across every project, so length
            compares volume between rows; the filled part is that project's
@@ -6035,7 +5878,442 @@
         .auto-execution-chip .exec-status.completed { background: var(--accent-green); }
         .auto-execution-chip .exec-status.failed { background: var(--accent-red); }
 
-    </style>
+    
+
+        /* ==========================================================
+           ATTENTION VIEW ("the board")
+           Every rule below is scoped to .bd or a .bd- class, so none of it
+           can reach another view. Verified the other direction too: the
+           host stylesheet has no .bd* selector, and its unqualified
+           table/th/td/tbody-tr rules cannot reach in because this board is
+           divs on CSS grid, not table markup. Turning any of it back into a
+           real <table> would re-open that.
+           Ported from the standalone prototype with three changes, all
+           marked below: the font stack and the mono stack go through the
+           :root tokens instead of naming families, and height comes off the
+           chrome above the board rather than being 100vh.
+           ========================================================== */
+
+/* ============================================================
+   ATTENTION BOARD v2
+   Style direction from the ui-ux-pro-max design system for
+   "personal productivity work dashboard, dense, professional":
+     - Soft UI Evolution: layered soft shadows, subtle depth, AA+
+     - density 8 (dashboard), motion 3 (subtle, 150-300ms)
+     - blue data + amber highlight; Fira Sans / Fira Code
+   Two of its rules are load-bearing here:
+     - values always visible as TEXT, never hover-only
+     - a filtered empty state suggests, it never goes blank
+   ============================================================ */
+.bd {
+  /* Teal focus + action orange, from the plugin's "colorful vibrant friendly
+     productivity" palette. Replaces the all-grey board: greys were correct and
+     lifeless. Values here are the AA-verified variants, not the raw palette. */
+  --bg:        #eff6f5;
+  --tile:      #ffffff;
+  --head-a:    #ffffff;
+  --head-b:    #f3faf8;
+  --line:      #d6e4e1;
+  --line-soft: #e9f2f0;
+  --ink:       #0f2b28;
+  --ink-2:     #3c5754;
+  --ink-3:     #52706c;
+  --accent:    #0b6e66;
+  --accent-2:  #14b8a6;
+  --accent-bg: #dcf5f1;
+  --amber:     #b34700;
+  --amber-bg:  #fff0e4;
+  --late:      #c0362c;
+  --late-bg:   #fdeceb;
+  --ok:        #14724c;
+
+  --b0: #aab6c6;
+  --b1: #f2d08a;
+  --b2: #e8b33d;
+  --b3: #c98a06;
+
+  --r: 8px;
+  --r-sm: 5px;
+  /* "improved shadows, softer than flat, clearer than neumorphism" */
+  --lift: 0 1px 2px rgba(22,35,58,.06), 0 2px 6px rgba(22,35,58,.05), 0 8px 20px rgba(22,35,58,.045);
+  --lift-hi: 0 1px 2px rgba(22,35,58,.08), 0 4px 12px rgba(22,35,58,.09), 0 16px 32px rgba(22,35,58,.07);
+  --inset-top: inset 0 1px 0 rgba(255,255,255,.9);
+}
+/* Dark is this app's DEFAULT and is signalled by the ABSENCE of data-theme:
+   the boot script in <head> only sets the attribute when the theme is not
+   dark. A [data-theme="dark"] selector therefore never matches, which left the
+   board showing its light tokens on a near-black page. Matching on "not light"
+   covers all three states: attribute absent, explicitly dark, explicitly
+   light. */
+:root:not([data-theme="light"]) .bd {
+  --bg:        #171b21;
+  --tile:      #1e242c;
+  --head-a:    #232a33;
+  --head-b:    #1e242c;
+  --line:      #333c47;
+  --line-soft: #272e37;
+  --ink:       #dbe3ec;
+  --ink-2:     #a6b4c5;
+  --ink-3:     #93a5a3;
+  --accent:    #4fd6c3;
+  --accent-2:  #7fe6d7;
+  --accent-bg: #10312e;
+  --amber:     #e8b33d;
+  --amber-bg:  #33280f;
+  --late:      #ff7b70;
+  --late-bg:   #3a1f1d;
+  --ok:        #5fd3a0;
+  --b0: #55616f;
+  --lift: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.35);
+  --lift-hi: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+  --inset-top: inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.bd, .bd *, .bd *::before, .bd *::after { box-sizing: border-box; }
+.bd {
+  /* Two very wide, very low-opacity washes. The flat fill read as a spreadsheet;
+     this gives the board a light source without putting anything behind the
+     data itself. Fixed so it does not travel when a tile scrolls. */
+  /* Three washes rather than a flat fill. Teal at the top-left where the eye
+     lands, orange at the top-right to pick up the action colour, and a low
+     violet at the bottom so the board does not fade out. Kept under 14% so it
+     tints the surface without competing with any data on top of it. */
+  background:
+    radial-gradient(880px 420px at 6% -12%, rgba(20,184,166,.16), transparent 62%),
+    radial-gradient(720px 380px at 98% -4%, rgba(234,88,12,.11), transparent 60%),
+    radial-gradient(900px 500px at 50% 108%, rgba(99,102,241,.09), transparent 64%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--ink);
+  font: 500 13px/1.45 var(--font-sans);
+  padding: 14px;
+  height: calc(100vh - var(--bd-top, 48px));
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+/* ---------- avatars ----------
+   The people gadget was a column of plain text names. An initial disc gives each
+   person a stable identity you recognise before you read, which is what makes a
+   people list scannable rather than just dense. Hue is derived from the name, so
+   it is stable across renders without any stored state. All eight hues carry
+   white initials at 5.78:1 or better - measured, not chosen by eye. */
+.bd-av {
+  width: 22px; height: 22px; flex: 0 0 auto;
+  border-radius: 50%; color: #fff;
+  font: 600 9.5px/22px var(--font-sans);
+  text-align: center; letter-spacing: .02em;
+  box-shadow: 0 1px 2px rgba(22,35,58,.25), inset 0 -1px 0 rgba(0,0,0,.12);
+  user-select: none;
+}
+.bd-person:hover .bd-av { transform: scale(1.08); }
+.bd-av.is-team {
+  background: var(--line-soft); color: var(--ink-3);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: none;
+}
+.bd-kind {
+  display: inline-block; margin-right: 5px; padding: 1px 5px; border-radius: 4px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  background: var(--accent-bg); color: var(--accent);
+}
+.bd-kind.is-wait { background: var(--amber-bg); color: var(--amber); }
+.bd-else {
+  margin-left: 6px; font-size: 10px; color: var(--ink-3); font-weight: 500;
+  white-space: nowrap;
+}
+.bd-tag {
+  margin-left: 6px; padding: 1px 5px; border-radius: 4px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  background: var(--line-soft); color: var(--ink-3); vertical-align: 1px;
+}
+.bd-av { transition: transform .15s ease; }
+
+/* ---------- age band headers ---------- */
+.bd-band {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px 5px;
+  background: var(--head-b);
+  border-bottom: 1px solid var(--line-soft);
+  position: sticky; top: 0; z-index: 5;
+}
+.bd-band-sw { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+.bd-band-t { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
+.bd-band-n { font-size: 10.5px; color: var(--ink-3); margin-left: auto; font-family: var(--font-mono); }
+
+/* the expanded ask list slides rather than snapping */
+@keyframes bdIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.bd-asks { animation: bdIn .16s ease both; }
+@media (prefers-reduced-motion: reduce) { .bd-asks { animation: none; } }
+
+.bd-sort {
+  margin-left: auto; display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--ink-3);
+}
+.bd .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- greeting ---------- */
+.bd-hello {
+  flex: 0 0 auto;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 0 2px;
+}
+.bd-hello h1 {
+  margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.015em; color: var(--ink);
+}
+.bd-hello .when { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.bd-hello em { font-style: normal; color: var(--accent); }
+/* sits on the text baseline rather than the cap line, and never scales with the
+   heading weight, so it reads as punctuation rather than as an icon */
+.bd-emoji { font-size: 16px; margin-left: 2px; vertical-align: -1px; }
+
+/* ---------- stat strip ---------- */
+.bd-strip {
+  flex: 0 0 auto;
+  display: grid; grid-template-columns: repeat(7, minmax(0,1fr)) 1.5fr; gap: 10px;
+}
+.bd-stat {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--inset-top);
+  padding: 9px 12px 8px;
+  position: relative;
+  min-width: 0;
+  transition: box-shadow .18s ease, transform .18s ease;
+}
+.bd-stat::before {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 3px;
+  border-radius: var(--r) 0 0 var(--r); background: var(--accent-2); opacity: .5;
+}
+.bd-stat.is-late::before { background: var(--late); opacity: 1; }
+.bd-stat.is-warn::before { background: var(--amber); opacity: 1; }
+.bd-stat-v { font-size: 21px; font-weight: 600; letter-spacing: -.03em; line-height: 1.15; }
+.bd-stat.is-late .bd-stat-v { color: var(--late); }
+.bd-stat.is-warn .bd-stat-v { color: var(--amber); }
+.bd-stat-l { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 4px; }
+
+/* info affordance. A real button, not a title attribute: the native tooltip
+   has a ~1s delay, cannot be reached by keyboard, and is what made "on you"
+   and "late" unexplained in v1. */
+.bd-i {
+  width: 13px; height: 13px; flex: 0 0 auto;
+  border-radius: 50%; border: 1px solid var(--line);
+  background: none; color: var(--ink-3);
+  font: 600 9px/1 var(--font-sans);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: help; padding: 0;
+}
+.bd-i:hover, .bd-i:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+.bd-tip {
+  position: absolute; z-index: 40; left: 10px; right: 10px; top: calc(100% - 2px);
+  background: var(--ink); color: var(--tile);
+  padding: 7px 9px; border-radius: var(--r-sm);
+  font-size: 11px; line-height: 1.4;
+  box-shadow: var(--lift-hi);
+  opacity: 0; visibility: hidden; transform: translateY(-3px);
+  transition: opacity .16s ease, transform .16s ease, visibility .16s;
+}
+:root:not([data-theme="light"]) .bd-tip { background: #0e1319; color: var(--ink); border: 1px solid var(--line); }
+.bd-stat:hover .bd-tip, .bd-stat:focus-within .bd-tip,
+.bd-tile-head:hover .bd-tip, .bd-tile-head:focus-within .bd-tip { opacity: 1; visibility: visible; transform: translateY(0); }
+.bd-tip-wide { left: 12px; right: auto; width: 340px; }
+
+.bd-spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; }
+.bd-spark i {
+  flex: 1 1 0; min-height: 2px; border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  opacity: .75; transition: opacity .15s;
+}
+.bd-spark i:hover { opacity: 1; }
+
+/* ---------- gadget grid ---------- */
+.bd-grid {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; gap: 12px;
+  grid-template-columns: minmax(0,1.05fr) minmax(0,1fr);
+  grid-template-rows: minmax(0,1fr) minmax(0,.92fr);
+}
+@media (max-width: 1150px) {
+  .bd { height: auto; }
+  .bd-grid { grid-template-columns: minmax(0,1fr); grid-template-rows: none; grid-auto-rows: 320px; }
+  .bd-strip { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+
+.bd-tile {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--inset-top);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  transition: box-shadow .2s ease;
+}
+.bd-tile:hover { box-shadow: var(--lift-hi), var(--inset-top); }
+.bd-tile-head {
+  position: relative;
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
+  background: linear-gradient(180deg, var(--head-a), var(--head-b));
+  border-bottom: 1px solid var(--line);
+}
+.bd-tile-head svg { color: var(--accent); flex: 0 0 auto; }
+.bd-tile-head h3 { margin: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.bd-pill {
+  font: 600 11px/1 var(--font-mono);
+  padding: 3px 7px; border-radius: 20px;
+  background: var(--accent-bg); color: var(--accent);
+}
+.bd-pill.is-late { background: var(--late-bg); color: var(--late); }
+.bd-pill.is-warn { background: var(--amber-bg); color: var(--amber); }
+.bd-tile-sub { font-size: 11px; color: var(--ink-3); margin-left: auto; white-space: nowrap; }
+.bd-tile-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.bd-tile-foot {
+  flex: 0 0 auto; padding: 6px 12px; border-top: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--ink-3);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--head-b);
+}
+
+/* ---------- filter bar ---------- */
+.bd-filters {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-bottom: 1px solid var(--line-soft);
+  background: var(--head-b); flex-wrap: wrap;
+}
+.bd-chip {
+  font: 500 11px/1 var(--font-sans);
+  padding: 5px 9px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--tile); color: var(--ink-2);
+  transition: background .15s, border-color .15s, color .15s;
+}
+.bd-chip:hover { border-color: var(--accent-2); color: var(--accent); }
+.bd-chip-cat { display: inline-flex; align-items: center; gap: 5px; text-transform: capitalize; }
+/* inside a chip the glyph is the label's companion, so it drops its own tile */
+.bd-chip .bd-cat { width: 14px; height: 14px; border-radius: 0; background: none; color: inherit; }
+.bd-chip[aria-pressed="true"] .bd-cat { color: inherit; }
+.bd-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root:not([data-theme="light"]) .bd-chip[aria-pressed="true"] { color: #0e1319; }
+.bd-search {
+  font: 400 12px/1 var(--font-sans);
+  padding: 6px 9px; border-radius: var(--r-sm); min-width: 0; flex: 1 1 120px;
+  border: 1px solid var(--line); background: var(--tile); color: var(--ink);
+}
+.bd-search::placeholder { color: var(--ink-3); }
+.bd-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+
+/* ---------- rows ---------- */
+.bd-row {
+  display: grid; align-items: center; gap: 8px;
+  padding: 5px 12px; min-height: 32px;
+  border-bottom: 1px solid var(--line-soft); font-size: 13px;
+  transition: background .13s;
+}
+.bd-row:last-child { border-bottom: 0; }
+.bd-row:hover { background: var(--accent-bg); }
+.bd-row.is-late { box-shadow: inset 3px 0 0 var(--late); }
+.bd-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-sub { color: var(--ink-3); font-size: 11px; }
+.bd-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink-2); text-align: right; white-space: nowrap; }
+.bd-num.is-late { color: var(--late); font-weight: 600; }
+.bd-num.is-warn { color: var(--amber); font-weight: 600; }
+.bd a { color: var(--accent); text-decoration: none; }
+.bd a:hover { text-decoration: underline; }
+
+.bd-acts { display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.bd-row:hover .bd-acts, .bd-row:focus-within .bd-acts,
+.bd-ask:hover .bd-acts, .bd-ask:focus-within .bd-acts { opacity: 1; }
+.bd-btn {
+  font: 500 11px/1 var(--font-sans); padding: 5px 9px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--tile); color: var(--ink-2);
+  cursor: pointer; white-space: nowrap; transition: all .15s;
+}
+.bd-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root:not([data-theme="light"]) .bd-btn:hover { color: #0e1319; }
+.bd-btn:focus-visible, .bd a:focus-visible, .bd [tabindex]:focus-visible, .bd-i:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+.bd-row.bd-mine { grid-template-columns: minmax(0,1fr) 72px 112px; }
+.bd-row.bd-person { grid-template-columns: 14px 22px minmax(0,1fr) 92px 38px 30px; cursor: pointer; }
+.bd-caret { color: var(--ink-3); transition: transform .15s ease; }
+.bd-person[aria-expanded="true"] .bd-caret { transform: rotate(90deg); }
+.bd-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-bar { display: flex; gap: 2px; align-items: center; height: 11px; }
+.bd-bar i { height: 11px; border-radius: 2px; display: block; transition: transform .15s; }
+.bd-person:hover .bd-bar i { transform: scaleY(1.25); }
+.bd-bar i.b0 { background: var(--b0); }
+.bd-bar i.b1 { background: var(--b1); }
+.bd-bar i.b2 { background: var(--b2); }
+.bd-bar i.b3 { background: var(--b3); }
+
+.bd-asks { background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+.bd-ask {
+  /* 116px, not 92: Resolve + a 4px gap + Nudge measures ~110, so at 92 the
+     buttons overflowed their own grid column and overflow-x:hidden clipped
+     Nudge in half. Sized to the content it actually holds. */
+  display: grid; grid-template-columns: minmax(0,1fr) 34px 116px; gap: 8px; align-items: center;
+  padding: 5px 12px 5px 30px; min-height: 30px; font-size: 12px;
+  border-bottom: 1px solid var(--line-soft); transition: background .13s;
+}
+.bd-ask:last-child { border-bottom: 0; }
+.bd-ask:hover { background: var(--tile); }
+
+/* The old row was name+desc on the left and four numbers stranded at the far
+   right of a 1470px tile, with ~700px of white space between them and the
+   description truncated at 58 characters to make room for space it never used.
+   Columns are sized to their content now, the description gets the slack, and
+   a header row says what each number is - the legend in the tile header was
+   the only label and it sat 40px above the first value. */
+.bd-row.bd-proj {
+  grid-template-columns: minmax(190px,1.1fr) minmax(0,2fr) 128px 74px 84px 92px;
+  gap: 14px;
+}
+.bd-proj-head {
+  display: grid;
+  grid-template-columns: minmax(190px,1.1fr) minmax(0,2fr) 128px 74px 84px 92px;
+  gap: 14px;
+  padding: 6px 12px;
+  position: sticky; top: 0; z-index: 5;
+  background: var(--head-b); border-bottom: 1px solid var(--line);
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.bd-proj-head span:nth-child(n+4) { text-align: right; }
+.bd-proj .bd-pname { font-weight: 600; font-size: 13.5px; }
+.bd-pcell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.bd-pcell .bd-pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-cat {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-bg); color: var(--accent);
+}
+.bd-cat.is-none { background: var(--line-soft); }
+.bd-cat.is-none::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3); opacity: .5; }
+.bd-proj .bd-next {
+  color: var(--ink-2); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bd-proj .bd-next-l {
+  display: block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.bd-progwrap { display: flex; align-items: center; gap: 7px; }
+.bd-prog { flex: 1 1 auto; height: 7px; }
+.bd-progn { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); min-width: 30px; text-align: right; }
+/* a value with nothing in it should read as calm, not as a missing number */
+.bd-zero { color: var(--ink-3); opacity: .55; }
+.bd-prog { height: 5px; background: var(--line-soft); border-radius: 3px; overflow: hidden; }
+.bd-prog i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--ok), #34c98a); }
+
+.bd-key { display: inline-flex; align-items: center; gap: 4px; }
+.bd-key i { width: 9px; height: 9px; border-radius: 2px; display: block; }
+.bd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--late); display: inline-block; }
+.bd-empty { padding: 20px 14px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+.bd-empty b { color: var(--ink-2); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) { .bd * { transition: none !important; } }
+        </style>
 </head>
 <body>
     <div class="bg-gradient"></div>
@@ -6154,36 +6432,14 @@
                  is portfolio state. The endpoint's own docstring already called
                  its output "cross-project attention data". -->
             <div class="view active" id="attentionView">
-                <div class="container">
-                    <!-- No .page-header here: the sidebar already says Today and
-                         marks it active, so an h2 plus a subtitle spent 81px of
-                         the most expensive space on the app restating it. The
-                         hero cards below carry their own labels. -->
-                    <div class="attn-hero">
-                        <div class="glass-card" id="attnMineCard"></div>
-                        <div class="glass-card" id="attnPeopleCard"></div>
-                        <div class="glass-card" id="attnStalledCard"></div>
-                    </div>
-
-                    <div class="glass-card today-section" id="todayOnOthersCard">
-                        <div class="card-header">
-                            <span class="card-title">
-                                <svg class="attn-icon attn-icon-title" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-                                Projects
-                            </span>
-                            <span class="count-pill" id="todayOnOthersCount">0</span>
-                        </div>
-                        <p class="today-card-help" id="todayOnOthersHelp"></p>
-                        <div class="pm-card-banner" id="todayOnOthersBanner" role="alert" style="display:none;"></div>
-                        <div id="todayOnOthersBody"></div>
-                    </div>
-
-                    <!-- Hidden until its data lands, which takes ~2s (the
-                         endpoint reads Claude transcript files). An empty glass
-                         card sitting there for two seconds reads as broken. -->
-                    <div class="glass-card" id="attnTodayCard" style="display:none;"></div>
-                </div>
-            </div><!-- End Today View -->
+                <!-- One root, filled entirely by renderAttention: a greeting, a
+                     stats strip, and three gadgets (My work, Waiting on people,
+                     Projects). Nothing inside is addressed by a fixed container,
+                     because what renders depends on the data. Every class is
+                     .bd-* and every token is declared on .bd, so nothing here
+                     can reach another view or be reached by one. -->
+                <div class="bd" id="attnRoot"></div>
+            </div><!-- End Attention View -->
 
             <!-- Projects View -->
             <div class="view" id="projectsView">
@@ -7454,16 +7710,31 @@
                 // default of "0" over an empty body reads as "nothing is owed",
                 // which is the opposite of unknown on the one number this view
                 // exists to surface.
-                const retry = '<button class="pm-mini-btn" onclick="loadTodayData()">Retry</button>';
-                const oops = label =>
-                    `<div class="pm-empty" style="padding:8px 0;">Couldn't load ${label}. ${retry}</div>`;
-                document.getElementById('attnMineCard').innerHTML = oops('what is on you');
-                document.getElementById('attnPeopleCard').innerHTML = oops('who owes you');
-                document.getElementById('attnStalledCard').innerHTML = oops('project health');
-                document.getElementById('todayOnOthersCount').textContent = '-';
-                document.getElementById('todayOnOthersHelp').textContent = '';
-                document.getElementById('todayOnOthersBody').innerHTML =
-                    `<div class="pm-empty">Couldn't load. ${retry}</div>`;
+                // The view is one root now, so there is one place to fill. It
+                // still has to SAY it failed rather than render empty: an empty
+                // Attention view reads as "nothing is owed", which is the
+                // opposite of unknown on the one number this view exists for.
+                const root = document.getElementById('attnRoot');
+                if (root) {
+                    root.classList.remove('attn-is-calm');
+                    root.innerHTML = `
+                      <div class="attn-wrap">
+                        <header class="attn-masthead">
+                          <div class="attn-date">${escapeHtml(
+                              new Date().toLocaleDateString(undefined,
+                                  { weekday: 'long', day: 'numeric', month: 'long' }))}</div>
+                          <h1 class="attn-finding">Couldn't load what needs your <em class="attn-late">attention</em>.</h1>
+                        </header>
+                        <section>
+                          <div class="attn-card">
+                            <div class="attn-mx-line">${escapeHtml(String(e && e.message || e))}</div>
+                            <div class="attn-mx-line attn-mx-quiet-n" style="margin-top:8px">
+                              <button class="attn-act attn-primary" onclick="loadTodayData()">Try again</button>
+                            </div>
+                          </div>
+                        </section>
+                      </div>`;
+                }
                 return false;
             }
             renderToday(pmData);
@@ -7471,36 +7742,627 @@
             return true;
         }
 
+        // The last payload, kept so a Waiting-on row can be resolved by index
+        // without the row's text being interpolated into an inline handler. The
+        // server verifies what/who/since, so the values have to come from the
+        // same payload the user was looking at.
+        let attnLastData = {};
+
         function renderToday(data) {
-            const c = data.counts || {};
-            // Populated before the table renders: each row reads its project's
-            // due date, at-risk flag and recency from here.
+            attnLastData = data || {};
+            // Still populated: the project page and the resolve helpers read a
+            // project's due date, at-risk flag and recency from here.
             todayProjectsById = {};
             (data.projects || []).forEach(p => { todayProjectsById[p.task_id] = p; });
-            const groups = data.on_others || [];
             todayGroupsByTask = {};
-            groups.forEach(g => { todayGroupsByTask[g.task_id] = g; });
-            const mine = data.on_me || { overdue: [], due_soon: [], other_open: [] };
-            // Waiting-on rows whose `who` names him. The server flags these; the
-            // old design filed them under "on other people", which under-reported
-            // his own plate roughly 4x.
-            const mineRows = groups.flatMap(g => (g.rows || []).filter(r => r.mine));
-            renderAttnMine(mine, mineRows, c);
-            renderAttnPeople(groups, c);
-            renderAttnStalled(data.projects || []);
-            renderOnOthers(data.projects || [], groups, c);
+            (data.on_others || []).forEach(g => { todayGroupsByTask[g.task_id] = g; });
+            renderAttention(data);
         }
 
-        // The DOM-id scheme the resolve helpers address a row by. They build
-        // `${rowId}-form`, `-outcome` and `-error` from it and read the row's
-        // data-* attributes, so this is the addressing contract rather than a
-        // convenience helper - two renderers emit rows and both must agree with
-        // pmResolveWaiting on the id, or Resolve silently targets nothing.
-        function pmRowDomId(row, prefix) {
-            return row.kind === 'commitment'
-                ? `${prefix}Item-${row.id}`
-                : `${prefix}Wait-${row.task_id}-${row.row_index}`;
+
+        /* ==================================================================
+           ATTENTION VIEW
+           Four verb sections over one graphic. Ported from the standalone
+           prototype; the layout reasoning lives in the comments below and in
+           docs/dashboard.md. Pure helpers sit here at module scope, everything
+           derived from a payload is local to renderAttention so a re-render
+           cannot read stale state from the last one.
+           ================================================================== */
+
+// ---- age bands. Ordinal, so a single-hue ramp is the right colour job.
+// The 7-day line is the threshold, so under it is context rather than band 0.
+// `label` is the compact form for the legend and the hover title; `heading` is
+// the sentence the band header shows, because "under 7d" tells you the
+// arithmetic rather than what the group means.
+const BANDS = [
+  { key: 'b0', label: 'under 7d', heading: 'Asked in the last week',    test: a => a < 7 },
+  { key: 'b1', label: '7-13d',    heading: 'Waiting one to two weeks',  test: a => a >= 7  && a < 14 },
+  { key: 'b2', label: '14-29d',   heading: 'Waiting two to four weeks', test: a => a >= 14 && a < 30 },
+  { key: 'b3', label: '30d+',     heading: 'Waiting over a month',      test: a => a >= 30 },
+];
+const bandOf = a => BANDS.findIndex(b => b.test(a ?? 0));
+const isQuiet = r => r.days_past_line !== null && r.days_past_line !== undefined;
+
+// The same ask can arrive twice. Two task records pointing at one context file
+// (a stale row whose full_path is missing falls back to the name and reads its
+// twin's file) means every Waiting-on row in that file is parsed once per task.
+// Measured live at the time this was written: 66 rows, 63 distinct, 3 counted
+// twice. Left in, the page claims more asks than exist. Identity is the text
+// plus the person plus the date; a genuine repeat ask to the same person on the
+// same day about the same thing is one ask.
+const askKey = r => [String(r.what || '').trim(),
+                     String(r.who || '').trim(),
+                     String(r.since || '').trim()].join(' ');
+
+const bdCut = (t, n) => { t = String(t == null ? '' : t).trim();
+  return t.length <= n ? t : t.slice(0, n).replace(/\s+\S*$/, '') + '…'; };
+const bdWorked = d => d == null ? 'never' : d === 0 ? 'today'
+  : d === 1 ? 'yesterday' : `${d}d ago`;
+
+// `who_primary` is a GROUPING key: it takes the first word so that "Lior",
+// "Lior Ben Naon" and "Lior (with Adam)" collapse to one person. Showing that
+// key was wrong twice over - it dropped every surname, and for a cell like
+// "Epic owners (Gal, Tamir, Yonatan)" or "data-infra / IT / DevEx" the first
+// word ("Epic", "Data-Infra") is not a name at all. So: group by the key,
+// DISPLAY the best raw variant the group actually contains.
+const BD_NOT_PEOPLE = new Set(['automatic', 'devex', 'epic', 'data-infra', 'unknown']);
+function bdCleanWho(v) {
+  return String(v || '')
+    .replace(/\s*\([^)]*\)/g, ' ')    // "(on vacation til Wed)", "(SecOps)"
+    .split(/\s+-\s+/)[0]              // " - I said I would handle it"
+    .split(',')[0]                    // ", all invitees" - a note, not a name
+    .replace(/\s*([\/+])\s*/g, ' $1 ')
+    .replace(/\s+/g, ' ')
+    .replace(/[\s,;]+$/, '')          // the comma left behind by the paren strip
+    .trim();
+}
+function bdBestName(variants) {
+  const cands = [...variants].map(bdCleanWho).filter(Boolean);
+  if (!cands.length) return '';
+  // A cell naming several people ("Hadas / Tamir") is not this person's full
+  // name, so prefer a variant with no separator when one exists.
+  const solo = cands.filter(c => !/[\/+,]/.test(c));
+  const pool = solo.length ? solo : cands;
+  // most words wins, because that is the variant carrying a surname
+  return pool.sort((a, b) =>
+    b.split(' ').length - a.split(' ').length || b.length - a.length)[0];
+}
+
+// Hue from the name, so a person keeps the same disc across renders with no
+// stored state. Two initials where the cell holds a full name, one otherwise.
+const BD_AV_HUES = ['#5e4db2','#0b5cd5','#206a83','#216e4e','#8f5a0a','#ae2e24','#943d73','#3b6b3b'];
+function bdAvatar(name, isTeam) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  const bg = BD_AV_HUES[Math.abs(h) % BD_AV_HUES.length];
+  const init = String(name).trim().split(/[\s-]+/).filter(Boolean)
+    .slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+  if (isTeam) return `<span class="bd-av is-team" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></span>`;
+  return `<span class="bd-av" style="background:${bg}" aria-hidden="true">${escapeHtml(init)}</span>`;
+}
+
+// One Lucide glyph per category, covering the full built-in list so a category
+// added later still renders. Stroke icons rather than emoji: they inherit
+// currentColor, so they theme with everything else and match the 2px weight the
+// gadget headers already use. Unknown or unset falls back to a plain dot.
+const BD_CAT = {
+  test:      ['M9 3h6M10 3v6.2a2 2 0 0 1-.3 1L4.6 19a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3l-5.1-8.8a2 2 0 0 1-.3-1V3', 'Test / QA'],
+  infra:     ['M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01', 'Infrastructure'],
+  ui:        ['M3 4h18v16H3zM3 9h18M9 9v11', 'UI'],
+  feature:   ['M12 3l2.2 5.4L20 9.6l-4 3.9.9 5.5L12 16.4 7.1 19l.9-5.5-4-3.9 5.8-1.2z', 'Feature'],
+  docs:      ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h6', 'Docs'],
+  security:  ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', 'Security'],
+  coding:    ['M16 18l6-6-6-6M8 6l-6 6 6 6', 'Coding'],
+  noncoding: ['M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8', 'Non-coding'],
+  bug:       ['M8 2l1.9 1.9M16 2l-1.9 1.9M12 20v-9M4.3 9H2M22 9h-2.3M6 13H3M21 13h-3M7.6 5.6A5 5 0 0 1 16.4 5.6M5 9v3a7 7 0 0 0 14 0V9a3 3 0 0 0-3-3H8a3 3 0 0 0-3 3z', 'Bug'],
+  refactor:  ['M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9', 'Refactor'],
+  api:       ['M12 22v-5M9 7V2M15 7V2M6 11h12v4a6 6 0 0 1-12 0z', 'API'],
+  database:  ['M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3zM4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3', 'Database'],
+  perf:      ['M13 2L3 14h9l-1 8 10-12h-9z', 'Performance'],
+};
+function bdCatIcon(c) {
+  const e = BD_CAT[String(c || '').toLowerCase()];
+  if (!e) return `<span class="bd-cat is-none" title="No category"></span>`;
+  return `<span class="bd-cat" title="${escapeHtml(e[1])}" aria-label="${escapeHtml(e[1])}" role="img">`
+    + `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" `
+    + `stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${e[0]}"/></svg></span>`;
+}
+
+const BD_ICON = {
+  mine:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  people: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>',
+  proj:   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+};
+
+const BD_FILTERS = {
+  all:   { label: 'All',           fn: () => true },
+  quiet: { label: 'No reply 7d+',  fn: o => o.quiet > 0 },
+  old:   { label: '30d+',          fn: o => o.oldest >= 30 },
+  many:  { label: '3 or more',     fn: o => o.asks.length >= 3 },
+};
+
+const BD_PROJ_HEAD = `<div class="bd-proj-head">
+    <span>Project</span><span>What's next</span><span>Checklist</span>
+    <span>On you</span><span>No reply</span><span>Last worked</span>
+  </div>`;
+
+// Everything the inline handlers need, replaced wholesale on every render. The
+// handlers are global because they are called from onclick attributes, so they
+// cannot close over a render's locals without pinning that render's data alive
+// and going stale the next time the payload changes.
+let bdState = {
+  people: [], projects: [], theirs: [], myWork: [], totalQuiet: 0, lateCount: 0,
+  filter: 'all', query: '', sort: 'near', pcat: 'all', pquery: '',
+};
+
+// The slow half of the page. /api/stats/today takes 1517-2640ms against
+// /api/today's 26-44ms, so it arrives separately and drops into the strip that
+// is already on screen rather than blocking the board on it.
+let bdTodayStats = null;
+
+function bdPersonRow(o, bi, uid) {
+  const inBand = o.asks.filter(r => bandOf(r.age_days) === bi);
+  const quietN = inBand.filter(isQuiet).length;
+  const elsewhere = o.asks.length - inBand.length;
+  const bar = `<i class="${BANDS[bi].key}" style="width:${Math.max(4, inBand.length * 6)}px"
+                  title="${inBand.length} ${BANDS[bi].label}"></i>`;
+  const rows = [...inBand].sort((a, b) => (b.age_days || 0) - (a.age_days || 0)).map(r => {
+    // Same dispatch as the My work rows: a commitment carries a stable id and
+    // completes through the action-item endpoint, a Waiting-on row has none and
+    // resolves positionally with the server verifying its text.
+    const done = r.id != null
+      ? `attnDoneItem(${Number(r.id)})`
+      : `attnDoneWaiting(${Number(r.task_id)}, ${Number(r.row_index)}, this)`;
+    return `
+    <div class="bd-ask">
+      <div style="min-width:0">
+        <div class="bd-what" title="${escapeHtml(r.what)}">${escapeHtml(bdCut(r.what, 68))}</div>
+        <div class="bd-sub"><a href="${projectHref(r.project_name, r.task_id)}">${escapeHtml(r.project_name || '')}</a>${r.why ? ' &middot; blocks ' + escapeHtml(bdCut(r.why, 28)) : ''}</div>
+      </div>
+      <div class="bd-num ${isQuiet(r) ? 'is-late' : ''}">${r.age_days ?? ''}d</div>
+      <div class="bd-acts"><button class="bd-btn" type="button" onclick="event.stopPropagation();${done}">Resolve</button></div>
+    </div>`;
+  }).join('');
+  return `<div class="bd-row bd-person" role="button" tabindex="0" aria-expanded="false"
+               onclick="bdTog('${uid}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bdTog('${uid}');}">
+      <svg class="bd-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+      ${bdAvatar(o.name, o.isTeam || o.isShared)}
+      <div class="bd-name">${escapeHtml(o.name)}${o.isTeam ? '<span class="bd-tag">team</span>' : o.isShared ? '<span class="bd-tag">shared</span>' : ''}${elsewhere ? `<span class="bd-else" title="${elsewhere} more ask${elsewhere === 1 ? '' : 's'} in another age group">+${elsewhere} elsewhere</span>` : ''}</div>
+      <div class="bd-bar">${bar}</div>
+      <div class="bd-num ${quietN ? 'is-warn' : ''}">${quietN || '·'}</div>
+      <div class="bd-num">${inBand.length}</div>
+    </div>
+    <div class="bd-asks" id="pa-${uid}" hidden>${rows}</div>`;
+}
+
+// A person is rendered ONCE PER BAND they have asks in, showing only that
+// band's asks. Bucketing them by their oldest ask put a colleague in "two to
+// four weeks" and hid the fact that he also owed something from this week, so a
+// band answered "whose oldest ask is this old" when the useful question is "who
+// owes me something in this age range". The per-band counts now sum to the band
+// total, and a person's rows across bands sum to their whole.
+function bdPersonRows() {
+  const { people, filter, query, sort } = bdState;
+  const q = query.trim().toLowerCase();
+  const list = people.filter(o => BD_FILTERS[filter].fn(o)).filter(o =>
+    !q || o.name.toLowerCase().includes(q)
+       || o.asks.some(r => String(r.what || '').toLowerCase().includes(q)
+                        || String(r.project_name || '').toLowerCase().includes(q)));
+  if (!list.length) {
+    const alt = q ? `No one matches “${escapeHtml(query)}”.`
+                  : `No one is in <b>${BD_FILTERS[filter].label}</b>.`;
+    return `<div class="bd-empty">${alt}<br>Try <b>All</b>${q ? ', or search a project name instead of a person' : ''}.</div>`;
+  }
+  const order = sort === 'near' ? [0, 1, 2, 3] : [3, 2, 1, 0];
+  let out = '';
+  for (const bi of order) {
+    const inBand = list
+      .map(o => ({ o, n: o.asks.filter(r => bandOf(r.age_days) === bi).length }))
+      .filter(x => x.n > 0)
+      .sort((a, b) => b.n - a.n || a.o.name.localeCompare(b.o.name));
+    if (!inBand.length) continue;
+    const asksN = inBand.reduce((t, x) => t + x.n, 0);
+    out += `<div class="bd-band">
+        <span class="bd-band-sw" style="background:var(--${BANDS[bi].key})"></span>
+        <span class="bd-band-t">${BANDS[bi].heading}</span>
+        <span class="bd-band-n">${inBand.length} ${inBand.length === 1 ? 'person' : 'people'} &middot; ${asksN} ask${asksN === 1 ? '' : 's'}</span>
+      </div>`;
+    out += inBand.map(x => bdPersonRow(x.o, bi, `${bi}-${people.indexOf(x.o)}`)).join('');
+  }
+  return out;
+}
+
+function bdProjRowHtml(p) {
+  const pct = p.total_count ? Math.round(100 * p.completed_count / p.total_count) : 0;
+  const next = p.next_up || p.left_off || '';
+  const z = n => n ? '' : ' bd-zero';
+  return `<div class="bd-row bd-proj">
+    <div class="bd-what bd-pcell">
+      ${bdCatIcon(p.category)}
+      <a class="bd-pname" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a>
+      ${p.overdue_count ? '<span class="bd-dot" title="You are late on this project"></span>' : ''}
+    </div>
+    <div class="bd-next" title="${escapeHtml(next)}">
+      <span class="bd-next-l">${p.next_up ? 'next' : 'last did'}</span>${escapeHtml(bdCut(next, 150))}</div>
+    <div class="bd-progwrap" title="${p.completed_count} of ${p.total_count} checklist items done">
+      <div class="bd-prog"><i style="width:${pct}%"></i></div>
+      <span class="bd-progn">${p.total_count ? pct + '%' : '-'}</span></div>
+    <div class="bd-num${z(p.open_count)}${p.overdue_count ? ' is-late' : ''}">${p.open_count || '0'}</div>
+    <div class="bd-num${z(p.stale_on_others_count)}${p.stale_on_others_count ? ' is-warn' : ''}">${p.stale_on_others_count || '0'}</div>
+    <div class="bd-num${p.days_since_worked > 7 ? ' bd-zero' : ''}">${escapeHtml(bdWorked(p.days_since_worked))}</div>
+  </div>`;
+}
+
+function bdProjectRows() {
+  const { projects, pcat, pquery } = bdState;
+  const q = pquery.trim().toLowerCase();
+  const list = projects
+    .filter(p => pcat === 'all' || (p.category || '(none)') === pcat)
+    .filter(p => !q
+      || p.name.toLowerCase().includes(q)
+      || String(p.next_up || '').toLowerCase().includes(q)
+      || String(p.left_off || '').toLowerCase().includes(q));
+  if (!list.length) {
+    const what = q ? `No project matches “${escapeHtml(pquery)}”`
+                   : `No project is in <b>${escapeHtml(pcat)}</b>`;
+    return `<div class="bd-empty">${what}.<br>Try <b>All</b>${q ? ', or search what you last did instead of the name' : ''}.</div>`;
+  }
+  return list.map(bdProjRowHtml).join('');
+}
+
+function bdTog(uid) {
+  const el = document.getElementById('pa-' + uid); if (!el) return;
+  const row = el.previousElementSibling;
+  const open = el.hasAttribute('hidden');
+  if (open) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+  if (row) row.setAttribute('aria-expanded', String(open));
+}
+function bdSetFilter(f) { bdState.filter = f; bdRefreshPeople(); }
+function bdSetQuery(v)  { bdState.query = v;  bdRefreshPeople(); }
+function bdSetSort(v)   { bdState.sort = v;   bdRefreshPeople(); }
+function bdRefreshPeople() {
+  const body = document.getElementById('peopleBody');
+  if (!body) return;
+  body.innerHTML = bdPersonRows();
+  document.querySelectorAll('#attnRoot [data-f]').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.f === bdState.filter)));
+  const shown = body.querySelectorAll('.bd-person').length;
+  const sub = document.getElementById('peopleSub');
+  if (sub) sub.textContent = shown === bdState.people.length
+    ? `${bdState.totalQuiet} with no reply in 7d`
+    : `${shown} of ${bdState.people.length} people`;
+}
+
+function bdSetPcat(c)   { bdState.pcat = c;   bdRefreshProjects(); }
+function bdSetPquery(v) { bdState.pquery = v; bdRefreshProjects(); }
+function bdRefreshProjects() {
+  const body = document.getElementById('projBody');
+  if (!body) return;
+  // Column headers over an empty table label columns that are not there, so the
+  // empty state replaces the whole body rather than sitting under them.
+  const rows = bdProjectRows();
+  const empty = rows.startsWith('<div class="bd-empty"');
+  body.innerHTML = (empty ? '' : BD_PROJ_HEAD) + rows;
+  document.querySelectorAll('#attnRoot [data-pc]').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.pc === bdState.pcat)));
+  const shown = body.querySelectorAll('.bd-proj').length;
+  const pill = document.getElementById('projPill');
+  const sub = document.getElementById('projSub');
+  if (pill) pill.textContent = shown;
+  if (sub) sub.textContent = shown === bdState.projects.length
+    ? 'everything active, most recently worked first'
+    : `${shown} of ${bdState.projects.length} projects`;
+}
+
+// The board is a snapshot the moment it renders. Saying WHEN makes a stale tab
+// obvious instead of quietly convincing you these numbers are current. One
+// timer for the life of the page: renderAttention runs again on every mutation,
+// and starting an interval per render would stack them up.
+let bdStampAt = 0, bdStampTimer = null;
+function bdStartStamp() {
+  bdStampAt = Date.now();
+  if (bdStampTimer) return;
+  const tick = () => {
+    const n = document.getElementById('bdStamp');
+    if (!n) return;
+    const s = Math.round((Date.now() - bdStampAt) / 1000);
+    n.textContent = s < 45 ? 'just now'
+      : s < 5400 ? Math.round(s / 60) + 'm ago'
+      : Math.round(s / 3600) + 'h ago';
+    n.style.color = s > 300 ? 'var(--amber)' : '';
+  };
+  tick();
+  bdStampTimer = setInterval(tick, 30000);
+}
+
+// The strip's own markup, split out because the tracked-time half of it arrives
+// on a separate, much slower request and replaces this in place.
+function bdStrip() {
+  const t = bdTodayStats;
+  const { myWork, lateCount, theirs, people, totalQuiet } = bdState;
+  const stat = (v, l, tip, cls) => `<div class="bd-stat ${cls || ''}">
+    <div class="bd-stat-v mono">${v}</div>
+    <div class="bd-stat-l">${l}${tip ? `<button class="bd-i" type="button" aria-label="What ${l} means">i</button>` : ''}</div>
+    ${tip ? `<div class="bd-tip" role="tooltip">${tip}</div>` : ''}
+  </div>`;
+  const hourly = (t && t.hourly) || [];
+  const maxH = Math.max(1, ...hourly);
+  // A dash rather than a zero while the slow request is in flight: "0 commits"
+  // is a claim about your day, and it would be wrong for the second or two
+  // before the real number lands.
+  const pend = v => t ? v : '·';
+  return [
+    stat(t ? escapeHtml(t.total_formatted || '0m') : '·', 'tracked', 'Time MissionCache recorded against any project today.'),
+    stat(pend(t && t.commits), 'commits', 'Commits you authored today across all tracked repos.'),
+    stat(t ? `+${t.loc_added}/-${t.loc_removed}` : '·', 'lines', 'Lines added and removed in today’s commits.'),
+    stat(myWork.length, 'on you', 'Work YOU owe: your open action items, plus rows in a project’s Waiting-on table where the Who column names you.', lateCount ? 'is-late' : ''),
+    stat(lateCount, 'late', 'Of the "on you" items: an action item past its due date, or an ask of yours with no movement for more than 7 days.', lateCount ? 'is-late' : ''),
+    stat(theirs.length, 'out', `Asks sitting with other people - ${people.length} of them. Their latency, not yours.`),
+    stat(totalQuiet, 'no reply 7d+', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', totalQuiet ? 'is-warn' : ''),
+    // The floor applies to real activity only, so a small hour stays visible
+    // while an empty one stays empty. Flooring every bar drew a solid row of
+    // stubs across a day that was mostly idle.
+    `<div class="bd-stat"><div class="bd-spark">${hourly.map((h, i) => `<i style="height:${h ? Math.max(7, Math.round(h / maxH * 100)) : 0}%" title="${String(i).padStart(2, '0')}:00 &middot; ${Math.round(h / 60)}m"></i>`).join('')}</div><div class="bd-stat-l">by hour</div></div>`,
+  ].join('');
+}
+
+function renderAttention(data) {
+  const root = document.getElementById('attnRoot');
+  if (!root) return;
+
+  const rawAsks = (data.on_others || []).flatMap(g => g.rows || []);
+  const asks = [...new Map(rawAsks.map(r => [askKey(r), r])).values()];
+  const theirs = asks.filter(r => !r.mine);
+  const mineRows = asks.filter(r => r.mine);
+
+  const onMe = data.on_me || {};
+  const mine = [...(onMe.overdue || []), ...(onMe.due_soon || []), ...(onMe.other_open || [])];
+  // Both places work you owe is recorded: an action item assigned to you, and a
+  // Waiting-on row in some project whose Who column names you. The second kind
+  // was invisible on your side of the board while sitting under someone else's
+  // name, which is the whole reason they are merged here.
+  const myWork = [...mine, ...mineRows];
+  const lateCount = mine.filter(i => i.overdue).length + mineRows.filter(isQuiet).length;
+
+  const owners = new Map();
+  for (const r of theirs) {
+    const k = r.who_primary || r.who || '(unknown)';
+    if (!owners.has(k)) owners.set(k, { key: k, name: k, asks: [], quiet: 0, oldest: 0, variants: new Set() });
+    const o = owners.get(k);
+    o.asks.push(r); o.variants.add(r.who);
+    if (isQuiet(r)) o.quiet++;
+    o.oldest = Math.max(o.oldest, r.age_days || 0);
+  }
+  for (const o of owners.values()) {
+    o.name = bdBestName(o.variants) || o.key;
+    // A team, a rota or a cron job, not a person. It still counts in every
+    // total, it just is not someone you can message, so it reads differently.
+    o.isTeam = BD_NOT_PEOPLE.has(o.key.trim().toLowerCase());
+    // "Hadas / Tamir" is two people, not a team. Still not one person you can
+    // message, so it is marked, just not mislabelled.
+    o.isShared = !o.isTeam && /[\/+]/.test(o.name);
+  }
+  const people = [...owners.values()]
+    .sort((a, b) => b.quiet - a.quiet || b.asks.length - a.asks.length);
+  const totalQuiet = theirs.filter(isQuiet).length;
+
+  // Two active projects can share a name (a fork, or a stale row left by a
+  // rename), and a duplicate makes the page look broken. Keep the one worked
+  // most recently.
+  const projects = [...new Map(
+    [...(data.projects || [])]
+      .sort((a, b) => String(b.last_worked_on || '').localeCompare(String(a.last_worked_on || '')))
+      .map(p => [p.name, p])
+  ).values()];
+
+  // Filter selections survive a re-render: resolving an ask re-renders the
+  // board, and being thrown back to "All" every time you finish something
+  // punishes exactly the person who is working through a filtered list.
+  bdState = {
+    ...bdState,
+    people, projects, theirs, myWork, lateCount, totalQuiet,
+  };
+
+  const catCounts = projects.reduce((m, p) => {
+    const k = p.category || '(none)';
+    m[k] = (m[k] || 0) + 1; return m;
+  }, {});
+  // Chips come from the categories actually present, not the built-in list:
+  // showing "Database 0" for a category you have never used is noise, and the
+  // list grows by itself when you start using a new one.
+  const catKeys = Object.keys(catCounts).sort((a, b) =>
+    catCounts[b] - catCounts[a] || a.localeCompare(b));
+  if (!catKeys.includes(bdState.pcat) && bdState.pcat !== 'all') bdState.pcat = 'all';
+
+  // ---- greeting. Rotates, so the page does not say the same thing every day,
+  // and it is about the SITUATION rather than about the reader's character. The
+  // headline it replaced ("One thing is late, and it is yours") read as an
+  // accusation.
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  const NAME = 'Tomer';
+  const opts = [];
+  if (lateCount) {
+    opts.push(`${partOfDay}, ${NAME}. <em>${lateCount}</em> thing${lateCount === 1 ? '' : 's'} to clear first.`,
+              `Let's start with the <em>${lateCount}</em> that slipped, ${NAME}.`,
+              `${partOfDay}. <em>${lateCount}</em> item${lateCount === 1 ? '' : 's'} past its date, then you're clear.`);
+  } else if (myWork.length) {
+    opts.push(`${partOfDay}, ${NAME}. <em>${myWork.length}</em> on your plate, nothing overdue.`,
+              `Nothing is late, ${NAME}. <em>${myWork.length}</em> waiting when you're ready.`,
+              `${partOfDay}. You're on top of it - <em>${myWork.length}</em> open.`);
+  } else {
+    opts.push(`Your plate is <em>clear</em>, ${NAME}.`,
+              `${partOfDay}, ${NAME}. Nothing is on you today.`,
+              `All clear, ${NAME}. Good day to pick something up.`);
+  }
+  if (theirs.length && totalQuiet > theirs.length * 0.5) {
+    opts.push(`${partOfDay}, ${NAME}. Most of your work is with <em>other people</em> right now.`);
+  }
+  // One emoji, at the end, and only on the greeting - it is prose, not chrome.
+  // Everything functional on this board is a stroke icon so it can theme; an
+  // emoji cannot, which is why it lives here and nowhere else.
+  const mark = lateCount ? '⚡' : myWork.length ? '\u{1F44B}' : '✨';
+  const greeting = opts[Math.floor(Math.random() * opts.length)]
+    + ` <span class="bd-emoji">${mark}</span>`;
+
+  const myRows = myWork.length ? myWork.map(it => {
+    const late = it.overdue === true || isQuiet(it);
+    const when = it.due_date || (it.age_days != null ? it.age_days + 'd' : '');
+    // Where the row came from, because the two kinds behave differently: an
+    // action item has a due date and a stable id, a waiting row has an age and
+    // is resolved positionally.
+    const kind = it.id != null
+      ? '<span class="bd-kind">action item</span>'
+      : '<span class="bd-kind is-wait">waiting on you</span>';
+    const done = it.id != null
+      ? `attnDoneItem(${Number(it.id)})`
+      : `attnDoneWaiting(${Number(it.task_id)}, ${Number(it.row_index)}, this)`;
+    // Two lines, not one. Inline, the kind badge and the project link competed
+    // with the title inside a single nowrap+ellipsis cell, so adding the badge
+    // silently ate the project name on every row.
+    return `<div class="bd-row bd-mine ${late ? 'is-late' : ''}">
+      <div style="min-width:0">
+        <div class="bd-what" title="${escapeHtml(it.what)}">${escapeHtml(bdCut(it.what, 96))}</div>
+        <div class="bd-sub">${kind}<a href="${projectHref(it.project_name, it.task_id)}">${escapeHtml(it.project_name || '')}</a></div>
+      </div>
+      <div class="bd-num ${late ? 'is-late' : ''}">${escapeHtml(when)}</div>
+      <div class="bd-acts"><button class="bd-btn" type="button" onclick="${done}">Done</button></div>
+    </div>`;
+  }).join('') : `<div class="bd-empty"><b>Nothing is on you.</b><br>Everything open is with someone else.</div>`;
+
+  root.innerHTML = `
+  <div class="bd-hello">
+    <h1>${greeting}</h1>
+    <span class="when mono">${escapeHtml(new Date(data.generated_at || Date.now())
+      .toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
+  </div>
+  <div class="bd-strip" id="bdStripEl">${bdStrip()}</div>
+  <div class="bd-grid">
+
+    <section class="bd-tile">
+      <div class="bd-tile-head">${BD_ICON.mine}<h3>My work</h3>
+        <span class="bd-pill ${lateCount ? 'is-late' : ''}">${myWork.length}</span>
+        <button class="bd-i" type="button" aria-label="What My work contains">i</button>
+        <div class="bd-tip bd-tip-wide" role="tooltip">Everything <b>you</b> owe, from both places it is recorded: action items assigned to you, and rows in a project's Waiting-on table whose Who column names you. Work sitting with other people is in the gadget to the right, not here.</div>
+        <span class="bd-tile-sub">${lateCount ? lateCount + ' past its date' : 'nothing overdue'}</span></div>
+      <div class="bd-tile-body">${myRows}</div>
+      <div class="bd-tile-foot"><span class="bd-key"><span class="bd-dot"></span> late: past its due date, or an ask of yours older than 7 days</span>
+        <span class="bd-key" style="margin-left:auto">updated <span id="bdStamp" class="mono">just now</span></span></div>
+    </section>
+
+    <section class="bd-tile">
+      <div class="bd-tile-head">${BD_ICON.people}<h3>Waiting on people</h3>
+        <span class="bd-pill">${theirs.length}</span>
+        <span class="bd-tile-sub" id="peopleSub">${totalQuiet} with no reply in 7d</span></div>
+      <div class="bd-filters">
+        ${Object.entries(BD_FILTERS).map(([k, v]) =>
+          `<button class="bd-chip" type="button" data-f="${k}" aria-pressed="${k === bdState.filter}" onclick="bdSetFilter(this.dataset.f)">${v.label}</button>`).join('')}
+        <input class="bd-search" type="search" placeholder="Filter by person, project or text…"
+               aria-label="Filter asks" value="${escapeHtml(bdState.query)}" oninput="bdSetQuery(this.value)">
+        <label class="bd-sort">sort
+          <select class="bd-chip" style="padding:5px 7px" aria-label="Band order" onchange="bdSetSort(this.value)">
+            <option value="near"${bdState.sort === 'near' ? ' selected' : ''}>newest band first</option>
+            <option value="far"${bdState.sort === 'far' ? ' selected' : ''}>30d+ first</option>
+          </select></label>
+      </div>
+      <div class="bd-tile-body" id="peopleBody">${bdPersonRows()}</div>
+      <div class="bd-tile-foot">
+        ${BANDS.map(b => `<span class="bd-key"><i style="background:var(--${b.key})"></i>${b.label}</span>`).join('')}
+        <span style="margin-left:auto">bar length = number of asks</span>
+      </div>
+    </section>
+
+    <section class="bd-tile" style="grid-column:1 / -1">
+      <div class="bd-tile-head">${BD_ICON.proj}<h3>Projects</h3>
+        <span class="bd-pill" id="projPill">${projects.length}</span>
+        <span class="bd-tile-sub" id="projSub">everything active, most recently worked first</span></div>
+      <div class="bd-filters">
+        <button class="bd-chip" type="button" data-pc="all" aria-pressed="${bdState.pcat === 'all'}" onclick="bdSetPcat(this.dataset.pc)">All ${projects.length}</button>
+        ${/* The category goes in a data- attribute and is read back off the
+              element, never interpolated into the handler. Categories are
+              user-created (POST /api/categories), and escaping alone does not
+              make a value safe inside an inline handler: the HTML parser
+              decodes &#39; back to an apostrophe before the JS is parsed, so a
+              category named "it's" would break the chip and a hostile one
+              would run. dataset gives back the original string with no JS
+              string literal in the middle. */''}
+        ${catKeys.map(k => `<button class="bd-chip bd-chip-cat" type="button" data-pc="${escapeHtml(k)}"
+             aria-pressed="${bdState.pcat === k}" onclick="bdSetPcat(this.dataset.pc)">${bdCatIcon(k === '(none)' ? null : k)}
+             ${escapeHtml(k === '(none)' ? 'uncategorised' : k)} ${catCounts[k]}</button>`).join('')}
+        <input class="bd-search" type="search" placeholder="Filter projects…"
+               aria-label="Filter projects" value="${escapeHtml(bdState.pquery)}" oninput="bdSetPquery(this.value)">
+      </div>
+      <div class="bd-tile-body" id="projBody"></div>
+      <div class="bd-tile-foot"><span class="bd-key"><span class="bd-dot"></span> you are late on this project</span>
+        <span class="bd-key">On you = items assigned to you here</span>
+        <span class="bd-key">No reply = asks out over 7 days</span></div>
+    </section>
+
+  </div>`;
+
+  // Fills #projBody and syncs the pill and subtitle, so a re-render that
+  // restores a category filter reports the filtered count rather than the total.
+  bdRefreshProjects();
+
+  // The board is one viewport tall with each tile scrolling inside itself, so
+  // it has to know how much chrome sits above it. Measured rather than
+  // hardcoded to 48px: the toolbar is a fixed height but the update banner
+  // above it is not always there, and hardcoding pushed the bottom of the board
+  // off screen whenever it appeared.
+  root.style.setProperty('--bd-top', Math.round(root.getBoundingClientRect().top) + 'px');
+  bdStartStamp();
+}
+
+
+        // Both kinds of "done" from one view. A commitment has a stable id so it
+        // completes through the action-item endpoint; a Waiting-on row has none
+        // (it is hand-editable markdown) so it resolves positionally and the
+        // server verifies the row's own text before removing it, answering 409
+        // rather than resolving the wrong row when the table has shifted.
+        async function attnDoneItem(itemId) {
+            try {
+                await pmPost(`/api/action-items/${itemId}`, { status: 'done' }, 'PUT');
+                await loadTodayData();
+            } catch (e) { console.error('Could not complete item:', e); }
         }
+
+        async function attnDoneWaiting(taskId, rowIndex, btn) {
+            const group = (attnLastData.on_others || []).find(g => g.task_id === taskId);
+            // Matched on row_index, NOT indexed by it. row_index is the row's
+            // position in the context file's markdown table, while group.rows is
+            // sorted most-past-the-line first, so the two orders differ and
+            // `rows[rowIndex]` would hand the server a different row's text than
+            // the one the user clicked. The server verifies what/who/since, so
+            // that mismatch would surface as a 409 rather than a wrong write,
+            // but it would make Done fail on exactly the rows it matters for.
+            const row = group && (group.rows || []).find(r => r.row_index === rowIndex);
+            if (!row) { console.error('Waiting row no longer in the payload'); return; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Resolving...'; }
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${taskId}/waiting-on/resolve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        row_index: rowIndex, what: row.what || '', who: row.who || '',
+                        since: row.since || '', outcome: null,
+                    }),
+                });
+                if (res.status === 409) {
+                    // The table moved under the view. Reloading is the honest
+                    // answer: the row the user pointed at is not where it was.
+                    if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
+                    await loadTodayData();
+                    return;
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                await loadTodayData();
+            } catch (e) {
+                console.error('Could not resolve waiting row:', e);
+                if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
+            }
+        }
+
+
 
         // Card 1: what he owes. Action items plus the waiting-on rows that name
         // him, which is the whole point - those were previously invisible on his
@@ -7518,294 +8380,15 @@
             return '#project/' + encodeURIComponent(name || '') + (q.length ? '?' + q.join('&') : '');
         }
 
-        // One icon per section, five in total, each used exactly once - they are
-        // section markers, not decoration, so a repeat would stop marking
-        // anything. Deliberately NONE on rows: twelve rows times four columns
-        // would add 48 objects competing with the numbers they sit beside, which
-        // is the noise this view was redesigned to remove.
-        //
-        // Same shape as the nav icons above (Feather geometry on a 24x24 box,
-        // fill none, stroke currentColor) so they inherit the theme for free.
-        // None of the five repeats a nav glyph: the Today card is a calendar
-        // rather than the pulse line, which is the Activity nav item.
-        //
-        // Four here, not five - the projects table's layers icon sits inline in
-        // its static card header, since that title is markup rather than
-        // rendered by any of these functions.
-        const ATTN_ICONS = {
-            // On you - an inbox, the things landed in front of him
-            inbox: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
-            // Waiting on - other people
-            users: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-            // Stalled - time passing with nothing happening
-            hourglass: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2h12M6 22h12"/><path d="M6 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V2"/><path d="M6 22v-5a6 6 0 0 1 6-6 6 6 0 0 1 6 6v5"/></svg>',
-            // Today
-            calendar: '<svg class="attn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
-        };
 
-        // The icon and its words are one object, so they get their own centred
-        // flex line. The label around them stays baseline-aligned, which is what
-        // sets the 32px count on the same baseline as the 10px caps.
-        function attnHead(icon, text) {
-            return `<span class="attn-label-head">${ATTN_ICONS[icon]}${text}</span>`;
-        }
 
-        function renderAttnMine(mine, mineRows, counts) {
-            const el = document.getElementById('attnMineCard');
-            const items = [...mine.overdue, ...mine.due_soon, ...mine.other_open];
-            const total = items.length + mineRows.length;
-            const overdue = counts.overdue || 0;
-            if (!total) {
-                el.innerHTML = `<div class="attn-label">${attnHead('inbox', 'On you')}</div>
-                    <div class="pm-empty" style="padding:8px 0;">Nothing on your plate.</div>`;
-                return;
-            }
-            // Overdue renders only when non-zero: a card reading "0 overdue" is
-            // the least informative thing the view can carry.
-            const note = overdue
-                ? `<span class="attn-note pm-alert-text">${overdue} overdue</span>`
-                : '';
-            // Two, not three. These rows are two lines each, so a third pushed
-            // the hero to 364px and dragged the other two cards up with it (the
-            // grid equalises heights), which cost the projects table the fold.
-            const SHOWN = 2;
-            const rows = [
-                ...items.map(renderAttnOwnItem),
-                ...mineRows.map(renderAttnMineWaitRow),
-            ];
-            const visible = rows.slice(0, SHOWN).join('');
-            const hidden = rows.length > SHOWN
-                ? `<div id="attnMineMore" style="display:none;">${rows.slice(SHOWN).join('')}</div>
-                   <button class="pm-toggle-link" onclick="attnToggleMineMore(this)"
-                           data-more="${rows.length - SHOWN}">+${rows.length - SHOWN} more</button>`
-                : '';
-            el.innerHTML = `
-                <div class="attn-label">
-                    ${attnHead('inbox', 'On you')}
-                    <span class="attn-count ${overdue ? 'is-alert' : ''}">${total}</span>
-                    ${note}
-                </div>
-                ${visible}${hidden}`;
-        }
 
-        // An action item of his, compact. The due-date input moves into the
-        // expanded state; on the footer line it would leave no room for the
-        // project name.
-        function renderAttnOwnItem(item) {
-            const due = pmFormatDue(item.due_date);
-            const what = escapeHtml(item.what || '');
-            return `<div class="attn-own ${item.overdue ? 'is-overdue' : ''}">
-                <div class="attn-own-what" title="${what}" onclick="attnToggleOwn(this)">
-                    <span class="pm-id-chip">${escapeHtml(item.label)}</span> ${what}
-                </div>
-                <div class="attn-own-foot">
-                    <a class="pm-item-project" href="${projectHref(item.project_name, item.task_id, 'action-items')}">${escapeHtml(item.project_name || '')}</a>
-                    <span class="${due.cls}">${due.text}</span>
-                    <span class="attn-own-actions">
-                        <button class="pm-mini-btn" onclick="pmMarkDone(${item.id}, this)">Done</button>
-                    </span>
-                </div>
-                <div class="attn-own-extra">
-                    <input type="date" value="${escapeHtml(item.due_date || '')}" title="Change due date"
-                           aria-label="Due date for ${what}"
-                           onchange="pmChangeDue(${item.id}, this.value, this)">
-                </div>
-                <div class="pm-row-error" role="alert" style="display:none;"></div>
-            </div>`;
-        }
 
-        // A self-owned waiting-on row, shown on his side of the split. It has no
-        // action-item id, so it resolves by verified row position exactly like
-        // any other waiting row - only the label differs.
-        function renderAttnMineWaitRow(row) {
-            const rowId = pmRowDomId(row, 'onOthers');
-            const what = escapeHtml(row.what || '');
-            // Past its line on a row of HIS means he is late, which the server
-            // now counts into overdue. Two consequences the row was missing:
-            // it gets the same red rail an overdue action item gets, so the
-            // count in the card header has something to point AT, and the age
-            // goes red rather than amber. Amber on this view means "someone
-            // else is slow"; on his own row that is the wrong claim.
-            const pastLine = row.days_past_line !== null && row.days_past_line !== undefined;
-            const age = (row.age_days !== null && row.age_days !== undefined)
-                ? `<span class="${pastLine ? 'pm-alert-text' : ''}">${row.age_days}d</span>`
-                : '';
-            return `<div class="attn-own ${pastLine ? 'is-overdue' : ''}" id="${rowId}"
-                         data-task-id="${row.task_id}"
-                         data-row-index="${row.row_index === null || row.row_index === undefined ? '' : row.row_index}"
-                         data-what="${what}"
-                         data-who="${escapeHtml(row.who || '')}"
-                         data-since="${escapeHtml(row.since || '')}">
-                <div class="attn-own-what" title="${what}" onclick="attnToggleOwn(this)">${what}</div>
-                <div class="attn-own-foot">
-                    <a class="pm-item-project" href="${projectHref(row.project_name, row.task_id)}">${escapeHtml(row.project_name || '')}</a>
-                    ${age}
-                    <span class="attn-own-actions">
-                        <button class="pm-mini-btn" onclick="pmOpenResolve('${rowId}')">Resolve</button>
-                    </span>
-                </div>
-                ${row.why ? `<div class="pm-item-why">gates ${escapeHtml(row.why)}</div>` : ''}
-                <div class="pm-resolve-form" id="${rowId}-form" style="display:none;">
-                    <input type="text" id="${rowId}-outcome" placeholder="What happened? (optional)"
-                           aria-label="Outcome for ${what} (optional)"
-                           aria-describedby="${rowId}-error"
-                           onkeydown="if(event.key==='Enter'){pmResolveWaiting('${rowId}');}">
-                    <button class="pm-mini-btn" onclick="pmResolveWaiting('${rowId}')">Confirm</button>
-                    <button class="pm-mini-btn" onclick="pmCloseResolve('${rowId}')">Cancel</button>
-                </div>
-                <div class="pm-row-error" id="${rowId}-error" role="alert" style="display:none;"></div>
-            </div>`;
-        }
 
-        // Click the text for the whole sentence, what it gates, and the
-        // due-date input.
-        function attnToggleOwn(el) {
-            const row = el.closest('.attn-own');
-            if (row) row.classList.toggle('is-open');
-        }
 
-        function attnToggleMineMore(btn) {
-            const el = document.getElementById('attnMineMore');
-            const open = el.style.display === 'none';
-            el.style.display = open ? 'block' : 'none';
-            btn.textContent = open ? 'Show fewer' : `+${btn.dataset.more} more`;
-        }
 
-        // Card 2: who owes him, most first. This is what turns 63 individual
-        // chases into an agenda - one conversation with the top name clears a
-        // fifth of the backlog. Grouping needs `who_primary` from the server,
-        // because the raw cell is prose: 47 distinct strings, 34 real owners.
-        function renderAttnPeople(groups, counts) {
-            const el = document.getElementById('attnPeopleCard');
-            const rows = groups.flatMap(g => (g.rows || []).filter(r => !r.mine));
-            if (!rows.length) {
-                el.innerHTML = `<div class="attn-label">${attnHead('users', 'Waiting on')}</div>
-                    <div class="pm-empty" style="padding:8px 0;">You are not waiting on anyone.</div>`;
-                return;
-            }
-            const by = new Map();
-            rows.forEach(r => {
-                const key = r.who_primary || r.who || '(unknown)';
-                const e = by.get(key)
-                    || { name: key, total: 0, idle: 0, oldest: 0, raw: new Set(), tasks: new Set() };
-                e.total += 1;
-                if (r.days_past_line !== null && r.days_past_line !== undefined) e.idle += 1;
-                e.oldest = Math.max(e.oldest, r.age_days || 0);
-                if (r.who) e.raw.add(r.who);
-                // Which projects to open when this person is clicked. Collected
-                // here because this is where the rows are; the click handler then
-                // needs no snapshot of the payload to consult.
-                e.tasks.add(r.task_id);
-                by.set(key, e);
-            });
-            const people = [...by.values()].sort((a, b) => b.total - a.total || b.idle - a.idle);
-            // The widget's claim is that a head exists. If the top holder has
-            // fewer than 3, there is no head and the list would assert a
-            // structure the data does not have, so it says so instead.
-            if (people[0].total < 3) {
-                el.innerHTML = `<div class="attn-label">${attnHead('users', 'Waiting on')}
-                        <span class="attn-note">${people.length} people, nobody with more than ${people[0].total} asks</span></div>
-                    <div class="pm-empty" style="padding:8px 0;">Spread thin, so there is no one person to chase.</div>`;
-                return;
-            }
-            const SHOWN = 4;
-            const top = people.slice(0, SHOWN);
-            const max = people[0].total;
-            const tailPeople = people.length - top.length;
-            const tailRows = people.slice(SHOWN).reduce((n, p) => n + p.total, 0);
-            const body = top.map(p => {
-                const pct = max ? Math.round((p.total / max) * 100) : 0;
-                const fill = p.total ? Math.round((p.idle / p.total) * 100) : 0;
-                // The merge is shown, not hidden: a first-name key can fuse two
-                // people who share one, and the raw cells are the only evidence.
-                const title = `${p.total} asks, ${p.idle} with no reply for 7d+, oldest is ${p.oldest}d old\n${[...p.raw].join('\n')}`;
-                return `<button class="attn-person" title="${escapeHtml(title)}"
-                                data-tasks="${[...p.tasks].join(',')}"
-                                onclick="attnFilterPerson(this)">
-                    <span class="attn-person-name">${escapeHtml(p.name)}</span>
-                    <span class="attn-num">${p.total}</span>
-                    <span class="attn-num ${p.idle ? 'pm-heat-text' : ''}">${p.idle || '·'}</span>
-                    <span class="pm-group-meter" aria-hidden="true">
-                        <span class="pm-group-meter-bar" style="width:${pct}%;">
-                            <span class="pm-group-meter-fill" style="width:${fill}%;"></span>
-                        </span>
-                    </span>
-                </button>`;
-            }).join('');
-            el.innerHTML = `
-                <div class="attn-label">${attnHead('users', 'Waiting on')}
-                    <span class="attn-note">${counts.on_others || rows.length} asks &middot; ${counts.stale || 0} with no reply 7d+</span>
-                </div>
-                <div class="attn-sub">asks &middot; no reply 7d+ &middot; share of all asks</div>
-                ${body}
-                ${tailPeople ? `<div class="attn-sub" style="margin:8px 0 0;">+${tailRows} more across ${tailPeople} other ${tailPeople === 1 ? 'person' : 'people'}</div>` : ''}`;
-        }
 
-        // Clicking a person expands every project holding one of their asks, so
-        // the table below becomes the detail view rather than a second list.
-        // Marks the projects, then refetches: onOthersExpanded survives a
-        // re-render by design, so the normal load path does the rest and no
-        // snapshot of the last payload has to be kept around to go stale.
-        async function attnFilterPerson(btn) {
-            (btn.dataset.tasks || '').split(',').filter(Boolean)
-                .forEach(id => onOthersExpanded.add(Number(id)));
-            await loadTodayData();
-            const first = document.querySelector('.pm-group-rows[style*="block"]');
-            if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
 
-        // Card 3: the join of attention owed against when the project was last
-        // worked. Two states needing opposite actions, which is why one list of
-        // "needs attention" would be wrong: chase the live ones, close the dead
-        // ones. Tracked minutes cannot tell them apart - only 33 minutes of a
-        // 5h48m day attributes to a project, and the most-owed project reads 0m
-        // on a day it was worked.
-        function renderAttnStalled(projects) {
-            const el = document.getElementById('attnStalledCard');
-            const idle = projects.filter(p => (p.stale_on_others_count || 0) > 0);
-            const d = p => p.days_since_worked;
-            const worked = p => d(p) !== null && d(p) !== undefined;
-            // The two sets partition `idle` exactly: worked in the last 3 days,
-            // or not. The parked side used to test > 7, which left a project
-            // worked 4 to 7 days ago in NEITHER set, so it appeared nowhere on
-            // the card. Nothing sits in that window today, so this was latent
-            // rather than visible - but the same bound has to draw both sides or
-            // the card silently drops rows. Never-worked counts as parked: a
-            // project with no last_worked_on is the most parked thing there is.
-            const RECENT_DAYS = 3;
-            const live = idle.filter(p => worked(p) && d(p) <= RECENT_DAYS);
-            const parked = idle.filter(p => !worked(p) || d(p) > RECENT_DAYS);
-            const chasing = live.length > 0;
-            const set = (chasing ? live : parked)
-                .sort((a, b) => b.stale_on_others_count - a.stale_on_others_count);
-            if (!set.length) {
-                el.innerHTML = `<div class="attn-label">${attnHead('hourglass', 'Stalled')}</div>
-                    <div class="pm-empty" style="padding:8px 0;">No ask has gone 7 days without a reply.</div>`;
-                return;
-            }
-            const SHOWN = 3;
-            const body = set.slice(0, SHOWN).map(p => `
-                <div class="attn-rot-row">
-                    <span class="attn-rot-name">
-                        <a class="pm-item-project" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a>
-                    </span>
-                    <span class="attn-rot-when">
-                        <span class="pm-heat-text">${p.stale_on_others_count}/${p.on_others_count}</span>
-                        &middot; ${attnWorkedLabel(p.days_since_worked)}
-                    </span>
-                </div>`).join('');
-            const more = set.length - SHOWN;
-            el.innerHTML = `
-                <div class="attn-label">${attnHead('hourglass', 'Stalled')}
-                    <span class="attn-state">${chasing ? 'chase' : 'parked'}</span>
-                    <span class="attn-note">${chasing
-                        ? 'you worked these in the last 3 days, so chase the people'
-                        : 'untouched more than 3 days too, so close or drop them'}</span>
-                </div>
-                <div class="attn-sub">no reply 7d+ / all asks &middot; last worked</div>
-                ${body}
-                ${more > 0 ? `<div class="attn-sub" style="margin:8px 0 0;">and ${more} more</div>` : ''}`;
-        }
 
         function attnWorkedLabel(days) {
             if (days === null || days === undefined) return 'never worked';
@@ -7814,43 +8397,37 @@
             return `${days}d ago`;
         }
 
-        // Card 4: the only genuinely daily thing on the view, from the one data
-        // source the old design ignored entirely.
+        // The strip's tracked-time half. It arrives on its own fetch because
+        // /api/stats/today reads Claude transcript files and takes 1517-2640ms
+        // against /api/today's 26-44ms, so the board renders without it and this
+        // drops into the strip already on screen.
+        //
+        // The shape is remapped rather than used raw: the endpoint returns
+        // `commit_count` and an `hourly_activity` array of objects, while the
+        // strip wants a count and a flat array of seconds per hour. Reading the
+        // endpoint's names directly rendered "undefined commits" and an empty
+        // sparkline.
+        //
+        // Two things about hourly_activity, both matching renderHourlyChart:
+        // it carries only the hours that saw activity, so today's came back as
+        // 0,1,2,3,9,17 and plotting them in order would have drawn 06:00 next
+        // to 17:00 as if they were adjacent; and its `total_seconds` is 0 on
+        // every row right now while `claude_seconds` holds the real time, so
+        // the larger of the two is the honest read.
         function renderAttnToday(stats) {
-            const el = document.getElementById('attnTodayCard');
-            if (!stats) { el.style.display = 'none'; return; }
-            el.style.display = '';
-            const hours = stats.hourly_activity || [];
-            const max = hours.reduce((m, h) => Math.max(m, h.total_seconds || 0), 0);
-            const spark = hours.map(h => {
-                const s = h.total_seconds || 0;
-                const pct = max ? Math.max(6, Math.round((s / max) * 100)) : 0;
-                const label = `${h.hour !== undefined ? String(h.hour).padStart(2, '0') + ':00' : ''} ${Math.round(s / 60)}m`;
-                return `<span class="attn-spark-bar ${s ? '' : 'is-empty'}" style="height:${s ? pct : 8}%" title="${escapeHtml(label.trim())}"></span>`;
-            }).join('');
-            // Only 9% of today's tracked time attributes to a project, so the
-            // unattributed remainder is stated rather than left to look like
-            // idleness. It is the one number here he cannot get elsewhere.
-            const unbound = (stats.tasks_today || [])
-                .filter(t => t.is_untracked)
-                .reduce((n, t) => n + (t.time_seconds || 0), 0);
-            const item = (v, l) => `<div class="attn-strip-item"><span class="attn-strip-value">${v}</span><span class="attn-strip-label">${l}</span></div>`;
-            const loc = (stats.loc_added || stats.loc_removed)
-                ? `+${formatNumber(stats.loc_added || 0)}/-${formatNumber(stats.loc_removed || 0)}`
-                : '0';
-            el.innerHTML = `
-                <div class="attn-label">${attnHead('calendar', 'Today')}
-                    ${unbound ? `<span class="attn-note">${formatDuration(unbound)} not bound to a project</span>` : ''}
-                </div>
-                <div class="attn-strip">
-                    ${item(escapeHtml(stats.total_formatted || '0m'), 'tracked')}
-                    ${item(stats.commit_count || 0, 'commits')}
-                    ${item(loc, 'lines')}
-                    ${item(stats.task_count || 0, 'projects')}
-                    ${spark ? `<span class="attn-spark" aria-hidden="true">${spark}</span>` : ''}
-                </div>`;
+            bdTodayStats = stats && {
+                total_formatted: stats.total_formatted || '0m',
+                commits: stats.commit_count || 0,
+                loc_added: stats.loc_added || 0,
+                loc_removed: stats.loc_removed || 0,
+                hourly: Array.from({ length: 24 }, (_, h) => {
+                    const e = (stats.hourly_activity || []).find(x => x.hour === h);
+                    return e ? Math.max(e.total_seconds || 0, e.claude_seconds || 0) : 0;
+                }),
+            };
+            const el = document.getElementById('bdStripEl');
+            if (el) el.innerHTML = bdStrip();
         }
-
 
         // A row in the "On me" sections - always the user's own item, so it
         // carries no owner badge (the section title already says whose it is).
@@ -7890,117 +8467,8 @@
         // collapsed the row the user was working in on each action.
         let onOthersExpanded = null;
 
-        function renderOnOthers(projects, groups, counts) {
-            // A fresh payload supersedes any stale-view notice.
-            pmClearOnOthersBanner();
-            const byTask = new Map(groups.map(g => [g.task_id, g]));
-            document.getElementById('todayOnOthersCount').textContent = projects.length
-                ? `${projects.length} active`
-                : '0';
-            const help = document.getElementById('todayOnOthersHelp');
-            const body = document.getElementById('todayOnOthersBody');
-            if (!projects.length) {
-                if (help) help.textContent = '';
-                body.innerHTML = '<div class="pm-empty">No project has an open item or an outstanding ask.</div>';
-                return;
-            }
-            if (help) help.textContent = attnTableHelp(counts);
-            if (onOthersExpanded === null) {
-                // Everything starts closed. Auto-expanding filled the screen
-                // with rows from whichever project happened to sort first, so
-                // the list of projects never fit on screen at all.
-                onOthersExpanded = new Set();
-            } else {
-                // Drop projects that no longer exist (all their rows resolved).
-                const live = new Set(projects.map(p => p.task_id));
-                for (const id of [...onOthersExpanded]) {
-                    if (!live.has(id)) onOthersExpanded.delete(id);
-                }
-            }
-            const maxCount = projects.reduce((m, p) => Math.max(m, p.on_others_count || 0), 0);
-            // "idle" was the heading on two different columns - the meter and
-            // the count - so neither said what it measured. The meter is a
-            // share, the count is a number of asks, and both are about the same
-            // 7-day threshold, so the threshold is what they are named after.
-            const head = `<div class="attn-col-head" aria-hidden="true">
-                <span></span><span></span><span>mine</span><span>asks</span>
-                <span>one tick per ask</span><span>7d+</span><span>worked</span>
-                <span>done</span><span>next up</span>
-            </div>`;
-            body.innerHTML = head + projects
-                .map(p => renderOnOthersGroup(p, byTask.get(p.task_id),
-                                              onOthersExpanded.has(p.task_id), maxCount))
-                .join('');
-        }
 
-        // One line under the title. It has to explain the meter, which is novel,
-        // and carry the one fact the columns cannot: how much of the whole is
-        // idle. An age histogram was the alternative and it says less per pixel.
-        function attnTableHelp(counts) {
-            const stale = counts.stale || 0;
-            const total = counts.on_others || 0;
-            // The mechanism now lives in the column heading ("one tick per ask"),
-            // so this line only has to say what amber means and carry the total.
-            const scale = 'Amber ticks are the ones with no reply.';
-            if (!stale) return `Every ask has had a reply inside 7 days. ${scale}`;
-            return `${stale} of ${total} asks have had no reply for 7 days or more. ${scale}`;
-        }
 
-        function renderOnOthersGroup(project, group, expanded, maxCount) {
-            const name = project.name || '';
-            const bodyId = `onOthersGroup-${project.task_id}`;
-            const rows = group ? (group.rows || []) : [];
-            const count = project.on_others_count || 0;
-            const staleCount = project.stale_on_others_count || 0;
-            const mineCount = project.open_count || 0;
-            const due = project.due_date ? pmFormatDue(project.due_date) : null;
-            // Deliberately NOT project.at_risk: that is true whenever anything
-            // is stale, which the meter already says, so it would repeat the
-            // meter in the one colour reserved for lateness. Only the reasons
-            // this row does not otherwise carry get a dot.
-            const overdueCount = project.overdue_count || 0;
-            const dueSoon = project.days_to_due !== null && project.days_to_due !== undefined
-                && project.days_to_due <= 7;
-            const dot = overdueCount
-                ? `<span class="pm-risk-dot" title="${overdueCount === 1 ? 'One of your own items is late' : overdueCount + ' of your own items are late'}"></span>`
-                : (dueSoon ? '<span class="pm-risk-dot is-soon" title="Project due within 7 days"></span>' : '');
-            // Same predicate as the Stalled card, so the card is a shortcut into
-            // rows he can already find by eye.
-            const worked = project.days_since_worked;
-            const isStalled = staleCount > 0 && worked !== null && worked !== undefined && worked <= 3;
-            const num = (n, cls) => n
-                ? `<span class="pm-group-count ${cls || ''}">${n}</span>`
-                : '<span class="pm-group-count is-zero">&middot;</span>';
-            const meter = attnAskMeter(count, staleCount, maxCount);
-            // The row was a single <button> wrapping everything, which is why
-            // there was no way to open a project from here: an <a> cannot live
-            // inside a <button>, so the name could not be a link. Split into
-            // two controls with distinct jobs - the caret expands, the name
-            // navigates - and the row itself is a plain div whose click is
-            // delegated to the caret, so clicking any of the numbers still
-            // expands. The href carries the task id because names repeat.
-            const href = projectHref(name, project.task_id);
-            return `<div class="pm-group">
-                <div class="pm-group-header ${isStalled ? 'is-stalled' : ''}"
-                     onclick="attnRowClick(event, '${bodyId}')">
-                    <button class="pm-group-caret" aria-expanded="${expanded}" aria-controls="${bodyId}"
-                            data-task-id="${project.task_id}"
-                            aria-label="${expanded ? 'Collapse' : 'Expand'} ${escapeHtml(name)}"
-                            onclick="toggleOnOthersGroup(this, '${bodyId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
-                    <a class="pm-group-name" href="${href}">${escapeHtml(name)}${dot}</a>
-                    ${num(mineCount, 'is-mine')}
-                    ${num(count)}
-                    ${meter}
-                    ${num(staleCount, 'pm-heat-text')}
-                    <span class="pm-group-touched">${due ? `<span class="${due.cls}">${due.text}</span>` : attnWorkedLabel(worked)}</span>
-                    ${attnProgress(project)}
-                    ${attnNextUp(project)}
-                </div>
-                <div class="pm-group-rows" id="${bodyId}" style="display:${expanded ? 'block' : 'none'};">
-                    ${expanded ? attnPanel(project, rows) : ''}
-                </div>
-            </div>`;
-        }
 
         // His own rows first, then everyone else's. That ordering IS his
         // complaint answered: the panel used to show only what other people owed.
@@ -8037,28 +8505,6 @@
         // end of the range, because a project with 20+ asks is unambiguously the
         // long one whatever the drawing.
         const COMB_MAX_TICKS = 20;
-        function attnAskMeter(count, staleCount, maxCount) {
-            // Nothing at all when nothing is with anyone else. The 4px min-width
-            // that keeps a one-ask project visible would otherwise draw a stub on
-            // a project with zero, reading as "a tiny amount" rather than "none".
-            if (!count) return '<span></span>';
-            const label = `${count} asks with other people, ${staleCount} with no reply for 7 days or more`;
-            if (count > COMB_MAX_TICKS) {
-                // Bar length on one absolute scale across every project, so
-                // length compares volume between rows; the fill is this
-                // project's no-reply share.
-                const lengthPct = maxCount ? Math.round((count / maxCount) * 100) : 0;
-                const fillPct = Math.round((staleCount / count) * 100);
-                return `<span class="pm-group-meter" title="${escapeHtml(label)}">
-                        <span class="pm-group-meter-bar" style="width:${lengthPct}%;">
-                            <span class="pm-group-meter-fill" style="width:${fillPct}%;"></span>
-                        </span>
-                    </span>`;
-            }
-            const ticks = Array.from({ length: count }, (_, i) =>
-                `<span class="attn-comb-tick${i < staleCount ? ' is-idle' : ''}"></span>`).join('');
-            return `<span class="attn-comb" title="${escapeHtml(label)}">${ticks}</span>`;
-        }
 
         // The project's tracker reference, in the panel rather than the row: 7 of
         // 12 projects have one, so as a row column it would be a mostly-empty
@@ -8075,46 +8521,8 @@
             return ` &middot; ${inner}`;
         }
 
-        // How far through the checklist the project is. The row said who owed
-        // what but nothing about whether the work was nearly done or barely
-        // started, so "3 asks outstanding" read the same on a project at 86% as
-        // on one at 0%. A bar plus the fraction: the bar is for comparing rows
-        // at a glance, the fraction is the number you act on.
-        function attnProgress(project) {
-            const total = project.total_count || 0;
-            if (!total) return '<span class="pm-group-count is-zero">&middot;</span>';
-            const done = project.completed_count || 0;
-            const pct = project.completion_pct || 0;
-            return `<span class="attn-done" title="${done} of ${total} checklist items done">
-                <span class="attn-done-bar"><span class="attn-done-fill" style="width:${pct}%"></span></span>
-                <span class="attn-done-text">${done}/${total}</span>
-            </span>`;
-        }
 
-        // The next unchecked item, which is the "what is next on the plate" half
-        // of the row - its partner is the `worked` column saying when the project
-        // was last touched. One line, ellipsised, full text in the tooltip: these
-        // are whole sentences and twelve of them wrapping would cost the fold.
-        function attnNextUp(project) {
-            const next = (project.next_up || '').trim();
-            if (!next) {
-                // 100% complete is a different statement from "no checklist".
-                const done = (project.total_count || 0) > 0
-                    && project.completed_count === project.total_count;
-                return `<span class="attn-next ${done ? 'is-done' : 'is-none'}">${done ? 'all done' : '&middot;'}</span>`;
-            }
-            return `<span class="attn-next" title="${escapeHtml(next)}">${escapeHtml(next)}</span>`;
-        }
 
-        // The whole row stays clickable to expand, so the numbers and the meter
-        // are not dead space. The two real controls inside it opt out: the name
-        // link navigates, the caret already has its own handler and would
-        // otherwise toggle twice.
-        function attnRowClick(ev, bodyId) {
-            if (ev.target.closest('a, button')) return;
-            const caret = ev.currentTarget.querySelector('.pm-group-caret');
-            if (caret) toggleOnOthersGroup(caret, bodyId);
-        }
 
         function toggleOnOthersGroup(btn, bodyId) {
             const el = document.getElementById(bodyId);
@@ -8145,86 +8553,6 @@
             }
         }
 
-        function renderOnOthersRow(row) {
-            const pastLine = row.days_past_line !== null && row.days_past_line !== undefined;
-            const isCommitment = row.kind === 'commitment';
-            // A chip only on the minority kind. Every row in this list is a
-            // blocker in practice, and 60-odd identical "blocker" badges carry
-            // no information while costing a column - the card's help line says
-            // it once instead. A commitment among them is genuinely worth
-            // marking, so it keeps its chip.
-            const kindChip = isCommitment ? '<span class="pm-badge">commitment</span>' : '';
-            const idChip = row.label ? `<span class="pm-id-chip">${escapeHtml(row.label)}</span> ` : '';
-
-            let timing = '';
-            if (isCommitment) {
-                if (pastLine) {
-                    timing = `<span class="pm-alert-text">${row.days_past_line}d overdue</span>`;
-                } else if (row.due_date) {
-                    timing = `<span class="due-cell-soon">due ${escapeHtml(row.due_date)}</span>`;
-                }
-            } else if (row.age_days !== null && row.age_days !== undefined) {
-                // Amber, not red, and no "(stale)" word: the project's meter
-                // right above already says how much has gone idle, and
-                // repeating it per row is what turned two thirds of the list
-                // red and left red meaning nothing.
-                timing = pastLine
-                    ? `<span class="pm-heat-text">${row.age_days}d</span>`
-                    : `<span>${row.age_days}d</span>`;
-            }
-
-            // Moved out of the collapsed row: it is the single largest source
-            // of per-row noise, and it only matters once you are deciding about
-            // that one item.
-            // "gates" and "from" are both terse to the point of ambiguity - the
-            // first is jargon, the second could mean who asked or where it came
-            // from. Say the relationship.
-            const why = row.why
-                ? `<div class="pm-item-why">${isCommitment ? 'asked by' : 'blocks'} ${escapeHtml(row.why)}</div>`
-                : '';
-
-            // A commitment acts by its action-item id. A blocker has no id -
-            // it acts by row position, verified server-side against its own
-            // text, so the exact `what` travels with the request.
-            const rowId = pmRowDomId(row, 'onOthers');
-            const actions = isCommitment
-                ? `<div class="pm-item-actions">
-                    <input type="date" value="${escapeHtml(row.due_date || '')}" title="Change due date"
-                           aria-label="Due date for ${escapeHtml(row.what || '')}"
-                           onchange="pmChangeDue(${row.id}, this.value, this)">
-                    <button class="pm-mini-btn" onclick="pmMarkDone(${row.id}, this)">Done</button>
-                </div>`
-                : `<div class="pm-item-actions">
-                    <button class="pm-mini-btn" onclick="pmOpenResolve('${rowId}')">Resolve</button>
-                </div>`;
-            const resolveForm = isCommitment ? '' : `
-                <div class="pm-resolve-form" id="${rowId}-form" style="display:none;">
-                    <input type="text" id="${rowId}-outcome" placeholder="What happened? (optional)"
-                           aria-label="Outcome for ${escapeHtml(row.what || '')} (optional)"
-                           aria-describedby="${rowId}-error"
-                           onkeydown="if(event.key==='Enter'){pmResolveWaiting('${rowId}');}">
-                    <button class="pm-mini-btn" onclick="pmResolveWaiting('${rowId}')">Confirm</button>
-                    <button class="pm-mini-btn" onclick="pmCloseResolve('${rowId}')">Cancel</button>
-                </div>`;
-
-            const what = escapeHtml(row.what || '');
-            return `<div class="pm-item-row pm-wait-row" id="${rowId}"
-                         data-task-id="${row.task_id}" data-row-index="${row.row_index === null || row.row_index === undefined ? '' : row.row_index}"
-                         data-what="${what}"
-                         data-who="${escapeHtml(row.who || '')}"
-                         data-since="${escapeHtml(row.since || '')}">
-                <div class="pm-item-what" title="${what}" onclick="pmToggleWaitRow(this)">${idChip}${what}</div>
-                <div class="pm-item-meta">
-                    ${kindChip}
-                    <span>${escapeHtml(row.who || '')}</span>
-                    ${timing}
-                </div>
-                ${actions}
-                ${why}
-                ${resolveForm}
-                <div class="pm-row-error" id="${rowId}-error" role="alert" style="display:none;"></div>
-            </div>`;
-        }
 
         // Click the text to see the whole sentence plus what it gates. Bound to
         // the text rather than the row so it cannot swallow clicks meant for
