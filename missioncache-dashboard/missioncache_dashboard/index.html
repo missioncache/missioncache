@@ -7634,12 +7634,16 @@
            cannot read stale state from the last one.
            ================================================================== */
 
+// Two prefixes on purpose: bd* is the board - rendering, derived state, the
+// pure helpers below - while attn* is the handful of things that outlive a
+// render, namely the two mutation handlers and the payload they share.
+//
 // ---- age bands. Ordinal, so a single-hue ramp is the right colour job.
 // The 7-day line is the threshold, so under it is context rather than band 0.
 // `label` is the compact form for the legend and the hover title; `heading` is
 // the sentence the band header shows, because "under 7d" tells you the
 // arithmetic rather than what the group means.
-const BANDS = [
+const BD_BANDS = [
   { key: 'b0', label: 'under 7d', heading: 'Asked in the last week',    test: a => a < 7 },
   { key: 'b1', label: '7-13d',    heading: 'Waiting one to two weeks',  test: a => a >= 7  && a < 14 },
   { key: 'b2', label: '14-29d',   heading: 'Waiting two to four weeks', test: a => a >= 14 && a < 30 },
@@ -7650,21 +7654,20 @@ const BANDS = [
 // rotting for months with a fat-fingered date sat at the top looking new and
 // escaped the no-reply-7d+ filter entirely. On a view whose whole job is age
 // triage, unknown has to read as "look at this", so it goes to the oldest band.
-const bandOf = a => (a === null || a === undefined)
-  ? BANDS.length - 1
-  : BANDS.findIndex(b => b.test(a));
-const isQuiet = r => r.days_past_line !== null && r.days_past_line !== undefined;
+const bdBandOf = a => (a === null || a === undefined)
+  ? BD_BANDS.length - 1
+  : BD_BANDS.findIndex(b => b.test(a));
+const bdIsQuiet = r => r.days_past_line !== null && r.days_past_line !== undefined;
 
-// The same ask can arrive twice. Two task records pointing at one context file
-// (a stale row whose full_path is missing falls back to the name and reads its
-// twin's file) means every Waiting-on row in that file is parsed once per task.
-// Measured live at the time this was written: 66 rows, 63 distinct, 3 counted
-// twice. Left in, the page claims more asks than exist. Identity is the text
-// plus the person plus the date; a genuine repeat ask to the same person on the
-// same day about the same thing is one ask.
-const askKey = r => [String(r.what || '').trim(),
-                     String(r.who || '').trim(),
-                     String(r.since || '').trim()].join(' ');
+// Which endpoint a row's Done button posts to. The two record types behind this
+// view have different identities: a commitment has a stable id and completes
+// through the action-item endpoint, while a Waiting-on row lives in hand-edited
+// markdown, has no id, and resolves positionally with the server verifying its
+// text first. Every id is Number()-wrapped because this string is interpolated
+// into an inline handler.
+const bdDoneCall = r => r.id != null
+  ? `attnDoneItem(${Number(r.id)}, this)`
+  : `attnDoneWaiting(${Number(r.task_id)}, ${Number(r.row_index)}, this)`;
 
 const bdCut = (t, n) => { t = String(t == null ? '' : t).trim();
   return t.length <= n ? t : t.slice(0, n).replace(/\s+\S*$/, '') + '…'; };
@@ -7798,25 +7801,20 @@ let bdStatsState = 'pending';   // 'pending' | 'failed' | 'ok'
 let bdExpanded = new Set();
 
 function bdPersonRow(o, bi, uid) {
-  const inBand = o.asks.filter(r => bandOf(r.age_days) === bi);
-  const quietN = inBand.filter(isQuiet).length;
+  const inBand = o.asks.filter(r => bdBandOf(r.age_days) === bi);
+  const quietN = inBand.filter(bdIsQuiet).length;
   const elsewhere = o.asks.length - inBand.length;
-  const bar = `<i class="${BANDS[bi].key}" style="width:${Math.max(4, inBand.length * 6)}px"
-                  title="${inBand.length} ${BANDS[bi].label}"></i>`;
+  const bar = `<i class="${BD_BANDS[bi].key}" style="width:${Math.max(4, inBand.length * 6)}px"
+                  title="${inBand.length} ${BD_BANDS[bi].label}"></i>`;
   const rows = [...inBand].sort((a, b) => (b.age_days || 0) - (a.age_days || 0)).map(r => {
-    // Same dispatch as the My work rows: a commitment carries a stable id and
-    // completes through the action-item endpoint, a Waiting-on row has none and
-    // resolves positionally with the server verifying its text.
-    const done = r.id != null
-      ? `attnDoneItem(${Number(r.id)}, this)`
-      : `attnDoneWaiting(${Number(r.task_id)}, ${Number(r.row_index)}, this)`;
+    const done = bdDoneCall(r);
     return `
     <div class="bd-ask">
       <div style="min-width:0">
         <div class="bd-what" title="${escapeHtml(r.what)}">${escapeHtml(bdCut(r.what, 68))}</div>
         <div class="bd-sub"><a href="${projectHref(r.project_name, r.task_id)}">${escapeHtml(r.project_name || '')}</a>${r.why ? ' &middot; blocks ' + escapeHtml(bdCut(r.why, 28)) : ''}</div>
       </div>
-      <div class="bd-num ${isQuiet(r) ? 'is-late' : ''}" ${r.age_days == null ? 'title="No readable date in the Since cell"' : ''}>${r.age_days == null ? '?' : r.age_days + 'd'}</div>
+      <div class="bd-num ${bdIsQuiet(r) ? 'is-late' : ''}" ${r.age_days == null ? 'title="No readable date in the Since cell"' : ''}>${r.age_days == null ? '?' : r.age_days + 'd'}</div>
       <div class="bd-acts"><button class="bd-btn" type="button" onclick="event.stopPropagation();${done}">Resolve</button></div>
       <div class="bd-err" role="alert"></div>
     </div>`;
@@ -7862,14 +7860,14 @@ function bdPersonRows() {
   let out = '';
   for (const bi of order) {
     const inBand = list
-      .map(o => ({ o, n: o.asks.filter(r => bandOf(r.age_days) === bi).length }))
+      .map(o => ({ o, n: o.asks.filter(r => bdBandOf(r.age_days) === bi).length }))
       .filter(x => x.n > 0)
       .sort((a, b) => b.n - a.n || a.o.name.localeCompare(b.o.name));
     if (!inBand.length) continue;
     const asksN = inBand.reduce((t, x) => t + x.n, 0);
     out += `<div class="bd-band">
-        <span class="bd-band-sw" style="background:var(--${BANDS[bi].key})"></span>
-        <span class="bd-band-t">${BANDS[bi].heading}</span>
+        <span class="bd-band-sw" style="background:var(--${BD_BANDS[bi].key})"></span>
+        <span class="bd-band-t">${BD_BANDS[bi].heading}</span>
         <span class="bd-band-n">${inBand.length} ${inBand.length === 1 ? 'person' : 'people'} &middot; ${asksN} ask${asksN === 1 ? '' : 's'}</span>
       </div>`;
     // Keyed by the person, not by their position in the filtered array. The old
@@ -8148,7 +8146,7 @@ function renderAttention(data) {
   // `it.overdue === true` on the row), so any truthy-but-not-true value made
   // the number disagree with the rows it was counting - the exact failure this
   // board is built to avoid.
-  const lateCount = mine.filter(i => i.overdue === true).length + mineRows.filter(isQuiet).length;
+  const lateCount = mine.filter(i => i.overdue === true).length + mineRows.filter(bdIsQuiet).length;
 
   const owners = new Map();
   for (const r of theirs) {
@@ -8156,7 +8154,7 @@ function renderAttention(data) {
     if (!owners.has(k)) owners.set(k, { key: k, name: k, asks: [], quiet: 0, oldest: 0, variants: new Set() });
     const o = owners.get(k);
     o.asks.push(r); o.variants.add(r.who);
-    if (isQuiet(r)) o.quiet++;
+    if (bdIsQuiet(r)) o.quiet++;
     o.oldest = Math.max(o.oldest, r.age_days || 0);
   }
   for (const o of owners.values()) {
@@ -8170,7 +8168,7 @@ function renderAttention(data) {
   }
   const people = [...owners.values()]
     .sort((a, b) => b.quiet - a.quiet || b.asks.length - a.asks.length);
-  const totalQuiet = theirs.filter(isQuiet).length;
+  const totalQuiet = theirs.filter(bdIsQuiet).length;
 
   // Two active projects can share a name (a fork, or a stale row left by a
   // rename), and a duplicate makes the page look broken. Keep the one worked
@@ -8248,7 +8246,7 @@ function renderAttention(data) {
     + ` <span class="bd-emoji">${mark}</span>`;
 
   const myRows = myWork.length ? myWork.map(it => {
-    const late = it.overdue === true || isQuiet(it);
+    const late = it.overdue === true || bdIsQuiet(it);
     const when = it.due_date || (it.age_days != null ? it.age_days + 'd' : '');
     // Where the row came from, because the two kinds behave differently: an
     // action item has a due date and a stable id, a waiting row has an age and
@@ -8256,9 +8254,7 @@ function renderAttention(data) {
     const kind = it.id != null
       ? '<span class="bd-kind">action item</span>'
       : '<span class="bd-kind is-wait">waiting on you</span>';
-    const done = it.id != null
-      ? `attnDoneItem(${Number(it.id)}, this)`
-      : `attnDoneWaiting(${Number(it.task_id)}, ${Number(it.row_index)}, this)`;
+    const done = bdDoneCall(it);
     // Two lines, not one. Inline, the kind badge and the project link competed
     // with the title inside a single nowrap+ellipsis cell, so adding the badge
     // silently ate the project name on every row.
@@ -8317,7 +8313,7 @@ function renderAttention(data) {
       </div>
       <div class="bd-tile-body" id="peopleBody">${bdPersonRows()}</div>
       <div class="bd-tile-foot">
-        ${BANDS.map(b => `<span class="bd-key"><i style="background:var(--${b.key})"></i>${b.label}</span>`).join('')}
+        ${BD_BANDS.map(b => `<span class="bd-key"><i style="background:var(--${b.key})"></i>${b.label}</span>`).join('')}
         <span style="margin-left:auto">bar length = number of asks</span>
       </div>
     </section>
@@ -8473,24 +8469,14 @@ function renderAttention(data) {
                     // version discarded it and silently reloaded, which looked
                     // identical to a dead button. Show it, and let the user
                     // reload once they have read why.
-                    let msg = 'This row moved in the project file, so nothing was changed.';
-                    try {
-                        const j = await res.json();
-                        msg = (j.detail && j.detail.message) || j.message || msg;
-                    } catch (err) { /* keep the default wording */ }
+                    const msg = await bdErrMsg(res,
+                        'This row moved in the project file, so nothing was changed.');
                     if (btn) { btn.disabled = false; btn.textContent = label; }
                     bdRowError(btn, msg, { reload: true });
                     bdMutating = false;
                     return;
                 }
-                if (!res.ok) {
-                    let msg = 'HTTP ' + res.status;
-                    try {
-                        const j = await res.json();
-                        msg = (j.detail && j.detail.message) || j.message || msg;
-                    } catch (err) { /* keep the status */ }
-                    throw new Error(msg);
-                }
+                if (!res.ok) throw new Error(await bdErrMsg(res, 'HTTP ' + res.status));
                 await loadTodayData();
             } catch (e) {
                 console.error('Could not resolve waiting row:', e);
@@ -8514,16 +8500,6 @@ function renderAttention(data) {
             if (ptab) q.push('ptab=' + encodeURIComponent(ptab));
             return '#project/' + encodeURIComponent(name || '') + (q.length ? '?' + q.join('&') : '');
         }
-
-
-
-
-
-
-
-
-
-
 
 
         // The strip's tracked-time half. It arrives on its own fetch because
@@ -8560,13 +8536,6 @@ function renderAttention(data) {
         }
 
 
-
-
-
-
-
-
-
         // True only for a parseable http(s) URL. Ticket URLs can arrive from a
         // bundle import or an MCP tool call, and this origin can register a
         // statusline command that gets executed, so a javascript: URL rendered
@@ -8582,11 +8551,6 @@ function renderAttention(data) {
         }
 
 
-
-
-
-
-
         // Inline mutations from the Attention view - refetch after each.
         // Puts the failure on the row instead of only the console, and blocks
         // the double-click that a silent no-op invites.
@@ -8600,8 +8564,6 @@ function renderAttention(data) {
             const el = document.getElementById(slotId);
             if (el) { el.style.display = 'none'; el.textContent = ''; }
         }
-
-
 
 
         // ---- Project detail page ----------------------------------------------
@@ -8870,17 +8832,23 @@ function renderAttention(data) {
         }
 
 
+        // One reader for the API's error shape. This existed three times in two
+        // idioms - twice in attnDoneWaiting, which cannot just call pmPost
+        // because it has to branch on 409 before throwing, and once here.
+        async function bdErrMsg(res, fallback) {
+            try {
+                const j = await res.json();
+                return (j.detail && j.detail.message) || j.message || fallback;
+            } catch (e) { return fallback; }
+        }
+
         async function pmPost(url, body, method) {
             const res = await fetch(API_BASE + url, {
                 method: method || 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: body ? JSON.stringify(body) : undefined,
             });
-            if (!res.ok) {
-                let msg = 'HTTP ' + res.status;
-                try { const j = await res.json(); msg = j.detail?.message || j.message || msg; } catch (e) {}
-                throw new Error(msg);
-            }
+            if (!res.ok) throw new Error(await bdErrMsg(res, 'HTTP ' + res.status));
             return res.json();
         }
 

@@ -3680,6 +3680,12 @@ def _display_name() -> str | None:
     return _DISPLAY_NAME_CACHE
 
 
+# Below this a bullet orients nobody - "- done", "- wip" - and filling the row's
+# one line with it is worse than leaving it empty. The one tunable number in
+# _left_off, so it gets a name rather than sitting inline as a bare literal.
+_LEFT_OFF_MIN_CHARS = 12
+
+
 def _left_off(content: str | None) -> str | None:
     """The newest Recent Changes bullet: what was last actually done here.
 
@@ -3720,7 +3726,7 @@ def _left_off(content: str | None) -> str | None:
         # literal asterisks. Only the paired forms go: a lone `*` can be a real
         # character in these bullets, `**` and `__` never are.
         text = text.replace("**", "").replace("__", "")
-        if len(text) > 12:
+        if len(text) > _LEFT_OFF_MIN_CHARS:
             return text
     return None
 
