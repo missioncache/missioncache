@@ -1155,3 +1155,40 @@ class TestDisplayName:
     def test_today_payload_carries_the_name(self, sandboxed, monkeypatch):
         monkeypatch.setattr(server, "_display_name", lambda: "Ada")
         assert asyncio.run(server.get_today())["user_name"] == "Ada"
+
+
+class TestWhoSelf:
+    """Spec: a Waiting-on row whose Who cell names the reader is work THEY owe,
+    so it belongs on their side of the split. That decision drives on_me vs
+    on_others, open_count, overdue_count, at_risk and the My work gadget.
+
+    The set used to be a literal containing one person's first name, which is
+    correct for that person and wrong for everyone else who installs this: their
+    own rows were filed under "waiting on other people" and their plate was
+    undercounted. It now derives from the same identity as the greeting, so the
+    two cannot disagree.
+    """
+
+    def test_generic_self_words_always_match(self, monkeypatch):
+        monkeypatch.setattr(server, "_display_name", lambda: None)
+        s = server._who_self()
+        assert "me" in s and "myself" in s
+
+    def test_the_readers_own_name_matches(self, monkeypatch):
+        monkeypatch.setattr(server, "_display_name", lambda: "Ada")
+        assert "ada" in server._who_self()
+
+    def test_someone_elses_name_does_not(self, monkeypatch):
+        monkeypatch.setattr(server, "_display_name", lambda: "Ada")
+        assert "dana" not in server._who_self()
+
+    def test_no_git_identity_still_gives_the_generic_words(self, monkeypatch):
+        """A machine with no git identity must still file "Me" rows correctly."""
+        monkeypatch.setattr(server, "_display_name", lambda: None)
+        assert server._who_self() == frozenset({"me", "myself"})
+
+    def test_no_hardcoded_person(self, monkeypatch):
+        """Regression: the set contained a literal first name. Whatever the
+        machine's identity is, no OTHER person's name may be baked in."""
+        monkeypatch.setattr(server, "_display_name", lambda: "Ada")
+        assert server._who_self() == frozenset({"me", "myself", "ada"})
