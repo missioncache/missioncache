@@ -1236,3 +1236,53 @@ class TestDisplayNameNegativeCache:
             assert len(calls) == 2, "a transient failure must not be cached"
         finally:
             self._reset()
+
+
+class TestOnMeKind:
+    """Spec: every row the view can act on declares which record type it is, so
+    the client dispatches Done on a stated fact rather than inferring it.
+
+    `on_others` published `kind` on both of its shapes from the start; `on_me`
+    did not, so the merged My-work list had no uniform discriminator and the
+    client fell back to `id != null` as a proxy for "which endpoint does this
+    post to" - a structural accident standing in for a declared one.
+    """
+
+    def test_on_me_entries_declare_their_kind(self, sandboxed):
+        from missioncache_db import pm_items
+
+        db = missioncache_db.TaskDB()
+        t = db.create_task("kind-proj", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "kind-proj").mkdir(parents=True)
+        (sandboxed / "active" / "kind-proj" / "kind-proj-context.md").write_text(CONTEXT)
+        pm_items.add_action_item(db, t.id, "mine and open", due_date="2099-01-01")
+        db.close()
+
+        on_me = asyncio.run(server.get_today())["on_me"]
+        entries = (on_me["overdue"] or []) + (on_me["due_soon"] or []) + (on_me["other_open"] or [])
+        assert entries, "fixture should have produced an on_me entry"
+        assert all(e.get("kind") == "commitment" for e in entries), \
+            [e.get("kind") for e in entries]
+
+    def test_the_discriminator_is_uniform_across_both_sides(self, sandboxed):
+        """The whole point: My work merges on_me entries with Waiting-on rows
+        that name you, and both halves must answer the same question the same
+        way."""
+        from missioncache_db import pm_items
+
+        db = missioncache_db.TaskDB()
+        t = db.create_task("kind-proj2", task_type="coding", repo_id=None)
+        (sandboxed / "active" / "kind-proj2").mkdir(parents=True)
+        (sandboxed / "active" / "kind-proj2" / "kind-proj2-context.md").write_text(
+            _with_waiting_rows("| A thing | Me | 2026-07-01 | gates |")
+        )
+        pm_items.add_action_item(db, t.id, "an open commitment", due_date="2099-01-01")
+        db.close()
+
+        result = asyncio.run(server.get_today())
+        on_me = result["on_me"]
+        commitments = (on_me["overdue"] or []) + (on_me["due_soon"] or []) + (on_me["other_open"] or [])
+        mine_rows = [r for g in result["on_others"] for r in g["rows"] if r["mine"]]
+        assert commitments and mine_rows, "fixture should produce one of each"
+        assert all("kind" in e for e in commitments + mine_rows), \
+            "every My-work row must declare a kind"
