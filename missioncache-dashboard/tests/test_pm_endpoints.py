@@ -1092,10 +1092,12 @@ class TestDisplayName:
 
         monkeypatch.setattr(server.subprocess, "run", fake_run)
         server._DISPLAY_NAME_CACHE = None
+        server._DISPLAY_NAME_RESOLVED = False
         try:
             return server._display_name()
         finally:
             server._DISPLAY_NAME_CACHE = None
+            server._DISPLAY_NAME_RESOLVED = False
 
     def test_first_token_only(self, monkeypatch):
         """A full name in a greeting reads like a form letter."""
@@ -1137,6 +1139,7 @@ class TestDisplayName:
         """A transient failure used to be pinned by lru_cache, leaving every
         later render nameless until the process restarted."""
         server._DISPLAY_NAME_CACHE = None
+        server._DISPLAY_NAME_RESOLVED = False
         try:
             monkeypatch.setattr(
                 server.subprocess, "run",
@@ -1151,6 +1154,7 @@ class TestDisplayName:
             assert server._display_name() == "Ada"
         finally:
             server._DISPLAY_NAME_CACHE = None
+            server._DISPLAY_NAME_RESOLVED = False
 
     def test_today_payload_carries_the_name(self, sandboxed, monkeypatch):
         monkeypatch.setattr(server, "_display_name", lambda: "Ada")
@@ -1192,3 +1196,45 @@ class TestWhoSelf:
         machine's identity is, no OTHER person's name may be baked in."""
         monkeypatch.setattr(server, "_display_name", lambda: "Ada")
         assert server._who_self() == frozenset({"me", "myself", "ada"})
+
+
+class TestDisplayNameNegativeCache:
+    """Spec: "git ran and reported no user.name" is a settled answer, not a
+    hiccup, so it must not re-fork git on every request. A missing binary or a
+    timeout can be transient, so those must stay retryable.
+
+    The commonest state on a fresh install is git present with user.name unset,
+    and that path used to shell out synchronously inside an async handler on
+    every single board render.
+    """
+
+    def _reset(self):
+        server._DISPLAY_NAME_CACHE = None
+        server._DISPLAY_NAME_RESOLVED = False
+
+    def test_unset_name_is_asked_once(self, monkeypatch):
+        import subprocess as sp
+        calls = []
+        monkeypatch.setattr(server.subprocess, "run",
+                            lambda *a, **k: (calls.append(1), sp.CompletedProcess([], 1, "", ""))[1])
+        self._reset()
+        try:
+            assert server._display_name() is None
+            assert server._display_name() is None
+            assert server._display_name() is None
+            assert len(calls) == 1, f"forked git {len(calls)} times for a settled answer"
+        finally:
+            self._reset()
+
+    def test_a_transient_failure_is_retried(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            server.subprocess, "run",
+            lambda *a, **k: (calls.append(1), (_ for _ in ()).throw(FileNotFoundError("git")))[0])
+        self._reset()
+        try:
+            assert server._display_name() is None
+            assert server._display_name() is None
+            assert len(calls) == 2, "a transient failure must not be cached"
+        finally:
+            self._reset()
