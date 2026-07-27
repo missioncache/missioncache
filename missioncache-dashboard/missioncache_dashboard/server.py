@@ -13,7 +13,6 @@ Port: 8787 (override with MISSIONCACHE_DASHBOARD_PORT env var)
 from __future__ import annotations
 
 import asyncio
-import functools
 import importlib.resources
 import json
 import logging
@@ -3624,6 +3623,12 @@ def _who_names(raw: str | None) -> list[str]:
 
 
 _DISPLAY_NAME_CACHE: str | None = None
+# Separate from the value, so "git says this user has no name" is cached while a
+# transient failure is not. Caching only truthy results meant the commonest
+# state on a fresh install - git present, user.name unset - re-forked git on
+# every single request, synchronously, inside an async handler. Measured at
+# 23.6ms against an endpoint that otherwise takes 26-44ms.
+_DISPLAY_NAME_RESOLVED = False
 
 
 def _display_name() -> str | None:
@@ -3642,8 +3647,8 @@ def _display_name() -> str | None:
     transient timeout left every later render nameless until the process
     restarted, which is a long punishment for a hiccup.
     """
-    global _DISPLAY_NAME_CACHE
-    if _DISPLAY_NAME_CACHE is not None:
+    global _DISPLAY_NAME_CACHE, _DISPLAY_NAME_RESOLVED
+    if _DISPLAY_NAME_RESOLVED:
         return _DISPLAY_NAME_CACHE
     try:
         out = subprocess.run(
@@ -3659,13 +3664,19 @@ def _display_name() -> str | None:
             errors="replace",
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        # Left uncached on purpose: a missing binary or a timeout can be
+        # transient, and the next request should ask again.
         return None
     if out.returncode != 0:
+        # git ran and reported no such key. That is a settled answer, not a
+        # hiccup, so it caches like a successful one.
+        _DISPLAY_NAME_RESOLVED = True
         return None
     first = out.stdout.strip().split()
     # First token only. "Tomer Brami" greets as "Tomer"; a full name in a
     # greeting reads like a form letter.
     _DISPLAY_NAME_CACHE = first[0] if first else None
+    _DISPLAY_NAME_RESOLVED = True
     return _DISPLAY_NAME_CACHE
 
 
@@ -3684,9 +3695,11 @@ def _left_off(content: str | None) -> str | None:
     a bare time. The 12-character floor drops fragments like "- done" that orient
     nobody.
     """
-    # Imported here rather than at module scope, matching get_today: this module
-    # is loaded by the CLI paths too, and missioncache_db is not a hard import
-    # for those.
+    # Local import purely to match get_today's shape below. It is not load
+    # bearing: server.py already imports missioncache_db at module scope, so
+    # deferring this submodule saves nothing. An earlier comment here claimed a
+    # CLI path that does not hard-import missioncache_db, which is not true of
+    # this module.
     from missioncache_db import context_health
 
     if not content:
@@ -3788,8 +3801,13 @@ async def get_today():
             stats["open_count"] += 1
             if overdue:
                 stats["overdue_count"] += 1
+            # `kind` on this side too. on_others already publishes it on both
+            # of its shapes, and without it here the merged My-work list had no
+            # uniform discriminator - so the client inferred "which endpoint
+            # does Done post to" from `id != null`, which is a structural
+            # accident standing in for a declared fact.
             entry = {**asdict(item), "label": item.label, "overdue": overdue,
-                     "mine": True}
+                     "mine": True, "kind": "commitment"}
             due_in = None
             if item.due_date:
                 age = _age_days(item.due_date)

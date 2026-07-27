@@ -6214,7 +6214,8 @@
 .bd-empty { padding: 20px 14px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
 .bd-empty b { color: var(--ink-2); font-weight: 600; }
 
-@media (prefers-reduced-motion: reduce) { .bd * { transition: none !important; } }
+/* The global rule at the top of this stylesheet already kills transitions
+   under prefers-reduced-motion for every element, .bd included. */
         </style>
 </head>
 <body>
@@ -8099,6 +8100,29 @@ function bdRestoreFocus(key) {
   });
 })();
 
+// --bd-top is how the board knows how much chrome sits above it. Measuring it
+// only at render time was not enough: the update banner can appear or be
+// dismissed without any re-render, and each left the board 62px out - once
+// overshooting the viewport and growing a scrollbar, once leaving dead space.
+// A ResizeObserver on the chrome re-measures whenever it actually changes,
+// which also covers browser zoom.
+function bdMeasureTop(root) {
+  root.style.setProperty('--bd-top', Math.round(root.getBoundingClientRect().top) + 'px');
+}
+
+let bdChromeObserver = null;
+function bdWatchChrome(root) {
+  if (bdChromeObserver || typeof ResizeObserver === 'undefined') return;
+  const chrome = [document.querySelector('.dashboard-toolbar'),
+                  document.getElementById('updateBanner')].filter(Boolean);
+  if (!chrome.length) return;
+  bdChromeObserver = new ResizeObserver(() => {
+    const r = document.getElementById('attnRoot');
+    if (r && r.isConnected) bdMeasureTop(r);
+  });
+  chrome.forEach(el => bdChromeObserver.observe(el));
+}
+
 function renderAttention(data) {
   const root = document.getElementById('attnRoot');
   if (!root) return;
@@ -8335,7 +8359,8 @@ function renderAttention(data) {
   // hardcoded to 48px: the toolbar is a fixed height but the update banner
   // above it is not always there, and hardcoding pushed the bottom of the board
   // off screen whenever it appeared.
-  root.style.setProperty('--bd-top', Math.round(root.getBoundingClientRect().top) + 'px');
+  bdMeasureTop(root);
+  bdWatchChrome(root);
   bdRestoreFocus(prevFocus);
   bdStartStamp();
 }
@@ -8382,7 +8407,16 @@ function renderAttention(data) {
             if (slot) { slot.textContent = ''; slot.classList.remove('is-on'); }
         }
 
+        // One mutation at a time. A second click while the first is in flight
+        // ends badly: the first success calls loadTodayData, which rebuilds the
+        // whole root and detaches the second button, so its error - typically
+        // the 409 that says the row moved, which is exactly when the reader
+        // needs telling - was written into a node no longer in the document.
+        let bdMutating = false;
+
         async function attnDoneItem(itemId, btn) {
+            if (bdMutating) return;
+            bdMutating = true;
             bdClearRowError(btn);
             if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
             try {
@@ -8392,10 +8426,13 @@ function renderAttention(data) {
                 console.error('Could not complete item:', e);
                 if (btn) { btn.disabled = false; btn.textContent = 'Done'; }
                 bdRowError(btn, 'Could not mark this done. ' + (e.message || e));
+            } finally {
+                bdMutating = false;
             }
         }
 
         async function attnDoneWaiting(taskId, rowIndex, btn) {
+            if (bdMutating) return;
             const group = (attnLastData.on_others || []).find(g => g.task_id === taskId);
             // Matched on row_index, NOT indexed by it. row_index is the row's
             // position in the context file's markdown table, while group.rows is
@@ -8412,6 +8449,7 @@ function renderAttention(data) {
                 bdRowError(btn, 'This row is no longer in the loaded data.', { reload: true });
                 return;
             }
+            bdMutating = true;
             bdClearRowError(btn);
             // Remember the label rather than hardcoding it on restore: this same
             // handler serves the ask rows, whose button says "Resolve", and the
@@ -8442,6 +8480,7 @@ function renderAttention(data) {
                     } catch (err) { /* keep the default wording */ }
                     if (btn) { btn.disabled = false; btn.textContent = label; }
                     bdRowError(btn, msg, { reload: true });
+                    bdMutating = false;
                     return;
                 }
                 if (!res.ok) {
@@ -8457,6 +8496,8 @@ function renderAttention(data) {
                 console.error('Could not resolve waiting row:', e);
                 if (btn) { btn.disabled = false; btn.textContent = label; }
                 bdRowError(btn, 'Could not resolve this. ' + (e.message || e));
+            } finally {
+                bdMutating = false;
             }
         }
 
@@ -12401,6 +12442,14 @@ function renderAttention(data) {
                     let ok = true;
                     if (view === 'attention' || view === '') {
                         ok = await loadTodayData();
+                        // The strip too. Without this the timer rebuilt the
+                        // board - which resets the freshness stamp to "just
+                        // now" - while tracked / commits / lines / by hour kept
+                        // whatever they held at view entry. After a few cycles
+                        // the stamp confidently claimed hours-old numbers were
+                        // current, which is the stale-not-unknown case the
+                        // pending/failed vocabulary was added to prevent.
+                        loadAttnStrip();
                     } else if (view === 'projects') {
                         // Categories too: another tab/machine/CLI may have
                         // added one since load - without this, its tasks
