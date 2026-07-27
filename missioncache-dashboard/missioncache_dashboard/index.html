@@ -8025,11 +8025,21 @@ function renderAttention(data) {
   // Two active projects can share a name (a fork, or a stale row left by a
   // rename), and a duplicate makes the page look broken. Keep the one worked
   // most recently.
+  // Two active projects can share a name (a fork and its parent, or a stale row
+  // left by a rename), and a duplicate makes the page look broken. Keep the one
+  // worked most recently.
+  //
+  // Two separate orderings, on purpose, because conflating them was the bug:
+  // `new Map` keeps the LAST entry for a repeated key, so the ascending sort is
+  // what makes the newest twin win. Map key order is FIRST-insertion, so it
+  // cannot also be the display order - the previous version sorted descending
+  // and kept the stale twin, rendering its counts, next step and last-worked
+  // date under the live project's name and linking to the wrong page.
+  const byRecency = (a, b) =>
+    String(a.last_worked_on || '').localeCompare(String(b.last_worked_on || ''));
   const projects = [...new Map(
-    [...(data.projects || [])]
-      .sort((a, b) => String(b.last_worked_on || '').localeCompare(String(a.last_worked_on || '')))
-      .map(p => [p.name, p])
-  ).values()];
+    [...(data.projects || [])].sort(byRecency).map(p => [p.name, p])
+  ).values()].sort((a, b) => byRecency(b, a));
 
   // Filter selections survive a re-render: resolving an ask re-renders the
   // board, and being thrown back to "All" every time you finish something

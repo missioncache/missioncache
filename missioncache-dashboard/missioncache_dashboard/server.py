@@ -3572,10 +3572,29 @@ async def set_due_date(task_id: int, payload: DueDatePayload):
     return {"success": True, "task_id": task_id, "due_date": value}
 
 
-# Names in a Waiting-on `who` cell that mean the owner himself. Such a row is
-# work he owes, so it belongs on his side of the split even though it lives in
-# the same markdown table as everyone else's.
-_WHO_SELF = frozenset({"me", "myself", "tomer"})
+# Names in a Waiting-on `who` cell that mean the reader themselves. Such a row
+# is work they owe, so it belongs on their side of the split even though it
+# lives in the same markdown table as everyone else's.
+#
+# This decides `mine`, which drives on_me vs on_others, open_count,
+# overdue_count, at_risk and the whole My work gadget - so a wrong answer here
+# does not just misword a greeting, it files the reader's own work under
+# "waiting on other people" and undercounts what they owe. It used to be a
+# literal frozenset containing "tomer", which is right for one person and wrong
+# for every other installer; the greeting was the cosmetic half of that bug and
+# this is the half that moves the numbers.
+_WHO_SELF_BASE = frozenset({"me", "myself"})
+
+
+def _who_self() -> frozenset[str]:
+    """The names that mean "the person reading this dashboard".
+
+    Built from the same source as the greeting, so the two cannot disagree.
+    `_who_names` lowercases and takes first names, so the first token of git's
+    user.name is the right thing to compare against.
+    """
+    name = _display_name()
+    return (_WHO_SELF_BASE | {name.lower()}) if name else _WHO_SELF_BASE
 
 
 def _who_names(raw: str | None) -> list[str]:
@@ -3726,6 +3745,10 @@ async def get_today():
     Per-project attention blocks carry typed counts and a DERIVED at_risk
     flag - never a manually set status.
     """
+
+    # Resolved once per request, not per row: it shells out to git behind a
+    # cache, and the answer cannot change mid-response.
+    who_self = _who_self()
     from datetime import date as _date
 
     from missioncache_db import MISSIONCACHE_ROOT, context_health, pm_items
@@ -3848,7 +3871,7 @@ async def get_today():
                 # else's label. It stays in this list because the resolve path
                 # addresses it by task_id + row_index either way.
                 names = _who_names(row["who"])
-                mine = any(n in _WHO_SELF for n in names)
+                mine = any(n in who_self for n in names)
                 if mine:
                     stats["open_count"] += 1
                     # A row that names HIM and has crossed its line is late, and
