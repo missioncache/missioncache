@@ -7746,7 +7746,7 @@ const BD_PROJ_HEAD = `<div class="bd-proj-head">
 // cannot close over a render's locals without pinning that render's data alive
 // and going stale the next time the payload changes.
 let bdState = {
-  people: [], projects: [], theirs: [], myWork: [], totalQuiet: 0, lateCount: 0,
+  people: [], projects: [], theirs: [], myWork: [], totalQuiet: 0, lateCount: 0, counts: {},
   filter: 'all', query: '', sort: 'near', pcat: 'all', pquery: '',
 };
 
@@ -7942,7 +7942,7 @@ function bdStartStamp() {
 // on a separate, much slower request and replaces this in place.
 function bdStrip() {
   const t = bdTodayStats;
-  const { myWork, lateCount, theirs, people, totalQuiet } = bdState;
+  const { myWork, lateCount, theirs, people, totalQuiet, counts } = bdState;
   const stat = (v, l, tip, cls) => `<div class="bd-stat ${cls || ''}">
     <div class="bd-stat-v mono">${v}</div>
     <div class="bd-stat-l">${l}${tip ? `<button class="bd-i" type="button" aria-label="What ${l} means">i</button>` : ''}</div>
@@ -7961,10 +7961,15 @@ function bdStrip() {
     stat(known(t && t.total_formatted), 'tracked', 'Time MissionCache recorded against any project today.' + failTip),
     stat(known(t && t.commits), 'commits', 'Commits you authored today across all tracked repos.' + failTip),
     stat(bdStatsState === 'ok' ? `+${t.loc_added}/-${t.loc_removed}` : unknown, 'lines', 'Lines added and removed in today’s commits.' + failTip),
-    stat(myWork.length, 'on you', 'Work YOU owe: your open action items, plus rows in a project’s Waiting-on table where the Who column names you.', lateCount ? 'is-late' : ''),
-    stat(lateCount, 'late', 'Of the "on you" items: an action item past its due date, or an ask of yours with no movement for more than 7 days.', lateCount ? 'is-late' : ''),
-    stat(theirs.length, 'out', `Asks sitting with other people - ${people.length} of them. Their latency, not yours.`),
-    stat(totalQuiet, 'no reply over 7d', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', totalQuiet ? 'is-warn' : ''),
+    // These four come from the server's `counts`, not from re-counting the rows
+    // here. Both existed before and disagreed - the server counted before the
+    // duplicate-task rows were removed and the client counted after - so the
+    // strip and the endpoint reported different totals for the same state. One
+    // owner now, and it is the one with tests.
+    stat(counts.on_me ?? 0, 'on you', 'Work YOU owe: your open action items, plus rows in a project’s Waiting-on table where the Who column names you.', counts.overdue ? 'is-late' : ''),
+    stat(counts.overdue ?? 0, 'late', 'Of the "on you" items: an action item past its due date, or an ask of yours with no movement for more than 7 days.', counts.overdue ? 'is-late' : ''),
+    stat(counts.on_others ?? 0, 'out', `Asks sitting with other people - ${people.length} of them. Their latency, not yours.`),
+    stat(counts.stale ?? 0, 'no reply over 7d', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', counts.stale ? 'is-warn' : ''),
     // The floor applies to real activity only, so a small hour stays visible
     // while an empty one stays empty. Flooring every bar drew a solid row of
     // stubs across a day that was mostly idle.
@@ -7981,8 +7986,12 @@ function renderAttention(data) {
   const root = document.getElementById('attnRoot');
   if (!root) return;
 
-  const rawAsks = (data.on_others || []).flatMap(g => g.rows || []);
-  const asks = [...new Map(rawAsks.map(r => [askKey(r), r])).values()];
+  // No client-side dedup any more. Duplicates came from two task rows sharing
+  // one context file, and get_today now skips the twin instead of emitting the
+  // rows twice - so deduping here would be a second implementation of a rule
+  // the server already applies, and it was the reason `counts` (computed
+  // pre-dedup) disagreed with these numbers by exactly the duplicate count.
+  const asks = (data.on_others || []).flatMap(g => g.rows || []);
   const theirs = asks.filter(r => !r.mine);
   const mineRows = asks.filter(r => r.mine);
 
@@ -8025,21 +8034,19 @@ function renderAttention(data) {
   // Two active projects can share a name (a fork, or a stale row left by a
   // rename), and a duplicate makes the page look broken. Keep the one worked
   // most recently.
-  // Two active projects can share a name (a fork and its parent, or a stale row
-  // left by a rename), and a duplicate makes the page look broken. Keep the one
-  // worked most recently.
+  // No dedup here any more - a duplicate project came from the same
+  // shared-context-file case as the duplicate asks, and get_today drops the
+  // twin before it reaches the wire.
   //
-  // Two separate orderings, on purpose, because conflating them was the bug:
-  // `new Map` keeps the LAST entry for a repeated key, so the ascending sort is
-  // what makes the newest twin win. Map key order is FIRST-insertion, so it
-  // cannot also be the display order - the previous version sorted descending
-  // and kept the stale twin, rendering its counts, next step and last-worked
-  // date under the live project's name and linking to the wrong page.
-  const byRecency = (a, b) =>
-    String(a.last_worked_on || '').localeCompare(String(b.last_worked_on || ''));
-  const projects = [...new Map(
-    [...(data.projects || [])].sort(byRecency).map(p => [p.name, p])
-  ).values()].sort((a, b) => byRecency(b, a));
+  // The sort stays, and it is not redundant with the server's. get_today orders
+  // by urgency, which is its documented contract and what an API consumer wants;
+  // this gadget says "most recently worked first" on its face, which is a
+  // different question - what was I just doing, rather than what is most on
+  // fire. Urgency still shows here, in the red dot and the on-you / no-reply
+  // columns, which is where it belongs: position says recency, colour says
+  // trouble.
+  const projects = [...(data.projects || [])].sort((a, b) =>
+    String(b.last_worked_on || '').localeCompare(String(a.last_worked_on || '')));
 
   // Filter selections survive a re-render: resolving an ask re-renders the
   // board, and being thrown back to "All" every time you finish something
@@ -8047,6 +8054,7 @@ function renderAttention(data) {
   bdState = {
     ...bdState,
     people, projects, theirs, myWork, lateCount, totalQuiet,
+    counts: data.counts || {},
   };
 
   const catCounts = projects.reduce((m, p) => {
