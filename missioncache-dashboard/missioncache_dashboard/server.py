@@ -3650,7 +3650,7 @@ def _display_name() -> str | None:
     return _DISPLAY_NAME_CACHE
 
 
-def _left_off(content: str) -> str | None:
+def _left_off(content: str | None) -> str | None:
     """The newest Recent Changes bullet: what was last actually done here.
 
     The view needs one line of orientation before it proposes what to do next,
