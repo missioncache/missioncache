@@ -3830,7 +3830,26 @@ async def get_today():
     # One query, not one per project: the progress parse below needs each task's
     # repo path to find its files.
     repos_by_id = {repo.id: repo for repo in sqlite_db.get_repos()}
-    for task in sqlite_db.get_active_tasks():
+    # Two task rows can point at ONE project: a fork and its parent, or a stale
+    # row left by a rename whose full_path no longer resolves, so it falls back
+    # to the name and reads its twin's context file. Both then parse the same
+    # Waiting-on table and every row is counted twice - measured live at 66 rows
+    # for 63 real asks. The client used to paper over this by deduping rows and
+    # projects after the fact, which left `counts` (computed here, pre-dedup)
+    # disagreeing with the numbers on screen by exactly the duplicate count.
+    #
+    # Fixing it at the source instead: iterate freshest-first and skip a task
+    # whose context file another task already consumed. That kills the duplicate
+    # rows, the duplicate project entries and the counts mismatch together, and
+    # the freshest-first order means the surviving twin is the one worked most
+    # recently rather than whichever the DB happened to return first.
+    seen_context: dict[str, str] = {}
+    active_tasks = sorted(
+        sqlite_db.get_active_tasks(),
+        key=lambda t: (t.last_worked_on or "", t.id),
+        reverse=True,
+    )
+    for task in active_tasks:
         stats = _stats_for(task.id)
         due_date = task.due_date
         days_to_due = None
@@ -3841,12 +3860,22 @@ async def get_today():
         # Waiting-on rows are file-side truth; read the context file once
         # and take both the display rows and the staleness count from it.
         content = None
+        is_duplicate = False
         for candidate in (
             MISSIONCACHE_ROOT / "active" / task.name,
             MISSIONCACHE_ROOT / task.full_path,
         ):
             ctx = candidate / f"{task.name}-context.md"
             if ctx.exists():
+                key = str(ctx.resolve())
+                if key in seen_context:
+                    # A twin already read this file. Its rows belong to that
+                    # task; parsing them again would double every ask, and
+                    # emitting a second projects[] entry would put the same
+                    # project on the board twice under one name.
+                    is_duplicate = True
+                    break
+                seen_context[key] = task.name
                 try:
                     content = ctx.read_text()
                 except (OSError, UnicodeDecodeError):
@@ -3922,7 +3951,7 @@ async def get_today():
             or stats["stale_on_others_count"]
             or (days_to_due is not None and days_to_due <= horizon)
         )
-        if stats["open_count"] or stats["on_others_count"] or due_date:
+        if not is_duplicate and (stats["open_count"] or stats["on_others_count"] or due_date):
             # Where the project stands and what comes next - the two things the
             # view showed nothing about, so a row said who owes what but not
             # whether the work was nearly done or barely started.
@@ -4046,6 +4075,14 @@ async def get_today():
     # then an imminent project deadline, then how much has gone idle with
     # someone else, then volume. Name last so the order is stable across
     # requests when everything else ties.
+    #
+    # This is the ENDPOINT's contract, pinned by
+    # TestTodayEndpoint::test_at_risk_projects_sort_first, and it is not the
+    # same question the board's Projects gadget answers - that one says "most
+    # recently worked first" on its face and sorts accordingly on the client.
+    # Two orderings for two questions: an API consumer asking "what is most
+    # urgent" and a reader asking "what was I just doing". Urgency still reaches
+    # the screen through the red dot and the on-you / no-reply columns.
     projects.sort(key=lambda p: (
         -p["overdue_count"],
         p["days_to_due"] is None,
