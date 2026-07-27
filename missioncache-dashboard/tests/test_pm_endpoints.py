@@ -1008,12 +1008,10 @@ class TestLeftOff:
         db = missioncache_db.TaskDB()
         db.create_task(name, task_type="coding", repo_id=None)
         (sandboxed / "active" / name).mkdir(parents=True)
-        ctx = CONTEXT.replace("- created", body)
-        # a waiting row so the project reaches projects[] at all
-        ctx = ctx.replace(
-            "|------|-----|-------|-------|",
-            "|------|-----|-------|-------|\n| A thing | Mor | 2026-07-01 | gates |",
-        )
+        # _with_waiting_rows already builds this; the row is here so the project
+        # earns a projects[] entry at all.
+        ctx = _with_waiting_rows("| A thing | Mor | 2026-07-01 | gates |").replace(
+            "- created", body)
         (sandboxed / "active" / name / f"{name}-context.md").write_text(ctx)
         db.close()
 
