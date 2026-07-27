@@ -5876,7 +5876,15 @@
   border-bottom: 1px solid var(--line-soft);
   position: sticky; top: 0; z-index: 5;
 }
-.bd-band-sw { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+/* The band swatches and bars are a single-hue amber ramp, and four steps of
+   one hue cannot all clear 3:1 against the tile without going dark enough to
+   stop being that ramp. So the contrast lives in the OUTLINE rather than the
+   fill: --ink-3 clears 3:1 on the tile in both themes, which gives every
+   swatch and bar segment a discernible boundary (WCAG 1.4.11) while the fill
+   keeps carrying the band identity. The band heading beside it states the same
+   thing in words, so colour is never the only channel. */
+.bd-band-sw { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto;
+              box-shadow: 0 0 0 1px var(--ink-3); }
 .bd-band-t { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); }
 .bd-band-n { font-size: 10.5px; color: var(--ink-3); margin-left: auto; font-family: var(--font-mono); }
 
@@ -5954,6 +5962,10 @@
   transition: opacity .16s ease, transform .16s ease, visibility .16s;
 }
 :root:not([data-theme="light"]) .bd-tip { background: #0e1319; color: var(--ink); border: 1px solid var(--line); }
+.bd-stat.bd-tip-off:hover .bd-tip, .bd-stat.bd-tip-off:focus-within .bd-tip,
+.bd-tile-head.bd-tip-off:hover .bd-tip, .bd-tile-head.bd-tip-off:focus-within .bd-tip {
+  opacity: 0; visibility: hidden;
+}
 .bd-stat:hover .bd-tip, .bd-stat:focus-within .bd-tip,
 .bd-tile-head:hover .bd-tip, .bd-tile-head:focus-within .bd-tip { opacity: 1; visibility: visible; transform: translateY(0); }
 .bd-tip-wide { left: 12px; right: auto; width: 340px; }
@@ -6068,7 +6080,8 @@
 }
 .bd-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 :root:not([data-theme="light"]) .bd-btn:hover { color: #0e1319; }
-.bd-btn:focus-visible, .bd a:focus-visible, .bd [tabindex]:focus-visible, .bd-i:focus-visible {
+.bd-btn:focus-visible, .bd a:focus-visible, .bd [tabindex]:focus-visible, .bd-i:focus-visible,
+.bd-chip:focus-visible, .bd-search:focus-visible, .bd-sort select:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
@@ -6078,7 +6091,8 @@
 .bd-person[aria-expanded="true"] .bd-caret { transform: rotate(90deg); }
 .bd-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bd-bar { display: flex; gap: 2px; align-items: center; height: 11px; }
-.bd-bar i { height: 11px; border-radius: 2px; display: block; transition: transform .15s; }
+.bd-bar i { height: 11px; border-radius: 2px; display: block; transition: transform .15s;
+            box-shadow: 0 0 0 1px var(--ink-3); }
 .bd-person:hover .bd-bar i { transform: scaleY(1.25); }
 .bd-bar i.b0 { background: var(--b0); }
 .bd-bar i.b1 { background: var(--b1); }
@@ -6102,6 +6116,19 @@
   font-size: 11.5px; line-height: 1.45; white-space: normal;
 }
 .bd-err.is-on { display: block; }
+
+/* A long value (+521/-0 needs 84px in a 36px track at 320px) used to spill
+   across the next card, because .bd-stat declared no overflow at all. */
+.bd-stat { min-width: 0; overflow: hidden; }
+.bd-stat-v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* C1: five of the six Projects columns are fixed px, so the row has a hard
+   ~650px floor and the whole grid simply ran off the side under
+   `overflow-x: hidden` - the last three columns became unreachable rather than
+   scrollable. Give this one body a horizontal scroller; the tile still clips
+   vertically, which is the behaviour the one-viewport layout wants. */
+#projBody { overflow-x: auto; }
+#projBody > * { min-width: 760px; }
 
 /* A custom category renders its emoji rather than a stroke path, so it drops
    the icon box's border and sizing and just centres the glyph. */
@@ -6181,7 +6208,8 @@
 .bd-prog i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--ok), #34c98a); }
 
 .bd-key { display: inline-flex; align-items: center; gap: 4px; }
-.bd-key i { width: 9px; height: 9px; border-radius: 2px; display: block; }
+.bd-key i { width: 9px; height: 9px; border-radius: 2px; display: block;
+            box-shadow: 0 0 0 1px var(--ink-3); }
 .bd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--late); display: inline-block; }
 .bd-empty { padding: 20px 14px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
 .bd-empty b { color: var(--ink-2); font-weight: 600; }
@@ -7762,6 +7790,12 @@ let bdState = {
 let bdTodayStats = null;
 let bdStatsState = 'pending';   // 'pending' | 'failed' | 'ok'
 
+// Which person rows are open, keyed by the stable uid rather than by array
+// position. Held across renders: a mutation refetches and rebuilds the whole
+// board, and typing in the search box rebuilds #peopleBody on every keystroke -
+// both used to collapse whatever the reader had open, under their hands.
+let bdExpanded = new Set();
+
 function bdPersonRow(o, bi, uid) {
   const inBand = o.asks.filter(r => bandOf(r.age_days) === bi);
   const quietN = inBand.filter(isQuiet).length;
@@ -7786,7 +7820,9 @@ function bdPersonRow(o, bi, uid) {
       <div class="bd-err" role="alert"></div>
     </div>`;
   }).join('');
-  return `<div class="bd-row bd-person" role="button" tabindex="0" aria-expanded="false"
+  const open = bdExpanded.has(uid);
+  return `<div class="bd-row bd-person" role="button" tabindex="0" aria-expanded="${open}"
+               aria-controls="pa-${uid}" data-uid="${uid}"
                onclick="bdTog('${uid}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bdTog('${uid}');}">
       <svg class="bd-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
       ${bdAvatar(o.name, o.isTeam || o.isShared)}
@@ -7795,7 +7831,7 @@ function bdPersonRow(o, bi, uid) {
       <div class="bd-num ${quietN ? 'is-warn' : ''}">${quietN || '·'}</div>
       <div class="bd-num">${inBand.length}</div>
     </div>
-    <div class="bd-asks" id="pa-${uid}" hidden>${rows}</div>`;
+    <div class="bd-asks" id="pa-${uid}"${open ? '' : ' hidden'}>${rows}</div>`;
 }
 
 // A person is rendered ONCE PER BAND they have asks in, showing only that
@@ -7804,6 +7840,11 @@ function bdPersonRow(o, bi, uid) {
 // band answered "whose oldest ask is this old" when the useful question is "who
 // owes me something in this age range". The per-band counts now sum to the band
 // total, and a person's rows across bands sum to their whole.
+// A DOM-id-safe key for a person within a band. `key` is who_primary, which is
+// already normalized and stable across renders.
+const bdUid = (bi, o) => bi + '-' + String(o.key || o.name || '?')
+  .toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
 function bdPersonRows() {
   const { people, filter, query, sort } = bdState;
   const q = query.trim().toLowerCase();
@@ -7830,7 +7871,11 @@ function bdPersonRows() {
         <span class="bd-band-t">${BANDS[bi].heading}</span>
         <span class="bd-band-n">${inBand.length} ${inBand.length === 1 ? 'person' : 'people'} &middot; ${asksN} ask${asksN === 1 ? '' : 's'}</span>
       </div>`;
-    out += inBand.map(x => bdPersonRow(x.o, bi, `${bi}-${people.indexOf(x.o)}`)).join('');
+    // Keyed by the person, not by their position in the filtered array. The old
+    // `people.indexOf(x.o)` was O(n^2) and, worse, positional - so the key of a
+    // given row changed whenever a filter changed the set, and an expanded row
+    // could not be restored because its id no longer named the same person.
+    out += inBand.map(x => bdPersonRow(x.o, bi, bdUid(bi, x.o))).join('');
   }
   return out;
 }
@@ -7877,7 +7922,8 @@ function bdTog(uid) {
   const el = document.getElementById('pa-' + uid); if (!el) return;
   const row = el.previousElementSibling;
   const open = el.hasAttribute('hidden');
-  if (open) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+  if (open) { el.removeAttribute('hidden'); bdExpanded.add(uid); }
+  else { el.setAttribute('hidden', ''); bdExpanded.delete(uid); }
   if (row) row.setAttribute('aria-expanded', String(open));
 }
 function bdSetFilter(f) { bdState.filter = f; bdRefreshPeople(); }
@@ -7943,11 +7989,18 @@ function bdStartStamp() {
 function bdStrip() {
   const t = bdTodayStats;
   const { myWork, lateCount, theirs, people, totalQuiet, counts } = bdState;
-  const stat = (v, l, tip, cls) => `<div class="bd-stat ${cls || ''}">
+  // Each tip gets an id and its button points at it. role="tooltip" with
+  // nothing referencing it is inert: a screen reader announced "What tracked
+  // means, button" and never reached the sentence explaining it.
+  let tipSeq = 0;
+  const stat = (v, l, tip, cls) => {
+    const id = 'bdtip-' + (++tipSeq);
+    return `<div class="bd-stat ${cls || ''}">
     <div class="bd-stat-v mono">${v}</div>
-    <div class="bd-stat-l">${l}${tip ? `<button class="bd-i" type="button" aria-label="What ${l} means">i</button>` : ''}</div>
-    ${tip ? `<div class="bd-tip" role="tooltip">${tip}</div>` : ''}
+    <div class="bd-stat-l">${l}${tip ? `<button class="bd-i" type="button" aria-label="What ${l} means" aria-describedby="${id}">i</button>` : ''}</div>
+    ${tip ? `<div class="bd-tip" role="tooltip" id="${id}">${tip}</div>` : ''}
   </div>`;
+  };
   const hourly = (t && t.hourly) || [];
   const maxH = Math.max(1, ...hourly);
   // Neither a zero nor a blank while we do not know. "0 commits" is a claim
@@ -7981,6 +8034,70 @@ function bdStrip() {
       : `<div class="bd-stat"><div class="bd-stat-v mono">${unknown}</div><div class="bd-stat-l">by hour${bdStatsState === 'failed' ? '<button class="bd-i" type="button" aria-label="Why by hour is unknown">i</button>' : ''}</div>${bdStatsState === 'failed' ? `<div class="bd-tip" role="tooltip">Today's stats could not be loaded, so the hourly breakdown is unknown - not empty.</div>` : ''}</div>`,
   ].join('');
 }
+
+// Focus identity that survives an innerHTML rebuild. Node identity cannot: the
+// element is gone. A person row is named by its uid, a filter chip by its
+// value, a search box by its class - all stable across a re-render.
+function bdFocusKey(el) {
+  const root = document.getElementById('attnRoot');
+  if (!el || !root || !root.contains(el)) return null;
+  if (el.dataset && el.dataset.uid) return { kind: 'person', uid: el.dataset.uid };
+  if (el.dataset && el.dataset.f) return { kind: 'filter', v: el.dataset.f };
+  if (el.dataset && el.dataset.pc) return { kind: 'pcat', v: el.dataset.pc };
+  if (el.classList.contains('bd-search')) {
+    const boxes = [...root.querySelectorAll('.bd-search')];
+    return { kind: 'search', i: boxes.indexOf(el), pos: el.selectionStart };
+  }
+  if (el.tagName === 'SELECT') return { kind: 'sort' };
+  return null;
+}
+
+function bdRestoreFocus(key) {
+  if (!key) return;
+  const root = document.getElementById('attnRoot');
+  if (!root) return;
+  let el = null;
+  if (key.kind === 'person') el = root.querySelector(`[data-uid="${CSS.escape(key.uid)}"]`);
+  else if (key.kind === 'filter') el = root.querySelector(`[data-f="${CSS.escape(key.v)}"]`);
+  else if (key.kind === 'pcat') el = root.querySelector(`[data-pc="${CSS.escape(key.v)}"]`);
+  else if (key.kind === 'search') el = root.querySelectorAll('.bd-search')[key.i];
+  else if (key.kind === 'sort') el = root.querySelector('.bd-sort select');
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (key.kind === 'search' && key.pos != null && el.setSelectionRange) {
+    try { el.setSelectionRange(key.pos, key.pos); } catch (e) {}
+  }
+}
+
+// WCAG 1.4.13: a tooltip shown on hover or focus has to be dismissable without
+// moving focus. Reveal is CSS-only (:hover / :focus-within), so Escape sets a
+// class that suppresses it, and any further interaction clears the suppression
+// so the tip works again. Delegated once for the whole board rather than bound
+// per tooltip, since the board is rebuilt wholesale on every render.
+(function bdTooltipEscape() {
+  if (window.__bdTipEscBound) return;
+  window.__bdTipEscBound = true;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const root = document.getElementById('attnRoot');
+    if (!root) return;
+    const holder = document.activeElement && document.activeElement.closest
+      ? document.activeElement.closest('.bd-stat, .bd-tile-head') : null;
+    if (holder && root.contains(holder)) { holder.classList.add('bd-tip-off'); e.stopPropagation(); }
+    else root.querySelectorAll('.bd-tip-off').forEach(h => h.classList.remove('bd-tip-off'));
+  });
+  document.addEventListener('focusin', (e) => {
+    const root = document.getElementById('attnRoot');
+    if (!root) return;
+    root.querySelectorAll('.bd-tip-off').forEach(h => {
+      if (!h.contains(e.target)) h.classList.remove('bd-tip-off');
+    });
+  });
+  document.addEventListener('pointerdown', () => {
+    const root = document.getElementById('attnRoot');
+    if (root) root.querySelectorAll('.bd-tip-off').forEach(h => h.classList.remove('bd-tip-off'));
+  });
+})();
 
 function renderAttention(data) {
   const root = document.getElementById('attnRoot');
@@ -8132,6 +8249,13 @@ function renderAttention(data) {
     </div>`;
   }).join('') : `<div class="bd-empty"><b>Nothing is on you.</b><br>Everything open is with someone else.</div>`;
 
+  // Remember where focus was before the rewrite. innerHTML destroys the focused
+  // node, so a keyboard or screen-reader user who resolved one row landed back
+  // on document.body and had to re-tab the entire board to reach the next one -
+  // on the view whose whole purpose is working down a list. Restored below by a
+  // description that survives the rebuild, not by node identity.
+  const prevFocus = bdFocusKey(document.activeElement);
+
   root.innerHTML = `
   <div class="bd-hello">
     <h1>${greeting}</h1>
@@ -8141,19 +8265,19 @@ function renderAttention(data) {
   <div class="bd-strip" id="bdStripEl">${bdStrip()}</div>
   <div class="bd-grid">
 
-    <section class="bd-tile">
-      <div class="bd-tile-head">${BD_ICON.mine}<h3>My work</h3>
+    <section class="bd-tile" aria-labelledby="bdh-mywork">
+      <div class="bd-tile-head">${BD_ICON.mine}<h3 id="bdh-mywork">My work</h3>
         <span class="bd-pill ${lateCount ? 'is-late' : ''}">${myWork.length}</span>
-        <button class="bd-i" type="button" aria-label="What My work contains">i</button>
-        <div class="bd-tip bd-tip-wide" role="tooltip">Everything <b>you</b> owe, from both places it is recorded: action items assigned to you, and rows in a project's Waiting-on table whose Who column names you. Work sitting with other people is in the gadget to the right, not here.</div>
+        <button class="bd-i" type="button" aria-label="What My work contains" aria-describedby="bdtip-mywork">i</button>
+        <div class="bd-tip bd-tip-wide" role="tooltip" id="bdtip-mywork">Everything <b>you</b> owe, from both places it is recorded: action items assigned to you, and rows in a project's Waiting-on table whose Who column names you. Work sitting with other people is in the gadget to the right, not here.</div>
         <span class="bd-tile-sub">${lateCount ? lateCount + ' past its date' : 'nothing overdue'}</span></div>
       <div class="bd-tile-body">${myRows}</div>
       <div class="bd-tile-foot"><span class="bd-key"><span class="bd-dot"></span> late: past its due date, or an ask of yours older than 7 days</span>
         <span class="bd-key" style="margin-left:auto">updated <span id="bdStamp" class="mono">just now</span></span></div>
     </section>
 
-    <section class="bd-tile">
-      <div class="bd-tile-head">${BD_ICON.people}<h3>Waiting on people</h3>
+    <section class="bd-tile" aria-labelledby="bdh-people">
+      <div class="bd-tile-head">${BD_ICON.people}<h3 id="bdh-people">Waiting on people</h3>
         <span class="bd-pill">${theirs.length}</span>
         <span class="bd-tile-sub" id="peopleSub">${totalQuiet} with no reply in 7d</span></div>
       <div class="bd-filters">
@@ -8162,7 +8286,7 @@ function renderAttention(data) {
         <input class="bd-search" type="search" placeholder="Filter by person, project or text…"
                aria-label="Filter asks" value="${escapeHtml(bdState.query)}" oninput="bdSetQuery(this.value)">
         <label class="bd-sort">sort
-          <select class="bd-chip" style="padding:5px 7px" aria-label="Band order" onchange="bdSetSort(this.value)">
+          <select class="bd-chip" style="padding:5px 7px" aria-label="sort by band order" onchange="bdSetSort(this.value)">
             <option value="near"${bdState.sort === 'near' ? ' selected' : ''}>newest band first</option>
             <option value="far"${bdState.sort === 'far' ? ' selected' : ''}>30d+ first</option>
           </select></label>
@@ -8174,8 +8298,8 @@ function renderAttention(data) {
       </div>
     </section>
 
-    <section class="bd-tile" style="grid-column:1 / -1">
-      <div class="bd-tile-head">${BD_ICON.proj}<h3>Projects</h3>
+    <section class="bd-tile" style="grid-column:1 / -1" aria-labelledby="bdh-projects">
+      <div class="bd-tile-head">${BD_ICON.proj}<h3 id="bdh-projects">Projects</h3>
         <span class="bd-pill" id="projPill">${projects.length}</span>
         <span class="bd-tile-sub" id="projSub">projects with something outstanding, most recently worked first</span></div>
       <div class="bd-filters">
@@ -8212,6 +8336,7 @@ function renderAttention(data) {
   // above it is not always there, and hardcoding pushed the bottom of the board
   // off screen whenever it appeared.
   root.style.setProperty('--bd-top', Math.round(root.getBoundingClientRect().top) + 'px');
+  bdRestoreFocus(prevFocus);
   bdStartStamp();
 }
 
@@ -8231,6 +8356,11 @@ function renderAttention(data) {
             const row = btn && btn.closest ? btn.closest('.bd-row, .bd-ask') : null;
             const slot = row ? row.querySelector('.bd-err') : null;
             if (!slot) { console.error(message); return; }
+            // Reveal BEFORE writing. A live region mutated while display:none is
+            // commonly ignored, so filling it first and showing it second risks
+            // the announcement never happening.
+            slot.textContent = '';
+            slot.classList.add('is-on');
             slot.textContent = message;
             if (opts && opts.reload) {
                 // Deliberately NOT an automatic reload. Re-rendering here would
@@ -8244,7 +8374,6 @@ function renderAttention(data) {
                 b.addEventListener('click', () => loadTodayData());
                 slot.appendChild(b);
             }
-            slot.classList.add('is-on');
         }
 
         function bdClearRowError(btn) {
