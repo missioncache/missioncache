@@ -4909,21 +4909,9 @@
         }
         @media (max-width: 900px) {
         }
-        .attn-hero > .glass-card { margin: 0; }
         /* Eyebrow. Goes DOWN from 11px, against the direction of everything
            else here: a label above a 32px number should name it, not compete
            with it. Uppercase at 600 keeps it findable at 10px. */
-        .attn-label {
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.9px;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-            margin-bottom: 12px;
-        }
         /* Icon plus words as one unit. .attn-label is baseline-aligned so that
            the 32px count shares a baseline with the 10px caps; an SVG has no
            baseline of its own, so putting it directly in that line would align
@@ -4931,21 +4919,6 @@
         /* Must follow .attn-icon, not precede it: equal specificity, so source
            order decides and the 13px above would otherwise win. Scales with the
            17px card title rather than with the 10px eyebrows. */
-        .attn-count {
-            font-family: var(--font-display);
-            font-size: 32px;
-            font-weight: 700;
-            /* Proportional figures, NOT tabular. Equal-width digits exist so
-               numbers line up down a column; on a standalone display figure they
-               only make a narrow digit sit in a wide box, so "11" reads loose.
-               tabular-nums stays where it earns its keep: the table's columns,
-               where the figures do align vertically. */
-            font-variant-numeric: proportional-nums;
-            letter-spacing: -1.5px;
-            line-height: 1;
-            color: var(--pm-ok);
-        }
-        .attn-count.is-alert { color: var(--pm-alert); }
         /* Which of two states a card is showing. The Stalled card flips between
            chase-the-people and the-project-is-parked, and those need opposite
            actions - the old label encoded that as ", live" / ", parked" tacked
@@ -4955,12 +4928,6 @@
            clears 4.5:1 on the bare card but not through its own background. A
            deeper amber for the chip only: 4.98:1. Same situation as
            --fork-accent's light-theme value above. */
-        [data-theme="light"] .attn-state { color: #8a4d00; }
-        .attn-sub {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin: -6px 0 12px;
-        }
 
         /* A row in the On-you card. The full-width .pm-item-row does not fit a
            third-of-the-screen card: its date input and button forced the text
@@ -4971,57 +4938,13 @@
            to separate items that a gap already separates. The overdue rail
            stays - that one carries meaning - and now has nothing competing with
            it, so it reads as the only marked row. */
-        .attn-own {
-            border-left: 3px solid transparent;
-            border-radius: 0 6px 6px 0;
-            padding: 6px 10px;
-            margin-bottom: 4px;
-        }
-        .attn-own.is-overdue { border-left-color: var(--pm-alert); }
-        .attn-own:hover { background: var(--bg-hover); }
-        .attn-own-what {
-            font-size: 14px;
-            line-height: 1.45;
-            color: var(--text-primary);
-            cursor: pointer;
-            /* Two lines, then ellipsis. These are full sentences and a variable
-               row height in a fixed-height card pushes the rest off the card. */
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .attn-own.is-open .attn-own-what {
-            display: block;
-            overflow: visible;
-            overflow-wrap: anywhere;
-        }
-        .attn-own-foot .pm-item-project {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
         /* The date input only appears once the row is expanded: it is 110px wide
            and would eat the footer line at this card width. */
-        .attn-own.is-open .attn-own-extra { display: flex; gap: 6px; align-items: center; }
-        .attn-own .pm-item-why { display: none; }
-        .attn-own.is-open .pm-item-why {
-            display: block;
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 5px;
-        }
 
         /* Owed-by-person. The 63 asks collapse onto the few people who actually
            hold them, which turns a backlog into an agenda: one conversation
            clears a fifth of it. The bar shares the projects table's absolute
            scale, so a person's bar and a project's bar are comparable. */
-        .attn-num {
-            font-size: 12px;
-            font-variant-numeric: tabular-nums;
-            text-align: right;
-            color: var(--text-secondary);
-        }
 
         /* Stalled: the join of attention owed against when the project was last
            worked. Flips between the chase and parked states instead of ever
@@ -5029,19 +4952,6 @@
 
         /* Today strip: the only genuinely daily thing on the view, and the one
            data source the old design ignored completely. */
-        .attn-strip-value {
-            font-family: var(--font-display);
-            font-size: 22px;
-            /* 600, not the 700 it was: these four sit on the same screen as the
-               32px hero count, and two competing 700s read as two headlines. */
-            font-weight: 600;
-            letter-spacing: -0.4px;
-            line-height: 1.1;
-            color: var(--text-primary);
-            /* Same reason as .attn-count: these four sit side by side in a row,
-               not stacked in a column, so nothing needs to align vertically. */
-            font-variant-numeric: proportional-nums;
-        }
         /* Hourly bars as divs, not a canvas: renderHourlyChart hardcodes its
            axis colours and applyTheme never touches a Chart instance, so a
            canvas here would be the one element ignoring the theme toggle. */
@@ -5057,29 +4967,11 @@
         /* One header row for the four numeric columns. Four unlabelled numbers
            was the failure mode of the previous design - even the meter needed a
            sentence of help text to explain itself. */
-        .attn-col-head {
-            display: grid;
-            /* Must stay identical to .pm-group-header's tracks or the headings
-               stop sitting over their columns. */
-            grid-template-columns: 14px minmax(180px, 280px) 34px 34px minmax(140px, 240px) 34px 74px 84px minmax(140px, 1fr);
-            gap: 12px;
-            padding: 0 0 6px 6px;
-            border-left: 2px solid transparent;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 2px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.9px;
-            color: var(--text-secondary);
-        }
         /* Figures right, the two cells whose content starts at the left edge
            (the meter and the next-up sentence) left. Both exceptions are listed
            together so adding a column means editing one line, not discovering
            that nth-child arithmetic silently mis-aligned a heading. */
-        .attn-col-head span:nth-child(n+3) { text-align: right; }
         .attn-col-head span:nth-child(5),
-        .attn-col-head span:nth-child(9) { text-align: left; }
         /* The row is the hover target now that the card no longer moves. A
            background rather than a colour change, because recolouring the text
            also recolours the figures, and their colour carries meaning here
@@ -5152,19 +5044,6 @@
         /* One tick per ask. 9px wide with a 3px gap is the smallest pair that
            stays countable at a glance; at 20 ticks that is 237px, which is what
            sets both the column's max width and the fallback threshold. */
-        .attn-comb {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-        }
-        .attn-comb-tick {
-            width: 9px;
-            height: 8px;
-            flex: 0 0 auto;
-            border-radius: 1px;
-            background: var(--pm-heat-track);
-        }
-        .attn-comb-tick.is-idle { background: var(--pm-heat-fill); }
 
         .pm-group-count {
             font-size: 14px;
@@ -5192,44 +5071,8 @@
            means "waiting on somebody" and progress is the opposite signal. The
            bar is thinner than the no-reply meter (4px vs 6px) so the two are
            never confused at a glance. */
-        .attn-done {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            justify-content: flex-end;
-        }
-        .attn-done-bar {
-            flex: 1 1 auto;
-            min-width: 18px;
-            height: 4px;
-            border-radius: 2px;
-            background: var(--pm-heat-track);
-            overflow: hidden;
-        }
-        .attn-done-fill {
-            display: block;
-            height: 100%;
-            border-radius: 2px;
-            background: var(--pm-ok);
-        }
-        .attn-done-text {
-            flex: 0 0 auto;
-            font-size: 12px;
-            font-variant-numeric: tabular-nums;
-            color: var(--text-secondary);
-        }
         /* The one cell that is a sentence rather than a figure, so it takes the
            row's slack and clips. 12 of these wrapping would cost the fold. */
-        .attn-next {
-            font-size: 12px;
-            color: var(--text-secondary);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-width: 0;
-        }
-        .attn-next.is-none { color: var(--pm-nil); }
-        .attn-next.is-done { color: var(--pm-ok); }
         .pm-group-rows { padding: 2px 0 10px 26px; }
 
         /* Every interactive thing on this view is a <button> or an <a>, and the
@@ -5242,11 +5085,6 @@
         .pm-toggle-link:focus-visible,
         .pm-mini-btn:focus-visible,
         #attentionView a:focus-visible,
-        .attn-own-what:focus-visible {
-            outline: 2px solid var(--pm-link);
-            outline-offset: 2px;
-            border-radius: 3px;
-        }
         .pm-resolve-form {
             display: flex;
             flex-wrap: wrap;
@@ -6264,6 +6102,10 @@
   font-size: 11.5px; line-height: 1.45; white-space: normal;
 }
 .bd-err.is-on { display: block; }
+
+/* A custom category renders its emoji rather than a stroke path, so it drops
+   the icon box's border and sizing and just centres the glyph. */
+.bd-cat.is-custom { border: 0; background: none; font-size: 12px; line-height: 1; }
 
 /* The failure card. It borrows .bd-tile/.bd-empty rather than inventing a
    parallel set, so it inherits the board's surface, spacing and theming. */
@@ -7650,7 +7492,6 @@
         // task_id -> that project's on_others group, so a panel can be built on
         // first open rather than up front for all twelve. Same lifetime and same
         // population point as todayProjectsById.
-        let todayGroupsByTask = {};
         let currentProjectPage = null;      // { id, name, repo_name, category }
         let currentProjectPageTab = 'overview';
         let currentProjectPmData = null;
@@ -7700,10 +7541,6 @@
                 pmData = await res.json();
             } catch (e) {
                 console.error('Error loading Attention:', e);
-                // Fill EVERY region. Leaving the count pill at its markup
-                // default of "0" over an empty body reads as "nothing is owed",
-                // which is the opposite of unknown on the one number this view
-                // exists to surface.
                 // The view is one root now, so there is one place to fill. It
                 // still has to SAY it failed rather than render empty: an empty
                 // Attention view reads as "nothing is owed", which is the
@@ -7755,8 +7592,6 @@
             // project's due date, at-risk flag and recency from here.
             todayProjectsById = {};
             (data.projects || []).forEach(p => { todayProjectsById[p.task_id] = p; });
-            todayGroupsByTask = {};
-            (data.on_others || []).forEach(g => { todayGroupsByTask[g.task_id] = g; });
             renderAttention(data);
         }
 
@@ -7869,7 +7704,19 @@ const BD_CAT = {
   perf:      ['M13 2L3 14h9l-1 8 10-12h-9z', 'Performance'],
 };
 function bdCatIcon(c) {
-  const e = BD_CAT[String(c || '').toLowerCase()];
+  const key = String(c || '').toLowerCase();
+  // Custom categories first, matching getTaskIconHTML. Without this a project
+  // on a user-created category rendered as the no-category dot while the
+  // Projects view rendered its emoji, and the filter chip printed the
+  // category's own name beside an icon captioned "No category" - the chip
+  // contradicting itself. Values are escaped for the same reason that function
+  // gives: they are raw stored values, and the colour is server-validated
+  // #RRGGBB but escaped anyway.
+  const custom = typeof CUSTOM_CATEGORIES !== 'undefined' && CUSTOM_CATEGORIES[key];
+  if (custom) {
+    return `<span class="bd-cat is-custom" title="${escapeHtml(key)}" aria-label="${escapeHtml(key)}" role="img" style="color:${escapeHtml(custom.color)}">${escapeHtml(custom.emoji)}</span>`;
+  }
+  const e = BD_CAT[key];
   if (!e) return `<span class="bd-cat is-none" title="No category"></span>`;
   return `<span class="bd-cat" title="${escapeHtml(e[1])}" aria-label="${escapeHtml(e[1])}" role="img">`
     + `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" `
@@ -8146,7 +7993,12 @@ function renderAttention(data) {
   // was invisible on your side of the board while sitting under someone else's
   // name, which is the whole reason they are merged here.
   const myWork = [...mine, ...mineRows];
-  const lateCount = mine.filter(i => i.overdue).length + mineRows.filter(isQuiet).length;
+  // `=== true` in both places. This decides the "late" stat AND the is-late
+  // class on the rows, and the two used different truthiness (`i.overdue` here,
+  // `it.overdue === true` on the row), so any truthy-but-not-true value made
+  // the number disagree with the rows it was counting - the exact failure this
+  // board is built to avoid.
+  const lateCount = mine.filter(i => i.overdue === true).length + mineRows.filter(isQuiet).length;
 
   const owners = new Map();
   for (const r of theirs) {
@@ -8463,13 +8315,9 @@ function renderAttention(data) {
 
 
 
-        // Card 1: what he owes. Action items plus the waiting-on rows that name
-        // him, which is the whole point - those were previously invisible on his
-        // side while sitting one card lower under someone else's label.
-        // One place that knows the project URL's shape. It was built inline at
-        // seven call sites, and adding the task id would have meant getting the
-        // same string right seven times. The id is what disambiguates duplicate
-        // project names, so every caller holding one passes it.
+        // One place that knows the project URL's shape. The task id is what
+        // disambiguates duplicate project names (a fork and its parent, or a
+        // stale row left by a rename), so every caller holding one passes it.
         function projectHref(name, taskId, ptab) {
             const q = [];
             if (taskId !== null && taskId !== undefined && taskId !== '') {
@@ -8523,24 +8371,6 @@ function renderAttention(data) {
             if (el) el.innerHTML = bdStrip();
         }
 
-
-        // One tick per ask instead of a solid bar. The bar's length was the
-        // project's share of the largest project, which at this data's range
-        // cannot be read: 1 ask and 3 asks both render as a stub a few pixels
-        // long, and 5 vs 3 is a difference of about 20px on a 300px scale. Ticks
-        // are countable, so 3 amber ticks IS "3 asks, all waiting".
-        //
-        // The absolute scale survives, which is the property that made the bar
-        // worth having: a tick is a fixed width, so total width still stays
-        // proportional to the number of asks and lengths compare between rows.
-        // Idle ticks go first so they read as one amber quantity rather than as a
-        // dotted line.
-        //
-        // Above 20 asks the comb stops being countable AND stops fitting (20
-        // ticks is 237px), so it falls back to the bar - which is fine at that
-        // end of the range, because a project with 20+ asks is unambiguously the
-        // long one whatever the drawing.
-        const COMB_MAX_TICKS = 20;
 
 
 
