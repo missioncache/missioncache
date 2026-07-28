@@ -4592,6 +4592,22 @@
             background-clip: text;
         }
 
+        /* The mint-to-cyan ramp is built for the dark surface and measures
+           1.44:1 to 1.68:1 against light --bg-primary #f4f4f8, so the title
+           reads as a pale wash rather than as text. Darkened endpoints keep the
+           green-to-teal direction at 4.88:1 at the ramp's weakest point. Only
+           this heading changes: --gradient-green-cyan's other users are a card
+           rail and two progress fills, where the contrast that matters is
+           against their own track, not the page.
+
+           background-image rather than the background shorthand, because the
+           shorthand also resets background-clip to border-box, which outranks
+           the text value set above and paints the heading as a solid block with
+           invisible text. */
+        [data-theme="light"] .page-header h2 {
+            background-image: linear-gradient(135deg, #0b7a50 0%, #0a7575 100%);
+        }
+
         .page-subtitle {
             color: var(--text-secondary);
             font-size: 14px;
@@ -5743,39 +5759,51 @@
      - values always visible as TEXT, never hover-only
      - a filtered empty state suggests, it never goes blank
    ============================================================ */
-.bd {
-  /* Teal focus + action orange, from the plugin's "colorful vibrant friendly
-     productivity" palette. Replaces the all-grey board: greys were correct and
-     lifeless. Values here are the AA-verified variants, not the raw palette. */
-  --bg:        #eff6f5;
-  --tile:      #ffffff;
-  --head-a:    #ffffff;
-  --head-b:    #f3faf8;
-  --line:      #d6e4e1;
-  --line-soft: #e9f2f0;
-  --ink:       #0f2b28;
-  --ink-2:     #3c5754;
-  --ink-3:     #52706c;
-  --accent:    #0b6e66;
-  --accent-2:  #14b8a6;
-  --accent-bg: #dcf5f1;
-  --amber:     #b34700;
-  --amber-bg:  #fff0e4;
-  --late:      #c0362c;
-  --late-bg:   #fdeceb;
-  --ok:        #14724c;
+/* The board was built with its own teal/slate palette, which made the app's
+   default view look like a different product next to Projects and Activity.
+   Every .bd-* rule below reads these tokens and nothing else, so pointing them
+   at the app's own variables re-skins the whole view without touching a single
+   structural rule. Surfaces, borders and ink are mapped rather than copied, so
+   a future change to --bg-card or --border reaches the board too. The three
+   chip tints are the exception: they are the --pm-* hues at low alpha, written
+   out because a var() cannot carry its own alpha.
 
+   --ink-3 maps to --pm-nil rather than the tempting --text-muted: the muted
+   token fails AA in both themes (2.72:1 dark, 3.43:1 light, see the note at the
+   top of this file) and --ink-3 carries real content here - stat labels, ask
+   counts, the "last worked" column. */
+.bd {
+  --bg:        transparent;
+  --tile:      var(--bg-card);
+  --head-a:    rgba(255,255,255,.75);
+  --head-b:    rgba(248,248,252,.55);
+  --line:      var(--border);
+  --line-soft: var(--border-light);
+  --ink:       var(--text-primary);
+  --ink-2:     var(--text-secondary);
+  --ink-3:     var(--pm-nil);
+  --accent:    var(--pm-ok);
+  --accent-2:  #0f9268;
+  --accent-bg: rgba(11,122,80,.10);
+  --amber:     var(--pm-heat);
+  --amber-bg:  rgba(163,91,0,.10);
+  --late:      var(--pm-alert);
+  --late-bg:   rgba(198,32,32,.09);
+
+  /* The age-band ramp stays as chosen: it is a data encoding, not chrome, and
+     its contrast was already settled with the 1px swatch boundary. */
   --b0: #aab6c6;
   --b1: #f2d08a;
   --b2: #e8b33d;
   --b3: #c98a06;
 
-  --r: 8px;
-  --r-sm: 5px;
-  /* "improved shadows, softer than flat, clearer than neumorphism" */
-  --lift: 0 1px 2px rgba(22,35,58,.06), 0 2px 6px rgba(22,35,58,.05), 0 8px 20px rgba(22,35,58,.045);
-  --lift-hi: 0 1px 2px rgba(22,35,58,.08), 0 4px 12px rgba(22,35,58,.09), 0 16px 32px rgba(22,35,58,.07);
-  --inset-top: inset 0 1px 0 rgba(255,255,255,.9);
+  /* 16px matches .glass-card and .stat-card, which the app uses at both large
+     and small sizes. */
+  --r: 16px;
+  --r-sm: 8px;
+  --lift: 0 1px 3px rgba(0,0,0,.06);
+  --lift-hi: 0 2px 8px rgba(0,0,0,.10);
+  --inset-top: inset 0 1px 0 rgba(255,255,255,.7);
 }
 /* Dark is this app's DEFAULT and is signalled by the ABSENCE of data-theme:
    the boot script in <head> only sets the attribute when the theme is not
@@ -5784,27 +5812,31 @@
    covers all three states: attribute absent, explicitly dark, explicitly
    light. */
 :root:not([data-theme="light"]) .bd {
-  --bg:        #171b21;
-  --tile:      #1e242c;
-  --head-a:    #232a33;
-  --head-b:    #1e242c;
-  --line:      #333c47;
-  --line-soft: #272e37;
-  --ink:       #dbe3ec;
-  --ink-2:     #a6b4c5;
-  --ink-3:     #93a5a3;
-  --accent:    #4fd6c3;
-  --accent-2:  #7fe6d7;
-  --accent-bg: #10312e;
-  --amber:     #e8b33d;
-  --amber-bg:  #33280f;
-  --late:      #ff7b70;
-  --late-bg:   #3a1f1d;
-  --ok:        #5fd3a0;
+  --bg:        transparent;
+  --tile:      var(--bg-card);
+  /* Same two stops the app's table headers use, so a tile head and a th read as
+     the same component. */
+  --head-a:    rgba(30, 30, 50, 0.8);
+  --head-b:    rgba(20, 20, 35, 0.8);
+  --line:      var(--border);
+  --line-soft: var(--border-light);
+  --ink:       var(--text-primary);
+  --ink-2:     var(--text-secondary);
+  --ink-3:     var(--pm-nil);
+  --accent:    var(--pm-ok);
+  --accent-2:  #6ff0b8;
+  --accent-bg: rgba(61,232,160,.12);
+  --amber:     var(--pm-heat);
+  --amber-bg:  rgba(255,176,58,.14);
+  --late:      var(--pm-alert);
+  --late-bg:   rgba(255,82,82,.14);
   --b0: #55616f;
-  --lift: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.35);
-  --lift-hi: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
-  --inset-top: inset 0 1px 0 rgba(255,255,255,.045);
+  /* The app's dark cards carry no drop shadow; depth comes from the translucent
+     fill over the page gradient. Kept non-zero but near-invisible so the
+     two-value box-shadow lists below stay valid CSS. */
+  --lift: 0 1px 2px rgba(0,0,0,.22);
+  --lift-hi: 0 2px 10px rgba(0,0,0,.32);
+  --inset-top: inset 0 1px 0 rgba(255,255,255,.035);
 }
 
 .bd, .bd *, .bd *::before, .bd *::after { box-sizing: border-box; }
@@ -5812,16 +5844,12 @@
   /* Two very wide, very low-opacity washes. The flat fill read as a spreadsheet;
      this gives the board a light source without putting anything behind the
      data itself. Fixed so it does not travel when a tile scrolls. */
-  /* Three washes rather than a flat fill. Teal at the top-left where the eye
-     lands, orange at the top-right to pick up the action colour, and a low
-     violet at the bottom so the board does not fade out. Kept under 14% so it
-     tints the surface without competing with any data on top of it. */
-  background:
-    radial-gradient(880px 420px at 6% -12%, rgba(20,184,166,.16), transparent 62%),
-    radial-gradient(720px 380px at 98% -4%, rgba(234,88,12,.11), transparent 60%),
-    radial-gradient(900px 500px at 50% 108%, rgba(99,102,241,.09), transparent 64%),
-    var(--bg);
-  background-attachment: fixed;
+  /* Transparent, so the app's own .bg-gradient shows through exactly as it does
+     behind Projects and Activity. The board used to paint its own teal/orange/
+     violet washes over an opaque fill, which is what made this view read as a
+     separate product: its surface was lighter than the page and the app's
+     ambient gradient stopped at its edge. */
+  background: var(--bg);
   color: var(--ink);
   font: 500 13px/1.45 var(--font-sans);
   padding: 14px;
@@ -5875,6 +5903,10 @@
   background: var(--head-b);
   border-bottom: 1px solid var(--line-soft);
   position: sticky; top: 0; z-index: 5;
+  /* --head-b is translucent so it matches the app's table headers. A sticky
+     element needs the blur as well, or the rows scrolling underneath read
+     straight through it. */
+  backdrop-filter: blur(10px);
 }
 /* The band swatches and bars are a single-hue amber ramp, and four steps of
    one hue cannot all clear 3:1 against the tile without going dark enough to
@@ -5924,6 +5956,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   box-shadow: var(--lift), var(--inset-top);
+  backdrop-filter: blur(10px);
   padding: 9px 12px 8px;
   position: relative;
   min-width: 0;
@@ -5954,14 +5987,16 @@
 .bd-i:hover, .bd-i:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 .bd-tip {
   position: absolute; z-index: 40; left: 10px; right: 10px; top: calc(100% - 2px);
-  background: var(--ink); color: var(--tile);
+  /* Explicit white rather than var(--tile): the tile fill is translucent now,
+     and a translucent text colour over a dark tooltip reads as washed out. */
+  background: var(--ink); color: #fff;
   padding: 7px 9px; border-radius: var(--r-sm);
   font-size: 11px; line-height: 1.4;
   box-shadow: var(--lift-hi);
   opacity: 0; visibility: hidden; transform: translateY(-3px);
   transition: opacity .16s ease, transform .16s ease, visibility .16s;
 }
-:root:not([data-theme="light"]) .bd-tip { background: #0e1319; color: var(--ink); border: 1px solid var(--line); }
+:root:not([data-theme="light"]) .bd-tip { background: var(--bg-card-solid); color: var(--ink); border: 1px solid var(--line); }
 .bd-stat.bd-tip-off:hover .bd-tip, .bd-stat.bd-tip-off:focus-within .bd-tip,
 .bd-tile-head.bd-tip-off:hover .bd-tip, .bd-tile-head.bd-tip-off:focus-within .bd-tip {
   opacity: 0; visibility: hidden;
@@ -5996,6 +6031,9 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   box-shadow: var(--lift), var(--inset-top);
+  /* Matches .glass-card: the fill is translucent, so without the blur the page
+     gradient reads through the tile as a hard-edged smear. */
+  backdrop-filter: blur(10px);
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   transition: box-shadow .2s ease;
 }
@@ -6158,7 +6196,10 @@
   border-bottom: 1px solid var(--line-soft); transition: background .13s;
 }
 .bd-ask:last-child { border-bottom: 0; }
-.bd-ask:hover { background: var(--tile); }
+/* --accent-bg, matching .bd-row:hover. The ask rows sit on a transparent
+   .bd-asks over the tile, so painting var(--tile) here is painting the colour
+   the row already has. */
+.bd-ask:hover { background: var(--accent-bg); }
 
 /* The old row was name+desc on the left and four numbers stranded at the far
    right of a 1470px tile, with ~700px of white space between them and the
@@ -6177,6 +6218,7 @@
   padding: 6px 12px;
   position: sticky; top: 0; z-index: 5;
   background: var(--head-b); border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
   font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink-3);
 }
@@ -6205,7 +6247,13 @@
 /* a value with nothing in it should read as calm, not as a missing number */
 .bd-zero { color: var(--ink-3); opacity: .55; }
 .bd-prog { height: 5px; background: var(--line-soft); border-radius: 3px; overflow: hidden; }
-.bd-prog i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--ok), #34c98a); }
+/* Same level-encoded ramp the Projects table uses via getProgressColor(), so
+   one checklist percentage is not two different colours in two views. */
+.bd-prog i { display: block; height: 100%; border-radius: 3px; background: var(--text-muted); }
+.bd-prog i.green { background: var(--gradient-green-cyan); }
+.bd-prog i.blue { background: var(--gradient-purple-blue); }
+.bd-prog i.yellow { background: linear-gradient(90deg, var(--accent-yellow) 0%, var(--accent-orange) 100%); }
+.bd-prog i.gray { background: var(--text-muted); }
 
 .bd-key { display: inline-flex; align-items: center; gap: 4px; }
 .bd-key i { width: 9px; height: 9px; border-radius: 2px; display: block;
@@ -7892,7 +7940,7 @@ function bdProjRowHtml(p) {
     <div class="bd-next" title="${escapeHtml(next)}">
       <span class="bd-next-l">${next ? (p.next_up ? 'next' : 'last did') : ''}</span>${escapeHtml(bdCut(next, 150))}</div>
     <div class="bd-progwrap" title="${p.completed_count} of ${p.total_count} checklist items done">
-      <div class="bd-prog"><i style="width:${pct}%"></i></div>
+      <div class="bd-prog"><i class="${getProgressColor(pct)}" style="width:${pct}%"></i></div>
       <span class="bd-progn">${p.total_count ? pct + '%' : '-'}</span></div>
     <div class="bd-num${z(p.open_count)}${p.overdue_count ? ' is-late' : ''}">${p.open_count || '0'}</div>
     <div class="bd-num${z(p.stale_on_others_count)}${p.stale_on_others_count ? ' is-warn' : ''}">${p.stale_on_others_count || '0'}</div>
