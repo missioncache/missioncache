@@ -6,6 +6,23 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - the update-available nag survives the update it recommends (missioncache-install, missioncache-dashboard)
+
+- `--update` finished successfully and the statusline kept saying "MissionCache update available" for up to 6 hours: nothing invalidated the shared cache at `~/.missioncache/update-check.json`, so the statusline and dashboard served the pre-update answer until its TTL expired. Every install, update, and uninstall run now drops the cache, so the next render recomputes against what was actually just installed.
+- An editable (`pip install -e`) package nagged forever: its metadata version is frozen at install time, so the check compared a stale number against PyPI and the recommended command could never clear it (a clone updates via git, not pipx). The check now reads each distribution's `direct_url.json` (PEP 610), labels editable installs in the payload, and excludes them from the `update_available` verdict. Per-package: a genuinely outdated regular install next to an editable one still nags.
+
+### Fixed - `--update` was not the full update it claims to be (missioncache-install)
+
+- The Claude Code plugin (hooks, commands, templates) never refreshed on `--update`: `marketplace add` does not re-fetch an already-registered marketplace, and `plugins install` no-ops on an installed plugin, so users stayed on the plugin version they first installed. The update path now runs `claude plugins marketplace update` followed by `claude plugins update`, falling back to plain install when the plugin was never registered. A failed marketplace refresh counts as a component failure (recorded and retried next update) instead of proceeding to a `plugins update` that would no-op against stale metadata and report a false success.
+- A component that failed during install could never be repaired by the printed advice ("re-run `--update`"): failures were never recorded in the state file, and `--update` only operates on what state tracks. Failed components are now recorded (`failed_components` in the state file), retried on every `--update`, and promoted to tracked once they succeed.
+- `--update` on a machine with a reset or bypassed state file said "Nothing to update" while components were plainly installed. Read-only probes (PATH binaries, the statusLine command, enabled plugins) now detect installed-but-untracked components and report them with the re-adopt command. Report-only by design: acting on them could pipx-install over a maintainer's editable setup or re-acquire config the user manages elsewhere.
+- During `--update`, a `statusLine` the user has since pointed at something else is now skipped silently instead of prompting to replace it (and, with `--yes`, instead of replacing it). An update refreshes what MissionCache owns; it does not win back config the user rewired.
+
+### Fixed - a second install run destroyed the user's `.bak` and ignored the managed marker (missioncache-install)
+
+- The bundled-file copy (rules, user commands) unconditionally renamed any existing file to `.bak` - so run one backed up the user's original, and run two (any update) silently replaced that backup with MissionCache's own previous version. Backups are now written once and never overwritten, and identical content is skipped entirely.
+- The managed-marker contract that `uninstall` already honored now holds on install too: a rules file carrying the line-1 marker refreshes in place, and a file without it is user-owned and is never touched (the installer says how to re-adopt it). The same test applies through symlinks: a link whose target lacks the marker (e.g. wired into a dotfiles repo) keeps its wiring, while a link to marker-carrying content (a local-mode leftover) is converted to a real copy. User commands, whose YAML frontmatter cannot carry a line-1 marker, keep filename-based ownership with the first-backup-preserved behavior.
+
 ## 2026-07-28
 
 Published package versions: missioncache-db 1.0.15, mcp-missioncache 1.0.18, missioncache-dashboard 1.0.11. Claude Code plugin 1.0.7.
