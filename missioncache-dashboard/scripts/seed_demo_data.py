@@ -5,19 +5,27 @@ Usage (always via HOME override - this is the safety mechanism):
 
     HOME=/tmp/missioncache-demo python3.11 missioncache-dashboard/scripts/seed_demo_data.py
 
-Then run the dashboard against the same HOME on an alternate port:
+Run it late in the day. The demo's commits and Claude sessions are stamped at
+hours 9 to 17, and the tracked total is capped at the time elapsed so far
+today, so seeding at 10am hides most of the day it just built.
 
-    HOME=/tmp/missioncache-demo MISSIONCACHE_DASHBOARD_PORT=8789 \\
-        python3.11 missioncache-dashboard/server.py
+Then run the dashboard against the same HOME on a spare port. Use the console
+entry point, not `python3.11 .../server.py` - server.py lives inside the package
+and importing it as a script fails on its relative imports:
 
-    open http://localhost:8789
+    HOME=/tmp/missioncache-demo MISSIONCACHE_DASHBOARD_PORT=8791 \\
+        missioncache-dashboard serve
+
+    open http://localhost:8791
 
 The seeder refuses to run if HOME is your real user home (safety check against
 pwd.getpwuid). It creates:
 
     $HOME/.missioncache/tasks.db                  - SQLite with fixture data
+                                                    (incl. open action items)
     $HOME/.missioncache/tasks.duckdb              - DuckDB (migrated from SQLite)
     $HOME/.missioncache/active/<name>/            - plan/context/tasks files
+                                                    (context carries Waiting on)
     $HOME/.missioncache/completed/<name>/         - completed project files
     $HOME/projects/{api,docs,pipelines,data}/     - empty repo dirs referenced by tasks
 """
@@ -26,7 +34,9 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import shutil
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -53,8 +63,10 @@ def safety_check() -> Path:
     if existing_db.exists() and existing_db.stat().st_size > 1024:
         sys.exit(
             f"REFUSING to seed: {existing_db} already exists and is >1KB.\n"
-            "Delete it first if you want a fresh seed:\n"
-            f"    rm -rf {demo_home}/.missioncache {demo_home}/.claude"
+            "Delete it first if you want a fresh seed. Remove the whole demo\n"
+            "home, not just the data dir - the git repos under projects/ carry\n"
+            "the commit and lines-of-code numbers:\n"
+            f"    rm -rf {demo_home}"
         )
 
     return demo_home
@@ -672,6 +684,105 @@ Feast for phase 1. Revisit Tecton if serving latency becomes a bottleneck.
 }
 
 
+# =============================================================================
+# Project-management layer - what the Attention view reads
+# =============================================================================
+#
+# /api/today joins two sources, and the Attention screenshot is empty without
+# both: action items (DB-canonical, carry a due date) and Waiting-on rows
+# (file-canonical, hand-editable markdown, aged off the 7-day threshold).
+# Everything below is dated RELATIVE to the seed date so the demo never drifts
+# into showing a wall of 400-day-old asks.
+#
+# The spread is deliberate, so the screenshot exercises the real UI states:
+#   - one action item already past its due date  -> the overdue/red path
+#   - one due shortly, one with no date at all
+#   - one Waiting-on row whose `who` is the reader -> lands in "My work"
+#   - three age bands with three people each, and one person (Dana) holding
+#     asks in two bands, which is what renders the "+N elsewhere" badge
+
+# The demo's identity. The greeting reads it, and so does _who_self, which
+# decides whether a Waiting-on row is yours or a colleague's.
+DEMO_USER_NAME = "Ada Lovelace"
+DEMO_USER_EMAIL = "ada@example.com"
+
+# Built-in category per project, so the filter chips on the Attention and
+# Projects views have something to filter. Named PROJECT_CATEGORIES to avoid
+# reading as missioncache_db.CATEGORIES, which is the canonical taxonomy these
+# values are checked against below.
+PROJECT_CATEGORIES: dict[str, str] = {
+    "auth-refactor": "refactor",
+    "api-gateway-rewrite": "api",
+    "data-pipeline": "database",
+    "ios-tests": "test",
+    "android-tests": "test",
+    "kafka-consumer-fix": "bug",
+    "docs-site-migration": "docs",
+    "ml-feature-store-poc": "perf",
+    "circuit-breaker-tuning": "infra",
+}
+
+# (project, what, requested_by, due_offset_days | None, source)
+# Negative offset = already past its date.
+ACTION_ITEMS: list[tuple[str, str, str, int | None, str]] = [
+    ("auth-refactor", "Send the auth design doc to Sam for review",
+     "Sam Okafor", -4, "design review 12/07"),
+    ("api-gateway-rewrite", "Write the migration runbook for the gateway cutover",
+     "Alex Chen", 2, "cutover planning"),
+    ("docs-site-migration", "Pick the search provider for the new docs site",
+     "Nina Patel", None, "docs sync"),
+]
+
+# project -> [(what, who, days_ago, gates)]
+# A `who` of "Ada" is the reader: that row is work SHE owes, so it renders in
+# My work rather than under someone else's name.
+WAITING_ON: dict[str, list[tuple[str, str, int, str]]] = {
+    "auth-refactor": [
+        ("Design doc review", "Sam Okafor", 3, "JWT issuance rollout"),
+    ],
+    "api-gateway-rewrite": [
+        ("Staging capacity for the cutover window", "platform-team", 22,
+         "Blocks the write-path migration"),
+    ],
+    "data-pipeline": [
+        ("Schema v2 sign-off", "Dana Whitfield", 4, "Backfill cannot start"),
+        ("Backfill window confirmation", "Dana Whitfield", 9, "June partitions"),
+    ],
+    "ios-tests": [
+        ("Session-replay event names", "Priya Raman", 2, "Blocks the replay suite"),
+        ("CI runner quota bump", "Alex Chen", 11, "Suite times out at 40 min"),
+    ],
+    "android-tests": [
+        ("Confirm the churn-event fixture names", "Ada", 5, "Blocks the churn suite"),
+        ("Device farm access", "Ravi Menon", 8, "Cannot run on real devices"),
+    ],
+    "kafka-consumer-fix": [
+        ("Broker restart maintenance slot", "Marco Silva", 17,
+         "Static membership needs a rolling restart"),
+    ],
+    "docs-site-migration": [
+        ("Algolia contract renewal", "Nina Patel", 26, "Search goes dark on 01/09"),
+    ],
+}
+
+
+def _offset_date(days: int) -> str:
+    """ISO date `days` from NOW; negative is in the past.
+
+    Anchored to the module-level NOW rather than a fresh now(), so one seed run
+    uses one clock and a midnight crossing mid-run cannot split the fixture.
+    """
+    return (NOW + timedelta(days=days)).date().isoformat()
+
+
+def waiting_on_rows(project_name: str) -> list[dict[str, str]]:
+    """WAITING_ON entries for a project as context_health row dicts."""
+    return [
+        {"what": what, "who": who, "since": _offset_date(-days_ago), "gates": gates}
+        for what, who, days_ago, gates in WAITING_ON.get(project_name, [])
+    ]
+
+
 # Tasks files - hierarchical checklist
 def make_tasks_file(project: dict) -> str:
     """Generate a tasks.md from a PROJECTS entry.
@@ -794,7 +905,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
     We import missioncache_db so the schema stays in sync with the canonical source.
     """
     # Import here so the script can fail fast if missioncache_db is missing.
-    from missioncache_db import SCHEMA_SQL  # type: ignore[import-not-found]
+    from missioncache_db import CATEGORIES, SCHEMA_SQL  # type: ignore[import-not-found]
+
+    # The task rows are written with a raw INSERT, which skips the validation a
+    # normal write path applies. An unknown category renders as a bare label
+    # with no icon, which is easy to miss in a screenshot.
+    unknown = set(PROJECT_CATEGORIES.values()) - set(CATEGORIES)
+    assert not unknown, f"unknown demo categories: {sorted(unknown)}"
 
     conn.executescript(SCHEMA_SQL)
     conn.execute("""
@@ -821,6 +938,137 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_claude_session_date ON claude_session_cache(date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_claude_session_hour ON claude_session_cache(date, hour)")
     conn.commit()
+
+
+def seed_action_items(conn: sqlite3.Connection, task_ids: dict[str, int]) -> int:
+    """Insert the open action items the Attention view's "My work" gadget reads."""
+    for project, what, requested_by, due_offset, source in ACTION_ITEMS:
+        conn.execute(
+            """
+            INSERT INTO action_items
+                (task_id, what, requested_by, assignee, due_date, status, source)
+            VALUES (?, ?, ?, 'me', ?, 'open', ?)
+            """,
+            (
+                task_ids[project],
+                what,
+                requested_by,
+                _offset_date(due_offset) if due_offset is not None else None,
+                source,
+            ),
+        )
+    conn.commit()
+    return len(ACTION_ITEMS)
+
+
+# Today's commits, per repo. The dashboard reads the commit count and the
+# lines added/removed from REAL git history (get_commits_with_loc shells out to
+# git log), so empty directories make three of the eight stat tiles read zero.
+# (repo, hour, message, lines_added, lines_removed)
+DEMO_COMMITS: list[tuple[str, int, str, int, int]] = [
+    ("api", 9, "Extract the session lifecycle into auth/sessions.py", 84, 31),
+    ("api", 10, "Port the read path to Fastify route handlers", 96, 22),
+    ("api", 11, "Drop the legacy Express middleware chain", 12, 78),
+    ("pipelines", 11, "Add the churn-event fixture factory", 71, 9),
+    ("pipelines", 13, "Wire the session-replay events into CI", 58, 14),
+    ("data", 14, "Backfill the June partitions from raw S3 dumps", 63, 18),
+    ("data", 15, "Switch consumers to static group membership", 44, 27),
+    ("docs", 16, "Port the remaining MDX pages to VitePress", 52, 21),
+    ("docs", 17, "Wire up Algolia search", 32, 13),
+]
+
+# Lines in the ballast file each repo carries, so a commit can delete a precise
+# number of lines. Sized above the largest total removal per repo.
+_BALLAST_LINES = 400
+
+
+def seed_git_repos(demo_home: Path) -> int:
+    """Give each demo repo real git history so the LOC and commit tiles work.
+
+    Each repo gets a dated baseline commit (30 days back, so it never counts
+    toward today) plus today's commits. A commit adds a file of N lines and
+    deletes M lines from the ballast, which is what makes the numbers exact
+    rather than approximate.
+    """
+    # Write the sandbox git identity here rather than leaving it to a manual
+    # step. The Attention greeting and _who_self (which decides whether a
+    # Waiting-on row is yours or a colleague's) both read
+    # `git config --global user.name`, so skipping it silently files the demo's
+    # own row under a colleague named Ada and greets nobody.
+    (demo_home / ".gitconfig").write_text(
+        f"[user]\n\tname = {DEMO_USER_NAME}\n\temail = {DEMO_USER_EMAIL}\n"
+    )
+
+    made = 0
+    for short_name in REPO_SHORTNAMES:
+        repo = demo_home / "projects" / short_name
+        # Start from nothing. Re-seeding over an existing repo re-creates the
+        # same change files with identical content, so every commit is empty
+        # and the LOC tiles read zero while the seeder still prints a commit
+        # count. The documented reset does not remove $HOME/projects, so this
+        # is the likely path, not the exotic one.
+        shutil.rmtree(repo, ignore_errors=True)
+        repo.mkdir(parents=True, exist_ok=True)
+
+        def git(*args: str, when: str | None = None) -> None:
+            env = {
+                **os.environ,
+                "HOME": str(demo_home),
+                # Hermetic: without this an /etc/gitconfig carrying
+                # commit.gpgsign or a template dir reaches into the sandbox and
+                # the failure is unexplainable from the output.
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": DEMO_USER_NAME,
+                "GIT_AUTHOR_EMAIL": DEMO_USER_EMAIL,
+                "GIT_COMMITTER_NAME": DEMO_USER_NAME,
+                "GIT_COMMITTER_EMAIL": DEMO_USER_EMAIL,
+            }
+            if when:
+                env["GIT_AUTHOR_DATE"] = when
+                env["GIT_COMMITTER_DATE"] = when
+            proc = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                text=True,
+            )
+            # git's own message, not a bare "exit status 128". An old git
+            # rejecting `init -b`, or a signing hook, is otherwise silent.
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"git {' '.join(args)} failed in {repo}: "
+                    f"{proc.stderr.strip() or f'exit {proc.returncode}'}"
+                )
+
+        git("init", "-q", "-b", "main")
+        # Per-repo identity as well as the env vars: get_commits_with_loc falls
+        # back to `git config user.email` when no allowlist is configured, and
+        # a repo with no identity yields no attributable commits at all.
+        git("config", "user.name", "Ada Lovelace")
+        git("config", "user.email", "ada@example.com")
+
+        ballast = repo / "ballast.txt"
+        ballast.write_text("".join(f"line {i}\n" for i in range(_BALLAST_LINES)))
+        (repo / "README.md").write_text(f"# {short_name}\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "Initial import",
+            when=iso(NOW - timedelta(days=30)))
+
+        kept = _BALLAST_LINES
+        for idx, (rname, hour, msg, added, removed) in enumerate(DEMO_COMMITS):
+            if rname != short_name:
+                continue
+            (repo / f"change_{idx:02d}.py").write_text(
+                "".join(f"# {msg} :: line {i}\n" for i in range(added))
+            )
+            kept -= removed
+            ballast.write_text(
+                "".join(f"line {i}\n" for i in range(max(kept, 0)))
+            )
+            git("add", "-A")
+            git("commit", "-q", "-m", msg,
+                when=NOW.replace(hour=hour, minute=15, second=0).isoformat())
+            made += 1
+    return made
 
 
 def seed_repositories(conn: sqlite3.Connection, demo_home: Path) -> dict[str, int]:
@@ -861,8 +1109,8 @@ def seed_tasks(
         cur = conn.execute(
             """INSERT INTO tasks (repo_id, name, full_path, status, type, tags,
                                    priority, jira_key, branch, created_at, updated_at,
-                                   completed_at, last_worked_on, parent_id)
-               VALUES (?, ?, ?, ?, 'coding', '[]', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   completed_at, last_worked_on, parent_id, category)
+               VALUES (?, ?, ?, ?, 'coding', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 repo_ids[p["repo"]],
                 p["name"],
@@ -876,6 +1124,7 @@ def seed_tasks(
                 completed_at,
                 last_worked_on,
                 parent_id,
+                PROJECT_CATEGORIES.get(p["name"]),
             ),
         )
         task_ids[p["name"]] = cur.lastrowid  # type: ignore[assignment]
@@ -937,6 +1186,19 @@ CLAUDE_SESSIONS = [
      "day_offset": -1, "hour": 13, "duration": 4500, "messages": 34, "tools": 31},
     {"session_id": "demo-claude-003", "repo": "docs", "task": "docs-site-migration",
      "day_offset": -2, "hour": 11, "duration": 2100, "messages": 14, "tools": 12},
+    # A fuller day today. The "tracked" tile is driven ONLY by Claude JSONL
+    # activity (server.py: total_seconds = claude_seconds), not by the sessions
+    # table, so without these the headline stat reads 1h against a day that has
+    # 9 commits and seven active projects behind it. Spread across the working
+    # day so the by-hour sparkline has a shape rather than two spikes.
+    {"session_id": "demo-claude-004", "repo": "api", "task": "auth-refactor",
+     "day_offset": 0, "hour": 9, "duration": 3600, "messages": 28, "tools": 24},
+    {"session_id": "demo-claude-005", "repo": "pipelines", "task": "ios-tests",
+     "day_offset": 0, "hour": 13, "duration": 4200, "messages": 31, "tools": 26},
+    {"session_id": "demo-claude-006", "repo": "pipelines", "task": "data-pipeline",
+     "day_offset": 0, "hour": 15, "duration": 3900, "messages": 24, "tools": 19},
+    {"session_id": "demo-claude-007", "repo": "docs", "task": "docs-site-migration",
+     "day_offset": 0, "hour": 17, "duration": 3060, "messages": 18, "tools": 14},
     # Untracked sessions: cwd has no matching repo and no linked MissionCache session.
     {"session_id": "demo-claude-untracked-001", "untracked_cwd": "scratch/experiments",
      "day_offset": -1, "hour": 20, "duration": 1800, "messages": 11, "tools": 6},
@@ -1107,6 +1369,11 @@ def write_missioncache_files(demo_home: Path) -> None:
     """Create plan.md, context.md, tasks.md, and prompt files under
     $HOME/.missioncache/<status>/<name>/.
     """
+    # Local import, matching init_schema: keeps the missioncache_db dependency
+    # at the point of use so the script fails with a clear error rather than at
+    # import time.
+    from missioncache_db import context_health  # type: ignore[import-not-found]
+
     for p in PROJECTS:
         status_dir = "active" if p["status"] == "active" else "completed"
         task_dir = demo_home / ".missioncache" / status_dir / p["name"]
@@ -1120,6 +1387,18 @@ def write_missioncache_files(demo_home: Path) -> None:
         ctx = "\n".join(
             ctx_lines[:2] + ["## Description", "", p["description"], ""] + ctx_lines[2:]
         )
+        # Waiting on sits directly above Next Steps, per the section order in
+        # the MissionCache rules. /api/today reads it straight out of the file,
+        # so without this the Attention view has nothing to show. Built by the
+        # library rather than by hand: it escapes pipes in cell text, carries
+        # the same usage note real files have, and falls back through Recent
+        # Changes to end-of-file when a fixture has no Next Steps heading
+        # instead of dropping the section silently.
+        rows = waiting_on_rows(p["name"])
+        if rows:
+            ctx = context_health.insert_waiting_on_before_next_steps(
+                ctx, context_health.build_waiting_on_section(rows)
+            )
         (task_dir / f"{p['name']}-context.md").write_text(ctx)
 
         (task_dir / f"{p['name']}-tasks.md").write_text(make_tasks_file(p))
@@ -1160,6 +1439,9 @@ def main() -> None:
         repo_ids = seed_repositories(conn, demo_home)
         print(f"  seeded {len(repo_ids)} repositories")
 
+        n_commits = seed_git_repos(demo_home)
+        print(f"  created git history: {n_commits} commits dated today")
+
         task_ids = seed_tasks(conn, repo_ids)
         print(f"  seeded {len(task_ids)} tasks ({sum(1 for p in PROJECTS if p['status']=='active')} active, {sum(1 for p in PROJECTS if p['status']=='completed')} completed)")
 
@@ -1167,6 +1449,10 @@ def main() -> None:
         hb_count = conn.execute("SELECT count(*) FROM heartbeats").fetchone()[0]
         sess_count = conn.execute("SELECT count(*) FROM sessions").fetchone()[0]
         print(f"  seeded {hb_count} heartbeats across {sess_count} sessions")
+
+        n_items = seed_action_items(conn, task_ids)
+        n_waiting = sum(len(v) for v in WAITING_ON.values())
+        print(f"  seeded {n_items} action items and {n_waiting} Waiting-on rows")
 
         seed_auto_execution(conn, task_ids)
         log_count = conn.execute("SELECT count(*) FROM auto_execution_logs").fetchone()[0]
@@ -1194,15 +1480,15 @@ def main() -> None:
     print()
     print("Demo data seeded successfully.")
     print()
-    print("Next step - run the dashboard on port 8789 so it does not collide")
+    print("Next step - run the dashboard on a spare port so it does not collide")
     print("with your real dashboard on 8787:")
     print()
-    print(f"    HOME={demo_home} MISSIONCACHE_DASHBOARD_PORT=8789 \\")
-    print("        python3.11 missioncache-dashboard/server.py")
+    print(f"    HOME={demo_home} MISSIONCACHE_DASHBOARD_PORT=8791 \\")
+    print("        missioncache-dashboard serve")
     print()
-    print("Then open http://localhost:8789 and take screenshots.")
+    print("Then open http://localhost:8791 and take screenshots.")
     print()
-    print(f"To reset: rm -rf {demo_home}")
+    print(f"To reset: rm -rf {demo_home}   (the whole home, projects/ included)")
 
 
 if __name__ == "__main__":
