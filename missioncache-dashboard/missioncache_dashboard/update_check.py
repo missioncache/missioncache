@@ -41,6 +41,23 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _editable_install(package: str) -> bool:
+    """True when the package is an editable (pip install -e) install.
+
+    Editable metadata freezes the version at whatever install time recorded,
+    so comparing it to PyPI is meaningless - the clone is its own source of
+    truth and no update command applies. Detection reads the distribution's
+    direct_url.json (PEP 610), the same record pip writes for -e installs.
+    """
+    try:
+        raw = metadata.distribution(package).read_text("direct_url.json")
+        if not raw:
+            return False
+        return bool(json.loads(raw).get("dir_info", {}).get("editable"))
+    except Exception:
+        return False
+
+
 def _fetch_latest(package: str, timeout: float) -> str | None:
     url = f"https://pypi.org/pypi/{package}/json"
     req = urllib.request.Request(url, headers={"User-Agent": "missioncache-update-check"})
@@ -90,12 +107,18 @@ def get_update_status(ttl: int = CACHE_TTL, timeout: float = 3.0) -> dict:
             latest = _fetch_latest(pkg, timeout)
             if latest is None:
                 continue
-            outdated = _parse_version(latest) > _parse_version(installed)
+            editable = _editable_install(pkg)
+            outdated = (
+                not editable
+                and _parse_version(latest) > _parse_version(installed)
+            )
             packages[pkg] = {
                 "installed": installed,
                 "latest": latest,
                 "outdated": outdated,
             }
+            if editable:
+                packages[pkg]["editable"] = True
             update_available = update_available or outdated
     except Exception:
         # Keep the previous answer (stale beats none) but stamp checked_at
