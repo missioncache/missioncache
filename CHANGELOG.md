@@ -27,6 +27,23 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 - Tickets are system-agnostic by contract: `label` + `url` is the whole interface, `system` is a display hint never branched on, `status` is a free-text cache MissionCache never fetches. A legacy `tasks.jira_key` migrates into a tickets row on the project's first PM mutation (idempotent, non-destructive, URL derived from the dashboard's JIRA prefix map when one matches); the column stays readable.
 - Export/import: bundles carry the PM layer additively (`pm` manifest block + `project.due_date`; ids dropped as machine-local). Import restores it idempotently (stakeholders/tickets upsert on natural keys, action items dedupe on what+created_at) and hostile values degrade with warnings, never failures. Old bundles without the block import unchanged.
 
+### Changed - the Attention view now looks like the rest of the dashboard (missioncache-dashboard)
+
+- The view had been built on its own design tokens - a teal and slate palette, opaque tiles, an 8px radius, heavy drop shadows, and three background washes of its own painted over an opaque fill. Next to Projects and Activity it read as a different product: its surface sat lighter than the page, and the app's ambient gradient stopped dead at its edge. Its tokens now map onto the app's own variables, so the tiles are the same translucent `--bg-card` over the same page gradient, with the same 1px border, the same 16px radius that `.glass-card` and `.stat-card` already use, and the same `backdrop-filter` blur. Mapped rather than copied, so a later change to `--bg-card` or `--border` reaches this view too.
+- Semantic colour moves to the `--pm-*` set that was built for this project-management layer and is contrast-checked in both themes. One deliberate exception: the muted text token fails AA in both themes, and the labels it would have covered here carry real content (stat labels, ask counts, the last-worked column), so those use `--pm-nil` instead. The age-band ramp is untouched - it encodes data rather than chrome, and its contrast was already settled.
+- Checklist progress bars follow the same level-encoded ramp the Projects table uses, so one percentage is not two different colours on two screens.
+
+### Fixed - page headings were nearly invisible in light mode (missioncache-dashboard)
+
+- Every page heading (Projects, Activity, MissionCache Auto, Settings) painted a mint-to-cyan gradient built for the dark surface as clipped text. Against the light background it measured 1.44:1 to 1.68:1, roughly half of what WCAG asks even under the large-text allowance, so the title read as a pale wash rather than as text. Light mode now uses darkened endpoints that hold 4.88:1 at the ramp's weakest point while keeping the green-to-teal direction. Dark mode is unchanged. Only the heading changed: the same gradient also fills a card rail and two progress bars, where the contrast that matters is against their own track rather than the page.
+
+### Fixed - the demo seeder could not produce the Attention screenshot (missioncache-dashboard)
+
+- `seed_demo_data.py` seeded repositories, tasks, heartbeats and context files, but nothing the Attention view reads, so a freshly seeded install rendered it empty. It now seeds the project-management layer (action items and Waiting-on rows, dated relative to the seed so the demo never drifts), real git history per repo so the commit and lines-of-code tiles are not zero, and a built-in category per project so the filter chips have something to filter.
+- Re-seeding produced silently wrong numbers. The documented reset removed the data directory but not the git repositories, so the second run re-created identical files, every commit came out empty, and the lines-of-code tiles read zero while the seeder still reported nine commits. Seeding now starts each repository from scratch and the reset instruction covers the whole demo home.
+- The sandbox git identity is written by the seeder rather than left to a manual step. It decides both the greeting and whether a Waiting-on row counts as yours, so skipping it filed the demo's own row under a colleague and greeted nobody, with no error either way.
+- Also: the run instructions pointed at `python3.11 missioncache-dashboard/server.py`, which fails on its relative imports now that `server.py` lives inside the package; a git failure surfaced as a bare exit code with git's own message discarded; and the Waiting-on section is built by the library that owns that format, so it escapes pipes and self-heals when a project has no Next Steps heading instead of dropping the section without a word.
+
 ## 2026-07-21
 
 Plugin-only release: no PyPI packages changed. Claude Code plugin 1.0.6.
