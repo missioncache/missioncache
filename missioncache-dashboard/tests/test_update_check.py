@@ -5,7 +5,10 @@ are compared against PyPI, the answer is cached with a TTL at
 ``~/.missioncache/update-check.json``, a fresh cache short-circuits the
 fetch, fetch failure returns the previous answer (stale beats none) while
 refreshing the timestamp so offline machines do not re-fetch per render,
-and a newer LOCAL version (maintainer machine) is not an update.
+a newer LOCAL version (maintainer machine) is not an update, and an
+editable (pip install -e) package never nags - its metadata version is
+frozen at install time, so comparing it to PyPI is meaningless and the
+update command could never clear the nag (2026-07-28 fix).
 """
 
 import json
@@ -23,13 +26,41 @@ def sandbox(tmp_path, monkeypatch):
     return cache
 
 
-def _install_fakes(monkeypatch, installed: dict, latest: dict):
+class _FakeDist:
+    """Distribution stub controlling what direct_url.json says."""
+
+    def __init__(self, direct_url: str | None) -> None:
+        self._direct_url = direct_url
+
+    def read_text(self, name):
+        assert name == "direct_url.json"
+        return self._direct_url
+
+
+def _install_fakes(monkeypatch, installed: dict, latest: dict, editable: set | None = None):
+    """Fake version metadata, PyPI, and distribution records.
+
+    Faking metadata.distribution matters even for tests that don't care
+    about editable installs: without it, the real environment's own install
+    kind (editable on a maintainer clone) would leak into the comparison
+    and flip results per machine.
+    """
+    editable = editable or set()
+
     def fake_version(pkg):
         if pkg in installed:
             return installed[pkg]
         raise uc.metadata.PackageNotFoundError(pkg)
 
+    def fake_distribution(pkg):
+        if pkg in editable:
+            return _FakeDist(json.dumps(
+                {"dir_info": {"editable": True}, "url": "file:///clone/pkg"}
+            ))
+        return _FakeDist(None)
+
     monkeypatch.setattr(uc.metadata, "version", fake_version)
+    monkeypatch.setattr(uc.metadata, "distribution", fake_distribution)
     monkeypatch.setattr(uc, "_fetch_latest", lambda pkg, timeout: latest.get(pkg))
 
 
@@ -141,6 +172,64 @@ class TestGetUpdateStatus:
         status = uc.get_update_status()
         assert status["update_available"] is False
         assert status["error"] == "fetch failed"
+
+
+class TestEditableInstalls:
+    def test_editable_behind_pypi_never_nags(self, sandbox, monkeypatch):
+        """A contributor's editable install looks behind (frozen metadata)
+        but must not produce a nag - no update command can clear it."""
+        _install_fakes(
+            monkeypatch,
+            {"missioncache-db": "1.0.14"},
+            {"missioncache-db": "1.0.15"},
+            editable={"missioncache-db"},
+        )
+        status = uc.get_update_status()
+        assert status["update_available"] is False
+        entry = status["packages"]["missioncache-db"]
+        assert entry["outdated"] is False
+        assert entry["editable"] is True, \
+            "The entry must be labeled so UIs can explain why no update applies"
+
+    def test_regular_package_still_nags_beside_editable(self, sandbox, monkeypatch):
+        """Editable exclusion is per-package: a genuinely outdated regular
+        install must keep nagging."""
+        _install_fakes(
+            monkeypatch,
+            {"missioncache-db": "1.0.14", "missioncache-dashboard": "1.0.7"},
+            {"missioncache-db": "1.0.15", "missioncache-dashboard": "1.0.8"},
+            editable={"missioncache-db"},
+        )
+        status = uc.get_update_status()
+        assert status["update_available"] is True
+        assert status["packages"]["missioncache-dashboard"]["outdated"] is True
+        assert status["packages"]["missioncache-db"]["outdated"] is False
+
+    def test_regular_install_carries_no_editable_key(self, sandbox, monkeypatch):
+        """Regular installs keep the pre-fix entry shape."""
+        _install_fakes(
+            monkeypatch,
+            {"missioncache-db": "1.0.14"},
+            {"missioncache-db": "1.0.15"},
+        )
+        entry = uc.get_update_status()["packages"]["missioncache-db"]
+        assert "editable" not in entry
+
+    def test_unreadable_direct_url_falls_back_to_comparison(
+        self, sandbox, monkeypatch
+    ):
+        """Editable detection must never take down the check - a distribution
+        whose direct_url.json read blows up is treated as a regular install."""
+
+        class _ExplodingDist:
+            def read_text(self, name):
+                raise OSError("unreadable metadata")
+
+        monkeypatch.setattr(uc.metadata, "version", lambda pkg: "1.0.0")
+        monkeypatch.setattr(uc.metadata, "distribution", lambda pkg: _ExplodingDist())
+        monkeypatch.setattr(uc, "_fetch_latest", lambda pkg, timeout: "1.0.1")
+        status = uc.get_update_status()
+        assert status["update_available"] is True
 
 
 class TestEndpoint:
