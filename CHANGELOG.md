@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-28
+
+Published package versions: missioncache-db 1.0.15, mcp-missioncache 1.0.18, missioncache-dashboard 1.0.11. Claude Code plugin 1.0.7.
+
 ### Added - project-management layer: action items, stakeholders, tickets, due dates (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin commands)
 
 - New `action_items`, `stakeholders`, and `tickets` tables plus a `tasks.due_date` column (idempotent ALTER migration; existing DBs pick everything up on first open). SQLite is the source of truth; every mutation re-renders read-only `## Action Items` / `## Stakeholders` / `## Tickets` sections and a `**Due:**` header line into the project's context file under the existing sidecar lock, with a Recent Changes line per mutation. Sections self-heal into canonical positions on first data and are never created empty; done/dropped items stay visible in the mirror for 7 days, forever in the DB. All writes converge on one module (`missioncache_db/pm_items.py`) shared by the CLI, the MCP tools, and the dashboard.
