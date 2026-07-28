@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-29
+
+Published package versions: missioncache-install 1.0.7, missioncache-dashboard 1.0.12.
+
 ### Fixed - the update-available nag survives the update it recommends (missioncache-install, missioncache-dashboard)
 
 - `--update` finished successfully and the statusline kept saying "MissionCache update available" for up to 6 hours: nothing invalidated the shared cache at `~/.missioncache/update-check.json`, so the statusline and dashboard served the pre-update answer until its TTL expired. Every install, update, and uninstall run now drops the cache, so the next render recomputes against what was actually just installed.
