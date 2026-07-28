@@ -148,7 +148,9 @@ def test_copy_bundled_dir_copies_md_files(
     dst = tmp_path / "dst"
     dst.mkdir()
 
-    installers._copy_bundled_dir("missioncache_install.bundled.rules", dst)
+    installers._copy_bundled_dir(
+        "missioncache_install.bundled.rules", dst, ownership="marker"
+    )
 
     assert (dst / "one.md").read_text() == "# one"
     assert (dst / "two.md").read_text() == "# two"
@@ -156,26 +158,160 @@ def test_copy_bundled_dir_copies_md_files(
         "Only *.md files should be copied"
 
 
-def test_copy_bundled_dir_backs_up_existing_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+MARKED = f"<!-- {installers.MANAGED_MARKER} -->\n# rule body v1"
+MARKED_V2 = f"<!-- {installers.MANAGED_MARKER} -->\n# rule body v2"
+
+
+def test_install_md_file_marker_refreshes_managed_file(tmp_path: Path) -> None:
+    """A file carrying the managed marker on line 1 is MissionCache's and is
+    refreshed in place - no .bak churn for our own file."""
+    dst = tmp_path
+    (dst / "rule.md").write_text(MARKED)
+
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
+
+    assert (dst / "rule.md").read_text() == MARKED_V2
+    assert not (dst / "rule.md.bak").exists(), \
+        "Refreshing a managed file must not create a backup"
+
+
+def test_install_md_file_marker_never_touches_unmarked_file(tmp_path: Path) -> None:
+    """A file WITHOUT the marker is user-owned (the marker text says removing
+    it means taking ownership): the installer must not overwrite or move it."""
+    dst = tmp_path
+    (dst / "rule.md").write_text("# my own rule, marker removed")
+
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
+
+    assert (dst / "rule.md").read_text() == "# my own rule, marker removed", \
+        "User-owned file must be left byte-identical"
+    assert not (dst / "rule.md.bak").exists(), \
+        "User-owned file must not be renamed to .bak"
+
+
+def test_install_md_file_equal_content_is_noop(tmp_path: Path) -> None:
+    """Identical content means nothing to do - no rewrite, no backup."""
+    dst = tmp_path
+    (dst / "cmd.md").write_text("same content")
+
+    installers._install_md_file("cmd.md", "same content", dst, ownership="filename")
+
+    assert (dst / "cmd.md").read_text() == "same content"
+    assert not (dst / "cmd.md.bak").exists(), \
+        "Equal content must not produce a backup"
+
+
+def test_install_md_file_filename_backs_up_existing_once(tmp_path: Path) -> None:
+    """filename ownership: a different existing file is backed up to .bak."""
+    dst = tmp_path
+    (dst / "cmd.md").write_text("user's version")
+
+    installers._install_md_file("cmd.md", "bundled v1", dst, ownership="filename")
+
+    assert (dst / "cmd.md").read_text() == "bundled v1"
+    assert (dst / "cmd.md.bak").read_text() == "user's version"
+
+
+def test_install_md_file_second_run_preserves_first_backup(tmp_path: Path) -> None:
+    """The first .bak is the user's original; a later run (an update shipping
+    new content) must never overwrite it with MissionCache's own previous
+    version."""
+    dst = tmp_path
+    (dst / "cmd.md").write_text("user's original")
+
+    installers._install_md_file("cmd.md", "bundled v1", dst, ownership="filename")
+    installers._install_md_file("cmd.md", "bundled v2", dst, ownership="filename")
+
+    assert (dst / "cmd.md").read_text() == "bundled v2"
+    assert (dst / "cmd.md.bak").read_text() == "user's original", \
+        "Run two must not replace the user's backup with bundled v1"
+
+
+def test_install_md_file_marker_replaces_symlink_to_managed_content(
+    tmp_path: Path,
 ) -> None:
-    """An existing file at the destination is preserved as .bak."""
-    bundled = tmp_path / "bundled"
-    bundled.mkdir()
-    (bundled / "rule.md").write_text("bundled version")
-
-    monkeypatch.setattr(
-        installers.resources, "files", lambda _pkg: _FakeTraversable(bundled)
-    )
-
+    """A symlink whose target carries the managed marker (a local-mode
+    leftover) is replaced by a real file; the target file survives."""
+    target = tmp_path / "repo" / "rule.md"
+    target.parent.mkdir()
+    target.write_text(MARKED)
     dst = tmp_path / "dst"
     dst.mkdir()
-    (dst / "rule.md").write_text("user's version")
+    (dst / "rule.md").symlink_to(target)
 
-    installers._copy_bundled_dir("missioncache_install.bundled.rules", dst)
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
 
-    assert (dst / "rule.md").read_text() == "bundled version"
-    assert (dst / "rule.md.bak").read_text() == "user's version"
+    assert not (dst / "rule.md").is_symlink()
+    assert (dst / "rule.md").read_text() == MARKED_V2
+    assert target.read_text() == MARKED, \
+        "Replacing the link must not modify the linked target"
+
+
+def test_install_md_file_marker_preserves_user_owned_symlink(
+    tmp_path: Path,
+) -> None:
+    """A symlink whose target lacks the marker is user config (e.g. a link
+    into a dotfiles repo) - the link must survive, same as an unmarked
+    regular file."""
+    target = tmp_path / "dotfiles" / "rule.md"
+    target.parent.mkdir()
+    target.write_text("# my own rule wired via dotfiles")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    (dst / "rule.md").symlink_to(target)
+
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
+
+    assert (dst / "rule.md").is_symlink(), \
+        "User-owned symlink wiring must survive the install"
+    assert target.read_text() == "# my own rule wired via dotfiles"
+
+
+def test_install_md_file_marker_leaves_equal_content_symlink_in_place(
+    tmp_path: Path,
+) -> None:
+    """A symlink whose target already equals the new content stays a symlink
+    (the maintainer local-mode case where the clone is current)."""
+    target = tmp_path / "repo" / "rule.md"
+    target.parent.mkdir()
+    target.write_text(MARKED_V2)
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    (dst / "rule.md").symlink_to(target)
+
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
+
+    assert (dst / "rule.md").is_symlink()
+
+
+def test_install_md_file_marker_replaces_dangling_symlink(tmp_path: Path) -> None:
+    """A dangling symlink is not functioning config - it gets replaced."""
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    (dst / "rule.md").symlink_to(tmp_path / "gone" / "rule.md")
+
+    installers._install_md_file("rule.md", MARKED_V2, dst, ownership="marker")
+
+    assert not (dst / "rule.md").is_symlink()
+    assert (dst / "rule.md").read_text() == MARKED_V2
+
+
+def test_install_md_file_filename_replaces_symlink(tmp_path: Path) -> None:
+    """filename ownership owns the name outright: any symlink is replaced by
+    a real file; the target survives."""
+    target = tmp_path / "elsewhere" / "cmd.md"
+    target.parent.mkdir()
+    target.write_text("linked content")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    (dst / "cmd.md").symlink_to(target)
+
+    installers._install_md_file("cmd.md", "bundled v1", dst, ownership="filename")
+
+    assert not (dst / "cmd.md").is_symlink()
+    assert (dst / "cmd.md").read_text() == "bundled v1"
+    assert target.read_text() == "linked content", \
+        "Replacing the link must not modify the linked target"
 
 
 # ---------------------------------------------------------------------------

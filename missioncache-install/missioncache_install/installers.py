@@ -26,9 +26,13 @@ from . import command_clients, mcp_clients, settings, state, subprocess_utils, u
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
 PLUGIN_GITHUB_SOURCE = "missioncache/missioncache"
+PLUGIN_MARKETPLACE_NAME = "missioncache"
 PLUGIN_ID_PYPI = "missioncache@missioncache"
 PLUGIN_ID_LOCAL = "missioncache@local"
 USER_COMMAND_FILES = ("whats-new.md", "optimize-prompt.md")
+# Line-1 marker that makes a copied file MissionCache-managed. Same contract as
+# uninstall_rules: no marker means the user took ownership and we never touch it.
+MANAGED_MARKER = "missioncache-plugin:managed"
 
 
 Mode = Literal["pypi", "local"]
@@ -43,6 +47,10 @@ class InstallContext:
     skip_service: bool       # --no-service; dashboard installs without launchd/systemd
     port: int                # dashboard port (default 8787)
     assume_yes: bool         # --yes; skip per-file confirmations (still honors component selection)
+    # True when running under --update. Update refreshes what MissionCache owns
+    # but never re-acquires config the user has since pointed elsewhere (e.g. a
+    # statusLine command that is no longer missioncache-statusline).
+    updating: bool = False
     # In-memory MCP-registration outcomes for THIS run only. Keys are tool
     # names ("codex", "opencode", "vscode"); True means the parent MCP
     # installer succeeded in this run, False means it ran and failed, missing
@@ -66,7 +74,7 @@ def install_plugin(ctx: InstallContext) -> None:
     if ctx.mode == "local":
         _install_plugin_local(ctx)
     else:
-        _install_plugin_pypi()
+        _install_plugin_pypi(updating=ctx.updating)
     state.record_component(
         "plugin",
         {"mode": "marketplace" if ctx.mode == "pypi" else "local"},
@@ -74,8 +82,15 @@ def install_plugin(ctx: InstallContext) -> None:
     ui.success("Core plugin installed")
 
 
-def _install_plugin_pypi() -> None:
-    """Add the upstream marketplace and install missioncache@missioncache."""
+def _install_plugin_pypi(updating: bool = False) -> None:
+    """Add the upstream marketplace and install missioncache@missioncache.
+
+    updating=True additionally refreshes the marketplace and runs `claude
+    plugins update`: `marketplace add` does not re-fetch an already-registered
+    marketplace and `plugins install` no-ops on an installed plugin, so
+    without the explicit refresh a user's plugin (hooks, commands, templates)
+    would stay at its install-time version forever.
+    """
     if not shutil.which("claude"):
         ui.warn("Claude CLI not found - skipping plugin registration.")
         ui.detail("After installing Claude Code, run: missioncache-install --update")
@@ -92,6 +107,28 @@ def _install_plugin_pypi() -> None:
             ui.detail("Marketplace already registered")
         else:
             raise
+
+    if updating:
+        try:
+            subprocess_utils.run(
+                ["claude", "plugins", "marketplace", "update", PLUGIN_MARKETPLACE_NAME]
+            )
+            ui.detail("Marketplace refreshed from source")
+        except subprocess_utils.CommandFailed as e:
+            # A `plugins update` against stale marketplace metadata would
+            # likely no-op "already latest" and record a false success -
+            # exactly the stuck-plugin bug this path exists to fix. Propagate
+            # instead: the component gets recorded as failed and the next
+            # --update retries it.
+            ui.warn(f"Marketplace refresh failed: {e.stderr.strip() or 'unknown error'}")
+            raise
+        try:
+            subprocess_utils.run(["claude", "plugins", "update", PLUGIN_ID_PYPI])
+            settings.enable_plugin(PLUGIN_ID_PYPI)
+            ui.detail(f"Updated {PLUGIN_ID_PYPI} (restart Claude Code sessions to apply)")
+            return
+        except subprocess_utils.CommandFailed:
+            ui.detail("Plugin update failed (not installed yet?) - falling back to install")
 
     ui.detail(f"Installing {PLUGIN_ID_PYPI}")
     subprocess_utils.run(["claude", "plugins", "install", PLUGIN_ID_PYPI])
@@ -317,6 +354,19 @@ def install_statusline(ctx: InstallContext) -> bool:
     if isinstance(existing, dict):
         current_cmd = existing.get("command")
 
+    if ctx.updating and current_cmd and current_cmd != "missioncache-statusline":
+        # The user pointed statusLine at something else after installing.
+        # An update refreshes MissionCache's own pieces; it must not win the
+        # statusline back, and it must not stall a non-interactive update on
+        # a consent prompt either.
+        ui.info(
+            "statusLine in ~/.claude/settings.json points at something else - "
+            "leaving it untouched."
+        )
+        ui.detail(f"  current command: {current_cmd}")
+        ui.detail("  To re-wire MissionCache's statusline: missioncache-install --statusline")
+        return False
+
     if current_cmd and current_cmd != "missioncache-statusline":
         ui.warn(f"An existing statusLine is wired in ~/.claude/settings.json:")
         ui.detail(f"  command: {current_cmd}")
@@ -367,7 +417,9 @@ def install_rules(ctx: InstallContext) -> None:
     if ctx.mode == "local":
         _symlink_md_dir(_require_repo(ctx) / "rules", dst)
     else:
-        _copy_bundled_dir("missioncache_install.bundled.rules", dst)
+        _copy_bundled_dir(
+            "missioncache_install.bundled.rules", dst, ownership="marker"
+        )
     state.record_component(
         "rules",
         {"mode": "symlink" if ctx.mode == "local" else "copy"},
@@ -420,7 +472,9 @@ def install_user_commands(ctx: InstallContext) -> None:
     if ctx.mode == "local":
         _symlink_md_dir(_require_repo(ctx) / "user-commands", dst)
     else:
-        _copy_bundled_dir("missioncache_install.bundled.user_commands", dst)
+        _copy_bundled_dir(
+            "missioncache_install.bundled.user_commands", dst, ownership="filename"
+        )
     state.record_component(
         "user_commands",
         {"mode": "symlink" if ctx.mode == "local" else "copy"},
@@ -498,11 +552,26 @@ def _symlink_md_dir(src_dir: Path, dst_dir: Path) -> None:
         ui.detail(f"Linked {src.name}")
 
 
-def _copy_bundled_dir(package_path: str, dst_dir: Path) -> None:
+def _copy_bundled_dir(
+    package_path: str,
+    dst_dir: Path,
+    *,
+    ownership: Literal["marker", "filename"],
+) -> None:
     """Copy every *.md file out of the bundled package into dst_dir.
 
     package_path: dotted path to the bundled resource package, e.g.
-    "missioncache_install.bundled.rules". Existing files are backed up to .bak.
+    "missioncache_install.bundled.rules".
+
+    ownership decides what may be overwritten (mirroring the two uninstall
+    contracts):
+    - "marker": a destination file is MissionCache-managed only when line 1
+      carries MANAGED_MARKER. Managed files refresh in place; unmarked files
+      are user-owned and are never touched.
+    - "filename": the bundled filenames belong to MissionCache by contract
+      (user commands, where YAML frontmatter must start at line 1 so a marker
+      is impossible). A different existing file is backed up to .bak once;
+      an existing .bak is never overwritten by a later run.
     """
     try:
         src_files = resources.files(package_path)
@@ -512,16 +581,95 @@ def _copy_bundled_dir(package_path: str, dst_dir: Path) -> None:
     for item in src_files.iterdir():
         if not item.name.endswith(".md"):
             continue
-        dst = dst_dir / item.name
-        if dst.exists() or dst.is_symlink():
-            bak = dst.with_suffix(dst.suffix + ".bak")
-            if dst.is_symlink():
-                dst.unlink()
-            else:
-                dst.rename(bak)
-                ui.detail(f"Backed up existing {item.name} -> {item.name}.bak")
-        dst.write_text(item.read_text())
-        ui.detail(f"Installed {item.name}")
+        _install_md_file(item.name, item.read_text(), dst_dir, ownership=ownership)
+
+
+def _install_md_file(
+    name: str,
+    new_content: str,
+    dst_dir: Path,
+    *,
+    ownership: Literal["marker", "filename"],
+) -> None:
+    """Write one bundled file into dst_dir under the given ownership policy."""
+    dst = dst_dir / name
+    if dst.is_symlink():
+        if ownership == "filename":
+            # Filename contract: the name is MissionCache's; replacing the
+            # link never destroys its target file.
+            dst.unlink()
+            dst.write_text(new_content)
+            ui.detail(f"Installed {name} (replaced symlink)")
+            return
+        # Marker policy applies to the LINK TARGET's content: a user who
+        # wires this filename as a symlink into their own dotfiles owns it
+        # exactly like a regular unmarked file, and must not lose the wiring.
+        try:
+            existing = dst.read_text()  # follows the link
+        except OSError:
+            # Dangling link - not functioning config; replace it.
+            dst.unlink()
+            dst.write_text(new_content)
+            ui.detail(f"Installed {name} (replaced broken symlink)")
+            return
+        if existing == new_content:
+            ui.detail(f"{name} already up to date (symlink left in place)")
+            return
+        first_line = existing.split("\n", 1)[0]
+        if MANAGED_MARKER in first_line:
+            # A local-mode leftover pointing at MissionCache-managed content;
+            # a pypi install deliberately converts it to a real copy.
+            dst.unlink()
+            dst.write_text(new_content)
+            ui.detail(f"Refreshed {name} (replaced symlink)")
+        else:
+            ui.warn(
+                f"{name} is a symlink to content without the MissionCache "
+                "managed marker - treating it as user-owned and leaving it "
+                "untouched."
+            )
+            ui.detail(
+                "  To let MissionCache manage it again, remove your symlink "
+                "and re-run the installer."
+            )
+        return
+    if not dst.exists():
+        dst.write_text(new_content)
+        ui.detail(f"Installed {name}")
+        return
+    try:
+        existing = dst.read_text()
+    except OSError as e:
+        ui.warn(f"Could not read existing {name} ({e}) - leaving it untouched")
+        return
+    if existing == new_content:
+        ui.detail(f"{name} already up to date")
+        return
+
+    if ownership == "marker":
+        first_line = existing.split("\n", 1)[0]
+        if MANAGED_MARKER in first_line:
+            dst.write_text(new_content)
+            ui.detail(f"Refreshed {name}")
+        else:
+            ui.warn(
+                f"{name} exists without the MissionCache managed marker - "
+                "treating it as user-owned and leaving it untouched."
+            )
+            ui.detail(
+                "  To let MissionCache manage it again, move your file aside "
+                "and re-run the installer."
+            )
+        return
+
+    # ownership == "filename": we own this name, but the first backup is the
+    # user's original and must survive every later run.
+    bak = dst.with_suffix(dst.suffix + ".bak")
+    if not bak.exists():
+        dst.rename(bak)
+        ui.detail(f"Backed up existing {name} -> {name}.bak")
+    dst.write_text(new_content)
+    ui.detail(f"Installed {name}")
 
 
 # ---------------------------------------------------------------------------
@@ -699,6 +847,10 @@ def install_components(components: list[str], ctx: InstallContext) -> list[str]:
             reason = e.stderr.strip() or e.stdout.strip() or str(e)
             ui.warn(f"{c.replace('_', '-')} failed to install: {reason}")
             failed.append(c)
+    # Failed components never reach record_component, so without this they
+    # would vanish from state and the retry advice below could not work.
+    state.update_failures(attempted=ordered, failed=failed)
+    _invalidate_update_cache()
     if failed:
         ui.warn(
             "Some components did not install: "
@@ -714,20 +866,110 @@ def uninstall_components(components: list[str], ctx: InstallContext) -> None:
     ordered = [c for c in reversed(ALL_COMPONENTS) if c in components]
     for c in ordered:
         _UNINSTALLERS[c](ctx)
+    # An uninstalled component has nothing left to retry.
+    state.update_failures(attempted=ordered, failed=[])
+    _invalidate_update_cache()
 
 
 def update_all(ctx: InstallContext) -> None:
-    """Refresh only what's already in state. No new components are added."""
-    installed = state.installed_components()
-    if not installed:
+    """Refresh what state tracks and retry previously failed installs.
+
+    Never adds components the user did not choose: anything installed on this
+    machine but absent from state (a manual/maintainer install, or a reset
+    state file) is detected read-only and reported, not acted on.
+    """
+    st = state.load()
+    tracked = list(st.get("components", {}).keys())
+    failed_prev = [c for c in state.failed_components() if c not in tracked]
+    targets = tracked + failed_prev
+    if not targets:
         ui.warn("Nothing to update - no prior install detected in state file.")
+        _report_untracked(targets)
         return
     # Update must reinstall in the SAME mode it was installed in, not the mode
     # re-derived from the current directory. The install-time mode was recorded
     # globally at install; prefer it so an update run from a clone doesn't flip
     # a pypi install to an editable one (or vice versa).
-    recorded = state.load().get("mode")
+    recorded = st.get("mode")
     if recorded in ("pypi", "local") and recorded != ctx.mode:
         ctx = replace(ctx, mode=recorded)
-    ui.info(f"Updating: {', '.join(installed)}")
-    install_components(installed, ctx)
+    ctx = replace(ctx, updating=True)
+    ui.info(f"Updating: {', '.join(c.replace('_', '-') for c in tracked)}")
+    if failed_prev:
+        ui.info(
+            "Retrying previously failed: "
+            + ", ".join(c.replace("_", "-") for c in failed_prev)
+        )
+    install_components(targets, ctx)
+    _report_untracked(state.installed_components() + state.failed_components())
+
+
+def _invalidate_update_cache() -> None:
+    """Drop the shared update-check cache after installs change anything.
+
+    The statusline and dashboard serve ~/.missioncache/update-check.json for
+    up to its 6h TTL; without this, a successful update keeps showing the
+    pre-update "update available" answer for hours. Deleting forces the next
+    render to recompute against what this run just installed. Computed at call
+    time (not a module constant) so Path.home() redirection works in tests.
+    """
+    cache = Path.home() / ".missioncache" / "update-check.json"
+    try:
+        cache.unlink(missing_ok=True)
+    except OSError:
+        pass  # advisory cache; the next TTL expiry recomputes anyway
+
+
+def _probe_settings() -> dict:
+    """settings.json content for read-only probes; {} on any read problem."""
+    try:
+        return settings.load()
+    except Exception:
+        return {}
+
+
+# Read-only evidence that a component is present on this machine even though
+# state does not track it. Existence checks only - probes must never mutate.
+_UNTRACKED_PROBES = {
+    "plugin": lambda: any(
+        k.startswith("missioncache@")
+        for k in _probe_settings().get("enabledPlugins", {})
+    ),
+    "dashboard": lambda: shutil.which("missioncache-dashboard") is not None,
+    "missioncache_auto": lambda: shutil.which("missioncache-auto") is not None,
+    "missioncache_db": lambda: shutil.which("missioncache-db") is not None,
+    "statusline": lambda: (
+        isinstance(_probe_settings().get("statusLine"), dict)
+        and _probe_settings()["statusLine"].get("command") == "missioncache-statusline"
+    ),
+}
+
+
+def _report_untracked(tracked: list[str]) -> None:
+    """Report MissionCache components found installed but absent from state.
+
+    Report-only by design: acting on them could pipx-install over a
+    maintainer's editable setup or re-acquire config the user manages
+    elsewhere. The user re-adopts explicitly by re-running the installer.
+    """
+    found = []
+    for comp, probe in _UNTRACKED_PROBES.items():
+        if comp in tracked:
+            continue
+        try:
+            if probe():
+                found.append(comp)
+        except Exception:
+            continue
+    if not found:
+        return
+    ui.warn(
+        "Installed but not tracked by the installer, so not updated: "
+        + ", ".join(c.replace("_", "-") for c in found)
+    )
+    ui.detail(
+        "  These may come from a manual/maintainer install or a reset state file."
+    )
+    ui.detail(
+        "  To bring them under --update management, re-run: uvx missioncache-install"
+    )

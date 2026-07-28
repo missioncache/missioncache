@@ -85,6 +85,29 @@ def installed_components() -> list[str]:
     return list(load().get("components", {}).keys())
 
 
+def failed_components() -> list[str]:
+    """List components whose last install attempt failed (for --update retry)."""
+    return list(load().get("failed_components", []))
+
+
+def update_failures(attempted: list[str], failed: list[str]) -> None:
+    """Record install outcomes so --update can retry failures.
+
+    Components in ``attempted`` leave the failed set unless they are in
+    ``failed``. Components outside ``attempted`` keep their prior status,
+    so a partial install (component subset) never erases the failure record
+    of components it did not touch.
+    """
+    st = load()
+    prior = set(st.get("failed_components", []))
+    now = (prior - set(attempted)) | set(failed)
+    if now:
+        st["failed_components"] = sorted(now)
+    else:
+        st.pop("failed_components", None)
+    save(st)
+
+
 def set_mode(mode: str) -> None:
     """Record install mode (pypi or local)."""
     state = load()
