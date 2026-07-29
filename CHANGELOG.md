@@ -6,6 +6,14 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-07-29.1
+
+Published package versions: mcp-missioncache 1.0.19. Claude Code plugin 1.0.8.
+
+### Fixed - MCP server crashed on startup in freshly resolved environments (mcp-missioncache, plugin)
+
+- The `mcp` SDK released a breaking 2.0.0 on 2026-07-28 that removed `mcp.server.fastmcp`, and our dependency spec (`mcp>=1.0.0`) had no upper bound - so any environment resolved from that moment on (a brand-new install, or an existing one whose uv cache re-resolved, e.g. after `uvx --refresh`) picked 2.0.0 and the server died on import with `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. Environments already cached kept working, which made the breakage look machine-specific. The dependency is now pinned to `mcp>=1.0.0,<2`; raising the bound is coupled to the FastMCP import migration.
+
 ## 2026-07-29
 
 Published package versions: missioncache-install 1.0.7, missioncache-dashboard 1.0.12.

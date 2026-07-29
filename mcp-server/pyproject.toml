@@ -1,6 +1,6 @@
 [project]
 name = "mcp-missioncache"
-version = "1.0.18"
+version = "1.0.19"
 description = "MCP server for the MissionCache Claude Code plugin: project management with time tracking"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,9 @@ classifiers = [
 ]
 dependencies = [
     "missioncache-db>=1.0.15",
-    "mcp>=1.0.0",
+    # <2 because mcp 2.0.0 (2026-07-28) removed mcp.server.fastmcp; raise the
+    # bound only together with the FastMCP import migration in app.py.
+    "mcp>=1.0.0,<2",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
 ]
