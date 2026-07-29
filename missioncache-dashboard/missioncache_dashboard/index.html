@@ -6226,6 +6226,9 @@
 .bd-proj .bd-pname { font-weight: 600; font-size: 13.5px; }
 .bd-pcell { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .bd-pcell .bd-pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The shared copy-to-clipboard wrapper must stay shrinkable inside the flex
+   cell, or a long project name stops truncating and pushes the columns. */
+.bd-pcell .copyable-name { min-width: 0; }
 .bd-cat {
   flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -7934,7 +7937,7 @@ function bdProjRowHtml(p) {
   return `<div class="bd-row bd-proj">
     <div class="bd-what bd-pcell">
       ${bdCatIcon(p.category)}
-      <a class="bd-pname" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a>
+      <span class="copyable-name"><a class="bd-pname" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a><span class="copy-icon" data-copy-name="${escapeHtml(p.name)}" title="Copy project name">${COPY_ICON_SVG}</span><span class="copy-tooltip">Copied!</span></span>
       ${p.overdue_count ? '<span class="bd-dot" title="You are late on this project"></span>' : ''}
     </div>
     <div class="bd-next" title="${escapeHtml(next)}">
