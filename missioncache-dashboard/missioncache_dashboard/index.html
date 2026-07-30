@@ -4628,6 +4628,16 @@
             color: var(--text-secondary);
             border: 1px solid var(--border);
             white-space: nowrap;
+            cursor: help;
+        }
+        .pm-badge svg {
+            width: 11px;
+            height: 11px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
         .pm-badge.pm-badge-alert {
             background: rgba(255, 82, 82, 0.12);
@@ -10642,12 +10652,15 @@ function renderAttention(data) {
             if (pmInfo) {
                 if (pmInfo.open_count) {
                     const alert = pmInfo.overdue_count > 0;
+                    const items = pmInfo.open_count === 1 ? 'action item' : 'action items';
                     const label = pmInfo.overdue_count > 0
-                        ? `${pmInfo.open_count} open, ${pmInfo.overdue_count} overdue`
-                        : `${pmInfo.open_count} open`;
-                    pmBadge = `<span class="pm-badge ${alert ? 'pm-badge-alert' : ''}" title="${escapeHtml(label)}">${pmInfo.open_count}&#9744;</span>`;
+                        ? `${pmInfo.open_count} open ${items}, ${pmInfo.overdue_count} overdue`
+                        : `${pmInfo.open_count} open ${items}`;
+                    // Check-square SVG, not U+2610 BALLOT BOX: the bare glyph
+                    // renders as an unlabeled square that reads as a broken font.
+                    pmBadge = `<span class="pm-badge ${alert ? 'pm-badge-alert' : ''}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${pmInfo.open_count}<svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></span>`;
                 }
-                if (pmInfo.at_risk) riskDot = '<span class="pm-risk-dot" title="At risk"></span>';
+                if (pmInfo.at_risk) riskDot = '<span class="pm-risk-dot" title="At risk: something is overdue, an ask to someone has gone stale, or the due date is close" aria-label="At risk"></span>';
             }
 
             const taskNameHTML = `
