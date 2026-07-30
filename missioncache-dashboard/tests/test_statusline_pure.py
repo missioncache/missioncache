@@ -29,7 +29,7 @@ from missioncache_dashboard.statusline import (
     _order_status_rows,
     _osc8_link,
     _join_items,
-    _pad_line,
+    _fit_line,
     _parse_stdin_rate_limits,
     _parse_task_progress,
     _parse_usage_response,
@@ -583,26 +583,28 @@ class TestItem:
         assert "\U0001f4c1" in result
 
 
-# ============ _join_items / _pad_line (2 tests) ============
+# ============ _join_items / _fit_line (2 tests) ============
 
 
-class TestJoinItemsPadLine:
+class TestJoinItemsFitLine:
     def test_join_items_empty(self):
         assert _join_items([], [], 24, 24) == ""
 
-    def test_pad_line_adds_trailing_spaces(self):
+    def test_fit_line_never_right_pads(self):
+        """Spec source: Claude Code trims every statusline line before
+        rendering (2.1.220 executor: stdout.trim().split newline, per-line
+        trim; anthropics/claude-code#69598), so trailing padding is stripped
+        and erases nothing. Emitting it only added bytes and, on pre-COLUMNS
+        Claude Code, wrapped narrow terminals."""
         line = "hello"
-        padded = _pad_line(line, 5, 20)
-        assert len(padded) == 20
-        assert padded == "hello" + " " * 15
-        # No padding needed when already at max
-        assert _pad_line(line, 20, 20) == "hello"
+        assert _fit_line(line, 5, 20) == "hello"
+        assert _fit_line(line, 20, 20) == "hello"
 
-    def test_pad_line_truncates_when_wider_than_max(self):
+    def test_fit_line_truncates_when_wider_than_max(self):
         # A line whose display width exceeds max_width is truncated (with an
         # ellipsis) instead of emitted verbatim, so it never wraps a narrow
         # terminal past the fixed-height status block.
-        result = _pad_line("hello world", 11, 6)
+        result = _fit_line("hello world", 11, 6)
         assert display_width(result) == 6
         assert "hello" in result
         assert "world" not in result
