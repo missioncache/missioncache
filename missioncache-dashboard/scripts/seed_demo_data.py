@@ -1468,6 +1468,28 @@ def main() -> None:
     write_missioncache_files(demo_home)
     print(f"  wrote MissionCache plan/context/tasks files for {len(PROJECTS)} projects")
 
+    # Mirror the seeded action items into each context file's managed
+    # `## Action Items` section through the same locked write path the live
+    # PM layer uses. Without this the DB-backed gadgets show the items while
+    # the project detail view (which reads the file) shows no section - a
+    # demo that differs from a real project.
+    from missioncache_db import TaskDB, pm_items  # type: ignore[import-not-found]
+
+    db = TaskDB(db_path=db_path)
+    try:
+        mirrored = 0
+        for project in sorted({row[0] for row in ACTION_ITEMS}):
+            result = pm_items.refresh_context_mirror(db, task_ids[project])
+            if result.get("updated"):
+                mirrored += 1
+            elif result.get("reason"):
+                print(f"  [mirror skip] {project}: {result['reason']}")
+            for warning in result.get("warnings", []):
+                print(f"  [mirror warning] {project}: {warning}")
+        print(f"  mirrored action items into {mirrored} context files")
+    finally:
+        db.close()
+
     # Sync SQLite -> DuckDB so the dashboard has the analytics layer ready
     # on startup without a separate migration step. Use the same code path the
     # dashboard's lifespan startup uses (AnalyticsDB.sync_from_sqlite), which
