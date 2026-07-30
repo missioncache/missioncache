@@ -773,9 +773,8 @@ class AnalyticsDB:
         the dashboard's read path until the count was surfaced.
         """
         rows = sqlite_conn.execute("SELECT * FROM tasks").fetchall()
-        if not rows:
-            return 0, 0
-
+        # No early return on empty: an empty source is the extreme ghost case
+        # (every mirror row is a deleted task) and must still reconcile.
         synced = 0
         failed = 0
         with self.connection() as conn:
@@ -838,7 +837,39 @@ class AnalyticsDB:
                         f"[SYNC WARNING] Failed to sync task {task_id} ({row_dict.get('name')}): {e}"
                     )
 
+            self._prune_ghost_tasks(conn, {dict(r)["id"] for r in rows})
+
         return synced, failed
+
+    def _prune_ghost_tasks(self, conn: duckdb.DuckDBPyConnection, sqlite_ids: set) -> None:
+        """Remove mirror rows whose task no longer exists in SQLite.
+
+        The upsert loop above never deletes, and prune_task only runs from the
+        dashboard's own delete endpoint - so a task deleted by any other path
+        (missioncache-db CLI, the MCP server, hand SQL) lingered in the read
+        path forever and rendered as a duplicate-looking ghost in the projects
+        table. Reconciling here makes every deletion path converge on the next
+        periodic sync. Children go first, mirroring prune_task's cascade set.
+        """
+        try:
+            ghost_rows = conn.execute("SELECT id FROM tasks").fetchall()
+            ghosts = [r[0] for r in ghost_rows if r[0] not in sqlite_ids]
+            for task_id in ghosts:
+                conn.execute("BEGIN TRANSACTION")
+                try:
+                    for table in ("task_updates", "heartbeats", "sessions", "shadow_commits", "plans"):
+                        conn.execute(f"DELETE FROM {table} WHERE task_id = ?", (task_id,))
+                    conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+                    conn.execute("COMMIT")
+                    print(f"[SYNC] Pruned ghost task {task_id} (deleted from SQLite)")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        except Exception as e:
+            # A failed prune must not fail the sync - the upserts already
+            # happened and a ghost lingering one more cycle is the old status
+            # quo, not a regression.
+            print(f"[SYNC WARNING] Ghost-task prune failed: {e}")
 
     def _sync_repos_from_sqlite(self, sqlite_conn) -> tuple[int, int]:
         """Sync repositories from SQLite to DuckDB. Returns (synced, failed)."""
