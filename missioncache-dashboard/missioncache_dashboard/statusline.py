@@ -1463,16 +1463,24 @@ def _render_effort_field(effort_level: str | None, thinking_enabled: bool) -> st
 
 
 def _join_items(items: list[str], widths: list[int], max_col1: int, max_col2: int) -> str:
+    """Join row cells, padding each to its column so the NEXT cell aligns.
+
+    The last cell gets no pad: nothing follows it, and trailing spaces sit
+    before the row's final RESET where Claude Code's per-line trim cannot
+    remove them - they count toward the row's width and can push it over
+    COLUMNS, earning a spurious ellipsis on a row whose content fits.
+    """
     if not items:
         return ""
+    last = len(items) - 1
     parts: list[str] = []
     for i, (item, w) in enumerate(zip(items, widths)):
         if i == 0:
-            pad = max_col1 - w
+            pad = 0 if i == last else max_col1 - w
             parts.append(item + (" " * max(pad, 0)))
         else:
             target = max_col2 if i == 1 else CELL_WIDTH
-            pad = target - w
+            pad = 0 if i == last else target - w
             parts.append(PIPE + item + (" " * max(pad, 0)))
     return "".join(parts)
 
@@ -1519,11 +1527,19 @@ def _truncate_to_width(line: str, max_width: int, line_width: int | None = None)
     return "".join(out) + "…" + RESET
 
 
-def _pad_line(line: str, line_width: int, max_width: int) -> str:
+def _fit_line(line: str, line_width: int, max_width: int) -> str:
+    """Truncate a line that exceeds ``max_width``; never right-pad.
+
+    Claude Code trims every statusline line before rendering (verified against
+    the 2.1.220 bundle: ``stdout.trim().split("\\n").flatMap(c => c.trim() || [])``,
+    and anthropics/claude-code#69598), so trailing padding is stripped and
+    erases nothing - the renderer repaints its own cell grid per frame.
+    Padding only added bytes, and on pre-COLUMNS Claude Code versions it made
+    every row as wide as the widest one, wrapping narrow terminals.
+    """
     if line_width > max_width:
         return _truncate_to_width(line, max_width, line_width)
-    pad = max_width - line_width
-    return line + (" " * pad) if pad > 0 else line
+    return line
 
 
 def _order_status_rows(addon_rows: list[str], health_row: str, addons_after_status: bool) -> list[str]:
@@ -1592,7 +1608,7 @@ ADDON_DEFAULT_COLOR = "version"
 # \Z (not $) so a trailing newline in the id can't slip through - the id is
 # used in the cache filename.
 _ADDON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
-_ADDON_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ADDON_CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # C0 + DEL + C1 (\x9b is a bare CSI)
 _ADDON_OVERRIDE_KEYS = ("value", "label", "icon", "color", "hidden")
 
 # Friendly append-target name -> the internal line list it injects a cell into.
@@ -2206,20 +2222,25 @@ def main() -> None:
     # (health takes the codex slot, no blank gap). The addon rows and the health
     # line always sum to the same count, so the addons_after_status flag reorders
     # them (see _order_status_rows) without changing the height.
+    #
+    # Every emitted line ends with RESET, and blank spacer rows are RESET-only:
+    # Claude Code drops lines whose trim() is empty, and a space-only spacer
+    # trims to empty. The RESET is invisible but survives the trim, keeping the
+    # row (and the fixed height) alive.
     has_codex = CODEX_ENABLED and CODEX_AUTH_FILE.exists()
-    blank = " " * max_width if max_width > 0 else ""
+    blank = ""
     segments = [RESET]
-    segments.append((_pad_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n")
-    segments.append(_pad_line(j_line1, w_line1, max_width) + RESET + "\n")
-    segments.append(_pad_line(j_line4, w_line4, max_width) + RESET + "\n")
-    segments.append(_pad_line(j_line3, w_line3, max_width) + RESET + "\n")
-    segments.append((_pad_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n")
-    segments.append((_pad_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n")
+    segments.append((_fit_line(j_line2, w_line2, max_width) if j_line2 else blank) + RESET + "\n")
+    segments.append(_fit_line(j_line1, w_line1, max_width) + RESET + "\n")
+    segments.append(_fit_line(j_line4, w_line4, max_width) + RESET + "\n")
+    segments.append(_fit_line(j_line3, w_line3, max_width) + RESET + "\n")
+    segments.append((_fit_line(j_line_k8s, w_line_k8s, max_width) if j_line_k8s else blank) + RESET + "\n")
+    segments.append((_fit_line(j_line_usage, w_line_usage, max_width) if j_line_usage else blank) + RESET + "\n")
     if has_codex:
-        segments.append((_pad_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n")
-    addon_rows = [(_pad_line(_j, _w, max_width) if _j else blank) + RESET + "\n"
+        segments.append((_fit_line(j_line_codex, w_line_codex, max_width) if j_line_codex else blank) + RESET + "\n")
+    addon_rows = [(_fit_line(_j, _w, max_width) if _j else blank) + RESET + "\n"
                   for _j, _w in zip(addon_joined, addon_line_widths)]
-    health_row = (_pad_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n"
+    health_row = (_fit_line(j_line_health, w_line_health, max_width) if j_line_health else blank) + RESET + "\n"
     segments.extend(_order_status_rows(addon_rows, health_row, STATUSLINE_CONFIG["addons_after_status"]))
     segments.append(RESET)
     output = "".join(segments)
@@ -2233,10 +2254,16 @@ def main() -> None:
 
 
 def _fallback_output() -> None:
-    """Print minimal output so the statusline area stays allocated."""
+    """Print minimal output so the statusline area stays allocated.
+
+    Each line is a bare RESET, not a space: Claude Code drops lines whose
+    trim() is empty (and trims the whole stdout first), so space-only lines
+    collapse to no statusline at all. The RESET is invisible but survives
+    the trim, keeping every row - and the area height - alive.
+    """
     lines = (8 if CODEX_ENABLED and CODEX_AUTH_FILE.exists() else 7) + ADDON_LINE_COUNT
     for _ in range(lines):
-        sys.stdout.write(" \n")
+        sys.stdout.write(RESET + "\n")
     sys.stdout.flush()
 
 
