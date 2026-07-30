@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-install"
-version = "1.0.7"
+version = "1.0.8"
 description = "Bootstrap installer for MissionCache - the project manager for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,10 +30,15 @@ classifiers = [
 # both accept JSONC (comments + trailing commas) in their config files; without
 # it, MCP registration silently skips users with documented-format configs.
 # First-run cost on cold uvx cache: ~1-3s for rich + pyfiglet, ~0.1s for json5.
+# Majors are capped: this package runs via `uvx missioncache-install@latest`, so it
+# re-resolves fresh on every invocation and an upstream breaking major reaches
+# users with no release on our side (how mcp 2.0.0 broke the MCP server in
+# every fresh env on 2026-07-28). rich 15 / pyfiglet 1.x / json5 0.x are the
+# tested ceilings as of 2026-07-30.
 dependencies = [
-    "rich>=13.7.0",
-    "pyfiglet>=1.0.0",
-    "json5>=0.9.0",
+    "rich>=13.7.0,<16",
+    "pyfiglet>=1.0.0,<2",
+    "json5>=0.9.0,<1",
 ]
 
 [project.scripts]
