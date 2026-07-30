@@ -6,7 +6,27 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
-### Fixed - statusline output hardened against Claude Code's renderer contract (missioncache-dashboard)
+## 2026-07-30
+
+Published package versions: mcp-missioncache 1.0.20, missioncache-dashboard 1.0.13, missioncache-install 1.0.8. Claude Code plugin 1.0.9.
+
+### Changed - every third-party dependency now caps its major version (mcp-missioncache, missioncache-dashboard, missioncache-install)
+
+- The mcp 2.0.0 incident generalized: the MCP server resolves fresh via uvx and the installer via `uvx missioncache-install@latest`, so an upstream breaking major reaches users with no release on our side; pipx re-resolves the dashboard's deps on every `--update` the same way. All floors now carry a major cap (`pydantic<3`, `fastapi<1`, `duckdb<2`, `rich<16`, and the rest), each verified above the currently resolving version. Raising a cap is a deliberate, tested change from now on.
+
+### Changed - MCP server migrated to mcp SDK 2.0 (mcp-missioncache)
+
+- `FastMCP` from `mcp.server.fastmcp` became `MCPServer` from `mcp.server.mcpserver` per the SDK's v2 migration guide; the decorator API and stdio transport are unchanged, and the temporary `<2` hotfix pin from 2026-07-29.1 is replaced by `mcp>=2.0.0,<3`. Verified with a live stdio handshake: initialize carries the server instructions and tools/list returns all 42 tools on mcp 2.0.0.
+
+### Fixed - deleted projects no longer linger as ghosts in the dashboard (missioncache-dashboard)
+
+- The SQLite -> DuckDB sync was upsert-only, and the mirror-side delete ran only from the dashboard's own delete endpoint - so a project deleted via the missioncache-db CLI, the MCP server, or hand SQL stayed in the dashboard's read path forever and rendered as a duplicate-looking row in the projects table (two such ghosts were live on the maintainer machine). The sync now reconciles: mirror rows whose task no longer exists in SQLite are pruned, children first, on every periodic sync - including the edge where the source has no tasks left at all, which previously short-circuited before any reconciliation.
+
+### Fixed - the demo seeder mirrors action items into the context files (missioncache-dashboard)
+
+- Seeded action items reached the database but not the managed `## Action Items` section of each project's context file, so the demo's project detail view differed from a real project. The seeder now runs the same locked mirror write path the live PM layer uses, after the context files exist.
+
+## 2026-07-29.1
 
 - Random characters after a monitor/terminal resize were root-caused to Claude Code itself: it does not re-run the statusline on resize (anthropics/claude-code#76988) and its renderer leaves stale cells to the right of the new render (anthropics/claude-code#81135, open on 2.1.220). Ctrl+L or the next render clears them. What WAS ours to fix, verified against the decompiled 2.1.220 statusline executor: Claude Code trims every output line and drops lines that trim to empty, so the full-width right-padding on every row never erased anything - it only fattened the cached lines that get re-clipped on resize, and wrapped narrow terminals on pre-COLUMNS versions. Rows now end at their content.
 - Column padding was also emitted after a row's LAST cell, where it aligns nothing; it sat before the row's closing color reset (out of reach of Claude Code's trim), counted toward the row's width, and could push a fitting row over COLUMNS into a spurious ellipsis.

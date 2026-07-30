@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-dashboard"
-version = "1.0.12"
+version = "1.0.13"
 description = "MissionCache Dashboard - Task analytics and autonomous execution monitoring for Claude Code MissionCache projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,16 +23,21 @@ classifiers = [
 ]
 
 dependencies = [
+    # Majors are capped on every third-party dep: pipx re-resolves them on
+    # each --update, so an upstream breaking major otherwise reaches users
+    # with no release on our side (how mcp 2.0.0 broke the MCP server in
+    # every fresh env on 2026-07-28). Raise a cap only after testing on the
+    # new major.
     "missioncache-db>=1.0.15",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "duckdb>=1.1.0",
-    "httpx>=0.28.0",
-    "sse-starlette>=2.0.0",
+    "fastapi>=0.115.0,<1",
+    "uvicorn[standard]>=0.32.0,<1",
+    "duckdb>=1.1.0,<2",
+    "httpx>=0.28.0,<1",
+    "sse-starlette>=2.0.0,<4",
     # FastAPI needs this for the Form/File/UploadFile routes; it is NOT pulled
     # in transitively, and without it the server cannot even import on a clean
     # install (caught by the CI installer smoke test).
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.9,<1",
 ]
 
 [project.scripts]
@@ -42,14 +47,14 @@ mc-dash = "missioncache_dashboard.cli:main"
 
 [project.optional-dependencies]
 rss = [
-    "feedparser>=6.0.0",
-    "beautifulsoup4>=4.12.0",
-    "lxml>=5.0.0",
-    "readability-lxml>=0.8.0",
+    "feedparser>=6.0.0,<7",
+    "beautifulsoup4>=4.12.0,<5",
+    "lxml>=5.0.0,<7",
+    "readability-lxml>=0.8.0,<1",
 ]
 learn = [
-    "anthropic>=0.40.0",
-    "python-slugify>=8.0.0",
+    "anthropic>=0.40.0,<1",
+    "python-slugify>=8.0.0,<9",
 ]
 dev = [
     "pytest>=7.0",
