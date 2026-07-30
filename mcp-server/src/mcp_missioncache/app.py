@@ -1,6 +1,11 @@
-"""FastMCP application instance, shared across tool modules."""
+"""MCPServer application instance, shared across tool modules.
 
-from mcp.server.fastmcp import FastMCP
+mcp SDK 2.0 renamed FastMCP to MCPServer and moved it from
+mcp.server.fastmcp to mcp.server.mcpserver (the 2.0.0 migration guide);
+the decorator API and stdio run are unchanged.
+"""
+
+from mcp.server.mcpserver import MCPServer
 
 INSTRUCTIONS = (
     "MissionCache project/task tracking. Some operations are deliberately "
@@ -12,4 +17,4 @@ INSTRUCTIONS = (
     "and docs/cli.md in the MissionCache repo documents each command."
 )
 
-mcp = FastMCP("missioncache", instructions=INSTRUCTIONS)
+mcp = MCPServer("missioncache", instructions=INSTRUCTIONS)
