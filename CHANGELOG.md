@@ -6,6 +6,18 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Fixed - statusline output hardened against Claude Code's renderer contract (missioncache-dashboard)
+
+- Random characters after a monitor/terminal resize were root-caused to Claude Code itself: it does not re-run the statusline on resize (anthropics/claude-code#76988) and its renderer leaves stale cells to the right of the new render (anthropics/claude-code#81135, open on 2.1.220). Ctrl+L or the next render clears them. What WAS ours to fix, verified against the decompiled 2.1.220 statusline executor: Claude Code trims every output line and drops lines that trim to empty, so the full-width right-padding on every row never erased anything - it only fattened the cached lines that get re-clipped on resize, and wrapped narrow terminals on pre-COLUMNS versions. Rows now end at their content.
+- Column padding was also emitted after a row's LAST cell, where it aligns nothing; it sat before the row's closing color reset (out of reach of Claude Code's trim), counted toward the row's width, and could push a fitting row over COLUMNS into a spurious ellipsis.
+- Addon (custom statusline cell) sanitization stripped C0 control characters but not C1 (U+0080-U+009F): U+009B is a one-character CSI that starts an escape sequence in many terminals, so a stray C1 in a command's output could corrupt the line. Both ranges are stripped now.
+- The error-fallback path emitted space-only lines, which Claude Code's trim collapses to nothing - so any statusline crash silently removed the whole statusline area instead of holding its height. Fallback lines now carry a bare color reset, which is invisible but survives the trim.
+
+### Changed - the projects table's action-items badge explains itself (missioncache-dashboard)
+
+- The open-action-items badge drew its icon as the bare U+2610 BALLOT BOX character, which renders as an anonymous little square indistinguishable from a broken font. It is now a check-square icon in the app's icon style, inheriting the badge color.
+- Its tooltip said "2 open, 1 overdue" without ever saying open WHAT; it now reads "2 open action items, 1 overdue", with a matching aria-label and a help cursor so the hover affordance is discoverable. The at-risk dot's tooltip grew from "At risk" to naming its actual triggers: something overdue, an ask to someone gone stale, or a close due date.
+
 ## 2026-07-29.1
 
 Published package versions: mcp-missioncache 1.0.19. Claude Code plugin 1.0.8.
