@@ -654,3 +654,89 @@ class TestForkOfDigest:
         )
         digest = ch.build_digest(content, tmp_path / "x.md")
         assert digest["fork_of"] is None
+
+
+# Spec source for the two classes below: the "Cross-project events" convention
+# in rules/missioncache.md - an imported-event section sits ABOVE Waiting on and
+# the link is recorded on a `**Related projects:**` header line so both sides
+# know it exists.
+
+_WITH_WAITING = (
+    "# demo - Context\n"
+    "**Last Updated:** 2026-08-01 10:00\n"
+    "\n## Description\nBody.\n"
+    "\n## Waiting on\n\n| What | Who | Since | Gates |\n|---|---|---|---|\n"
+    "\n## Next Steps\n\n1. Thing\n"
+)
+
+
+class TestInsertSectionBefore:
+    def test_inserts_before_the_first_matching_anchor(self):
+        out = ch.insert_section_before(
+            _WITH_WAITING, "## Event\n\nBody.", ("Waiting on", "Next Steps")
+        )
+        names = [s["name"] for s in ch.section_index(out)]
+        assert names == ["Description", "Event", "Waiting on", "Next Steps"]
+
+    def test_falls_back_to_the_next_anchor(self):
+        """A file predating the Waiting on convention still gets the section in
+        the right relative place."""
+        content = "# demo - Context\n\n## Description\nBody.\n\n## Next Steps\n\n1. Thing\n"
+        out = ch.insert_section_before(
+            content, "## Event\n\nBody.", ("Waiting on", "Next Steps")
+        )
+        names = [s["name"] for s in ch.section_index(out)]
+        assert names == ["Description", "Event", "Next Steps"]
+
+    def test_appends_at_eof_when_no_anchor_exists(self):
+        content = "# demo - Context\n\n## Description\nBody.\n"
+        out = ch.insert_section_before(content, "## Event\n\nBody.", ("Waiting on",))
+        assert [s["name"] for s in ch.section_index(out)] == ["Description", "Event"]
+
+    def test_anchor_inside_a_fence_is_not_matched(self):
+        """Fence-aware, like every other section locator here."""
+        content = (
+            "# demo - Context\n\n## Description\n```\n## Waiting on\n```\n"
+            "\n## Next Steps\n\n1. Thing\n"
+        )
+        out = ch.insert_section_before(
+            content, "## Event\n\nBody.", ("Waiting on", "Next Steps")
+        )
+        names = [s["name"] for s in ch.section_index(out)]
+        assert names == ["Description", "Event", "Next Steps"]
+
+
+class TestUpsertRelatedProjects:
+    def test_creates_the_header_line_in_the_header_region(self):
+        out = ch.upsert_related_projects(_WITH_WAITING, "other-proj", "shares the feed")
+        assert (
+            ch.build_digest(out, Path("x.md"))["related_projects"]
+            == "**Related projects:** [[other-proj]] (shares the feed)"
+        )
+
+    def test_extends_an_existing_line(self):
+        once = ch.upsert_related_projects(_WITH_WAITING, "a-proj", "feed")
+        twice = ch.upsert_related_projects(once, "b-proj", "cluster")
+        assert (
+            ch.build_digest(twice, Path("x.md"))["related_projects"]
+            == "**Related projects:** [[a-proj]] (feed), [[b-proj]] (cluster)"
+        )
+
+    def test_is_a_no_op_for_a_project_already_listed(self):
+        once = ch.upsert_related_projects(_WITH_WAITING, "a-proj", "feed")
+        assert ch.upsert_related_projects(once, "a-proj", "different note") == once
+
+    def test_note_is_optional(self):
+        out = ch.upsert_related_projects(_WITH_WAITING, "a-proj")
+        assert (
+            ch.build_digest(out, Path("x.md"))["related_projects"]
+            == "**Related projects:** [[a-proj]]"
+        )
+
+    def test_does_not_disturb_the_sections(self):
+        out = ch.upsert_related_projects(_WITH_WAITING, "a-proj", "feed")
+        assert [s["name"] for s in ch.section_index(out)] == [
+            "Description",
+            "Waiting on",
+            "Next Steps",
+        ]
