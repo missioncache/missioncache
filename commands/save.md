@@ -142,6 +142,9 @@ Waiting-on notes:
 - `waiting_on_add` rows: `since` defaults to today; the section is created before Next Steps if the file predates the convention.
 - `waiting_on_resolve` removes the first row whose What cell contains `match` and writes "Resolved (was waiting on <who>): <what> - <outcome>" into today's Recent Changes. Check `waiting_on_unmatched` in the response - a non-empty list means a resolve found no row (typo or already resolved); tell the user, never drop it silently.
 - The response's `journal_rolled_over` reports Recent Changes entries moved to `<name>-journal.md` by the cap - no action needed, it is informational.
+- The response's `live_sessions` lists other live Claude Code sessions bound to this project. Tell each one what changed with `SendMessage`, per "Cross-session notifications" in the MissionCache rules. This also fires when the save wrote into another project's context.
+
+**Writing into another project's context:** resolve its path with `get_missioncache_files(project_name=...)` and pass `imported_event={"heading": ..., "body": ..., "related_project": "<this project>", "related_note": "<what's shared>"}`. Never Edit that file directly - only the tool path takes the lock, and a session may be reading it right now.
 
 **Tasks file (if tasks completed):**
 ```

@@ -38,6 +38,7 @@
 | `hooks/stop.py` | Stop hook |
 | `hooks/activity_tracker.py` | UserPromptSubmit hook (heartbeat recording) |
 | `hooks/task_tracker.py` | UserPromptSubmit hook (missioncache task-tracking divergence reminder) |
+| `hooks/session_title.py` | UserPromptSubmit hook (names the session after its bound project, so peers can address it) |
 | `commands/*.md` | Slash command definitions |
 | `templates/` | File templates for missioncache project files |
 | `rules/*.md` | Claude rule files installed to `~/.claude/rules/` (via symlink) |

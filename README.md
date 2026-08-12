@@ -273,7 +273,7 @@ MissionCache's MCP server exposes tools across six categories: task lifecycle, f
 
 ### Lifecycle hooks
 
-Five Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Two `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, the other reminds you when task tracking drifts. All five ship with the plugin.
+Six Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Three `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, the other reminds you when task tracking drifts. All six ship with the plugin.
 
 ## How MissionCache compares
 
