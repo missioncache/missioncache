@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-13
+
+Published package versions: missioncache-db 1.0.19, mcp-missioncache 1.0.24, missioncache-dashboard 1.0.14, missioncache-install 1.0.9. Claude Code plugin 1.0.13.
+
 ### Cross-session notifications
 
 - A session that writes into another project's context now tells that project's live sessions about it, instead of leaving them working from what they read at load time. `update_context_file` returns `live_sessions` (other live Claude Code sessions bound to the project owning the file), and the new "Cross-session notifications" rule tells Claude to reach each one with Claude Code's cross-session `SendMessage` (2.1.224+, macOS and Linux) and what the receiving session should do with the message. (mcp-missioncache, rules)
@@ -16,6 +20,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 - The send protocol documents that a send is not a delivery: a receiver running with bypassed permissions and `crossSessionInbound: "hold"` parks the message for manual approval and drops it after `dialogExpiry`, while `SendMessage` still returns success to the sender. Setting `crossSessionInbound` to `accept` delivers without the prompt and applies to already-running sessions. (rules)
 - The send protocol addresses a peer by its `ListAgents` name **and** the row's `[ref]`. A cross-session peer is not an agent in the calling conversation, so the bare name is rejected outright rather than only when two rows collide, and refs are per-listing so a remembered one does not resolve. (rules)
+
+### Statusline
+
+- The usage line shows a per-model weekly counter after Weekly, reading the `weekly_scoped` entry from the usage response's `limits` array. That array is the only place the number appears: the top-level `seven_day_opus` / `seven_day_sonnet` buckets are null on plans that report the cap this way, even while it sits at 71% used. The label comes from `scope.model.display_name` rather than being hardcoded, so whichever model the plan scopes is what renders, and unlike the Opus counter it does not hide at 0% because a freshly reset week reading zero is real information. (missioncache-dashboard)
 
 ### Context files
 
