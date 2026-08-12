@@ -48,22 +48,6 @@ _SESSION_ID_CHARSET_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # finished hours ago.
 _PARALLEL_THRESHOLD_SECONDS = 10 * 60
 
-# Per-session process records, keyed by session id, used to tell a sibling
-# session that is still running apart from one that was just closed. Transcript
-# mtime alone cannot make that distinction: a session closed seconds ago (e.g.
-# /clear then relaunch, or quit-and-reopen in the same cwd) leaves a transcript
-# whose mtime is just as fresh as a session that is genuinely still alive. The
-# recorded process pid resolves the ambiguity - a dead pid proves the session
-# is gone.
-_SESSION_PID_DIR = Path.home() / ".claude" / "hooks" / "state" / "session-pids"
-
-# How far up the process tree to climb when resolving the Claude Code session
-# process. The hook runs as a short-lived ``python3`` descendant, usually under
-# a transient ``sh -c`` / ``zsh -c`` wrapper, under ``claude``; a handful of
-# levels covers every observed launch shape. Bounded so a pathological tree can
-# never spin.
-_SESSION_PID_WALK_MAX_DEPTH = 12
-
 
 def _is_valid_session_id(value: object) -> bool:
     """True if ``value`` is a plausible session id (UUID-charset, bounded length).
@@ -209,35 +193,21 @@ def _ps_field(pid: int, fmt: str) -> str | None:
 def _resolve_session_pid() -> int | None:
     """Climb from this hook to the Claude Code session process and return its pid.
 
-    The hook is spawned as ``python3 session_start.py``, itself a child of
-    Claude Code - sometimes directly, sometimes under a transient ``sh -c`` /
-    ``zsh -c`` wrapper - so ``os.getppid()`` is not reliably the session
-    process. We walk the ancestry until we find a process whose executable
-    name (argv0 basename, via ``ps -o comm=``) is ``claude``, which is the
-    CLI's process name (verified empirically: a claude-spawned subprocess sees
-    ``... -> claude -> login shell`` above it).
-
-    Returns None when no ``claude`` ancestor is found within
-    ``_SESSION_PID_WALK_MAX_DEPTH`` levels - e.g. the Claude Desktop app, whose
-    process shape differs - in which case callers fall back to the mtime-only
-    heuristic.
+    The implementation lives in ``missioncache_db.resolve_claude_process_pid``
+    so the walk sits next to ``session_pid_path`` and ``session_is_alive``, the
+    record it feeds and the reader of that record. It is used only for recording
+    a session's pid: identity must NOT be derived from it, because one ``claude``
+    process hosts many sessions (see ``tools_docs._live_peer_sessions``).
+    An ImportError degrades to None, the same answer an unresolvable process
+    shape gives, so rules installation still runs where the db will not import.
     """
-    pid = os.getpid()
-    for _ in range(_SESSION_PID_WALK_MAX_DEPTH):
-        ppid_s = _ps_field(pid, "ppid")
-        if not ppid_s:
-            return None
-        try:
-            ppid = int(ppid_s)
-        except ValueError:
-            return None
-        if ppid <= 1:
-            return None
-        comm = _ps_field(ppid, "comm") or ""
-        if os.path.basename(comm) == "claude":
-            return ppid
-        pid = ppid
-    return None
+    try:
+        from missioncache_db import (  # type: ignore[import-not-found]
+            resolve_claude_process_pid,
+        )
+    except ImportError:
+        return None
+    return resolve_claude_process_pid()
 
 
 def write_session_pid(session_id: str) -> None:
@@ -258,7 +228,7 @@ def write_session_pid(session_id: str) -> None:
     The session id is validated before it becomes a filename component, the
     same path-traversal guard (CWE-22) ``_is_valid_session_id`` enforces for
     the other ``<sid>.json`` pointers - so a malformed or path-like id can
-    never write outside ``_SESSION_PID_DIR``.
+    never write outside the session-pids dir.
     """
     if not _is_valid_session_id(session_id):
         return
@@ -266,10 +236,13 @@ def write_session_pid(session_id: str) -> None:
     if pid is None:
         return
 
-    from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
+    from missioncache_db import (  # type: ignore[import-not-found]
+        atomic_write_json,
+        session_pid_path,
+    )
 
     atomic_write_json(
-        _SESSION_PID_DIR / f"{session_id}.json",
+        session_pid_path(session_id),
         {
             "sessionId": session_id,
             "pid": pid,
@@ -280,44 +253,22 @@ def write_session_pid(session_id: str) -> None:
 
 
 def _session_is_alive(session_id: str) -> bool | None:
-    """Liveness of ``session_id`` from its recorded process pid.
+    """Liveness of ``session_id``, tri-state: True alive, False proven dead,
+    None unknown (caller falls back to the mtime heuristic).
 
-    Returns:
-      * ``True``  - pid recorded and the process is still running (and, when a
-        start time was recorded, still the same process).
-      * ``False`` - pid recorded but the process is gone, or the pid was reused
-        by an unrelated process (recorded start time no longer matches).
-      * ``None``  - no usable pid record (a session predating this feature,
-        Claude Desktop, or a resolution failure), OR an invalid session id.
-        Caller should fall back to the mtime heuristic and treat the session
-        as possibly-alive.
-
-    The id is validated before it becomes a filename component so a candidate
-    sid sourced from a transcript stem cannot read outside ``_SESSION_PID_DIR``
-    (CWE-22); an invalid id returns None, the safe possibly-alive fallback.
+    The implementation lives in ``missioncache_db.session_is_alive`` because the
+    session_title hook and the MCP server's live-session lookup need the same
+    answer, and a second copy of "is this pid still the session that recorded
+    it" would drift. This wrapper is the import boundary: rules installation and
+    parallel-session detection are pure filesystem work that must still run on an
+    install where ``missioncache_db`` will not import, so an ImportError degrades
+    to None (possibly-alive) rather than breaking SessionStart.
     """
-    if not _is_valid_session_id(session_id):
-        return None
-    rec_file = _SESSION_PID_DIR / f"{session_id}.json"
     try:
-        data = json.loads(rec_file.read_text())
-    except (OSError, ValueError):
+        from missioncache_db import session_is_alive  # type: ignore[import-not-found]
+    except ImportError:
         return None
-    pid = data.get("pid")
-    if not isinstance(pid, int) or pid <= 1:
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return None
-    recorded_start = data.get("startTime")
-    if recorded_start:
-        current_start = _ps_field(pid, "lstart")
-        if current_start is not None and current_start != recorded_start:
-            return False  # pid was recycled by a different process
-    return True
+    return session_is_alive(session_id)
 
 
 def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:

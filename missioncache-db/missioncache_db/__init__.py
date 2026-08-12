@@ -72,6 +72,7 @@ import logging
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 import uuid
@@ -201,6 +202,323 @@ def read_session_binding(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return (True, None)
     return (True, data if isinstance(data, dict) else None)
+
+
+# =============================================================================
+# Session identity: liveness, titles, and the project -> live sessions lookup
+# =============================================================================
+
+# Charset for a session id used as a filename component. Same intent as the
+# guards in hooks/session_start.py and the MCP server's helpers - a malformed or
+# path-like id must never escape the state dirs (CWE-22) - but deliberately the
+# widest of the three, because this is the read side and must not reject an id
+# another writer accepted. They do NOT match: session_start rejects the dot,
+# helpers caps at 128. Session ids reaching the
+# functions below come from project_state rows and directory listings, neither
+# of which is guaranteed well-formed.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,256}$")
+
+
+def _is_valid_session_id(value: object) -> bool:
+    """True if ``value`` is safe to interpolate into a state filename."""
+    return (
+        isinstance(value, str)
+        and ".." not in value
+        and bool(_SESSION_ID_RE.fullmatch(value))
+    )
+
+
+def _ps_field(pid: int, fmt: str) -> Optional[str]:
+    """Return a single ``ps -o <fmt>=`` field for ``pid``, or None.
+
+    Best-effort and portable across macOS and Linux (no ``/proc`` dependency,
+    which macOS lacks). Returns None when the process is gone, ps is missing,
+    or the call errors out.
+
+    Deliberately duplicated from ``hooks/session_start.py``, which needs its own
+    copy to record a session's process start time before ``missioncache_db`` is
+    importable under the hook test harness (the tests replace the module with a MagicMock, so a
+    shared helper would return a mock here). Same precedent as ``_file_lock``
+    being duplicated into ``hooks/pre_compact.py``: keep the two in sync.
+    """
+    try:
+        out = subprocess.run(
+            ["ps", "-o", f"{fmt}=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
+
+
+# How far up the process tree to climb when resolving the Claude Code session
+# process. A caller runs as a short-lived descendant, often under a transient
+# ``sh -c`` / ``uv`` wrapper; a handful of levels covers every observed launch
+# shape. Bounded so a pathological tree can never spin.
+_SESSION_PID_WALK_MAX_DEPTH = 12
+
+
+def resolve_claude_process_pid() -> Optional[int]:
+    """Climb from this process to the Claude Code session process and return its pid.
+
+    Walks the ancestry looking for a process whose executable name (argv0
+    basename via ``ps -o comm=``) is ``claude``, because the caller is usually a
+    grandchild rather than a direct child: an MCP server runs as
+    ``claude -> uv -> python``, and a hook as ``claude -> sh -> python3``.
+
+    Returns None when no ``claude`` ancestor is found within
+    ``_SESSION_PID_WALK_MAX_DEPTH`` levels - e.g. the Claude Desktop app, whose
+    process shape differs.
+    """
+    pid = os.getpid()
+    for _ in range(_SESSION_PID_WALK_MAX_DEPTH):
+        ppid_s = _ps_field(pid, "ppid")
+        if not ppid_s:
+            return None
+        try:
+            ppid = int(ppid_s)
+        except ValueError:
+            return None
+        if ppid <= 1:
+            return None
+        comm = _ps_field(ppid, "comm") or ""
+        if os.path.basename(comm) == "claude":
+            return ppid
+        pid = ppid
+    return None
+
+
+def session_pid_path(session_id: str) -> Path:
+    """Canonical path of the per-session process record.
+
+    The pid recorded there is what tells a session that is still running apart
+    from one closed seconds ago, a distinction transcript mtime cannot make.
+
+    Single owner of the ``~/.claude/hooks/state/session-pids/<sid>.json``
+    convention, for the same reason ``session_binding_path`` exists: the writer
+    (the SessionStart hook) and the reader (``session_is_alive``) live in
+    different packages and must not each carry their own
+    copy of the path. ``Path.home()`` is resolved per call, not captured in a
+    module constant, so tests that redirect HOME see the redirect.
+    """
+    return Path.home() / ".claude" / "hooks" / "state" / "session-pids" / f"{session_id}.json"
+
+
+def session_is_alive(session_id: str) -> Optional[bool]:
+    """Liveness of ``session_id`` from its recorded process pid.
+
+    Returns:
+      * ``True``  - pid recorded and the process is still running (and still the
+        same process, when a start time was recorded AND could be re-read; a
+        ``ps`` that fails or times out skips the comparison).
+      * ``False`` - pid recorded but the process is gone, or the pid was reused
+        by an unrelated process (recorded start time no longer matches).
+      * ``None``  - no usable pid record (a session predating this feature,
+        Claude Desktop, or a resolution failure), OR an invalid session id.
+        Callers treat this as possibly-alive rather than dead.
+
+    Only ``False`` is proof. Treating ``None`` as dead would silently drop every
+    session whose pid could not be resolved.
+    """
+    if not _is_valid_session_id(session_id):
+        return None
+    try:
+        data = json.loads(session_pid_path(session_id).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    pid = data.get("pid")
+    if not isinstance(pid, int) or pid <= 1:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return None
+    recorded_start = data.get("startTime")
+    if recorded_start:
+        current_start = _ps_field(pid, "lstart")
+        if current_start is not None and current_start != recorded_start:
+            return False  # pid was recycled by a different process
+    return True
+
+
+def session_title_path(session_id: str) -> Path:
+    """Canonical path of the per-session applied-title record.
+
+    This record is what makes the live-session lookup authoritative. Claude
+    Code's cross-session SendMessage addresses a peer by its session title, so a
+    caller needs the title a session actually carries - and that stops being the
+    project name the moment a second session joins the project and takes a "-2"
+    suffix. Recording what was applied beats recomputing it.
+    """
+    return Path.home() / ".claude" / "hooks" / "state" / "session-title" / f"{session_id}.json"
+
+
+def write_session_title(session_id: str, title: str, project_name: str) -> None:
+    """Record the title this machine applied to ``session_id``.
+
+    ``project_name`` is stored alongside the title because it, not the title, is
+    what decides whether to re-apply: the title is re-set when the bound project
+    changes, and left alone otherwise, so a user's manual ``/rename`` survives.
+    """
+    if not _is_valid_session_id(session_id):
+        return
+    atomic_write_json(
+        session_title_path(session_id),
+        {
+            "sessionId": session_id,
+            "title": title,
+            "projectName": project_name,
+            "updated": datetime.now().astimezone().isoformat(),
+        },
+    )
+
+
+def read_session_title(session_id: str) -> Optional[Dict[str, Any]]:
+    """Return the applied-title record for ``session_id``, or None."""
+    if not _is_valid_session_id(session_id):
+        return None
+    try:
+        data = json.loads(session_title_path(session_id).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def live_sessions_for_project(
+    project_name: str, exclude_session_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Sessions explicitly bound to ``project_name`` that are still running.
+
+    Returns ``{session_id, title, last_active}`` per session, most recently
+    active first. Not "newest binding": ``project_state.updated_at`` is also
+    refreshed by the dashboard action hook, so it tracks activity, not binding.
+    ``title`` is the title the session_title hook applied, or None when it never
+    ran - callers fall back to asking the user which session to address.
+
+    Reads ``project_state`` rather than the ``projects/<sid>.json`` pointers:
+    a ``project_state`` row is only ever written by the explicit binding path
+    (``_bind_session_to_project``), while the pointer file is also written from
+    cwd auto-resolution at SessionStart. Merely having a project's repo open should
+    not make a session a notification target.
+
+    A session must be **proven** alive to be listed - ``session_is_alive`` is
+    True, not merely "not False". ``project_state`` rows are never deleted on
+    session exit and survive project completion, so the table is a full history
+    of every session that ever loaded the project, and those old rows have no pid
+    record and report None (unknown). Admitting unknowns would announce every
+    context write to every session that ever touched the project.
+
+    Unlike ``_detect_parallel_sessions``, which keeps unknowns because it has
+    already prefiltered on a 10-minute transcript window. The cost here is that a
+    session whose pid could not be resolved (Claude Desktop) is never notified,
+    which is fine: cross-session messaging is a CLI feature.
+
+    Best-effort: any DB error yields an empty list. This feeds a notification,
+    never a correctness decision, so failing quiet beats raising into a caller
+    that has already written the file it was going to announce.
+    """
+    if not HOOKS_STATE_DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            rows = conn.execute(
+                "SELECT session_id, updated_at FROM project_state "
+                "WHERE project_name = ? ORDER BY updated_at DESC",
+                (project_name,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning(
+            "live_sessions_for_project(%s): hooks-state.db read failed: %s",
+            project_name,
+            e,
+        )
+        return []
+
+    live: List[Dict[str, Any]] = []
+    for session_id, last_active in rows:
+        if session_id == exclude_session_id:
+            continue
+        if not _is_valid_session_id(session_id):
+            continue
+        if session_is_alive(session_id) is not True:
+            continue
+        record = read_session_title(session_id) or {}
+        live.append(
+            {
+                "session_id": session_id,
+                "title": record.get("title"),
+                "last_active": last_active,
+            }
+        )
+    return live
+
+
+def choose_session_title(project_name: str, session_id: str) -> str:
+    """Pick the title for ``session_id`` on ``project_name``, avoiding collisions.
+
+    Plain project name when no other live session already holds it, otherwise the
+    lowest free ``-2`` / ``-3`` suffix. Suffixes are computed against live
+    sessions only, so a closed session frees its number.
+
+    Uniqueness matters because the title is the address ``SendMessage`` uses. It
+    is best-effort, not a lock: two sessions taking their first prompt in the
+    same instant can both land on the same suffix. That degrades to two
+    identically-named rows in ``ListAgents``, which the caller disambiguates with
+    the per-row ref, so the race costs clarity rather than correctness.
+    """
+    taken = {
+        session["title"]
+        for session in live_sessions_for_project(
+            project_name, exclude_session_id=session_id
+        )
+        if session["title"]
+    }
+    if project_name not in taken:
+        return project_name
+    suffix = 2
+    while f"{project_name}-{suffix}" in taken:
+        suffix += 1
+    return f"{project_name}-{suffix}"
+
+
+def bound_project_for_session(session_id: str) -> Optional[str]:
+    """Project this session was explicitly bound to, from ``project_state``.
+
+    The read side of the binding the MCP server writes in
+    ``_bind_session_to_project``. Same store the live-session lookup reads, which
+    is the point: "titled", "addressable" and "notified" have to describe one set
+    of sessions, and they only do if both ends key off the same table.
+    """
+    if not _is_valid_session_id(session_id) or not HOOKS_STATE_DB_PATH.exists():
+        return None
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            row = conn.execute(
+                "SELECT project_name FROM project_state WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning(
+            "bound_project_for_session(%s): hooks-state.db read failed: %s",
+            session_id,
+            e,
+        )
+        return None
+    return row[0] if row else None
 
 
 def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
