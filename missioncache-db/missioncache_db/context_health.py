@@ -427,15 +427,18 @@ def replace_waiting_on_table(content: str, rows: list[dict[str, str]]) -> str:
     return content[:body_start] + new_body + content[body_end:]
 
 
-def insert_waiting_on_before_next_steps(content: str, section_text: str) -> str:
-    """Insert the section immediately before ``## Next Steps``.
+def insert_section_before(
+    content: str, section_text: str, anchors: tuple[str, ...]
+) -> str:
+    """Insert ``section_text`` immediately before the first anchor that exists.
 
-    Fallbacks (defensive - every current project has Next Steps): before
-    ``## Recent Changes``, else append at EOF. The caller is responsible
-    for checking ``## Waiting on`` is absent first.
+    ``anchors`` is tried in order and the section is appended at EOF when none
+    match. Fence-aware via ``_section_span``, and the preceding text is
+    normalized to end in a blank line so the inserted heading always starts its
+    own block.
     """
     section_block = section_text.rstrip() + "\n\n"
-    for anchor in ("Next Steps", "Recent Changes"):
+    for anchor in anchors:
         span = _section_span(content, anchor)
         if span is not None:
             pos = span[0]
@@ -444,6 +447,75 @@ def insert_waiting_on_before_next_steps(content: str, section_text: str) -> str:
                 prefix = prefix.rstrip("\n") + "\n\n"
             return prefix + section_block + content[pos:]
     return content.rstrip("\n") + "\n\n" + section_block
+
+
+def insert_waiting_on_before_next_steps(content: str, section_text: str) -> str:
+    """Insert the section immediately before ``## Next Steps``.
+
+    Fallbacks (defensive - every current project has Next Steps): before
+    ``## Recent Changes``, else append at EOF. The caller is responsible
+    for checking ``## Waiting on`` is absent first.
+    """
+    return insert_section_before(content, section_text, ("Next Steps", "Recent Changes"))
+
+
+_HEADING_ANY_RE = re.compile(r"^(#{1,5})(\s)", re.MULTILINE)
+
+
+def demote_headings(text: str) -> str:
+    """Push every real markdown heading in ``text`` one level deeper.
+
+    Used on caller-supplied body text before it is nested under a section
+    heading. Without it, a body carrying its own ``## Next Steps`` (exactly what
+    a pasted meeting summary looks like) creates a SECOND top-level section, and
+    because ``_section_span`` takes the first match, the project's real Next
+    Steps becomes unreachable to the digest and to every later write.
+
+    Fence-aware, so a ``## foo`` inside a code block is left alone. ``######`` is
+    already the deepest level markdown has and is left as-is rather than
+    corrupted into seven hashes.
+    """
+    masked = mask_fences(text)
+    out: list[str] = []
+    last = 0
+    for match in _HEADING_ANY_RE.finditer(masked):
+        out.append(text[last : match.start()])
+        out.append("#" + match.group(1) + match.group(2))
+        last = match.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def upsert_related_projects(content: str, project_name: str, note: str = "") -> str:
+    """Record ``project_name`` on the ``**Related projects:**`` header line.
+
+    Extends the line when it already exists, creates it at the end of the header
+    region (before the first ``##``) otherwise, and is a no-op when the project
+    is already listed. The digest reads this line via ``_header_line`` and
+    /missioncache:load renders it, so it is how both sides of a cross-project
+    link learn the link exists.
+
+    ``project_name`` must already be validated to the ``_FORK_NAME_RE`` shape by
+    the caller; ``note`` is flattened here because a newline in it would end the
+    header line and let the remainder pose as a header of its own (a planted
+    ``Hub:`` line is read by the resume flow, and a planted ``**Fork of:**`` line
+    redirects which project's context is loaded as the shared layer).
+    """
+    note = " ".join(note.split())
+    entry = f"[[{project_name}]]" + (f" ({note})" if note else "")
+    existing = _header_line(content, "**Related projects:**")
+
+    if existing is not None:
+        if f"[[{project_name}]]" in existing:
+            return content
+        return content.replace(existing, f"{existing}, {entry}", 1)
+
+    header_line = f"**Related projects:** {entry}"
+    first_h2 = _H2_LINE_RE.search(mask_fences(content))
+    if first_h2 is None:
+        return content.rstrip("\n") + f"\n{header_line}\n"
+    pos = first_h2.start()
+    return content[:pos].rstrip("\n") + f"\n{header_line}\n\n" + content[pos:]
 
 
 def parse_last_updated(content: str) -> Optional[datetime]:

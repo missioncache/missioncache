@@ -1,6 +1,7 @@
 """MissionCache file operation MCP tools - create, get, update MissionCache files."""
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -14,7 +15,12 @@ from . import active_task, project_files
 from .app import mcp
 from .config import settings
 from .db import get_db
-from .errors import MissionCacheError, MissionCacheFileNotFoundError, TaskNotFoundError
+from .errors import (
+    MissionCacheError,
+    MissionCacheFileNotFoundError,
+    TaskNotFoundError,
+    ValidationError,
+)
 from .helpers import (
     SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
@@ -26,6 +32,96 @@ from .helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A related-project name becomes a `[[wikilink]]` on a header line that the
+# digest parses. Same shape as context_health._FORK_NAME_RE, which carries the
+# comment calling it a load-bearing security control: no slashes, leading
+# alphanumeric. Enforced here because the header region is where a planted
+# `Hub:` or `**Fork of:**` line would decide which file the resume flow reads.
+_RELATED_PROJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_imported_event(imported_event: dict) -> None:
+    """Reject an imported event that would forge markdown structure.
+
+    Rejecting rather than dropping: the writer ignores a malformed event, and a
+    silent drop would still be reported in ``sections_updated`` - a success
+    claiming a section that was never written. Same never-silently-drop contract
+    as ``waiting_on_unmatched``.
+
+    ``heading`` is interpolated into a ``## `` line, so a newline in it forges
+    additional sections; the forged one lands above the real ``## Waiting on``
+    and wins ``_section_span``, hiding the project's real blockers table from the
+    digest and from every later waiting-on write. ``body`` is legitimately
+    free-form markdown and is normalized rather than rejected (see
+    ``context_health.demote_headings``).
+    """
+    heading = (imported_event.get("heading") or "").strip()
+    body = (imported_event.get("body") or "").strip()
+    if not heading or not body:
+        raise ValidationError(
+            "imported_event needs a non-empty 'heading' and 'body'",
+            field="imported_event",
+        )
+    if "\n" in heading or "\r" in heading:
+        raise ValidationError(
+            "imported_event 'heading' must be a single line; it becomes a "
+            "'## ' heading and a newline would forge extra sections",
+            field="imported_event.heading",
+        )
+
+    related = (imported_event.get("related_project") or "").strip()
+    if related and not _RELATED_PROJECT_RE.fullmatch(related):
+        raise ValidationError(
+            "imported_event 'related_project' must be a bare project name "
+            "(letters, digits, dot, underscore, hyphen; no slashes or newlines)",
+            field="imported_event.related_project",
+        )
+
+
+def _live_peer_sessions(context_file: str | Path) -> list[dict]:
+    """Other live Claude Code sessions bound to the project owning ``context_file``.
+
+    The project name comes from the filename (``<name>-context.md``), so this
+    works for a write into any project, not only the caller's own - which is the
+    case that matters, since the whole point is telling another project's session
+    that its context moved under it.
+
+    Identity comes from ``CLAUDE_CODE_SESSION_ID`` in THIS MCP subprocess's own
+    environment, which Claude Code sets per session. Do not try to derive it
+    from the process tree: one ``claude`` process hosts many sessions at once, so
+    pid to session is one-to-many and cannot identify the caller.
+
+    The env var is not perfect either - during a resume the subprocess can carry
+    an id the conversation is not using - but it is the only
+    per-session signal available here, and a wrong exclusion merely costs one
+    spurious ask-the-user, never a wrong write.
+
+    Returns an empty list when the session id cannot be resolved at all.
+    Without it the caller cannot be excluded from its own results, and since
+    ListAgents never lists the calling session, its row would always fail to
+    match and send the caller into the ask-the-user fallback for no reason.
+
+    Best-effort throughout: a failure here must not turn a successful write into
+    a failed tool call.
+    """
+    try:
+        session_id = _resolve_session_id(None)
+        if not session_id:
+            return []
+        name = Path(context_file).name
+        if not name.endswith("-context.md"):
+            # Subtask layout writes a bare `context.md`, which carries no project
+            # name. Those are nested under a parent and are not addressed as
+            # projects, so there is nobody to notify.
+            return []
+        project_name = name[: -len("-context.md")]
+        return missioncache_db.live_sessions_for_project(
+            project_name, exclude_session_id=session_id
+        )
+    except Exception:
+        logger.exception("Error resolving live peer sessions")
+        return []
 
 
 @mcp.tool()
@@ -338,17 +434,39 @@ async def update_context_file(
             )
         ),
     ] = None,
+    imported_event: Annotated[
+        dict[str, str] | None,
+        Field(
+            description=(
+                "A cross-project event that changes THIS project's reality, as "
+                '{"heading": ..., "body": ..., "related_project": ..., '
+                '"related_note": ...}. Writes a self-contained "## <heading>" '
+                "section above Waiting on and records the link on the "
+                "'**Related projects:**' header line. The heading gets today's "
+                "date appended when it does not already carry one. Use this "
+                "instead of editing another project's context file by hand - "
+                "only this path takes the file lock."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """
     Update a context.md file atomically.
 
     Updates timestamp and specified sections. Much faster than multiple
     Read/Edit calls. Maintains the '## Waiting on' table via waiting_on_add /
-    waiting_on_resolve, and enforces the Recent Changes cap (overflow rolls
-    into the per-project journal file automatically).
+    waiting_on_resolve, writes cross-project events via imported_event, and
+    enforces the Recent Changes cap (overflow rolls into the per-project
+    journal file automatically).
+
+    When other live Claude Code sessions are bound to the project that owns
+    this file, they are returned in 'live_sessions' - tell them what changed
+    with SendMessage, per the cross-session notifications rule.
     """
     try:
         _validate_path(context_file, "context_file", must_be_under=settings.root)
+        if imported_event:
+            _validate_imported_event(imported_event)
         result = project_files.update_context_file(
             context_file=context_file,
             next_steps=next_steps,
@@ -358,9 +476,10 @@ async def update_context_file(
             key_files=key_files,
             waiting_on_add=waiting_on_add,
             waiting_on_resolve=waiting_on_resolve,
+            imported_event=imported_event,
         )
 
-        return {
+        response = {
             "success": True,
             "file": context_file,
             "timestamp": project_files.get_timestamp(),
@@ -373,12 +492,26 @@ async def update_context_file(
                     ("gotchas", gotchas),
                     ("key_files", key_files),
                     ("waiting_on", waiting_on_add or waiting_on_resolve),
+                    # Only when it actually landed - a repeated event is a
+                    # no-op, and claiming it here would report a section this
+                    # call did not write.
+                    (
+                        "imported_event",
+                        imported_event and result["imported_event_applied"],
+                    ),
                 ]
                 if v
             ],
             "waiting_on_unmatched": result["waiting_on_unmatched"],
             "journal_rolled_over": result["journal_rolled_over"],
         }
+        if imported_event and not result["imported_event_applied"]:
+            response["imported_event_duplicate"] = True
+
+        peers = _live_peer_sessions(context_file)
+        if peers:
+            response["live_sessions"] = peers
+        return response
 
     except MissionCacheError as e:
         return e.to_dict()

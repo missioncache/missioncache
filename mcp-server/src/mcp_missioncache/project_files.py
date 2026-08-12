@@ -432,6 +432,52 @@ def _apply_waiting_on(
     return content, resolved_changes, unmatched
 
 
+def _apply_imported_event(
+    content: str, timestamp: str, imported_event: dict[str, str]
+) -> tuple[str, bool]:
+    """Write a self-contained imported-event section above ``## Waiting on``.
+
+    This is the only locked writer for the "Cross-project events" convention; a
+    direct Edit skips the sidecar lock the parallel-session discipline requires.
+
+    Returns ``(content, applied)``. ``applied`` is False when a section with this
+    exact heading is already present, which makes a retried call a no-op instead
+    of stacking duplicate sections - the receiving side is told to "read the
+    section it names", and two sections with one name makes that ambiguous.
+
+    Both caller-supplied strings are constrained before they reach the file.
+    ``heading`` is validated single-line by the MCP layer; ``body`` has its
+    headings demoted here so a pasted summary containing ``## Next Steps``
+    becomes a subsection of this event instead of shadowing the project's real
+    one. The date is appended unless the heading already ends in a parenthesized
+    one, so an id like ``ABCD-1234-56-7890`` is not mistaken for a date.
+    """
+    heading = " ".join((imported_event.get("heading") or "").split())
+    body = (imported_event.get("body") or "").strip()
+    if not heading or not body:
+        return content, False
+
+    today = timestamp.split(" ")[0]
+    if not re.search(r"\(\d{4}-\d{2}-\d{2}\)\s*$", heading):
+        heading = f"{heading} ({today})"
+
+    if context_health.extract_section(content, heading) is not None:
+        return content, False
+
+    content = context_health.insert_section_before(
+        content,
+        f"## {heading}\n\n{context_health.demote_headings(body)}",
+        ("Waiting on", "Next Steps", "Recent Changes"),
+    )
+
+    related = (imported_event.get("related_project") or "").strip()
+    if related:
+        content = context_health.upsert_related_projects(
+            content, related, imported_event.get("related_note", "") or ""
+        )
+    return content, True
+
+
 def update_context_file(
     context_file: str | Path,
     next_steps: list[str] | None = None,
@@ -441,6 +487,7 @@ def update_context_file(
     key_files: dict[str, str] | None = None,
     waiting_on_add: list[dict[str, str]] | None = None,
     waiting_on_resolve: list[dict[str, str]] | None = None,
+    imported_event: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Update sections in a context.md file atomically.
 
@@ -457,6 +504,11 @@ def update_context_file(
         waiting_on_resolve: Rows to resolve, each ``{"match", "outcome"}``.
             Removes the first row whose What cell contains ``match`` and
             records the resolution in today's Recent Changes subsection.
+        imported_event: A cross-project event as
+            ``{"heading", "body", "related_project", "related_note"}``. Writes
+            ``## <heading>`` above Waiting on and records the link on the
+            ``**Related projects:**`` header line. Ignored unless both
+            ``heading`` and ``body`` are given.
 
     Returns:
         Dict with ``content`` (updated file text), ``waiting_on_unmatched``
@@ -472,6 +524,9 @@ def update_context_file(
     journal_path = context_health.derive_journal_path(path)
     waiting_on_unmatched: list[str] = []
     rolled_over = 0
+    # Carries results out of the transform, which runs under the lock and may be
+    # retried; a plain closure variable would be rebound per attempt.
+    nonlocal_state: dict[str, Any] = {"imported_event_applied": False}
 
     def _transform(content: str) -> tuple[str, str | None]:
         nonlocal rolled_over
@@ -501,6 +556,14 @@ def update_context_file(
             content, timestamp, waiting_on_add, waiting_on_resolve
         )
         waiting_on_unmatched.extend(unmatched)
+
+        # Imported cross-project event, after waiting-on maintenance so the
+        # `## Waiting on` anchor exists even when this call self-healed it.
+        if imported_event:
+            content, applied = _apply_imported_event(
+                content, timestamp, imported_event
+            )
+            nonlocal_state["imported_event_applied"] = applied
 
         # Update Recent Changes - one `## Recent Changes` heading with dated
         # `###` sub-sections prepended newest-first. The prepend shape lives
@@ -548,6 +611,7 @@ def update_context_file(
         "content": new_content,
         "waiting_on_unmatched": waiting_on_unmatched,
         "journal_rolled_over": rolled_over,
+        "imported_event_applied": nonlocal_state["imported_event_applied"],
     }
 
 

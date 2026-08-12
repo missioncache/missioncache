@@ -6,6 +6,7 @@ Tests use tmp_path for all file I/O and monkeypatch to redirect root_dir.
 import re
 
 import pytest
+from missioncache_db import context_health as ch
 
 from mcp_missioncache.config import Settings
 from mcp_missioncache.errors import ErrorCode, MissionCacheError, MissionCacheFileNotFoundError
@@ -969,10 +970,18 @@ class TestUpdateContextReturnContract:
         ctx = tmp_path / "context.md"
         ctx.write_text(sample_context_md)
         result = update_context_file(str(ctx), recent_changes=["x"])
-        assert set(result) == {"content", "waiting_on_unmatched", "journal_rolled_over"}
+        assert set(result) == {
+            "content",
+            "waiting_on_unmatched",
+            "journal_rolled_over",
+            "imported_event_applied",
+        }
         assert isinstance(result["content"], str)
         assert result["waiting_on_unmatched"] == []
         assert result["journal_rolled_over"] == 0
+        # False when no event was passed at all, so the MCP layer can tell a
+        # skipped duplicate from a section it actually wrote.
+        assert result["imported_event_applied"] is False
 
 
 class TestAnchoredHeadingMatch:
@@ -1075,3 +1084,169 @@ class TestFencedHeadingNotCorrupted:
         content = ctx.read_text()
         assert "- seed" in content
         assert "### 2026-04-01 09:00" in content
+
+
+# ── imported_event (the locked writer for the cross-project convention) ──
+
+
+class TestImportedEvent:
+    """Spec source: the "Cross-project events" convention in
+    rules/missioncache.md - a self-contained ``## <event> (<date>)`` section
+    ABOVE Waiting on, plus a ``**Related projects:**`` header line so both sides
+    know the link exists. This parameter exists so following that convention
+    goes through the sidecar lock instead of a direct Edit.
+    """
+
+    CONTEXT = (
+        "# demo - Context\n"
+        "**Last Updated:** 2026-04-01 10:00\n"
+        "\n## Description\n\nBody.\n"
+        "\n## Waiting on\n\n| What | Who | Since | Gates |\n|---|---|---|---|\n"
+        "\n## Next Steps\n\n1. Thing\n"
+        "\n## Recent Changes\n"
+    )
+
+    def _write(self, tmp_path, **event):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.CONTEXT)
+        update_context_file(str(ctx), imported_event=event)
+        return ctx.read_text()
+
+    def test_section_lands_above_waiting_on(self, tmp_path):
+        content = self._write(tmp_path, heading="Steering call", body="- Scope cut.")
+        names = [s["name"] for s in ch.section_index(content)]
+        assert names.index("Steering call (%s)" % _today(content)) < names.index(
+            "Waiting on"
+        )
+
+    def test_body_is_written_verbatim(self, tmp_path):
+        content = self._write(tmp_path, heading="Steering call", body="- Scope cut.")
+        assert "- Scope cut." in content
+
+    def test_date_is_appended_when_the_heading_lacks_one(self, tmp_path):
+        content = self._write(tmp_path, heading="Steering call", body="- x")
+        assert f"## Steering call ({_today(content)})" in content
+
+    def test_a_heading_that_already_dates_itself_is_left_alone(self, tmp_path):
+        content = self._write(
+            tmp_path, heading="Steering call (2026-01-05)", body="- x"
+        )
+        assert "## Steering call (2026-01-05)" in content
+        assert content.count("Steering call") == 1
+
+    def test_related_project_lands_on_the_header_line(self, tmp_path):
+        content = self._write(
+            tmp_path,
+            heading="Steering call",
+            body="- x",
+            related_project="other-proj",
+            related_note="shares the feed",
+        )
+        assert "**Related projects:** [[other-proj]] (shares the feed)" in content
+
+    def test_ignored_without_a_body(self, tmp_path):
+        """Half an event is not an event - a heading with nothing under it
+        would be worse than no section at all."""
+        content = self._write(tmp_path, heading="Steering call", body="")
+        assert "Steering call" not in content
+
+    def test_ignored_without_a_heading(self, tmp_path):
+        content = self._write(tmp_path, heading="", body="- x")
+        assert "- x" not in content
+
+    def test_waiting_on_is_created_first_when_absent(self, tmp_path):
+        """On a file predating the Waiting on convention, a waiting_on_add in
+        the same call self-heals the section and the event still sits above it."""
+        ctx = tmp_path / "context.md"
+        ctx.write_text(
+            "# demo - Context\n**Last Updated:** 2026-04-01 10:00\n"
+            "\n## Description\n\nBody.\n\n## Next Steps\n\n1. Thing\n"
+        )
+        update_context_file(
+            str(ctx),
+            waiting_on_add=[{"what": "review", "who": "Dana", "gates": "rollout"}],
+            imported_event={"heading": "Steering call", "body": "- x"},
+        )
+        names = [s["name"] for s in ch.section_index(ctx.read_text())]
+        assert names.index("Steering call (%s)" % _today(ctx.read_text())) < names.index(
+            "Waiting on"
+        )
+
+
+def _today(content: str) -> str:
+    """The date update_context_file stamped on this write."""
+    return re.search(r"\*\*Last Updated:\*\* (\d{4}-\d{2}-\d{2})", content).group(1)
+
+
+# ── imported_event: structure forgery and idempotency ────────────────────
+
+
+class TestImportedEventCannotForgeStructure:
+    """Spec source: rules/missioncache.md requires the imported-event section to
+    be self-contained and to sit above Waiting on. A section that escapes its own
+    boundaries breaks the digest contract every other reader depends on.
+
+    All four cases below were reproduced against the pre-fix writer.
+    """
+
+    CONTEXT = (
+        "# demo - Context\n**Last Updated:** 2026-04-01 10:00\n"
+        "\n## Description\n\nBody.\n"
+        "\n## Waiting on\n\n| What | Who | Since | Gates |\n|---|---|---|---|\n"
+        "| real row | Dana | 2026-08-01 | rollout |\n"
+        "\n## Next Steps\n\n1. MY REAL NEXT STEP\n"
+        "\n## Recent Changes\n"
+    )
+
+    def _ctx(self, tmp_path):
+        ctx = tmp_path / "context.md"
+        ctx.write_text(self.CONTEXT)
+        return ctx
+
+    def test_body_heading_becomes_a_subsection_not_a_sibling(self, tmp_path):
+        """A pasted meeting summary containing '## Next Steps' must not shadow
+        the project's real Next Steps. This fires on ordinary content."""
+        ctx = self._ctx(tmp_path)
+        update_context_file(
+            str(ctx),
+            imported_event={
+                "heading": "Steering call",
+                "body": "- Scope cut.\n\n## Next Steps\n\n1. theirs",
+            },
+        )
+        content = ctx.read_text()
+        assert [s["name"] for s in ch.section_index(content)].count("Next Steps") == 1
+        assert "MY REAL NEXT STEP" in (ch.extract_section(content, "Next Steps") or "")
+        assert "### Next Steps" in content, "the body heading should be demoted"
+
+    def test_body_heading_inside_a_fence_is_left_alone(self, tmp_path):
+        ctx = self._ctx(tmp_path)
+        update_context_file(
+            str(ctx),
+            imported_event={"heading": "Call", "body": "```\n## not a heading\n```"},
+        )
+        assert "## not a heading" in ctx.read_text()
+
+    def test_repeating_the_same_event_is_a_no_op(self, tmp_path):
+        """A retried tool call must not stack duplicate sections - the receiver
+        is told to 'read the section it names', which two sections make
+        ambiguous."""
+        ctx = self._ctx(tmp_path)
+        event = {"heading": "Steering call", "body": "- Scope cut."}
+        for _ in range(3):
+            update_context_file(str(ctx), imported_event=event)
+        names = [s["name"] for s in ch.section_index(ctx.read_text())]
+        assert len([n for n in names if n.startswith("Steering call")]) == 1
+
+    def test_a_ticket_id_is_not_mistaken_for_a_date(self, tmp_path):
+        """The date suffix must still be appended when the heading merely
+        contains a date-shaped substring."""
+        ctx = self._ctx(tmp_path)
+        update_context_file(
+            str(ctx),
+            imported_event={"heading": "Ticket ABCD-1234-56-7890 handoff", "body": "- x"},
+        )
+        heading = next(
+            s["name"] for s in ch.section_index(ctx.read_text()) if "Ticket" in s["name"]
+        )
+        assert re.search(r"\(\d{4}-\d{2}-\d{2}\)$", heading), heading
