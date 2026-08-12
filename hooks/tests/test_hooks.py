@@ -2667,3 +2667,177 @@ class TestActivityTracker:
         # Must not raise. The hook is a fire-and-forget side effect; any
         # exception here would interrupt the user's prompt submission.
         mod.main()
+
+
+# ── session_title hook ────────────────────────────────────────────────────
+
+
+class TestSessionTitleHook:
+    """Spec source: "Cross-session notifications" in rules/missioncache.md and
+    the session_title section of docs/hooks.md.
+
+    Claude Code's cross-session SendMessage addresses a peer by its session
+    title, so the title has to equal the project name for anything to reach the
+    session that owns a project. The contract:
+
+    * Title from the EXPLICIT binding in project_state, so titled sessions and
+      the sessions live_sessions_for_project reports are one set.
+    * Set once per binding, so a manual /rename survives.
+    * Runs on slash commands too, or /missioncache:load could never retitle.
+    * Never raises, and stays silent when there is nothing to say.
+    """
+
+    @staticmethod
+    def _redirect_state(monkeypatch, home: Path):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @staticmethod
+    def _bind(db_path: Path, session_id: str, project_name: str, alive: bool = True):
+        """Bind a session to a project, and by default give it a live pid record.
+
+        The pid record is not optional scaffolding: a session only counts as a
+        live peer when its pid proves it is running, so a binding without one
+        models a stale row from a session that exited months ago.
+        """
+        import sqlite3 as _sqlite3
+
+        from missioncache_db import (  # type: ignore[import-not-found]
+            init_hooks_state_db_schema,
+            session_pid_path,
+        )
+
+        conn = _sqlite3.connect(db_path)
+        try:
+            init_hooks_state_db_schema(conn)
+            conn.execute(
+                "INSERT OR REPLACE INTO project_state (session_id, project_name) "
+                "VALUES (?, ?)",
+                (session_id, project_name),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        if alive:
+            rec = session_pid_path(session_id)
+            rec.parent.mkdir(parents=True, exist_ok=True)
+            rec.write_text(
+                json.dumps({"sessionId": session_id, "pid": os.getpid(), "startTime": None})
+            )
+
+    def _run(self, monkeypatch, capsys, payload: dict) -> dict | None:
+        """Run the hook against ``payload``; return the parsed stdout JSON."""
+        import importlib
+
+        import hooks.session_title as mod
+
+        importlib.reload(mod)
+        monkeypatch.setattr(sys, "stdin", StringIO(json.dumps(payload)))
+        mod.main()
+        out = capsys.readouterr().out.strip()
+        return json.loads(out) if out else None
+
+    def test_titles_a_bound_session_after_its_project(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+        assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+
+    def test_silent_for_an_unbound_session(self, tmp_path, monkeypatch, capsys):
+        self._redirect_state(monkeypatch, tmp_path)
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"}) is None
+
+    def test_does_not_retitle_on_the_next_prompt(self, tmp_path, monkeypatch, capsys):
+        """Set once per binding: re-asserting every prompt would silently undo
+        a manual /rename."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "again"}) is None
+
+    def test_retitles_when_the_bound_project_changes(self, tmp_path, monkeypatch, capsys):
+        """A mid-session /missioncache:load moves the binding, so the address
+        has to move with it."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        self._bind(db, "sid-a", "other-proj")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "other-proj"
+
+    def test_runs_on_slash_commands(self, tmp_path, monkeypatch, capsys):
+        """The other UserPromptSubmit hooks skip slash commands; this one must
+        not, or /missioncache:load would never trigger the retitle."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        out = self._run(
+            monkeypatch, capsys, {"session_id": "sid-a", "prompt": "/missioncache:load x"}
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_second_live_session_on_one_project_gets_a_suffix(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """One project can carry two sessions, and then one name cannot serve
+        both - the address has to stay distinct."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._bind(db, "sid-b", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-b", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj-2"
+
+    def test_a_long_dead_session_does_not_push_us_to_a_suffix(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """project_state keeps a row for every session that ever loaded the
+        project. A months-old row still holding the plain title must not cost
+        the only running session its name."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-ancient", "demo-proj", alive=False)
+        self._bind(db, "sid-a", "demo-proj")
+
+        from missioncache_db import write_session_title  # type: ignore[import-not-found]
+
+        write_session_title("sid-ancient", "demo-proj", "demo-proj")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_silent_in_a_subagent(self, tmp_path, monkeypatch, capsys):
+        """A subagent is not a session anyone addresses, and titling from one
+        would rename the parent it runs under."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        payload = {"session_id": "sid-a", "agent_id": "sub-1", "prompt": "hi"}
+        assert self._run(monkeypatch, capsys, payload) is None
+
+    def test_records_what_it_applied(self, tmp_path, monkeypatch, capsys):
+        """The recorded title is what the lookup hands callers to address, so
+        it must land before the title is announced."""
+        from missioncache_db import read_session_title  # type: ignore[import-not-found]
+
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        record = read_session_title("sid-a")
+        assert record["title"] == "demo-proj"
+        assert record["projectName"] == "demo-proj"
+
+    def test_survives_malformed_stdin(self, monkeypatch, capsys):
+        import importlib
+
+        import hooks.session_title as mod
+
+        importlib.reload(mod)
+        monkeypatch.setattr(sys, "stdin", StringIO("not json"))
+        mod.main()
+        assert capsys.readouterr().out == ""
