@@ -6,6 +6,27 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Cross-session notifications
+
+- A session that writes into another project's context now tells that project's live sessions about it, instead of leaving them working from what they read at load time. `update_context_file` returns `live_sessions` (other live Claude Code sessions bound to the project owning the file), and the new "Cross-session notifications" rule tells Claude to reach each one with Claude Code's cross-session `SendMessage` (2.1.224+, macOS and Linux) and what the receiving session should do with the message. (mcp-missioncache, rules)
+- New `session_title` UserPromptSubmit hook names each session after the MissionCache project it is bound to. `SendMessage` addresses a peer by its session title, and Claude Code otherwise derives that title from the session's first prompt - so nothing could reliably reach the session that owns a given project. The title is set once per binding, so a manual `/rename` sticks, and a second live session on one project takes a `-2` suffix. (plugin)
+- New `missioncache_db` helpers: `live_sessions_for_project` (the project → live sessions lookup, which did not exist in any form), `bound_project_for_session`, `session_is_alive`, and the `session_pid_path` / `session_title_path` state-file owners. `session_is_alive` is lifted out of `hooks/session_start.py` so the hook and the lookup cannot drift on what "still running" means. (missioncache-db)
+- `update_context_file` excludes the calling session from `live_sessions` using `CLAUDE_CODE_SESSION_ID` from the MCP subprocess's own environment. Deriving it from the process tree was tried and abandoned: one `claude` process hosts many sessions at once (measured: twelve under a single pid), so pid to session is one-to-many and the walk matched an unrelated two-month-old session that shared the pid. The process-tree walk is still lifted out of `hooks/session_start.py` and shared, but only for recording a session's pid. (missioncache-db, mcp-missioncache)
+- `live_sessions_for_project` lists a session only when its pid proves it is running, rather than when it is merely not proven dead. `project_state` is never cleaned on session exit, so it holds every session that ever loaded a project - a real project here had 34 such rows spanning two months against zero live sessions, and the looser rule would have announced every context write to all 34. (missioncache-db)
+
+- The send protocol documents that a send is not a delivery: a receiver running with bypassed permissions and `crossSessionInbound: "hold"` parks the message for manual approval and drops it after `dialogExpiry`, while `SendMessage` still returns success to the sender. Setting `crossSessionInbound` to `accept` delivers without the prompt and applies to already-running sessions. (rules)
+- The send protocol addresses a peer by its `ListAgents` name **and** the row's `[ref]`. A cross-session peer is not an agent in the calling conversation, so the bare name is rejected outright rather than only when two rows collide, and refs are per-listing so a remembered one does not resolve. (rules)
+
+### Context files
+
+- `imported_event` constrains what reaches the file. `heading` must be a single line and `related_project` must be a bare project name, because both are interpolated into markdown the digest parses: a newline in the heading forged a second `## Waiting on` above the real one (hiding the project's blockers table from the digest and sending every later waiting-on write to the decoy), and a newline in `related_project` forged a `**Fork of:**` or `Hub:` header line, which decides which file the resume flow loads. `body` stays free-form but has its headings demoted, so a pasted meeting summary containing `## Next Steps` becomes a subsection of the event instead of shadowing the project's real one - that last case needed no crafted input at all. (mcp-missioncache)
+- Repeating an `imported_event` whose heading already exists is now a no-op reported as `imported_event_duplicate`, instead of stacking a duplicate section on every retry. The heading's date suffix is only skipped when the heading already ends in a parenthesized date, so an id like `ABCD-1234-56-7890` is no longer mistaken for one. (mcp-missioncache)
+- `live_sessions_for_project` and `bound_project_for_session` log a warning when the hooks-state DB read fails, instead of returning "no peers" / "not bound" indistinguishably from success. Under lock contention the silent version failed exactly when a concurrent session existed, which is the case the feature is for. (missioncache-db)
+- The `session_title` hook no longer raises across the hook boundary when stdin carries valid JSON that is not an object. (plugin)
+- `live_sessions_for_project` returns `last_active` rather than `bound_at`: the underlying `project_state.updated_at` is refreshed by the dashboard's action hook, so it tracks activity, not binding time. (missioncache-db)
+
+- `update_context_file` gained an `imported_event` parameter that writes the "Cross-project events" section (`## <event> (<date>)` above Waiting on) and the `**Related projects:**` header line. The convention was documented but had no writer, so following it meant a direct Edit - which skips the sidecar lock the parallel-session discipline requires for exactly this write. (mcp-missioncache)
+
 ## 2026-07-30
 
 Published package versions: mcp-missioncache 1.0.20, missioncache-dashboard 1.0.13, missioncache-install 1.0.8. Claude Code plugin 1.0.9.

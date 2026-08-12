@@ -59,7 +59,7 @@ The hook also prints a short "Active Task Detected" block to stdout, which Claud
 
 ### 2. User submits a prompt
 
-Every time the user hits enter, Claude Code fires `UserPromptSubmit`. MissionCache registers two independent scripts on this hook:
+Every time the user hits enter, Claude Code fires `UserPromptSubmit`. MissionCache registers three independent scripts on this hook:
 
 - `hooks/activity_tracker.py` spawns a short-lived subprocess (`python -m missioncache_db heartbeat-auto`) with a hard 2-second timeout and `PYTHONPATH` set to the plugin-bundled `missioncache-db`. The subprocess calls `TaskDB.record_heartbeat_auto(cwd, session_id)`, which delegates to `find_task_for_cwd` - that checks `projects/<session-id>.json` and then pattern-matches `cwd` against `~/.missioncache/active/<task>/` and repo-local legacy `dev/active/` layouts. If a match is found, a row is inserted into the `heartbeats` table with the current timestamp and session ID. The subprocess boundary is deliberate: SQLite lock contention on the task DB can otherwise stall the heartbeat call for up to its 5-second `busy_timeout`, which would eat the entire `UserPromptSubmit` hook budget. The 2-second subprocess deadline bounds that worst case. Skip patterns filter out slash commands, shell commands, yes/no confirmations, and empty prompts so they do not inflate the count.
 - `hooks/task_tracker.py` checks for "divergence" between the tasks file and the context file (headings like `### Task 3` present in context while `- [ ] 3. ...` is still unchecked in tasks) and prints a reminder to stdout so Claude sees it. This is the guardrail that keeps the tasks file honest.
@@ -192,6 +192,8 @@ There is also a legacy layout under `<repo>/dev/{active,completed}/` that older 
 | File | Written by | Read by | Purpose |
 |------|------------|---------|---------|
 | `projects/<session-id>.json` | `session_start.py`, `/missioncache:load`, `/missioncache:new` (via `get_task` / `create_missioncache_files` server-side binding), `/missioncache:done` (removes) | `statusline.py`, `TaskDB.find_task_for_cwd` | Which project is active for a given session. Read on both the statusline rendering path (to show the project name) and the heartbeat path (to attribute time to the right task when `cwd` does not match a known task directory) |
+| `session-pids/<session-id>.json` | `session_start.py` (`write_session_pid`) | `missioncache_db.session_is_alive` | The Claude process pid plus its start time. Liveness for the parallel-session warning and for the live-session lookup; the start time catches a pid the OS has since recycled |
+| `session-title/<session-id>.json` | `session_title.py` | `missioncache_db.live_sessions_for_project`, and the hook itself | The title the hook applied and the project it applied it for. The project name is what decides whether to re-title, which is how a manual `/rename` survives |
 | `term-sessions/<term-id>` | `session_start.py` | `statusline.py` | Maps terminal-emulator session IDs back to Claude session IDs so mid-session lookups work from any tab |
 | `pending-project.json` | *(nothing)* | `TaskDB.find_task_for_cwd` priority-1 branch | Inverse legacy: read but never written. The priority-1 branch in `find_task_for_cwd` is effectively dead code - task resolution always falls through to the `projects/<session-id>.json` branch |
 | ~~`pending-task.json`~~ | *(removed in mcp-orbit 0.2.13)* | *(never read)* | Removed. Old files left on disk from pre-0.2.13 installs are harmless; the rename-sweep also stopped maintaining them. Safe to delete by hand |
@@ -206,7 +208,7 @@ It is easy to get confused about what is running where, because MissionCache has
 |------|--------------|----------|--------------|
 | Dashboard | Long-running (launchd-managed in practice) | Until stopped | Manual start or launchd |
 | MCP server | Stdio subprocess | One per Claude Code session | Claude Code on plugin load |
-| Hooks (`session_start`, `pre_compact`, `stop`, `activity_tracker`, `task_tracker`) | Short-lived one-shot | Single event | Claude Code hook events |
+| Hooks (`session_start`, `pre_compact`, `stop`, `activity_tracker`, `task_tracker`, `session_title`) | Short-lived one-shot | Single event | Claude Code hook events |
 | missioncache-auto | User-invoked CLI | Until task complete or failed | Manual `missioncache-auto <project>` |
 | missioncache-auto workers | Subprocesses of missioncache-auto | One per subtask in parallel mode | `parallel.py` |
 | Statusline | Very short-lived | ~50-200ms per invocation | Claude Code after every message |

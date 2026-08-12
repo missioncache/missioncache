@@ -1,6 +1,6 @@
 # Hooks
 
-This document covers the four lifecycle hooks MissionCache registers with Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`. Together they are what makes MissionCache's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside a MissionCache-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
+This document covers the four lifecycle events MissionCache hooks into Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`. Together they are what makes MissionCache's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside a MissionCache-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, heartbeats, sessions, `hooks-state.db`, `full_path`, the `find_task_for_cwd` resolution order). If a term in this doc is not defined here, it is defined there.
 
@@ -17,7 +17,8 @@ Claude Code's hook API lets a plugin register shell commands to run at specific 
   "hooks": {
     "UserPromptSubmit": [{"hooks": [
       {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/activity_tracker.py", "timeout": 5},
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/task_tracker.py", "timeout": 5}
+      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/task_tracker.py", "timeout": 5},
+      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_title.py", "timeout": 5}
     ]}],
     "SessionStart": [{"hooks": [
       {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py", "timeout": 10}
@@ -34,7 +35,7 @@ Claude Code's hook API lets a plugin register shell commands to run at specific 
 
 Each hook is a standalone Python script. Claude Code spawns them as subprocesses with the specified timeout, pipes event data in on stdin as JSON, and reads stdout (for context injection) and stderr (for user-visible reminders). The scripts never persist - they start, do their one job, and exit.
 
-Five hooks, four events: `UserPromptSubmit` runs *two* scripts (activity_tracker and task_tracker) in sequence because they have separate concerns but both trigger on the same event. The rest are one-to-one.
+Six hooks, four events: `UserPromptSubmit` runs *three* scripts (activity_tracker, task_tracker and session_title) in sequence because they have separate concerns but all trigger on the same event. The rest are one-to-one.
 
 ### Event-to-hook map
 
@@ -43,6 +44,7 @@ Five hooks, four events: `UserPromptSubmit` runs *two* scripts (activity_tracker
 | `SessionStart` | `session_start.py` | 10s | Detect active task for cwd, write session state, install bundled rules, emit context block to Claude |
 | `UserPromptSubmit` | `activity_tracker.py` | 5s | Record a heartbeat in the DB for time tracking |
 | `UserPromptSubmit` | `task_tracker.py` | 5s | Detect task-vs-context divergence and emit a reminder if Claude is forgetting to flip checkboxes |
+| `UserPromptSubmit` | `session_title.py` | 5s | Name the session after the project it is bound to, so other sessions can address it |
 | `PreCompact` | `pre_compact.py` | 30s | Update context file timestamp and add an "auto-saved before compaction" note |
 | `Stop` | `stop.py` | 10s | If files were edited during the session, remind the user to run `/missioncache:save` |
 
@@ -159,6 +161,28 @@ This is there because Claude Code (the harness) periodically injects system remi
 
 **Why this is not a feature of the MCP tool:** The divergence check has to run *on every prompt*, not on every `update_tasks_file` call. You can only detect "Claude forgot to flip the checkbox" by looking at the state of the two files on a schedule, and the only schedule Claude Code exposes to plugins is the hook event stream. Putting the check in an MCP tool would mean Claude has to proactively ask "am I drifting?" which is exactly the thing it forgets to do.
 
+## UserPromptSubmit: `session_title.py`
+
+**When:** Every user prompt, alongside the other two UserPromptSubmit hooks.
+
+**What it does:** Sets the Claude Code session title to the name of the MissionCache project the session is bound to, by printing `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "sessionTitle": "<project>"}}` to stdout.
+
+**Why the title matters:** Claude Code's cross-session `SendMessage` (2.1.224+) addresses a peer session *by its title* - the title is the address. Left alone, Claude Code derives it from the session's first prompt, so a session working on `avc-in-house-testing` can be called anything at all and nothing can reliably reach the session that owns a given project. `missioncache_db.live_sessions_for_project` exists to answer "which live sessions are on this project", and its answer is only useful if those sessions carry addressable names.
+
+**Where the binding comes from:** `project_state` in `hooks-state.db`, via `missioncache_db.bound_project_for_session`. Deliberately *not* the `projects/<session-id>.json` pointer, even though that is the more obvious source: the pointer is also written from cwd auto-resolution at SessionStart, so merely opening a project's repo would claim that project's title while the session stayed invisible to `live_sessions_for_project` (which reads `project_state`). Both ends key off the same table so that "titled", "addressable" and "notified" describe one set of sessions.
+
+**Set once per binding.** The hook records what it applied in `~/.claude/hooks/state/session-title/<session-id>.json` as `{sessionId, title, projectName, updated}` and re-applies only when the *bound project* changes. So:
+
+- A user's manual `/rename` survives - the hook never reasserts a title for a project it has already titled.
+- A mid-session `/missioncache:load other-project` retitles on the next prompt, because the bound project changed.
+- A renamed session no longer matches its recorded title in `ListAgents`, which is the signal for the caller to ask the user which session to address rather than send into the void.
+
+**Collision suffixes.** Two sessions can legitimately be on one project, and then one title cannot serve both. When another *live* session has already recorded the plain project name, this one takes the lowest free `-2` / `-3` suffix (`missioncache_db.choose_session_title`). Suffixes are computed against live sessions only, so a closed session frees its number. Two sessions taking their first prompt in the same instant can both land on the same suffix; that degrades to two identically-named `ListAgents` rows, which the caller disambiguates with the per-row ref.
+
+**No skip patterns.** Unlike `activity_tracker.py` and `task_tracker.py`, this hook runs on *every* prompt including slash commands. (It does keep the subagent guard those hooks have: a subagent would otherwise retitle the parent session it runs under.) Those hooks skip slash commands to keep heartbeat time honest; skipping them here would mean `/missioncache:load` - the very command that creates the binding - never triggers the retitle.
+
+**State files written:** `~/.claude/hooks/state/session-title/<session-id>.json`, whose path is owned by `missioncache_db.session_title_path`.
+
 ## PreCompact: `pre_compact.py`
 
 **When:** Claude Code is about to auto-compact the conversation. This happens when the context window fills up, and the compaction replaces older messages with a summary. The hook fires *before* the compaction happens, giving plugins one last chance to save state.
@@ -209,9 +233,11 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.missioncache/tasks.db:sessions` | missioncache_db `process_heartbeats` (called by pre_compact) | dashboard, MissionCache MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
-| `~/.claude/hooks-state.db:project_state` | `/missioncache:load`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline | SQLite row |
+| `~/.claude/hooks-state.db:project_state` | `/missioncache:load`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline, `bound_project_for_session` (session_title hook), `live_sessions_for_project` | SQLite row |
 | `~/.claude/hooks/state/term-sessions/<term-id>` | session_start | statusline fallback path | Plain text |
 | `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
+| `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
+| `~/.claude/hooks/state/session-title/<session-id>.json` | session_title | `missioncache_db.live_sessions_for_project` | JSON file |
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
@@ -322,7 +348,7 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 **Cause:** The pytest mocking pattern in `hooks/tests/` is `patch.dict('sys.modules', {'missioncache_db': MagicMock()}) + importlib.reload(mod)`. This only works if the import is lazy (inside `main()`) or if the `sys.path` bootstrap is the first thing that runs.
 
-**Fix:** Move the `missioncache_db` import inside `main()` so reload sees the mock. If you are adding a new hook, follow the lazy-import pattern used in `session_start.py`, `pre_compact.py`, `stop.py`, and `task_tracker.py`. Only `activity_tracker.py` uses a non-lazy pattern, and even that one calls `missioncache_db` via subprocess rather than `import`.
+**Fix:** Move the `missioncache_db` import inside `main()` so reload sees the mock. If you are adding a new hook, follow the lazy-import pattern used in `session_title.py`, `session_start.py`, `pre_compact.py`, `stop.py`, and `task_tracker.py`. Only `activity_tracker.py` uses a non-lazy pattern, and even that one calls `missioncache_db` via subprocess rather than `import`.
 
 ## Where to go from here
 
