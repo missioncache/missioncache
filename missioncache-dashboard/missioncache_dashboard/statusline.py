@@ -10,7 +10,7 @@ Layout:
   Line 3: Session    - [elapsed] [edits]
   Line 4: Metrics    - [model] [effort?]
   Line 5: K8s/Ctx    - [k8s context] [tokens] [ctx%]
-  Line 6: Usage      - [mode] [session%] [weekly%] [opus%]
+  Line 6: Usage      - [mode] [session%] [weekly%] [<scoped model>%] [opus%]
   Line 7: Codex      - [plan] [5h%] [weekly%] (only if codex installed)
   Line 8: Vitals     - [version] [Claude status]
 
@@ -95,6 +95,7 @@ COLORS = {
     "session_usage": f"{ESC}[38;2;100;160;200m",
     "weekly_usage": f"{ESC}[38;2;160;130;190m",
     "opus_usage": f"{ESC}[38;2;200;160;120m",
+    "scoped_usage": f"{ESC}[38;2;190;140;220m",
     "reset_time": f"{ESC}[38;2;120;120;130m",
     "mode_personal": f"{ESC}[38;2;80;200;120m",
     "mode_work": f"{ESC}[38;2;100;150;220m",
@@ -1221,6 +1222,42 @@ def _get_oauth_token() -> str | None:
         return os.environ.get("CLAUDE_OAUTH_TOKEN")
 
 
+def _parse_scoped_limit(limits: object) -> dict | None:
+    """Pull the per-model weekly limit out of the API's ``limits`` array.
+
+    The top-level buckets (``seven_day_opus``, ``seven_day_sonnet``, ...) are
+    null on plans where the model cap is reported here instead, so this is the
+    only place a scoped limit shows up. A live payload while Fable was capped:
+
+        {"kind": "weekly_scoped", "group": "weekly", "percent": 71,
+         "resets_at": "...", "is_active": true,
+         "scope": {"model": {"id": null, "display_name": "Fable"}}}
+
+    The label comes from ``scope.model.display_name`` rather than being
+    hardcoded, so whichever model is scoped is what gets shown. ``scope.model.id``
+    is null in practice, so the display name is the only usable key.
+
+    Returns None when no scoped weekly entry is present, which is the normal
+    state on a plan that does not cap a single model.
+    """
+    if not isinstance(limits, list):
+        return None
+    for entry in limits:
+        if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
+            continue
+        model = ((entry.get("scope") or {}).get("model") or {})
+        label = model.get("display_name")
+        percent = entry.get("percent")
+        if not label or percent is None:
+            continue
+        return {
+            "scoped_label": str(label),
+            "scoped_pct": str(int(percent)),
+            "scoped_reset": _format_reset_time(entry.get("resets_at") or ""),
+        }
+    return None
+
+
 def _parse_usage_response(data: dict) -> dict:
     """Parse API usage response into display values."""
     result: dict = {}
@@ -1239,6 +1276,9 @@ def _parse_usage_response(data: dict) -> dict:
             opus_pct = int(data["seven_day_opus"].get("utilization", 0))
             if opus_pct > 0:
                 result["opus_pct"] = str(opus_pct)
+    scoped = _parse_scoped_limit(data.get("limits"))
+    if scoped:
+        result.update(scoped)
     extra = _parse_extra_usage(data.get("extra_usage"))
     if extra:
         result.update(extra)
@@ -1904,7 +1944,10 @@ def main() -> None:
         try:
             extra_data = f_extra.result(timeout=_FUTURE_TIMEOUT)
             if extra_data and usage:
-                for k in ("extra_spent", "extra_limit", "extra_pct", "extra_reset"):
+                # scoped_* rides along with extra_*: both come only from the
+                # API response, never from the statusline's stdin payload.
+                for k in ("extra_spent", "extra_limit", "extra_pct", "extra_reset",
+                          "scoped_label", "scoped_pct", "scoped_reset"):
                     if k in extra_data:
                         usage[k] = extra_data[k]
         except Exception:
@@ -2116,6 +2159,20 @@ def main() -> None:
                 else:
                     line_usage.append(
                         f"{COLORS['weekly_usage']}{ICONS['week']} Weekly: {wp:>3}%{RESET}")
+            # Per-model weekly cap, right after the all-models weekly it sits
+            # under. Label comes from the API (currently "Fable"), so a
+            # different scoped model renders itself without a code change.
+            slabel = usage.get("scoped_label")
+            sp_pct = usage.get("scoped_pct")
+            if slabel and sp_pct and sp_pct != "null":
+                s_reset = usage.get("scoped_reset", "")
+                if s_reset and s_reset != "null":
+                    line_usage.append(
+                        f"{COLORS['scoped_usage']}{ICONS['model']} {slabel}: {sp_pct:>3}% "
+                        f"{COLORS['reset_time']}{ICONS['reset']} {s_reset}{RESET}")
+                else:
+                    line_usage.append(
+                        f"{COLORS['scoped_usage']}{ICONS['model']} {slabel}: {sp_pct:>3}%{RESET}")
             op = usage.get("opus_pct")
             if op and op != "null" and op != "0":
                 line_usage.append(
