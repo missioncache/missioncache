@@ -142,13 +142,16 @@ A project's context can change under a session that is running right now. When i
 
 `update_context_file` returns `live_sessions` when other live Claude Code sessions are bound to the project owning the file you just wrote. Each entry carries `session_id`, `title` and `last_active`. It appears for cross-project writes and for a sibling session on your own project alike.
 
-The `title` is the address: `SendMessage` reaches a peer by its session title, and the `session_title` hook names each bound session after its project (a second session on the same project takes `<project>-2`). The title is set once per binding, so a manual `/rename` sticks and the entry then falls to the ask-the-user path below.
+The `title` is the address: `SendMessage` reaches a peer by its session title, and the `session_title` hook names each bound session after its project (a second session on the same project takes `<project>-2`). The hook re-emits the title only when the computed address changes, so a stale suffix drops back to the plain name on that session's next prompt after the peer holding it dies, and a manual `/rename` survives the steady state.
+
+`ListAgents` is the reachability authority, not the pid filter. The pid record only proves a process runs, and one `claude` process hosts many sessions, so a closed session can stay "pid-alive" indefinitely. A session absent from `ListAgents` is unreachable regardless of what the pid says.
 
 **Sending.** For each entry:
 
 1. Call `ListAgents` and find the row whose name is the entry's `title`.
 2. `SendMessage` to that row's **name plus its ` [ref]`**, exactly as the listing printed it: `{"to": "avc-in-house-testing [c8fc2f]"}`. A peer session is not an agent in your conversation, so the bare name is rejected with `'<name>' is not an agent in this conversation` and an error naming the ref to use. Read the ref from the listing you just took - refs are per-listing, and one you remembered from earlier will not resolve. Message every entry: a project can legitimately have more than one live session.
-3. No matching row means the user renamed the session or the title hook never ran. Ask which session it is with `AskUserQuestion`, offering the `ListAgents` rows.
+3. No matching row means the session is gone - closed while its shared `claude` process lives on, so the pid filter could not catch it. Skip that entry and tell the user in one line ("one bound session was unreachable, skipped"); do NOT block on a question. A live session whose title went stale heals itself on its next prompt, and a renamed session gets its update from the context file on its next `/missioncache:load`.
+3b. TWO rows matching one title (unmanaged background sessions inherit a project's name without ever being bound or suffixed) is the one case that stays a question: sending to the wrong twin is a real misdelivery, so ask which row with `AskUserQuestion`.
 4. No `ListAgents` / `SendMessage` at all (Claude Code below 2.1.224, or Windows) means skip it silently. The context write already succeeded and is the durable half.
 
 A send is not a delivery. When the receiving session runs with bypassed permissions and its `crossSessionInbound` setting is `hold`, the message waits for the user to approve it in that session's window and expires after `dialogExpiry`. `SendMessage` returns `success: true` either way, so the sending side cannot tell the difference and must not claim the peer was told. Setting `crossSessionInbound` to `accept` delivers without the prompt, and it takes effect on sessions that are already running - no restart. Never treat the notification as the durable half of the work: the context write is.

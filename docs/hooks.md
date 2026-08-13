@@ -171,11 +171,12 @@ This is there because Claude Code (the harness) periodically injects system remi
 
 **Where the binding comes from:** `project_state` in `hooks-state.db`, via `missioncache_db.bound_project_for_session`. Deliberately *not* the `projects/<session-id>.json` pointer, even though that is the more obvious source: the pointer is also written from cwd auto-resolution at SessionStart, so merely opening a project's repo would claim that project's title while the session stayed invisible to `live_sessions_for_project` (which reads `project_state`). Both ends key off the same table so that "titled", "addressable" and "notified" describe one set of sessions.
 
-**Set once per binding.** The hook records what it applied in `~/.claude/hooks/state/session-title/<session-id>.json` as `{sessionId, title, projectName, updated}` and re-applies only when the *bound project* changes. So:
+**Re-emit only when the computed address changes.** The hook records what it applied in `~/.claude/hooks/state/session-title/<session-id>.json` as `{sessionId, title, projectName, updated}`, recomputes the title every prompt, and emits only on a difference. So:
 
-- A user's manual `/rename` survives - the hook never reasserts a title for a project it has already titled.
-- A mid-session `/missioncache:load other-project` retitles on the next prompt, because the bound project changed.
-- A renamed session no longer matches its recorded title in `ListAgents`, which is the signal for the caller to ask the user which session to address rather than send into the void.
+- Steady state (same project, same peers) is silent, which is what lets a user's manual `/rename` survive day to day.
+- A mid-session `/missioncache:load other-project` retitles on the next prompt, because the computation changed.
+- A stale suffix self-heals: a session left holding `<project>-2` after the plain-name holder died drops back to `<project>` on its next prompt. Without this, suffixes only accumulate (a real machine reached `-3` with zero live peers) and the recorded address stops matching any `ListAgents` row.
+- The accepted narrow cost: a manual `/rename` is overwritten when the peer set changes (a collision appears or a suffix frees up), not only on rebind. An unaddressable session fails every notify; a clobbered rename costs one repeated `/rename`.
 
 **Collision suffixes.** Two sessions can legitimately be on one project, and then one title cannot serve both. When another *live* session has already recorded the plain project name, this one takes the lowest free `-2` / `-3` suffix (`missioncache_db.choose_session_title`). Suffixes are computed against live sessions only, so a closed session frees its number. Two sessions taking their first prompt in the same instant can both land on the same suffix; that degrades to two identically-named `ListAgents` rows, which the caller disambiguates with the per-row ref.
 

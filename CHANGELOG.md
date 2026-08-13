@@ -6,6 +6,11 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+### Cross-session notifications
+
+- Session titles self-heal instead of being set once per binding. The `session_title` hook recomputes the address every prompt and re-emits only on a difference, so a session left holding `<project>-2` after the plain-name holder dies drops back to the plain name, and two sessions that raced their first prompt into the same name split apart on the next prompt. Set-once let suffixes only accumulate: a real machine reached `-3` with zero live peers, making two of six live projects unaddressable by their recorded titles. The narrow cost is that a manual `/rename` can be overwritten when the peer set changes, not only on rebind. (plugin)
+- The send protocol treats `ListAgents` as the reachability authority. A notify target with no matching row is skipped with a one-line note instead of blocking on a question - the pid filter cannot catch a session closed while its shared `claude` process lives on, and a live session's stale title now heals itself. Two rows matching one title (unmanaged background sessions inherit a project's name without being bound) stays the one case that asks. This retires the shared-pid liveness concern at the protocol level: a stale target costs a skipped send, never a misdirected one. (rules)
+
 ## 2026-08-13
 
 Published package versions: missioncache-db 1.0.19, mcp-missioncache 1.0.24, missioncache-dashboard 1.0.14, missioncache-install 1.0.9. Claude Code plugin 1.0.13.
