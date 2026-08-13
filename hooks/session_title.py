@@ -19,9 +19,11 @@ Three behaviours worth knowing:
    sessions. The `projects/<sid>.json` pointer is the wrong source here - it is
    also written from cwd auto-resolution at SessionStart, so merely opening a
    project's repo would claim the project's title.
-2. It sets the title once per binding and then leaves it alone, so a manual
-   `/rename` survives. A mid-session `/missioncache:load other-project` changes
-   the bound project and retitles on the next prompt.
+2. It re-emits only when the computed address changes: on a rebind, on a new
+   collision, or when a stale suffix can drop back to the plain name after a
+   peer dies. In the steady state it stays silent, which is what lets a manual
+   `/rename` survive day to day (see `resolve_title` for the accepted narrow
+   clobber case).
 3. It runs on every prompt, including slash commands. It deliberately does NOT
    copy the `SKIP_PATTERNS` guard from the other two UserPromptSubmit hooks -
    that guard keeps `activity_tracker`'s heartbeat time honest, and copying it
@@ -42,8 +44,24 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
 def resolve_title(session_id: str) -> tuple[str, str] | None:
     """``(title, project_name)`` to apply to ``session_id``, or None for nothing.
 
-    None covers every "nothing to do" case: the session is not bound to a
-    project, or it already carries the title this hook picked for that project.
+    The title is recomputed every prompt and emitted only when it DIFFERS from
+    what this hook last applied. That one comparison carries three behaviours:
+
+    * Steady state: same project, same peers -> the computed title equals the
+      recorded one -> silent. A manual ``/rename`` therefore survives, because
+      nothing is re-asserted while the environment is unchanged.
+    * Rebind: ``/missioncache:load other-project`` changes the computation ->
+      re-title.
+    * Self-heal: a session left holding ``<project>-2`` after the peer that
+      owned the plain name died re-titles to the plain name on its next prompt.
+      Without this, suffixes only ever accumulate (a real machine reached ``-3``
+      with zero live peers) and the recorded address stops matching any
+      ``ListAgents`` row, which the send protocol reads as "session gone".
+
+    The narrow cost: a manual ``/rename`` is re-overwritten when the peer set
+    changes (a collision appears or a suffix frees up), not only on rebind.
+    That trade was accepted because an unaddressable session fails every notify,
+    while a clobbered rename costs one repeated ``/rename``.
     """
     from missioncache_db import (  # type: ignore[import-not-found]
         bound_project_for_session,
@@ -55,14 +73,15 @@ def resolve_title(session_id: str) -> tuple[str, str] | None:
     if not project_name:
         return None
 
+    computed = choose_session_title(project_name, session_id)
     applied = read_session_title(session_id) or {}
-    if applied.get("projectName") == project_name:
-        # Already titled for this project. Re-applying every prompt would
-        # silently undo a manual /rename, so stop here even if the current
-        # title no longer matches what we recorded.
+    if (
+        applied.get("projectName") == project_name
+        and applied.get("title") == computed
+    ):
         return None
 
-    return choose_session_title(project_name, session_id), project_name
+    return computed, project_name
 
 
 def main() -> None:

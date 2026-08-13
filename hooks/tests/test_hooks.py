@@ -2757,8 +2757,9 @@ class TestSessionTitleHook:
         assert self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"}) is None
 
     def test_does_not_retitle_on_the_next_prompt(self, tmp_path, monkeypatch, capsys):
-        """Set once per binding: re-asserting every prompt would silently undo
-        a manual /rename."""
+        """Steady state is silent: same project, same peers, so the computed
+        title equals the recorded one and nothing is emitted. This silence is
+        what lets a manual /rename survive day to day."""
         db = self._redirect_state(monkeypatch, tmp_path)
         self._bind(db, "sid-a", "demo-proj")
         self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
@@ -2811,6 +2812,51 @@ class TestSessionTitleHook:
         write_session_title("sid-ancient", "demo-proj", "demo-proj")
         out = self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
         assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_stale_suffix_drops_back_when_the_plain_name_frees(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Self-heal: a session holding -2 re-titles to the plain name on its
+        next prompt after the plain-name holder dies. Found live: a machine
+        reached -3 with zero live peers, and the recorded address matched no
+        ListAgents row, so every notify to it read the session as gone."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._bind(db, "sid-b", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-b", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj-2"
+
+        # sid-a's process dies; the plain name is free again.
+        from missioncache_db import session_pid_path  # type: ignore[import-not-found]
+
+        rec = session_pid_path("sid-a")
+        rec.write_text(json.dumps({"sessionId": "sid-a", "pid": self._dead_pid_static()}))
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-b", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_first_prompt_race_heals_on_the_next_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Two sessions racing their first prompt can both take the plain name.
+        The recompute turns that from a permanent collision into a one-prompt
+        one: the next prompt of either sees the other's record and moves to -2."""
+        from missioncache_db import write_session_title  # type: ignore[import-not-found]
+
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._bind(db, "sid-a", "demo-proj")
+        self._bind(db, "sid-b", "demo-proj")
+        # Simulate the race outcome: both records claim the plain name.
+        write_session_title("sid-a", "demo-proj", "demo-proj")
+        write_session_title("sid-b", "demo-proj", "demo-proj")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-b", "prompt": "hi"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj-2"
+
+    @staticmethod
+    def _dead_pid_static():
+        proc = subprocess.Popen([sys.executable, "-c", ""])
+        proc.wait()
+        return proc.pid
 
     def test_silent_in_a_subagent(self, tmp_path, monkeypatch, capsys):
         """A subagent is not a session anyone addresses, and titling from one
