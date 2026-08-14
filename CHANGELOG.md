@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- The cross-session send rule now tries the bare `ListAgents` name first and falls back to the ref the rejection error itself prints. Claude Code 2.1.232 delivers a bare name matching one live session directly, but a long-lived session keeps the code it launched with regardless of what `claude --version` reports (it follows the install symlink, not the running process - confirmed with lsof on a session still executing the 2.1.231 binary hours after 2.1.232 was installed), so rejections continue after an upgrade until sessions restart and the ref fallback stays load-bearing. The two-rows-one-title ask stays, narrowed to unmanaged background sessions now that the harness auto-uniquifies interactive names with a `name-word-word` variant - which the rule also documents as a new way the recorded address can silently diverge from the displayed one (the entry then falls into the skip path, never a misdelivery). (rules)
+
 ### Cross-session notifications
 
 - Session titles self-heal instead of being set once per binding. The `session_title` hook recomputes the address every prompt and re-emits only on a difference, so a session left holding `<project>-2` after the plain-name holder dies drops back to the plain name, and two sessions that raced their first prompt into the same name split apart on the next prompt. Set-once let suffixes only accumulate: a real machine reached `-3` with zero live peers, making two of six live projects unaddressable by their recorded titles. The narrow cost is that a manual `/rename` can be overwritten when the peer set changes, not only on rebind. (plugin)
