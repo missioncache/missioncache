@@ -663,12 +663,13 @@ def _links_to(link: Path, target: Path) -> bool:
     installer would tear down and re-create a correct link on every run.
     """
     try:
-        current = link.readlink()
+        # samefile asks the filesystem (device + file index), so it is immune
+        # to path spelling entirely - the \\?\ prefix, 8.3 short names, and
+        # case all stop mattering. It follows the link, which is exactly the
+        # question: does this link land on target?
+        return link.exists() and os.path.samefile(link, target)
     except OSError:
         return False
-    return os.path.normcase(os.path.realpath(current)) == os.path.normcase(
-        os.path.realpath(target)
-    )
 
 
 def _symlink_or_copy(link: Path, target: Path) -> bool:
