@@ -137,7 +137,7 @@ class TestFormatWallTime:
         past = datetime.now() - timedelta(days=3)
         past = past.replace(hour=9, minute=5, second=0)
         # Month-name form, matching the Last Action cell's format.
-        assert _format_wall_time(past.timestamp()) == past.strftime("%b %-d %H:%M")
+        assert _format_wall_time(past.timestamp()) == f"{past.strftime('%b')} {past.day} {past.strftime('%H:%M')}"
 
 
 # ── get_project_info fork detection (IO) ────────────────────────────────

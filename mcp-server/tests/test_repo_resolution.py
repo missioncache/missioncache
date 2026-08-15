@@ -350,4 +350,4 @@ class TestGetMissionCacheProgressCompleted:
 
         assert "error" not in result
         assert result["progress"]["total_items"] == 2
-        assert "/completed/" in result["file"]
+        assert "completed" in pathlib.Path(result["file"]).parts

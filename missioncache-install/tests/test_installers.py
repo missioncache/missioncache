@@ -9,6 +9,7 @@ real CLI tools and are covered by the end-to-end clean-VM verification in M10.6.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,18 @@ def _make_ctx(
 # _symlink_md_dir
 # ---------------------------------------------------------------------------
 
+def _same_link_target(link: Path, expected: Path) -> bool:
+    """Whether a symlink points at expected, ignoring path spelling.
+
+    Windows readlink() returns the extended-length form (\\\\?\\C:\\...) while the
+    expected path is a plain C:\\... path, so a raw == is always False there.
+    Compares normalized real paths, matching installers._links_to.
+    """
+    return os.path.normcase(os.path.realpath(link.readlink())) == os.path.normcase(
+        os.path.realpath(expected)
+    )
+
+
 def test_symlink_md_dir_creates_links_for_md_files(tmp_path: Path) -> None:
     """Every *.md in src gets a symlink in dst; non-md files are skipped."""
     src = tmp_path / "src"
@@ -52,7 +65,7 @@ def test_symlink_md_dir_creates_links_for_md_files(tmp_path: Path) -> None:
     installers._symlink_md_dir(src, dst)
 
     assert (dst / "a.md").is_symlink(), "a.md should be symlinked"
-    assert (dst / "a.md").readlink() == src / "a.md"
+    assert _same_link_target(dst / "a.md", src / "a.md")
     assert (dst / "b.md").is_symlink(), "b.md should be symlinked"
     assert not (dst / "ignore.txt").exists(), \
         "Non-md files in src must not be touched in dst"
@@ -89,7 +102,7 @@ def test_symlink_md_dir_idempotent_when_already_linked(tmp_path: Path) -> None:
     installers._symlink_md_dir(src, dst)  # should not raise
 
     assert (dst / "rule.md").is_symlink()
-    assert (dst / "rule.md").readlink() == src / "rule.md"
+    assert _same_link_target(dst / "rule.md", src / "rule.md")
     assert not (dst / "rule.md.bak").exists(), \
         "Idempotent re-run should not create a redundant .bak"
 
@@ -109,7 +122,7 @@ def test_symlink_md_dir_replaces_stale_symlink(tmp_path: Path) -> None:
 
     installers._symlink_md_dir(src, dst)
 
-    assert (dst / "rule.md").readlink() == src / "rule.md", \
+    assert _same_link_target(dst / "rule.md", src / "rule.md"), \
         "Stale symlink should be updated to the new source"
 
 
@@ -866,7 +879,7 @@ def test_install_plugin_local_symlink_matches_marketplace_source(
         f"marketplace source is ./plugins/{source_name} but no symlink exists "
         f"there - install/marketplace plugin names diverged"
     )
-    assert symlink.readlink() == repo
+    assert _same_link_target(symlink, repo)
 
 
 # ---------------------------------------------------------------------------
