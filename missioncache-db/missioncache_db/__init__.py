@@ -1669,7 +1669,11 @@ class TaskDB:
         if not repo:
             return None
 
-        relative_path = str(task_dir.relative_to(MISSIONCACHE_ROOT))
+        # as_posix, not str: full_path is a LOGICAL key ("<prefix>/<name>"),
+        # not a filesystem path. Readers split it on "/" (rename_task does
+        # rsplit("/", 1)), and rows are portable across machines, so a
+        # Windows str() backslash would break lookups and raise on rename.
+        relative_path = task_dir.relative_to(MISSIONCACHE_ROOT).as_posix()
         task_name = task_dir.name
 
         # Parse metadata from markdown files

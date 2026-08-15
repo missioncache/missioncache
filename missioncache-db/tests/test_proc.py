@@ -16,6 +16,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from missioncache_db import proc
 
 
@@ -86,6 +88,11 @@ class TestIdentity:
         assert not name.lower().endswith(".exe")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="parses the POSIX `ps` output; on Windows parent_and_name uses "
+    "Toolhelp32 and never consults _ps_field, so the monkeypatch is inert",
+)
 class TestParentAndNameParse:
     """Direct coverage of the fused ps read - the one POSIX behavior change in
     the single-lookup optimization, previously covered only through the walk
