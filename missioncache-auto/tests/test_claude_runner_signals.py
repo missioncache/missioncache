@@ -15,6 +15,7 @@ from missioncache_auto import claude_runner as claude_runner_module
 from missioncache_auto.claude_runner import (
     ClaudeRunner,
     _install_termination_handlers,
+    _kill_process_group,
     _restore_termination_handlers,
 )
 from missioncache_auto.models import Visibility
@@ -61,6 +62,58 @@ def test_claude_launched_in_new_process_group_win32(tmp_path, monkeypatch):
     captured = _run_capturing_popen_kwargs(tmp_path, monkeypatch)
     assert captured.get("creationflags", 0) & subprocess.CREATE_NEW_PROCESS_GROUP
     assert "start_new_session" not in captured
+
+
+class _KillProc:
+    def __init__(self, pid=4321, alive_after_taskkill=False):
+        self.pid = pid
+        self._alive = alive_after_taskkill
+        self.killed = False
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def kill(self):
+        self.killed = True
+
+
+class TestKillProcessGroupWin32:
+    """Windows teardown: taskkill /T /F reaps the tree (no killpg on Windows),
+    with process.kill() as the fallback only when the tree survives. Simulated
+    by faking sys.platform + subprocess.run."""
+
+    def _fake_win32(self, monkeypatch):
+        monkeypatch.setattr(claude_runner_module.sys, "platform", "win32")
+        calls = []
+        monkeypatch.setattr(
+            claude_runner_module.subprocess, "run",
+            lambda cmd, **kw: calls.append(cmd) or None,
+        )
+        return calls
+
+    def test_taskkill_targets_the_pid_tree(self, monkeypatch):
+        calls = self._fake_win32(monkeypatch)
+        proc = _KillProc(pid=4321, alive_after_taskkill=False)
+        _kill_process_group(proc)
+        assert ["taskkill", "/T", "/F", "/PID", "4321"] in calls
+        assert proc.killed is False  # tree gone, no fallback needed
+
+    def test_kill_fallback_only_when_tree_survives(self, monkeypatch):
+        self._fake_win32(monkeypatch)
+        proc = _KillProc(alive_after_taskkill=True)
+        _kill_process_group(proc)
+        assert proc.killed is True
+
+    def test_taskkill_absent_falls_back_to_kill(self, monkeypatch):
+        monkeypatch.setattr(claude_runner_module.sys, "platform", "win32")
+
+        def raise_fnf(cmd, **kw):
+            raise FileNotFoundError("taskkill")
+
+        monkeypatch.setattr(claude_runner_module.subprocess, "run", raise_fnf)
+        proc = _KillProc(alive_after_taskkill=True)
+        _kill_process_group(proc)  # must not raise
+        assert proc.killed is True
 
 
 def test_termination_handlers_round_trip():

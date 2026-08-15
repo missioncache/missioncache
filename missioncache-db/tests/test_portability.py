@@ -973,6 +973,11 @@ class TestParentResolution:
 
 
 class TestWalkErrors:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="os.getuid and chmod 0o000 read-blocking are POSIX-only; Windows "
+        "ACLs do not deny the owner read via chmod",
+    )
     def test_unreadable_subtree_warned_not_silent(self, mc, tmp_path):
         if os.getuid() == 0:
             pytest.skip("root bypasses directory permissions")

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
-from missioncache_install.subprocess_utils import CommandFailed, run
+from missioncache_install import subprocess_utils
+from missioncache_install.subprocess_utils import (
+    CommandFailed,
+    _resolve_windows_executable,
+    run,
+    run_streaming,
+)
 
 
 def test_run_returns_result_on_zero_exit() -> None:
@@ -66,3 +73,65 @@ def test_command_failed_str_includes_command_and_stderr() -> None:
     rendered = str(err)
     assert "echo x" in rendered
     assert "boom" in rendered
+
+
+def test_run_missing_binary_folds_into_command_failed() -> None:
+    """A nonexistent binary raises FileNotFoundError from subprocess; the
+    runner folds it into the CommandFailed callers already handle (-1)."""
+    with pytest.raises(CommandFailed) as exc_info:
+        run(["missioncache-definitely-not-a-real-binary-xyz"])
+    assert exc_info.value.returncode == -1
+
+
+def test_run_streaming_missing_binary_folds_into_command_failed() -> None:
+    with pytest.raises(CommandFailed) as exc_info:
+        run_streaming(["missioncache-definitely-not-a-real-binary-xyz"])
+    assert exc_info.value.returncode == -1
+
+
+class TestResolveWindowsExecutable:
+    """The bare-name resolver: only fires on win32, resolves .cmd shims, and
+    refuses a current-directory resolution (the persistence/env-passing hazard).
+    Runs on POSIX by faking sys.platform + shutil.which."""
+
+    def test_posix_is_a_passthrough(self, monkeypatch):
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "linux")
+        called = []
+        monkeypatch.setattr(subprocess_utils.shutil, "which",
+                            lambda n: called.append(n) or "/somewhere/x")
+        assert _resolve_windows_executable(["claude", "a"]) == ["claude", "a"]
+        assert not called  # never even consulted on POSIX
+
+    def test_win32_resolves_bare_name(self, monkeypatch):
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "win32")
+        monkeypatch.setattr(subprocess_utils.shutil, "which",
+                            lambda n: r"C:\npm\claude.cmd")
+        # Not under cwd, so it is accepted and substituted.
+        monkeypatch.setattr(subprocess_utils.Path, "cwd", classmethod(lambda cls: Path(r"C:\work")))
+        out = _resolve_windows_executable(["claude", "--print"])
+        assert out == [r"C:\npm\claude.cmd", "--print"]
+
+    def test_win32_explicit_path_is_untouched(self, monkeypatch):
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "win32")
+        monkeypatch.setattr(subprocess_utils.shutil, "which",
+                            lambda n: (_ for _ in ()).throw(AssertionError("which called")))
+        assert _resolve_windows_executable([r"C:\x\claude.exe", "a"]) == [r"C:\x\claude.exe", "a"]
+
+    def test_win32_refuses_curdir_resolution(self, monkeypatch, tmp_path):
+        """shutil.which searches cwd before PATH on Windows; a resolution whose
+        parent is the cwd must be refused (left bare, to fail to spawn)."""
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "win32")
+        planted = tmp_path / "claude.cmd"
+        planted.write_text("x", encoding="utf-8")
+        monkeypatch.setattr(subprocess_utils.shutil, "which", lambda n: str(planted))
+        monkeypatch.setattr(subprocess_utils.Path, "cwd", classmethod(lambda cls: tmp_path))
+        assert _resolve_windows_executable(["claude"]) == ["claude"]
+
+    def test_win32_unresolvable_stays_bare(self, monkeypatch):
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "win32")
+        monkeypatch.setattr(subprocess_utils.shutil, "which", lambda n: None)
+        assert _resolve_windows_executable(["claude"]) == ["claude"]
+
+    def test_empty_cmd_is_safe(self, monkeypatch):
+        monkeypatch.setattr(subprocess_utils.sys, "platform", "win32")
+        assert _resolve_windows_executable([]) == []

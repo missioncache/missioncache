@@ -122,6 +122,67 @@ def test_symlink_md_dir_replaces_stale_symlink(tmp_path: Path) -> None:
 _REAL_WARM = installers._warm_hook_interpreter
 
 
+class TestServiceKind:
+    """_service_kind labels the dashboard service mechanism into install state,
+    which the uninstall path reads back."""
+
+    def test_skip_is_none(self):
+        assert installers._service_kind(True) == "none"
+
+    def test_win32_is_schtasks(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "win32")
+        assert installers._service_kind(False) == "schtasks"
+
+    def test_darwin_is_launchd(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "darwin")
+        assert installers._service_kind(False) == "launchd"
+
+    def test_linux_is_systemd(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "linux")
+        assert installers._service_kind(False) == "systemd"
+
+
+class TestHooksJsonShape:
+    """The plugin's hooks.json is the whole native-Windows story, and the
+    Windows CI job runs pytest, not Claude Code hooks - so a typo'd script name
+    or a launcher that drifts from the warm would ship silently. Pin the shape
+    here (the install suite is the only one with the repo tree in reach)."""
+
+    def _hooks_json(self):
+        import json
+
+        # tests/ -> missioncache-install/ -> repo root -> hooks/hooks.json
+        repo_root = Path(__file__).resolve().parents[2]
+        return json.loads((repo_root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+
+    def _command_entries(self):
+        data = self._hooks_json()
+        for event_groups in data["hooks"].values():
+            for group in event_groups:
+                for entry in group["hooks"]:
+                    yield entry
+
+    def test_every_hook_is_exec_form_uv(self):
+        entries = list(self._command_entries())
+        assert entries, "no hook entries found"
+        for entry in entries:
+            assert entry["type"] == "command"
+            assert entry["command"] == "uv"
+            assert isinstance(entry["args"], list)
+
+    def test_launcher_args_match_the_warm_prefix(self):
+        """Each hook's args start with the same uv prefix _warm_hook_interpreter
+        uses, so raising the >=3.11 floor cannot silently desync the two."""
+        for entry in self._command_entries():
+            assert entry["args"][: len(installers.HOOK_UV_ARGS)] == installers.HOOK_UV_ARGS
+
+    def test_every_hook_script_exists(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        for entry in self._command_entries():
+            script = entry["args"][-1].replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root))
+            assert Path(script).is_file(), f"hook script missing: {entry['args'][-1]}"
+
+
 class TestWarmHookInterpreter:
     """The pre-warm that keeps a first-run uv Python download from racing the
     5s UserPromptSubmit timeout. conftest stubs it autouse; these drive the real."""
@@ -144,7 +205,7 @@ class TestWarmHookInterpreter:
                             lambda cmd, **k: cmds.append(cmd) or 0)
         monkeypatch.setattr(installers.ui, "detail", lambda *a, **k: None)
         _REAL_WARM()
-        assert cmds == [["uv", "run", "--no-project", "--python", ">=3.11", "python", "-V"]]
+        assert cmds == [["uv", *installers.HOOK_UV_ARGS, "-V"]]
 
     def test_failed_warm_does_not_raise(self, monkeypatch):
         """A warm failure must never fail the plugin install."""

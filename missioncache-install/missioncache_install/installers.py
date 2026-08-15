@@ -37,6 +37,13 @@ MANAGED_MARKER = "missioncache-plugin:managed"
 
 Mode = Literal["pypi", "local"]
 
+# The `uv run` argument prefix the plugin's hooks.json uses to launch every
+# hook (before the per-hook script path). The interpreter pre-warm reuses it so
+# the two cannot drift - raising the >=3.11 floor in hooks.json without matching
+# it here would leave the warm preparing the wrong interpreter. A test asserts
+# hooks.json's args start with this prefix.
+HOOK_UV_ARGS = ["run", "--no-project", "--python", ">=3.11", "python"]
+
 
 @dataclass
 class InstallContext:
@@ -103,9 +110,7 @@ def _warm_hook_interpreter() -> None:
         # download, and the module's own convention is that long-running
         # commands with live output use run_streaming (captured output would
         # sit silent for the whole download).
-        subprocess_utils.run_streaming(
-            ["uv", "run", "--no-project", "--python", ">=3.11", "python", "-V"]
-        )
+        subprocess_utils.run_streaming(["uv", *HOOK_UV_ARGS, "-V"])
         ui.detail("Hook interpreter ready")
     except subprocess_utils.CommandFailed as e:
         ui.warn(f"Could not pre-warm the hook interpreter: {e.stderr.strip() or 'unknown error'}")

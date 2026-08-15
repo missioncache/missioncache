@@ -485,3 +485,38 @@ class TestResolvePortSelfRecognition:
         monkeypatch.setattr("builtins.input", lambda *a: "8790")
 
         assert cli.resolve_port(8787) == 8790
+
+
+class TestCmdServePortPrecedence:
+    """serve's port comes from --port, then MISSIONCACHE_DASHBOARD_PORT, then
+    the default. windows_task_run emits --port only for non-default ports, so
+    an inverted precedence would quietly serve the wrong port on Windows only."""
+
+    def _run_and_capture_port(self, monkeypatch, args_list, env=None):
+        import sys as _sys
+        import types
+
+        captured = {}
+        fake_uvicorn = types.ModuleType("uvicorn")
+        fake_uvicorn.run = lambda app, host, port: captured.update(port=port)
+        monkeypatch.setitem(_sys.modules, "uvicorn", fake_uvicorn)
+        if env is None:
+            monkeypatch.delenv("MISSIONCACHE_DASHBOARD_PORT", raising=False)
+        else:
+            monkeypatch.setenv("MISSIONCACHE_DASHBOARD_PORT", env)
+        args = cli.build_parser().parse_args(args_list)
+        cli.cmd_serve(args)
+        return captured["port"]
+
+    def test_flag_wins(self, monkeypatch):
+        assert self._run_and_capture_port(monkeypatch, ["serve", "--port", "9001"], env="9002") == 9001
+
+    def test_env_used_when_no_flag(self, monkeypatch):
+        assert self._run_and_capture_port(monkeypatch, ["serve"], env="9003") == 9003
+
+    def test_default_when_neither(self, monkeypatch):
+        assert self._run_and_capture_port(monkeypatch, ["serve"]) == cli.DEFAULT_PORT
+
+    def test_explicit_port_zero_is_honored(self, monkeypatch):
+        """--port 0 (ask OS for a free port) must not be dropped back to env."""
+        assert self._run_and_capture_port(monkeypatch, ["serve", "--port", "0"], env="9004") == 0
