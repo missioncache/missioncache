@@ -18,6 +18,30 @@ from rich.table import Table
 from rich.text import Text
 
 
+def _force_utf8_streams() -> None:
+    """Make stdout/stderr encode UTF-8 before rich builds its consoles.
+
+    A Windows console defaults to a legacy code page (cp1252 on an
+    English install). The banner's block glyphs are not in it, so rich's
+    legacy-console renderer raised UnicodeEncodeError on the very first
+    print and the installer died before doing any work - measured on
+    windows-latest, not theorized. Reconfiguring the streams costs nothing
+    elsewhere: they are already UTF-8 on macOS and Linux.
+
+    errors="replace" so a glyph the terminal genuinely cannot render
+    degrades to a placeholder instead of taking the install down.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, OSError, ValueError):
+            # Not a reconfigurable text stream (captured/redirected in a
+            # test, or already closed). Nothing to do - the default applies.
+            pass
+
+
+_force_utf8_streams()
+
 # Single Console so rich's layout state (live regions, cursor) stays consistent
 # across calls. soft_wrap=False keeps long lines from breaking mid-word inside
 # panels; rich still wraps on panel boundaries.
