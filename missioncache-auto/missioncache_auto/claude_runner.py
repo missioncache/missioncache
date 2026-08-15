@@ -8,24 +8,46 @@ and extracting structured results from responses.
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from missioncache_auto.models import ExecutionResult, Visibility
 
 
 def _kill_process_group(process: subprocess.Popen) -> None:
-    """SIGKILL the claude process and every child it spawned.
+    """Kill the claude process and every child it spawned.
 
-    ``run`` launches claude with ``start_new_session=True``, so the whole
-    subtree shares a process group whose id equals claude's pid. Killing the
-    group reaps grandchildren (sub-agents, tools) that a plain
+    POSIX: ``run`` launches claude with ``start_new_session=True``, so the
+    whole subtree shares a process group whose id equals claude's pid.
+    Killing the group reaps grandchildren (sub-agents, tools) that a plain
     ``process.kill()`` would orphan.
+
+    Windows: no process groups to signal (``os.killpg`` does not exist), so
+    ``taskkill /T /F`` walks and kills the tree by parent-pid links, with
+    ``process.kill()`` (TerminateProcess on the root alone) as the fallback
+    when taskkill is unavailable or refuses.
     """
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        return
     try:
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
@@ -133,10 +155,21 @@ class ClaudeRunner:
         start_time = time.time()
         ctx = StreamContext(start_time=start_time)
 
-        # Build command
+        # Build command. The executable is resolved via shutil.which because
+        # npm installs `claude` as a .cmd shim on Windows, which a list-form
+        # Popen cannot spawn by bare name (no shell involved); which() returns
+        # the shim's full path, which CreateProcess does accept. On Windows
+        # which() searches the current directory before PATH, and this process
+        # is handed the full environment + the prompt on stdin, so a
+        # claude.bat planted in working_dir must not win: reject a resolution
+        # whose parent is the cwd.
         # Note: --verbose is required when using --print with --output-format=stream-json
         # --exclude-dynamic-system-prompt-sections improves prompt-cache hits across parallel workers.
-        cmd = ["claude", "--print", "--output-format", "stream-json", "--verbose", "--exclude-dynamic-system-prompt-sections"]
+        claude_bin = shutil.which("claude")
+        if claude_bin and Path(claude_bin).resolve().parent == Path.cwd().resolve():
+            claude_bin = None
+        claude_bin = claude_bin or "claude"
+        cmd = [claude_bin, "--print", "--output-format", "stream-json", "--verbose", "--exclude-dynamic-system-prompt-sections"]
         if session_name:
             cmd.extend(["--name", session_name])
 
@@ -148,6 +181,15 @@ class ClaudeRunner:
 
         # Run Claude in its own session/process group so we can reap the whole
         # subtree (claude + any children it spawns) on timeout or termination.
+        # POSIX gets a real session (killpg reaps it); Windows has no killpg,
+        # so a new process group merely detaches claude from this console's
+        # Ctrl+C group and the reaping falls to taskkill /T in
+        # _kill_process_group.
+        group_kwargs: dict[str, Any]
+        if sys.platform == "win32":
+            group_kwargs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        else:
+            group_kwargs = {"start_new_session": True}
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -156,7 +198,7 @@ class ClaudeRunner:
             cwd=working_dir,
             text=True, encoding="utf-8", errors="replace",
             env=env,
-            start_new_session=True,
+            **group_kwargs,
         )
 
         # Send prompt (with optional timeout). While claude runs, catch

@@ -80,13 +80,17 @@ If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo
 First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_missioncache_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
 
 ```bash
-CWD_KEY=$(pwd | sed 's|/|-|g')
+# Probe-run each python candidate (catches Windows' Store-stub python, which resolves on PATH but does not run); the result is a single path so it stays quotable, with uv's pre-warmed interpreter as the last fallback.
+PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+# Claude Code's projects-dir encoding (every non-alphanumeric -> "-"). The sed fallback is POSIX-correct only: on Windows Git Bash `pwd` prints the MSYS form (/c/Users/...), which encodes to a key that matches nothing - there the CLI is the only correct source.
+CWD_KEY=$(missioncache-db encode-cwd 2>/dev/null || pwd | sed 's|[^A-Za-z0-9]|-|g')
 POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
 # Primary: env var set by Claude Code 2.1.132+ in every Bash subprocess.
 SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 # Fallbacks for older Claude Code: cwd-session pointer (SessionStart hook), then transcript-mtime walk.
 if [ -z "$SESSION_ID" ]; then
-  [ -r "$POINTER_FILE" ] && SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+  [ -r "$POINTER_FILE" ] && SESSION_ID=$("$PY" -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
   [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
 echo "SESSION_ID=$SESSION_ID"
@@ -153,7 +157,9 @@ fi
 # re-warn on later resumes.
 ERROR_FILE="$HOME/.claude/hooks/state/last-precompact-error.json"
 if [ -f "$ERROR_FILE" ]; then
-  PROJECT_NAME="$PROJECT_NAME" python3 - <<'PY' 2>/dev/null
+  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+  PROJECT_NAME="$PROJECT_NAME" "$PY" - <<'PYEOF' 2>/dev/null
 import json, os, pathlib, sys
 project = os.environ["PROJECT_NAME"]
 err_path = pathlib.Path.home() / ".claude" / "hooks" / "state" / "last-precompact-error.json"
@@ -172,7 +178,7 @@ try:
     err_path.unlink()
 except Exception:
     pass
-PY
+PYEOF
 fi
 ```
 
@@ -232,15 +238,17 @@ Replace `<project-name>` with the actual project name, `<SESSION_ID from Step 1>
 PROJECT_NAME='<project-name>'
 SESSION_ID='<SESSION_ID from Step 1>'
 TASK_ID='<task id>'
+PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
 
 # Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
 if [ -n "$SESSION_ID" ]; then
-  PROJECT_JSON=$(python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
+  PROJECT_JSON=$("$PY" -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
   curl -s -X POST http://localhost:8787/api/hooks/project \
     -H "Content-Type: application/json" \
     -d "$PROJECT_JSON" \
     --connect-timeout 1 --max-time 2 >/dev/null 2>&1 \
-  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" python3 -c '
+  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" "$PY" -c '
 import os, sqlite3
 conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
 conn.execute(
@@ -259,7 +267,7 @@ conn.commit()
   # missioncache_db.write_session_binding (the owner of the convention);
   # taskId is the durable identity resolution prefers - omitting it here
   # would clobber the MCP server's richer binding with a name-only one.
-  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" TASK_ID="$TASK_ID" python3 -c '
+  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" TASK_ID="$TASK_ID" "$PY" -c '
 import os, json, datetime, pathlib
 projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
 projects_dir.mkdir(parents=True, exist_ok=True)
@@ -292,7 +300,9 @@ SEEN_MTIME='<parent_digest.context_mtime, verbatim from the digest response>'
 SESSION_ID='<SESSION_ID from Step 1>'
 if [ -n "$SESSION_ID" ] && [ -n "$SEEN_MTIME" ]; then
   mkdir -p "$HOME/.claude/hooks/state/shared-seen"
-  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" python3 -c '
+  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" "$PY" -c '
 import json, os, pathlib, datetime
 marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")
 marker.write_text(json.dumps({

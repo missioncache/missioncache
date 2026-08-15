@@ -73,8 +73,8 @@ class _FakeTraversable:
     def __truediv__(self, other: str) -> "_FakeTraversable":
         return _FakeTraversable(self._path / other)
 
-    def read_text(self) -> str:
-        return self._path.read_text()
+    def read_text(self, encoding: str | None = None) -> str:
+        return self._path.read_text(encoding=encoding)
 
     def is_file(self) -> bool:
         return self._path.is_file()

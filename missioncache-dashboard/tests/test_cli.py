@@ -1,6 +1,7 @@
 """Tests for missioncache_dashboard.cli."""
 
 import socket
+import subprocess
 
 import pytest
 
@@ -74,36 +75,185 @@ class TestResolvePort:
 # --- Platform dispatch --------------------------------------------------------
 
 
+class TestWindowsTaskRun:
+    """The autostart command line (schtasks /TR and Run-key value alike)."""
+
+    def test_quotes_binary_and_adds_hidden(self):
+        cmd = cli.windows_task_run(r"C:\Users\Tomer Brami\Scripts\missioncache-dashboard.exe", cli.DEFAULT_PORT)
+        assert cmd == r'"C:\Users\Tomer Brami\Scripts\missioncache-dashboard.exe" serve --hidden'
+
+    def test_non_default_port_rides_on_the_command_line(self):
+        """Neither schtasks nor a Run key can set env vars - the flag is the
+        only channel for a non-default port."""
+        cmd = cli.windows_task_run("d.exe", 9000)
+        assert cmd == '"d.exe" serve --hidden --port 9000'
+
+
 class TestInstallServiceWindows:
-    def test_exits_zero_with_manual_instructions(self, monkeypatch, capsys):
+    def _capture_runs(self, monkeypatch, schtasks_rc, reg_add_rc=0):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "schtasks" and "/Create" in cmd:
+                rc = schtasks_rc
+            elif cmd[:2] == ["reg", "add"]:
+                rc = reg_add_rc
+            else:
+                rc = 0
+            # Honor check=True the way subprocess.run does, so a failing reg add
+            # on the fallback path surfaces as CalledProcessError in tests just
+            # as it would in production - the double-failure case a non-elevated
+            # user reaches.
+            if rc != 0 and kwargs.get("check"):
+                raise subprocess.CalledProcessError(rc, cmd)
+            return subprocess.CompletedProcess(cmd, rc, stdout="", stderr="denied" if rc else "")
+
+        monkeypatch.setattr(cli.subprocess, "run", fake_run)
+        monkeypatch.setattr(cli, "resolve_binary", lambda: "d.exe")
+        # Report the port as busy so install skips the immediate-start Popen.
+        monkeypatch.setattr(cli, "port_in_use", lambda p: True)
+        return calls
+
+    def test_schtasks_success_creates_onlogon_task(self, monkeypatch, capsys):
+        calls = self._capture_runs(monkeypatch, schtasks_rc=0)
+        cli.install_windows(cli.DEFAULT_PORT)
+        create = next(c for c in calls if c[0] == "schtasks")
+        assert "/SC" in create and "ONLOGON" in create
+        assert cli.windows_task_run("d.exe", cli.DEFAULT_PORT) in create
+        assert "Task Scheduler task created" in capsys.readouterr().out
+
+    def test_schtasks_success_cleans_lingering_run_key(self, monkeypatch):
+        """A prior non-elevated install may have left a Run key; the success
+        path must delete it so both mechanisms do not fire at logon."""
+        calls = self._capture_runs(monkeypatch, schtasks_rc=0)
+        cli.install_windows(cli.DEFAULT_PORT)
+        assert any(c[:2] == ["reg", "delete"] for c in calls)
+
+    def test_schtasks_refusal_falls_back_to_run_key(self, monkeypatch, capsys):
+        """A non-elevated prompt gets Access Denied from schtasks ONLOGON;
+        the HKCU Run key needs no elevation and must carry the SAME command."""
+        calls = self._capture_runs(monkeypatch, schtasks_rc=1)
+        cli.install_windows(cli.DEFAULT_PORT)
+        reg_add = next(c for c in calls if c[:2] == ["reg", "add"])
+        assert cli.RUN_KEY in reg_add
+        assert cli.windows_task_run("d.exe", cli.DEFAULT_PORT) in reg_add
+        out = capsys.readouterr().out
+        assert "Run-key autostart" in out
+        # The fallback must not pass check=True on reg add - it degrades with a
+        # message instead of a traceback (verified by the no-raise below).
+
+    def test_double_failure_degrades_with_message_not_traceback(self, monkeypatch, capsys):
+        """schtasks refuses AND the Run-key write fails (the locked-down box):
+        the install must print guidance, never raise CalledProcessError."""
+        self._capture_runs(monkeypatch, schtasks_rc=1, reg_add_rc=1)
+        cli.install_windows(cli.DEFAULT_PORT)  # must not raise
+        out = capsys.readouterr().out
+        assert "Could not register autostart" in out
+        assert "serve" in out
+
+    def test_immediate_start_spawns_hidden_serve(self, monkeypatch, tmp_path):
+        """When the port is free, install starts the server now: no window,
+        output to the log file, port in the env."""
+        self._capture_runs(monkeypatch, schtasks_rc=0)
+        monkeypatch.setattr(cli, "port_in_use", lambda p: False)
+        monkeypatch.setattr(cli, "windows_log_path", lambda: tmp_path / "d.log")
+        monkeypatch.setattr(cli, "log_dir", lambda: tmp_path)
+        popens = []
+
+        class _FakePopen:
+            def __init__(self, cmd, **kw):
+                popens.append((cmd, kw))
+
+        monkeypatch.setattr(cli.subprocess, "Popen", _FakePopen)
+        cli.install_windows(9000)
+        assert len(popens) == 1
+        cmd, kw = popens[0]
+        assert cmd == ["d.exe", "serve"]
+        assert kw["env"]["MISSIONCACHE_DASHBOARD_PORT"] == "9000"
+
+    def test_cmd_install_service_dispatches_win32(self, monkeypatch):
         monkeypatch.setattr(cli.sys, "platform", "win32")
         monkeypatch.setattr(cli, "resolve_port", lambda p: p)
-
-        # Build args via the real parser so we're not hand-rolling Namespace shape
+        seen = {}
+        monkeypatch.setattr(cli, "install_windows", lambda port: seen.setdefault("port", port))
         args = cli.build_parser().parse_args(["install-service"])
-        rc = cli.cmd_install_service(args)
-        assert rc == 0
-        captured = capsys.readouterr().out
-        assert "Windows" in captured
-        assert "not yet supported" in captured
+        assert cli.cmd_install_service(args) == 0
+        assert seen["port"] == cli.DEFAULT_PORT
+
+    def test_install_service_accepts_port_flag(self, monkeypatch):
+        """missioncache-install invokes `install-service --port N` for every
+        non-default port; the parser rejecting the flag silently left users
+        without autostart (pre-existing, surfaced by the Windows review)."""
+        monkeypatch.setattr(cli.sys, "platform", "win32")
+        monkeypatch.setattr(cli, "resolve_port", lambda p: p)
+        seen = {}
+        monkeypatch.setattr(cli, "install_windows", lambda port: seen.setdefault("port", port))
+        args = cli.build_parser().parse_args(["install-service", "--port", "9000"])
+        assert cli.cmd_install_service(args) == 0
+        assert seen["port"] == 9000
+
+    def test_reinstall_service_accepts_port_flag(self):
+        args = cli.build_parser().parse_args(["reinstall-service", "--port", "9000"])
+        assert args.port == 9000
 
 
 class TestUninstallServiceWindows:
-    def test_exits_zero_with_message(self, monkeypatch, capsys):
+    def test_removes_whichever_mechanism_is_present(self, monkeypatch, capsys):
+        calls = []
+        monkeypatch.setattr(
+            cli.subprocess, "run",
+            lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+        )
+        monkeypatch.setattr(cli, "_schtasks_installed", lambda: True)
+        monkeypatch.setattr(cli, "_run_key_installed", lambda: True)
+        cli.uninstall_windows()
+        assert any(c[:2] == ["schtasks", "/Delete"] for c in calls)
+        assert any(c[:2] == ["reg", "delete"] for c in calls)
+        # Platform parity: launchctl unload / systemctl --now / pkill all stop
+        # the running process; the Windows branch must too, or a reinstall
+        # keeps serving stale code behind the occupied port.
+        assert any(c[0] == "taskkill" for c in calls)
+
+    def test_nothing_installed_does_not_kill(self, monkeypatch, capsys):
+        """A no-op uninstall must not taskkill a server it never managed."""
+        calls = []
+        monkeypatch.setattr(
+            cli.subprocess, "run",
+            lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+        )
+        monkeypatch.setattr(cli, "_schtasks_installed", lambda: False)
+        monkeypatch.setattr(cli, "_run_key_installed", lambda: False)
+        cli.uninstall_windows()
+        assert not any(c[0] == "taskkill" for c in calls)
+
+    def test_nothing_installed_is_a_clean_noop(self, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "_schtasks_installed", lambda: False)
+        monkeypatch.setattr(cli, "_run_key_installed", lambda: False)
+        cli.uninstall_windows()
+        assert "nothing to do" in capsys.readouterr().out
+
+    def test_cmd_uninstall_service_dispatches_win32(self, monkeypatch):
         monkeypatch.setattr(cli.sys, "platform", "win32")
+        called = []
+        monkeypatch.setattr(cli, "uninstall_windows", lambda: called.append(True))
         args = cli.build_parser().parse_args(["uninstall-service"])
-        rc = cli.cmd_uninstall_service(args)
-        assert rc == 0
-        assert "nothing to uninstall" in capsys.readouterr().out
+        assert cli.cmd_uninstall_service(args) == 0
+        assert called
 
 
 class TestStatusWindows:
-    def test_prints_not_supported(self, monkeypatch, capsys):
+    def test_reports_installed_and_running(self, monkeypatch, capsys):
         monkeypatch.setattr(cli.sys, "platform", "win32")
+        monkeypatch.setattr(cli, "_schtasks_installed", lambda: False)
+        monkeypatch.setattr(cli, "_run_key_installed", lambda: True)
+        monkeypatch.setattr(cli, "port_in_use", lambda p: True)
         args = cli.build_parser().parse_args(["status"])
         rc = cli.cmd_status(args)
         assert rc == 0
-        assert "not supported" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "Installed: True" in out
+        assert "Running:   True" in out
 
 
 # --- Binary resolution --------------------------------------------------------

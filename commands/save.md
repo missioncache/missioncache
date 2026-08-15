@@ -51,7 +51,11 @@ Save progress on an active project using atomic MCP calls.
 First resolve the current Claude session id so `find_task_for_directory` can use the per-session project pointer written by `/missioncache:load` and `/missioncache:new`. Without this, the lookup can only match when cwd is under `~/.missioncache/active/<task>/`, which fails from the repo root.
 
 ```bash
-CWD_KEY=$(pwd | sed 's|/|-|g')
+# Probe-run each python candidate (catches Windows' Store-stub python, which resolves on PATH but does not run); the result is a single path so it stays quotable, with uv's pre-warmed interpreter as the last fallback.
+PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+# Claude Code's projects-dir encoding (every non-alphanumeric -> "-"). The sed fallback is POSIX-correct only: on Windows Git Bash `pwd` prints the MSYS form (/c/Users/...), which encodes to a key that matches nothing - there the CLI is the only correct source.
+CWD_KEY=$(missioncache-db encode-cwd 2>/dev/null || pwd | sed 's|[^A-Za-z0-9]|-|g')
 DIR="$HOME/.claude/projects/${CWD_KEY}"
 POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
 
@@ -60,7 +64,7 @@ SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 # Fallback: SessionStart hook's cwd-session pointer (last-writer-wins, can be
 # stale under concurrency), then transcript mtime for older Claude Code.
 if [ -z "$SESSION_ID" ] && [ -r "$POINTER_FILE" ]; then
-  SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+  SESSION_ID=$("$PY" -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
 fi
 [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 
@@ -96,7 +100,7 @@ If `RECENT <= 1`, also pass `session_id="<SESSION_ID>"` so the per-session bindi
 If `find_task_for_directory` returned `found: false` but `get_missioncache_files` found the project:
 
 ```bash
-SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1; echo "done"
+SESSION_ID="${CLAUDE_CODE_SESSION_ID}"; [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/$(missioncache-db encode-cwd 2>/dev/null || pwd | sed 's|[^A-Za-z0-9]|-|g')"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl); [ -n "$SESSION_ID" ] && curl -s -X POST http://localhost:8787/api/hooks/project -H "Content-Type: application/json" -d "{\"session_id\":\"$SESSION_ID\",\"project_name\":\"<project-name>\"}" --connect-timeout 1 --max-time 2 >/dev/null 2>&1; echo "done"
 ```
 <!-- /claude-code-only -->
 
@@ -164,7 +168,9 @@ SESSION_ID='<SESSION_ID from Step 1>'
 PARENT_CTX=$(ls "$HOME/.missioncache/active/$PARENT/$PARENT-context.md" "$HOME/.missioncache/completed/$PARENT/$PARENT-context.md" 2>/dev/null | head -1)
 if [ -n "$SESSION_ID" ] && [ -n "$PARENT_CTX" ]; then
   mkdir -p "$HOME/.claude/hooks/state/shared-seen"
-  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SESSION_ID="$SESSION_ID" python3 -c '
+  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SESSION_ID="$SESSION_ID" "$PY" -c '
 import json, os, pathlib, datetime
 ctx = pathlib.Path(os.environ["PARENT_CTX"])
 marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")

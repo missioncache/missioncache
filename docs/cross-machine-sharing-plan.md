@@ -8,7 +8,7 @@ Single executable spec. All `file:line` refer to `missioncache-db/missioncache_d
 
 ## 1. Goal, scope, non-goals
 
-**Goal.** Let one user move or share a MissionCache project between two POSIX machines (macOS + Windows 11 WSL) without leaking machine-specific absolute paths or local integer ids. A project = its markdown tree under `~/.missioncache/active/<name>/` plus the logical `tasks` row. Export produces a portable bundle; import lands it on the other machine, reconciling every machine-specific reference through a per-machine path map and reporting what resolved, what needs mapping, and what is missing.
+**Goal.** Let one user move or share a MissionCache project between machines (macOS, Linux, WSL, or native Windows as an import target) without leaking machine-specific absolute paths or local integer ids. A project = its markdown tree under `~/.missioncache/active/<name>/` plus the logical `tasks` row. Export produces a portable bundle; import lands it on the other machine, reconciling every machine-specific reference through a per-machine path map and reporting what resolved, what needs mapping, and what is missing.
 
 **In scope (v1).**
 - `missioncache-db export <name>` → portable bundle (markdown + `missioncache.json` manifest).
@@ -18,7 +18,7 @@ Single executable spec. All `file:line` refer to `missioncache-db/missioncache_d
 
 **Non-goals / v1 limitations (state in `--help` and docs).**
 - **Time history never merges.** `heartbeats` / `sessions` / `auto_executions` FK to local `tasks.id` (`:494`, `:504`) and are excluded from the bundle. The manifest carries `time_total_seconds` as **display-only** origin metadata; the target reads 0 local time until new work accrues. Import never fabricates session rows.
-- **No native-Windows (backslash) target.** Both ends are POSIX; only the HOME prefix and repo/vault roots differ. The `${HOME}`/anchor rewrite assumes `/`-rooted absolute paths.
+- **Native-Windows works as an import TARGET, not as an export source.** A bundle exported on macOS/Linux imports on native Windows: `config set-path` accepts Windows-shaped local paths (`C:/work/repo` or `C:\work\repo` - `Path.resolve()` normalizes both), token expansion builds local paths through `pathlib` so separators come out native, and `--rewrite-paths` writes those Windows paths into the landed markdown. Export FROM Windows stays out of scope: the embedded-path scanner (`_embedded_pattern`) recognizes only `/`-rooted absolute paths, so backslash paths inside markdown would not be tokenized.
 - **No continuous sync command in v1.** The optional git-tracked-folder reconcile loop is a shell wrapper over `export --out <folder>` + `import <folder>` (see §10 Phase 4). The CLI must not preclude it; it ships later.
 - **Embedded paths are report-only by default.** Import does not rewrite user markdown unless `--rewrite-paths` is passed (a documented opt-in, Phase 3).
 - `~/.claude/hooks-state.db` (statusline/session pointers) is machine-local and untouched.
@@ -387,7 +387,7 @@ Out of scope for this component's tests: MCP-tool wrapping, slash-command UX, th
 
 - **`~/.missioncache` must be on WSL native fs, not `/mnt/c`.** DrvFs breaks SQLite WAL, is slow, has perms/inotify issues. On import, if `MISSIONCACHE_ROOT.resolve()` starts with `/mnt/`, emit a loud warning ("move to WSL native filesystem; SQLite WAL can corrupt on DrvFs"). Warn, do not hard-fail.
 - **EOL normalization.** Bundles through Windows tools / git autocrlf can gain CRLF. Import normalizes CRLF→LF when writing `*.md`/`*.json` (keeps `Hub:`/`[[..]]`/frontmatter parsers stable, avoids spurious git-sync diffs). Export writes LF. `prompts/` binaries (none expected) copied byte-for-byte.
-- **POSIX-to-POSIX only.** Only HOME prefix + repo/vault roots differ; no separator translation. Native-Windows backslash target out of scope (state in `--help`).
+- **POSIX export, POSIX or native-Windows import.** Separator translation happens implicitly: bundle-internal keys are POSIX by design, and the import side builds every local path through `pathlib`, so a Mac bundle lands with `C:\...` paths on Windows. Export from native Windows is the remaining gap (the embedded-path scanner only recognizes `/`-rooted absolutes).
 - **Case sensitivity.** `validate_task_name` forces lowercase (`:198`), removing macOS-insensitive / WSL-sensitive collision risk on the project dir.
 - **Symlinked `.env` files** live in the REPO, not the project dir — not bundled; the repo (resolved by remote) brings its own. A markdown ref to an `.env` path falls into the normal buckets.
 - **`add_repo` no disk check** (`:930-957`) — always gate on `Path.exists()` / `get_repo_by_path` (`:989`) before calling, else a bogus machine-specific path pollutes `repositories`.

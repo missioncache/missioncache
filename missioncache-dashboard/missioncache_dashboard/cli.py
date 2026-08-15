@@ -8,10 +8,10 @@ Entry point for the `missioncache-dashboard` console script. Subcommands:
     missioncache-dashboard reinstall-service   Uninstall + install (Python path fix).
     missioncache-dashboard status              Show installed / running state.
 
-Platform support: macOS (launchd) and Linux (systemd --user, with a
+Platform support: macOS (launchd), Linux (systemd --user, with a
 shell-profile autostart fallback on systemd-less machines like default
-WSL). Windows prints manual instructions and exits 0 - Task Scheduler
-support is deferred.
+WSL), and Windows (Task Scheduler ONLOGON task, with an HKCU Run-key
+fallback when schtasks refuses from a non-elevated prompt).
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from pathlib import Path
 
 LAUNCHD_LABEL = "com.missioncache.dashboard"
 SYSTEMD_UNIT = "missioncache-dashboard.service"
+SCHTASKS_NAME = "MissionCacheDashboard"
+RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_KEY_VALUE = "MissionCacheDashboard"
 DEFAULT_PORT = 8787
 
 
@@ -44,6 +47,23 @@ def systemd_unit_path() -> Path:
 
 def log_dir() -> Path:
     return Path.home() / ".claude" / "logs"
+
+
+def windows_log_path() -> Path:
+    """Where a Windows-autostarted dashboard writes stdout/stderr.
+
+    The launchd/systemd/profile branches all have a log destination; Windows
+    is the one platform that also hides its console, so without this a startup
+    failure would leave no trace anywhere. serve --hidden redirects its own
+    output here (the schtasks/Run-key command lines have no shell to redirect
+    with), and the immediate start opens the same file.
+    """
+    return log_dir() / "missioncache-dashboard-windows.log"
+
+
+def _env_port() -> int:
+    """The dashboard port from the environment, or the default."""
+    return int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
 
 
 # =============================================================================
@@ -176,8 +196,19 @@ def resolve_port(requested: int) -> int:
 
 
 def resolve_binary() -> str:
-    """Return the absolute path of the installed `missioncache-dashboard` script."""
+    """Return the absolute path of the installed `missioncache-dashboard` script.
+
+    On Windows shutil.which searches the current directory BEFORE PATH (the
+    win32 branch of CPython's shutil does ``path.insert(0, curdir)``), so a
+    ``missioncache-dashboard.cmd`` planted in the directory this command runs
+    from would be resolved and then baked into the HKCU Run key / schtasks
+    ONLOGON task - durable code execution at every logon from a transient cwd.
+    Refuse a resolution whose parent is the cwd: a real console script lives in
+    a scripts dir, never in the invocation dir.
+    """
     found = shutil.which("missioncache-dashboard")
+    if found and Path(found).resolve().parent == Path.cwd().resolve():
+        found = None
     if not found:
         raise SystemExit(
             "Could not find `missioncache-dashboard` on PATH. This command must be "
@@ -381,22 +412,237 @@ def uninstall_linux() -> None:
     uninstall_profile_autostart()
 
 
+def windows_task_run(binary_path: str, port: int) -> str:
+    """The command line the Windows autostart runs (schtasks /TR and Run key alike).
+
+    ``--hidden`` makes serve detach its console window on win32 - both
+    mechanisms otherwise leave a console open on the desktop for the whole
+    session. ``--port`` rides on the command line because neither schtasks
+    nor a Run-key value can set per-task environment variables.
+    """
+    cmd = f'"{binary_path}" serve --hidden'
+    if port != DEFAULT_PORT:
+        cmd += f" --port {port}"
+    return cmd
+
+
+def _schtasks_installed() -> bool:
+    result = subprocess.run(
+        ["schtasks", "/Query", "/TN", SCHTASKS_NAME],
+        capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _run_key_installed() -> bool:
+    result = subprocess.run(
+        ["reg", "query", RUN_KEY, "/v", RUN_KEY_VALUE],
+        capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def install_windows(port: int) -> None:
+    """Task Scheduler ONLOGON task, Run-key fallback, immediate start.
+
+    schtasks is tried first because a Scheduler task is the closest analog
+    of launchd (visible in Task Scheduler, one place to manage). Creating an
+    ONLOGON trigger from a non-elevated prompt is refused on stock Windows
+    ("Access is denied"), so the HKCU Run key - writable by any user - is
+    the fallback rather than an elevation prompt mid-install.
+    """
+    binary = resolve_binary()
+    task_run = windows_task_run(binary, port)
+
+    result = subprocess.run(
+        ["schtasks", "/Create", "/SC", "ONLOGON", "/TN", SCHTASKS_NAME,
+         "/TR", task_run, "/F"],
+        capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+        check=False,
+    )
+    if result.returncode == 0:
+        # A Run-key entry may linger from an earlier non-elevated install.
+        subprocess.run(
+            ["reg", "delete", RUN_KEY, "/v", RUN_KEY_VALUE, "/f"],
+            capture_output=True, check=False,
+        )
+        print(f"  Task Scheduler task created: {SCHTASKS_NAME} (runs at logon)")
+    else:
+        # check=False + capture, matching the schtasks branch: this is the
+        # last-resort fallback on a locked-down box, so a failure here must
+        # degrade with a message, not dump a traceback out of the install (the
+        # same reasoning install_linux applies to a failing systemctl).
+        reg = subprocess.run(
+            ["reg", "add", RUN_KEY, "/v", RUN_KEY_VALUE, "/t", "REG_SZ",
+             "/d", task_run, "/f"],
+            capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            check=False,
+        )
+        if reg.returncode != 0:
+            print(
+                "  Could not register autostart: schtasks refused and the "
+                f"HKCU Run key write failed ({(reg.stderr or reg.stdout).strip() or 'unknown error'}). "
+                "Start the dashboard manually with: missioncache-dashboard serve"
+            )
+        else:
+            # Remove a schtasks task left by an earlier elevated install, so the
+            # two mechanisms do not both fire at logon (the loser dies on the
+            # port bind). Mirrors the Run-key cleanup on the success path above.
+            subprocess.run(
+                ["schtasks", "/Delete", "/TN", SCHTASKS_NAME, "/F"],
+                capture_output=True, check=False,
+            )
+            print(
+                f"  schtasks refused ({(result.stderr or result.stdout).strip() or 'unknown error'}) - "
+                "registered a Run-key autostart instead (HKCU, runs at logon)."
+            )
+
+    if port_in_use(port):
+        print(f"  Dashboard already running on port {port}")
+        return
+    env = {**os.environ, "MISSIONCACHE_DASHBOARD_PORT": str(port)}
+    # getattr, not the bare attribute: these constants exist only on win32, and
+    # install_windows must stay importable/callable (in tests) on POSIX.
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
+    log_dir().mkdir(parents=True, exist_ok=True)
+    log = open(windows_log_path(), "ab")
+    try:
+        subprocess.Popen(
+            [binary, "serve"], env=env,
+            stdout=log, stderr=log,
+            creationflags=creationflags,
+        )
+    finally:
+        log.close()
+    print(f"  Dashboard started in the background (port {port}, log: {windows_log_path()})")
+
+
+def uninstall_windows() -> None:
+    """Remove whichever autostart mechanism is present, then stop the server."""
+    removed = False
+    if _schtasks_installed():
+        subprocess.run(
+            ["schtasks", "/Delete", "/TN", SCHTASKS_NAME, "/F"],
+            capture_output=True, check=False,
+        )
+        print(f"  Removed Task Scheduler task {SCHTASKS_NAME}")
+        removed = True
+    if _run_key_installed():
+        subprocess.run(
+            ["reg", "delete", RUN_KEY, "/v", RUN_KEY_VALUE, "/f"],
+            capture_output=True, check=False,
+        )
+        print("  Removed Run-key autostart entry")
+        removed = True
+    if not removed:
+        print("  Windows autostart not installed, nothing to do.")
+        return
+    # Stop the running server too - the platform parity contract (launchctl
+    # unload / systemctl --now / pkill all stop the process). Without this, a
+    # package uninstall leaves the old process serving, and a reinstall keeps
+    # stale code because the occupied port suppresses the fresh start.
+    # /IM is the taskkill analog of the Linux branch's pkill -f.
+    subprocess.run(
+        ["taskkill", "/F", "/IM", "missioncache-dashboard.exe"],
+        capture_output=True, check=False,
+    )
+
+
 # =============================================================================
 # Subcommand handlers
 # =============================================================================
 
 
-def cmd_serve(_args: argparse.Namespace) -> int:
-    """Run the dashboard via uvicorn. Reads MISSIONCACHE_DASHBOARD_PORT env var."""
+def _hide_own_console_window() -> None:
+    """Hide the console window this process was given (win32 only).
+
+    The Windows autostart mechanisms (schtasks ONLOGON task, HKCU Run key)
+    both run console programs in a visible window for the whole login
+    session. Hiding our own window is the one wrapper-free way to run in
+    the background: no pythonw, no vbs launcher, no extra cmd flash.
+
+    Guarded on actually OWNING the console: GetConsoleProcessList reporting a
+    single attached pid means this process is the only one on the console, so
+    it is a fresh conhost the autostart spawned for us, safe to hide. More than
+    one pid means we are sharing the user's shell (someone ran `serve --hidden`
+    by hand from cmd.exe), and hiding that would take their terminal with no
+    way back.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        arr = (ctypes.c_uint * 4)()
+        count = kernel32.GetConsoleProcessList(arr, 4)
+        if count != 1:
+            return  # sharing a console we do not own - leave it visible
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:
+        pass
+
+
+def _redirect_output_to_log() -> None:
+    """Point this process's stdout/stderr at the Windows autostart log file.
+
+    Called when serving --hidden: the schtasks/Run-key command lines have no
+    shell to redirect with, and the console is hidden, so uvicorn's output
+    would otherwise go nowhere. Redirect at the fd level so C-level writes are
+    captured too. Best-effort; a failure here must not stop the server.
+
+    win32-only, like _hide_own_console_window: on other platforms --hidden is a
+    documented no-op, so the redirect must not run there either.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        log_dir().mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(windows_log_path()), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the dashboard via uvicorn.
+
+    Port precedence: --port flag, then MISSIONCACHE_DASHBOARD_PORT, then the
+    default. The flag exists because the Windows autostart command line is
+    the only knob its mechanisms have - neither schtasks nor a Run-key
+    value can set per-task environment variables.
+    """
     import uvicorn  # local import: keeps `missioncache-dashboard --help` fast
 
-    port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
+    if getattr(args, "hidden", False):
+        _redirect_output_to_log()
+        _hide_own_console_window()
+    # `is not None`, not `or`: --port 0 (ask the OS for a free port) is a valid
+    # explicit choice that `or` would silently drop back to the env/default.
+    flag_port = getattr(args, "port", None)
+    port = flag_port if flag_port is not None else _env_port()
     uvicorn.run("missioncache_dashboard.server:app", host="127.0.0.1", port=port)
     return 0
 
 
-def cmd_install_service(_args: argparse.Namespace) -> int:
-    port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
+def cmd_install_service(args: argparse.Namespace) -> int:
+    # --port first: missioncache-install has always passed the flag here (the
+    # env var only reaches the subcommand when the user exports it themselves).
+    # `is not None` so an explicit --port 0 is honored, not dropped by `or`.
+    flag_port = getattr(args, "port", None)
+    port = flag_port if flag_port is not None else _env_port()
     port = resolve_port(port)
 
     if sys.platform == "darwin":
@@ -404,12 +650,7 @@ def cmd_install_service(_args: argparse.Namespace) -> int:
     elif sys.platform.startswith("linux"):
         install_linux(port)
     elif sys.platform == "win32":
-        print(
-            "Windows service registration is not yet supported.\n"
-            "Run 'missioncache-dashboard serve' manually, or add your own Task "
-            "Scheduler entry. See docs/installation.md#windows."
-        )
-        return 0
+        install_windows(port)
     else:
         print(f"Unsupported platform: {sys.platform}", file=sys.stderr)
         return 1
@@ -422,8 +663,7 @@ def cmd_uninstall_service(_args: argparse.Namespace) -> int:
     elif sys.platform.startswith("linux"):
         uninstall_linux()
     elif sys.platform == "win32":
-        print("Windows service was never auto-registered; nothing to uninstall.")
-        return 0
+        uninstall_windows()
     else:
         print(f"Unsupported platform: {sys.platform}", file=sys.stderr)
         return 1
@@ -470,12 +710,23 @@ def cmd_status(_args: argparse.Namespace) -> int:
             profile = autostart_profile_path()
             installed = profile.exists() and AUTOSTART_BEGIN in profile.read_text(encoding="utf-8")
             if installed:
-                port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
-                running = port_in_use(port)
+                running = port_in_use(_env_port())
         print(f"  Installed: {installed}")
         print(f"  Running:   {running}")
     elif sys.platform == "win32":
-        print("  Windows: not supported.")
+        installed = _schtasks_installed() or _run_key_installed()
+        running = False
+        # No pid to ask on Windows (neither mechanism tracks one); a bound
+        # port is the running signal, same as the profile-autostart branch.
+        # Guarded on `installed` so a random service on 8787 does not make an
+        # uninstalled machine report Running: True (the profile branch does the
+        # same). The port install baked into the command line is not readable
+        # back from here without parsing schtasks /Query - a known gap for a
+        # non-default-port install, tracked for a follow-up.
+        if installed:
+            running = port_in_use(_env_port())
+        print(f"  Installed: {installed}")
+        print(f"  Running:   {running}")
     else:
         print(f"  Unsupported platform: {sys.platform}")
     return 0
@@ -494,9 +745,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     p_serve = sub.add_parser("serve", help="Run the dashboard (default)")
+    p_serve.add_argument(
+        "--port", type=int, default=None,
+        help="Port to serve on (overrides MISSIONCACHE_DASHBOARD_PORT)",
+    )
+    p_serve.add_argument(
+        "--hidden", action="store_true",
+        help="Detach the console window (Windows autostart; no-op elsewhere)",
+    )
     p_serve.set_defaults(func=cmd_serve)
 
     p_install = sub.add_parser("install-service", help="Register the dashboard as a background service")
+    p_install.add_argument(
+        "--port", type=int, default=None,
+        help="Port to register the service on (overrides MISSIONCACHE_DASHBOARD_PORT)",
+    )
     p_install.set_defaults(func=cmd_install_service)
 
     p_uninstall = sub.add_parser("uninstall-service", help="Remove the background service")
@@ -505,6 +768,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_reinstall = sub.add_parser(
         "reinstall-service",
         help="Uninstall + install the service (Python path change recovery)",
+    )
+    p_reinstall.add_argument(
+        "--port", type=int, default=None,
+        help="Port to register the service on (overrides MISSIONCACHE_DASHBOARD_PORT)",
     )
     p_reinstall.set_defaults(func=cmd_reinstall_service)
 

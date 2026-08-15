@@ -75,11 +75,40 @@ def install_plugin(ctx: InstallContext) -> None:
         _install_plugin_local(ctx)
     else:
         _install_plugin_pypi(updating=ctx.updating)
+    _warm_hook_interpreter()
     state.record_component(
         "plugin",
         {"mode": "marketplace" if ctx.mode == "pypi" else "local"},
     )
     ui.success("Core plugin installed")
+
+
+def _warm_hook_interpreter() -> None:
+    """Pre-resolve the Python that hooks.json's `uv run` launcher will use.
+
+    The plugin's hooks run via `uv run --no-project --python ">=3.11" python`.
+    On a machine with no suitable interpreter, uv downloads one on first use -
+    a download the UserPromptSubmit hooks' 5s timeout would lose. Warming here
+    moves that one-time cost into the install, where waiting is expected.
+
+    Best-effort: a missing uv or a failed warm only means the first hook run
+    pays the cost (or the hook times out once and the next one works).
+    """
+    if not shutil.which("uv"):
+        ui.warn("uv not found on PATH - plugin hooks need it. Install: https://docs.astral.sh/uv/")
+        return
+    ui.detail("Preparing the hook interpreter (uv-managed Python >=3.11, may download once)...")
+    try:
+        # run_streaming, not run: this can trigger a python-build-standalone
+        # download, and the module's own convention is that long-running
+        # commands with live output use run_streaming (captured output would
+        # sit silent for the whole download).
+        subprocess_utils.run_streaming(
+            ["uv", "run", "--no-project", "--python", ">=3.11", "python", "-V"]
+        )
+        ui.detail("Hook interpreter ready")
+    except subprocess_utils.CommandFailed as e:
+        ui.warn(f"Could not pre-warm the hook interpreter: {e.stderr.strip() or 'unknown error'}")
 
 
 def _install_plugin_pypi(updating: bool = False) -> None:
@@ -153,25 +182,30 @@ def _install_plugin_local(ctx: InstallContext) -> None:
 
     _write_local_marketplace_json(marketplace_json)
 
+    def _link_and_report(verb: str) -> None:
+        if _symlink_or_copy(plugin_link, repo):
+            ui.detail(f"{verb} symlink -> {repo}")
+        else:
+            ui.detail(f"{verb} copy of {repo} (symlinks need Developer Mode)")
+
     if plugin_link.is_symlink():
         if plugin_link.readlink() == repo:
             ui.detail("Plugin symlink already correct")
         else:
             plugin_link.unlink()
-            plugin_link.symlink_to(repo)
-            ui.detail(f"Updated symlink -> {repo}")
+            _link_and_report("Updated")
     elif plugin_link.is_dir():
-        ui.warn("Removing existing plugins/missioncache directory (not a symlink)")
+        # Steady state under the copy fallback: the previous run left a real
+        # directory here, so this is not the alarming "someone put a dir where
+        # our symlink goes" case. Only warn when symlinks actually work.
         shutil.rmtree(plugin_link)
-        plugin_link.symlink_to(repo)
-        ui.detail(f"Created symlink -> {repo}")
+        _link_and_report("Created")
     elif plugin_link.exists():
         ui.warn(f"Unexpected file at {plugin_link}; removing")
         plugin_link.unlink()
-        plugin_link.symlink_to(repo)
+        _link_and_report("Created")
     else:
-        plugin_link.symlink_to(repo)
-        ui.detail(f"Created symlink -> {repo}")
+        _link_and_report("Created")
 
     if shutil.which("claude"):
         try:
@@ -326,6 +360,77 @@ def uninstall_missioncache_auto(ctx: InstallContext) -> None:
 # Statusline - touches settings.json, so extra-careful about user consent
 # ---------------------------------------------------------------------------
 
+def _is_our_statusline(command: object) -> bool:
+    """Whether a statusLine.command is MissionCache's own.
+
+    One predicate for all three consent/probe sites so they agree. Matches on
+    the resolved basename, not a substring: on Windows we write an absolute
+    path (``C:/.../missioncache-statusline.exe``, possibly quoted), which an
+    exact ``== "missioncache-statusline"`` misses, while a plain substring test
+    would wrongly claim a user wrapper that merely mentions the name (e.g.
+    ``my-status --fallback missioncache-statusline``) and silently overwrite
+    it - the invariant the module docstring promises never to break. Non-string
+    commands (a malformed settings.json) are simply not ours.
+    """
+    if not isinstance(command, str):
+        return False
+    s = command.strip()
+    if not s:
+        return False
+    if s.startswith('"'):
+        # A quoted executable is one token even if its path holds a space
+        # (the Windows form); take up to the closing quote.
+        end = s.find('"', 1)
+        token = s[1:end] if end != -1 else s[1:]
+    else:
+        # Unquoted: the executable is the first whitespace-delimited word, so a
+        # user wrapper like "my-status --fallback missioncache-statusline" is
+        # correctly NOT ours.
+        token = s.split()[0]
+    stem = Path(token).name
+    return stem in ("missioncache-statusline", "missioncache-statusline.exe")
+
+
+def _statusline_command() -> str:
+    """The statusLine command written to settings.json.
+
+    POSIX uses the bare entry-point name (resolved via PATH at render time).
+    Windows writes the absolute path with forward slashes: Claude Code may
+    run the statusline via Git Bash, which eats backslashes in an unquoted
+    command, and the pipx/uv scripts dir is not guaranteed on that shell's
+    PATH. Falls back to the bare name when the exe is not resolvable yet
+    (dashboard component skipped or shell not restarted).
+    """
+    if sys.platform != "win32":
+        return "missioncache-statusline"
+    found = shutil.which("missioncache-statusline")
+    if not found:
+        # The bare name is what this function exists to avoid on Windows (Git
+        # Bash eats backslashes, the scripts dir may not be on that shell's
+        # PATH), so returning it is a known-degraded result - say so instead
+        # of writing it silently under a green "Statusline wired".
+        ui.warn(
+            "missioncache-statusline is not on PATH yet - wired the bare name, "
+            "which may not resolve in Claude Code's statusline shell. Restart "
+            "your shell and re-run: missioncache-install --statusline"
+        )
+        return "missioncache-statusline"
+    # Explicit replace, not Path.as_posix(): PosixPath treats backslash as a
+    # filename character and returns the string unchanged, so the conversion
+    # would silently depend on which platform class pathlib instantiates.
+    # A forward slash is never legal inside a Windows path component, so the
+    # blanket replace is safe.
+    path = found.replace("\\", "/")
+    # A space in the path (C:/Users/Jane Doe/...) splits an unquoted command
+    # in every shell. Double quotes fix Git Bash (the default statusline shell
+    # when installed); a PowerShell-only machine treats a quoted string as an
+    # expression, but the unquoted form is equally broken there, so quoting
+    # only when needed strictly improves.
+    if any(ch.isspace() for ch in path):
+        return f'"{path}"'
+    return path
+
+
 def install_statusline(ctx: InstallContext) -> bool:
     """Wire settings.json statusLine -> `missioncache-statusline`.
 
@@ -354,7 +459,7 @@ def install_statusline(ctx: InstallContext) -> bool:
     if isinstance(existing, dict):
         current_cmd = existing.get("command")
 
-    if ctx.updating and current_cmd and current_cmd != "missioncache-statusline":
+    if ctx.updating and current_cmd and not _is_our_statusline(current_cmd):
         # The user pointed statusLine at something else after installing.
         # An update refreshes MissionCache's own pieces; it must not win the
         # statusline back, and it must not stall a non-interactive update on
@@ -367,7 +472,7 @@ def install_statusline(ctx: InstallContext) -> bool:
         ui.detail("  To re-wire MissionCache's statusline: missioncache-install --statusline")
         return False
 
-    if current_cmd and current_cmd != "missioncache-statusline":
+    if current_cmd and not _is_our_statusline(current_cmd):
         ui.warn(f"An existing statusLine is wired in ~/.claude/settings.json:")
         ui.detail(f"  command: {current_cmd}")
         ui.detail("Overwriting will back up the current value to settings.json.bak")
@@ -375,14 +480,15 @@ def install_statusline(ctx: InstallContext) -> bool:
             ui.info("Keeping your existing statusline. Skipping.")
             return False
 
-    bak = settings.set_statusline("missioncache-statusline")
+    command = _statusline_command()
+    bak = settings.set_statusline(command)
     if bak:
         ui.detail(f"Backed up previous statusLine to {bak}")
     state.record_component(
         "statusline",
-        {"command": "missioncache-statusline", "backup": str(bak) if bak else None},
+        {"command": command, "backup": str(bak) if bak else None},
     )
-    ui.success("Statusline wired (missioncache-statusline)")
+    ui.success(f"Statusline wired ({command})")
     return True
 
 
@@ -532,6 +638,47 @@ def uninstall_missioncache_db(ctx: InstallContext) -> None:
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
+# Ignore list for the Windows copytree fallback: VCS/build/cache dirs plus the
+# file kinds a maintainer clone routinely carries gitignored (secrets, local
+# DBs) that must never land under ~/.claude/plugins/ as plugin content.
+_COPYTREE_IGNORE = shutil.ignore_patterns(
+    ".git", ".venv", "__pycache__", "dist", "build", "node_modules",
+    "*.egg-info", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox",
+    ".env", ".env.*", ".envrc", "*.pem", "*.key", "*.db", "*.sqlite", "*.sqlite3",
+)
+
+
+def _symlink_or_copy(link: Path, target: Path) -> bool:
+    """symlink_to, with a copy fallback for Windows without Developer Mode.
+
+    Returns True when a real symlink was made, False when it degraded to a
+    copy - so callers phrase their own message and record the right mode
+    instead of claiming a symlink over a copy.
+
+    Creating a symlink on Windows needs either elevation or Developer Mode;
+    without them the OS refuses with WinError 1314 ("A required privilege is
+    not held by the client"). Local mode is a maintainer convenience, so
+    degrade to a copy - edits to the clone then need a re-run of
+    missioncache-install --local to propagate - rather than failing the install.
+    """
+    try:
+        link.symlink_to(target)
+        return True
+    except OSError as e:
+        if getattr(e, "winerror", None) != 1314:
+            raise
+    if target.is_dir():
+        shutil.copytree(target, link, ignore=_COPYTREE_IGNORE)
+    else:
+        shutil.copy2(target, link)
+    ui.warn(
+        f"Symlinks need Windows Developer Mode - copied {target.name} instead. "
+        "Enable Developer Mode (Settings > System > For developers) and re-run "
+        "for live-updating links."
+    )
+    return False
+
+
 def _symlink_md_dir(src_dir: Path, dst_dir: Path) -> None:
     """For each *.md in src_dir, symlink into dst_dir. Backs up regular files."""
     if not src_dir.is_dir():
@@ -546,10 +693,22 @@ def _symlink_md_dir(src_dir: Path, dst_dir: Path) -> None:
             link.unlink()
         elif link.exists():
             bak = link.with_suffix(link.suffix + ".bak")
-            link.rename(bak)
-            ui.detail(f"Backed up existing {src.name} -> {src.name}.bak")
-        link.symlink_to(src)
-        ui.detail(f"Linked {src.name}")
+            # Never overwrite an existing .bak (the user's real original,
+            # preserved on the first run). Without this guard the third
+            # Windows-no-Developer-Mode install crashes: the copy fallback
+            # leaves a regular file, so every run re-enters this branch, and
+            # Path.rename onto an existing target raises FileExistsError on
+            # Windows (POSIX silently replaces). Matches _copy_bundled_dir's
+            # never-overwrite-.bak contract.
+            if bak.exists():
+                link.unlink()
+            else:
+                link.rename(bak)
+                ui.detail(f"Backed up existing {src.name} -> {src.name}.bak")
+        if _symlink_or_copy(link, src):
+            ui.detail(f"Linked {src.name}")
+        else:
+            ui.detail(f"Copied {src.name}")
 
 
 def _copy_bundled_dir(
@@ -769,6 +928,8 @@ def _service_kind(skip: bool) -> str:
         return "launchd"
     if sys.platform.startswith("linux"):
         return "systemd"
+    if sys.platform == "win32":
+        return "schtasks"
     return "manual"
 
 
@@ -940,7 +1101,7 @@ _UNTRACKED_PROBES = {
     "missioncache_db": lambda: shutil.which("missioncache-db") is not None,
     "statusline": lambda: (
         isinstance(_probe_settings().get("statusLine"), dict)
-        and _probe_settings()["statusLine"].get("command") == "missioncache-statusline"
+        and _is_our_statusline(_probe_settings()["statusLine"].get("command"))
     ),
 }
 

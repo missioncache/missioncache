@@ -6,34 +6,36 @@ It assumes you have read [`architecture.md`](./architecture.md) for the shared v
 
 If you are just trying to *use* MissionCache, you already are - hooks run automatically once the plugin is installed. The rest of this doc is for when you want to understand what they do, debug one that is misbehaving, or add your own.
 
-**Windows:** the hooks do not run on Windows yet. They are registered as `python3` commands, a name most Windows Python installs lack, and the PreCompact hook imports the Unix-only `fcntl` module (used for a file lock during the snapshot write), which fails on Windows before the hook can start. A Windows port is tracked; until then, everything in this doc applies to macOS and Linux.
+**Windows:** hooks run on native Windows (no WSL). They are registered in [exec form](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) - `uv` spawned directly with an argument list, no shell involved - so they work identically under Git Bash and PowerShell, and the file locking uses `msvcrt` on Windows instead of the Unix-only `fcntl` (see `missioncache_db/filelock.py`; the PreCompact hook carries its own msvcrt-aware mirror of the lock rather than importing it). **Requires Claude Code 2.1.139+**, where hook `args` (exec form) was added - an older client silently ignores `args` and runs bare `uv`, which fails. There is no plugin-manifest field to enforce a minimum client version, so this is the only place it is stated.
 
 ## The hook model
 
-Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers four of them via `hooks/hooks.json`:
+Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers four of them via `hooks/hooks.json`, in exec form (`command` + `args`):
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [{"hooks": [
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/activity_tracker.py", "timeout": 5},
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/task_tracker.py", "timeout": 5},
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_title.py", "timeout": 5}
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/activity_tracker.py"], "timeout": 5},
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/task_tracker.py"], "timeout": 5},
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/session_title.py"], "timeout": 5}
     ]}],
     "SessionStart": [{"hooks": [
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py", "timeout": 10}
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py"], "timeout": 10}
     ]}],
     "PreCompact": [{"hooks": [
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py", "timeout": 30}
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py"], "timeout": 30}
     ]}],
     "Stop": [{"hooks": [
-      {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop.py", "timeout": 10}
+      {"type": "command", "command": "uv", "args": ["run", "--no-project", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/stop.py"], "timeout": 10}
     ]}]
   }
 }
 ```
 
 Each hook is a standalone Python script. Claude Code spawns them as subprocesses with the specified timeout, pipes event data in on stdin as JSON, and reads stdout (for context injection) and stderr (for user-visible reminders). The scripts never persist - they start, do their one job, and exit.
+
+The launcher is `uv run --no-project --python ">=3.11" python <script>` rather than a bare `python3` for three reasons. `uv` is already a hard dependency (the plugin spawns its MCP server via `uvx`), and it is a real `.exe` on Windows - a requirement of exec form, which cannot spawn `.cmd`/`.bat` shims. Exec form passes each argument verbatim with no shell tokenization, so a plugin cache path containing spaces (the default under `C:\Users\<name>\...` for some usernames) cannot break the command. And `--python ">=3.11"` guarantees a modern interpreter everywhere: uv resolves a suitable Python (downloading one on first use if the machine has none), so the hooks stop depending on a `python3` name that most Windows Python installs lack. The installer pre-warms this resolution (`missioncache-install` runs `uv run --no-project --python ">=3.11" python -V` at plugin-install time) so the one-time interpreter download never races a hook's 5-second timeout. The hooks find `missioncache_db` themselves: each script makes the plugin's bundled `missioncache-db/` directory importable - five insert it into `sys.path`, `activity_tracker.py` passes it as `PYTHONPATH` to the `missioncache_db heartbeat-auto` subprocess it spawns - so the interpreter uv picks needs nothing pip-installed.
 
 Six hooks, four events: `UserPromptSubmit` runs *three* scripts (activity_tracker, task_tracker and session_title) in sequence because they have separate concerns but all trigger on the same event. The rest are one-to-one.
 
@@ -275,7 +277,7 @@ The variable is not magic - it is a plain environment variable - but it is the c
 
 If you have a new event you want to hook into, the pattern is straightforward:
 
-1. **Add the hook command in `hooks/hooks.json`.** Pick the event (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`, or another event Claude Code supports). Add a command entry pointing at your new script with a reasonable `timeout`. Hooks that already have multiple scripts (like `UserPromptSubmit`) take a list; new events need a new top-level key.
+1. **Add the hook command in `hooks/hooks.json`.** Pick the event (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`, or another event Claude Code supports). Copy an existing exec-form entry (`"command": "uv"` plus the `args` list) and change only the script filename, with a reasonable `timeout`. Hooks that already have multiple scripts (like `UserPromptSubmit`) take a list; new events need a new top-level key.
 2. **Create the script under `hooks/<your_hook>.py`.**
    ```python
    #!/usr/bin/env python3
@@ -305,11 +307,23 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 ## Troubleshooting
 
+### "No hooks fire at all, and the MCP tools are missing too"
+
+**Cause:** the hooks launch through `uv` (exec form resolves `command` on the PATH Claude Code itself runs with), and the MCP server spawns through `uvx` from that same environment. If `uv` is not on that PATH - common when Claude Code is launched from a GUI/dock icon that does not inherit your shell's PATH - every hook silently fails to spawn and the MCP server never starts.
+
+**Fix:** make `uv` resolvable from Claude Code's environment: install it to a location already on the system PATH, or launch Claude Code from a shell where `uv --version` works. On a machine where only some launch methods see `uv`, the tell is that hooks and MCP tools work from a terminal-launched session but not a GUI-launched one.
+
+### "Hooks do nothing right after a plugin-only install"
+
+**Cause:** the hooks' `uv run --python ">=3.11"` launcher downloads a managed Python on first use when the machine has no suitable interpreter. `missioncache-install` pre-warms that download, but a marketplace-only install (`claude plugins install` alone) skips the warm, and the first hook fire can lose the race against its 5-second timeout - mostly a fresh Windows box; macOS/Linux usually have a system 3.11+ that uv discovers without downloading.
+
+**Fix:** run `uv python install 3.13` once, then hooks fire normally from the next prompt. (Running the full `uvx missioncache-install` also warms it, but only on a first install - `--update` on a marketplace-only setup finds nothing in its state file and returns without warming.)
+
 ### "SessionStart doesn't show the active task banner"
 
 **Cause:** Either `missioncache_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
 
-**Fix:** Run the hook manually to see what happens: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`. It reads from stdin, so you can `echo '{}' | python3 session_start.py` and watch for import errors or exceptions. Most commonly the answer is "your cwd is not matching any MissionCache task" - check `~/.missioncache/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
+**Fix:** Run the hook manually, with the same launcher hooks.json uses: `echo '{}' | uv run --no-project --python ">=3.11" python ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py` and watch for import errors or exceptions. (On macOS/Linux a plain `echo '{}' | python3 session_start.py` also works when your system Python is 3.11+, but the uv form reproduces exactly what Claude Code spawns.) Most commonly the answer is "your cwd is not matching any MissionCache task" - check `~/.missioncache/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
 
 ### "Heartbeats aren't being recorded"
 

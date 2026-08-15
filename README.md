@@ -106,7 +106,7 @@ For a fully non-interactive install, use `uvx missioncache-install --all --yes`.
 
 **Requirements:** Python 3.11+, Claude Code CLI, and `uv` on your `PATH` (provides `uvx`). If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. `pipx` works in place of `uvx` if you prefer.
 
-**Windows note:** Windows support is partial today. The installer registers the plugin, pip-installs `missioncache-auto`, and prints manual instructions for running the dashboard (service registration is not automated). The lifecycle hooks - including the pre-compaction snapshot and session tracking - do not run on Windows yet: they are registered as `python3` commands (a name many Windows setups lack) and the snapshot hook uses a Unix-only file lock. A Windows port is on the roadmap.
+**Windows note:** MissionCache runs on native Windows (no WSL). The installer registers the plugin, installs `missioncache-auto`, and registers the dashboard as a Task Scheduler task (falling back to an HKCU Run-key entry when run without elevation). The lifecycle hooks - including the pre-compaction snapshot and session tracking - run too: they launch through `uv` in exec form and the snapshot lock uses `msvcrt` on Windows. This requires **Claude Code 2.1.139+** (where hook exec form was added); an older client silently ignores it and the hooks will not run. Native-Windows support is covered by platform-mocked unit tests; a windows-latest CI job that exercises it on real hardware is in progress.
 
 ### Plugin-only install
 
