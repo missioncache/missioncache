@@ -4,6 +4,7 @@ Tests use tmp_path for all file I/O and monkeypatch to redirect root_dir.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from missioncache_db import context_health as ch
@@ -140,7 +141,7 @@ class TestGetMissionCacheFiles:
         assert result.plan_file is not None
         assert result.context_file is not None
         assert result.tasks_file is not None
-        assert "active/active-task" in result.task_dir
+        assert Path(result.task_dir).parts[-2:] == ("active", "active-task")
 
     def test_finds_files_in_completed_dir(self, tmp_path):
         """When a project is archived to completed/, get_missioncache_files finds it.
@@ -165,7 +166,7 @@ class TestGetMissionCacheFiles:
         assert result.plan_file is not None
         assert result.context_file is not None
         assert result.tasks_file is not None
-        assert "completed/archived-task" in result.task_dir
+        assert Path(result.task_dir).parts[-2:] == ("completed", "archived-task")
 
     def test_returns_empty_paths_when_nothing_exists(self, tmp_path):
         result = get_missioncache_files("nonexistent-task")
@@ -188,9 +189,7 @@ class TestGetMissionCacheFiles:
         result = get_missioncache_files("dual-task")
 
         assert result.tasks_file is not None
-        assert "active/dual-task" in result.task_dir
-        from pathlib import Path
-
+        assert Path(result.task_dir).parts[-2:] == ("active", "dual-task")
         assert "active-version" in Path(result.tasks_file).read_text()
 
 

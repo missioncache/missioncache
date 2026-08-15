@@ -55,13 +55,13 @@ class TestFormatSavedTime:
         """The whole point of the format: a today save shows the date too,
         unlike _format_wall_time's bare HH:MM."""
         now = datetime.now().replace(hour=12, minute=34, second=0)
-        assert _format_saved_time(now.timestamp()) == now.strftime("%b %-d %H:%M")
+        assert _format_saved_time(now.timestamp()) == f"{now.strftime('%b')} {now.day} {now.strftime('%H:%M')}"
 
     def test_past_day_includes_date(self):
         past = (datetime.now() - timedelta(days=4)).replace(
             hour=9, minute=5, second=0
         )
-        assert _format_saved_time(past.timestamp()) == past.strftime("%b %-d %H:%M")
+        assert _format_saved_time(past.timestamp()) == f"{past.strftime('%b')} {past.day} {past.strftime('%H:%M')}"
 
 
 # ── get_project_info carries the context mtime (IO) ──────────────────────
