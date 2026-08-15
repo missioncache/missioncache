@@ -75,6 +75,13 @@ def sandboxed(tmp_path, monkeypatch):
     # without this line the progress assertions below silently measure real
     # projects instead of the sandbox.
     monkeypatch.setattr(server, "MISSIONCACHE_ROOT", mc_root)
+    # Pin the reader's display name. _who_self() derives it from `git config
+    # --global user.name`, so whether a row naming "Tomer" counts as mine
+    # depended on the developer's own git config: it passed on a machine
+    # configured with that name and failed anywhere else (a CI runner has no
+    # global user.name). The rows below name Tomer, so the sandbox says so.
+    monkeypatch.setattr(server, "_DISPLAY_NAME_CACHE", "Tomer")
+    monkeypatch.setattr(server, "_DISPLAY_NAME_RESOLVED", True)
     return mc_root
 
 
