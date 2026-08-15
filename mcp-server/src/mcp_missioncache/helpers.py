@@ -163,6 +163,62 @@ def _get_bound_project(session_id: str | None) -> str | None:
     return row[0] if row and row[0] else None
 
 
+def live_peer_sessions_for_project(project_name: str) -> list[dict]:
+    """Other live Claude Code sessions bound to ``project_name``.
+
+    The response-side half of the cross-session notification contract: every
+    MCP tool that rewrites a project's files under a live session returns this
+    as ``live_sessions`` so Claude can tell those sessions what changed. It
+    lives here because the writers span three modules (tools_docs, tools_pm,
+    tools_tasks) - the notification is acted on by Claude reading the tool
+    response, which is why the dashboard REST and CLI writers deliberately do
+    NOT get it: they have no Claude on the response side.
+
+    Identity comes from ``CLAUDE_CODE_SESSION_ID`` in this MCP subprocess's own
+    environment. Do not derive it from the process tree: one ``claude`` process
+    hosts many sessions at once, so pid to session is one-to-many and cannot
+    identify the caller. The env var is imperfect (a resume can leave the
+    subprocess carrying an id the conversation is not using), but a wrong
+    exclusion merely costs one spurious ask-the-user, never a wrong write.
+
+    Returns an empty list when the caller's session id cannot be resolved:
+    without it the caller cannot be excluded from its own results, and since
+    ListAgents never lists the calling session, its row would always fail to
+    match and send the caller into the ask-the-user fallback for no reason.
+
+    Best-effort throughout: a failure here must not turn a successful write
+    into a failed tool call.
+    """
+    try:
+        session_id = _resolve_session_id(None)
+        if not session_id or not project_name:
+            return []
+        return missioncache_db.live_sessions_for_project(
+            project_name, exclude_session_id=session_id
+        )
+    except Exception:
+        logger.exception("Error resolving live peer sessions")
+        return []
+
+
+def live_peer_sessions_for_context_file(context_file: str | Path) -> list[dict]:
+    """``live_peer_sessions_for_project`` with the project taken from the filename.
+
+    ``<name>-context.md`` carries the project name, so a write into ANOTHER
+    project's context reports that project's sessions - the case the feature
+    exists for. The subtask layout's bare ``context.md`` carries no name; those
+    are nested under a parent and are not addressed as projects, so there is
+    nobody to notify and the answer is empty.
+    """
+    try:
+        name = Path(context_file).name
+    except (TypeError, ValueError):
+        return []
+    if not name.endswith("-context.md"):
+        return []
+    return live_peer_sessions_for_project(name[: -len("-context.md")])
+
+
 async def _notify_dashboard_task_created() -> None:
     """Fire-and-forget POST to the dashboard so it syncs immediately.
 

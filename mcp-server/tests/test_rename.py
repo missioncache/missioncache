@@ -174,3 +174,147 @@ class TestRenameTaskMCPErrorMapping:
         )
         assert result.get("error") is True
         assert result["code"] == "INVALID_STATE"
+
+
+class TestRenameLiveSessionsContract:
+    """A rename moves the context file out from under any live peer session, so
+    it carries the cross-session notification contract - looked up by the NEW
+    name, since the rename's pointer sweep has already rewritten project_state.
+    """
+
+    def test_rename_reports_live_sessions_under_the_new_name(
+        self, isolated_orbit, monkeypatch
+    ):
+        import missioncache_db
+        from mcp_missioncache import helpers
+
+        tmp, root_dir = isolated_orbit
+        _seed(root_dir, "old-notify", tmp / "repo")
+        seen = {"project_names": []}
+
+        def _fake(project_name, exclude_session_id=None):
+            seen["project_names"].append(project_name)
+            return [{"session_id": "sid-peer", "title": project_name, "last_active": "now"}]
+
+        monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _fake)
+        monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-me")
+
+        result = asyncio.run(
+            tools_tasks.rename_task(new_name="new-notify", project_name="old-notify")
+        )
+        assert result["success"] is True
+        # Both names are queried (sweep-failure tolerance); new name first.
+        assert seen["project_names"] == ["new-notify", "old-notify"]
+        assert result["live_sessions"][0]["title"] == "new-notify"
+
+    def test_peers_stranded_under_the_old_name_still_notified(
+        self, isolated_orbit, monkeypatch
+    ):
+        """The project_state sweep inside db.rename_task is best-effort: on
+        failure the rename still returns changed=True with a warning, and the
+        peer rows keep the OLD name. That peer is exactly the one that most
+        needs to hear its directory moved, so the lookup covers both names
+        and dedupes by session id."""
+        import missioncache_db
+        from mcp_missioncache import helpers
+
+        tmp, root_dir = isolated_orbit
+        _seed(root_dir, "old-stranded", tmp / "repo")
+
+        def _fake(project_name, exclude_session_id=None):
+            if project_name == "old-stranded":  # sweep never moved these rows
+                return [
+                    {"session_id": "sid-a", "title": "old-stranded", "last_active": "now"},
+                    {"session_id": "sid-b", "title": "old-stranded-2", "last_active": "now"},
+                ]
+            return [  # sid-a also visible under the new name: dedupe keeps one
+                {"session_id": "sid-a", "title": "old-stranded", "last_active": "now"}
+            ]
+
+        monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _fake)
+        monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-me")
+
+        result = asyncio.run(
+            tools_tasks.rename_task(new_name="new-stranded", project_name="old-stranded")
+        )
+        assert result["success"] is True
+        assert sorted(p["session_id"] for p in result["live_sessions"]) == [
+            "sid-a",
+            "sid-b",
+        ]
+        assert len(result["live_sessions"]) == 2
+
+    def test_noop_rename_does_not_notify(self, isolated_orbit, monkeypatch):
+        """changed=False means nothing moved - a notification would be noise."""
+        import missioncache_db
+        from mcp_missioncache import helpers
+
+        tmp, root_dir = isolated_orbit
+        _seed(root_dir, "same-name", tmp / "repo")
+        monkeypatch.setattr(
+            missioncache_db,
+            "live_sessions_for_project",
+            lambda *a, **k: [{"session_id": "s", "title": "t", "last_active": "now"}],
+        )
+        monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-me")
+
+        result = asyncio.run(
+            tools_tasks.rename_task(new_name="same-name", project_name="same-name")
+        )
+        assert result["success"] is True
+        assert result["changed"] is False
+        assert "live_sessions" not in result
+
+
+class TestCompleteReopenLiveSessionsContract:
+    """complete_task and reopen_task move the entire project directory between
+    active/ and completed/ - the strongest form of "the files moved out from
+    under a live peer" - so both carry the notification contract.
+    """
+
+    @pytest.fixture
+    def one_peer(self, monkeypatch):
+        import missioncache_db
+        from mcp_missioncache import helpers
+
+        calls = []
+
+        def _fake(project_name, exclude_session_id=None):
+            calls.append(project_name)
+            return [{"session_id": "sid-peer", "title": project_name,
+                     "last_active": "now"}]
+
+        monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _fake)
+        monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-me")
+        return calls
+
+    def test_complete_then_reopen_both_notify(self, isolated_orbit, one_peer):
+        tmp, root_dir = isolated_orbit
+        _seed(root_dir, "lifecycle-proj", tmp / "repo")
+
+        completed = asyncio.run(
+            tools_tasks.complete_task(project_name="lifecycle-proj")
+        )
+        assert completed.get("error") is not True
+        assert completed["live_sessions"][0]["session_id"] == "sid-peer"
+
+        reopened = asyncio.run(
+            tools_tasks.reopen_task(project_name="lifecycle-proj")
+        )
+        assert reopened.get("error") is not True
+        assert reopened["live_sessions"][0]["session_id"] == "sid-peer"
+        assert one_peer == ["lifecycle-proj", "lifecycle-proj"]
+
+    def test_no_peers_no_key(self, isolated_orbit, monkeypatch):
+        import missioncache_db
+        from mcp_missioncache import helpers
+
+        tmp, root_dir = isolated_orbit
+        _seed(root_dir, "quiet-proj", tmp / "repo")
+        monkeypatch.setattr(
+            missioncache_db, "live_sessions_for_project", lambda *a, **k: []
+        )
+        monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-me")
+        completed = asyncio.run(tools_tasks.complete_task(project_name="quiet-proj"))
+        assert completed.get("error") is not True
+        assert "live_sessions" not in completed

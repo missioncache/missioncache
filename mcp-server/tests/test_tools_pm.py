@@ -176,3 +176,153 @@ class TestProjectDueDateTool:
         ))
         assert cleared["due_date"] is None
         assert "**Due:**" not in ctx.read_text()
+
+
+class TestPmWritersNotifyPeers:
+    """Spec source: the cross-session notifications rule - a session whose
+    context file just changed under it gets told. Every PM writer re-renders
+    the project's context mirror, so the notification contract cannot hold
+    only for update_context_file.
+    """
+
+    @pytest.fixture
+    def one_peer(self, monkeypatch):
+        """Fake exactly one live peer on any project; capture the lookups."""
+        import missioncache_db
+
+        calls = []
+
+        def _fake(project_name, exclude_session_id=None):
+            calls.append(project_name)
+            return [{"session_id": "sid-peer", "title": project_name,
+                     "last_active": "now"}]
+
+        monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _fake)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-mine")
+        return calls
+
+    def test_add_action_item_returns_live_sessions(self, pm_project, one_peer):
+        result = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="do the thing")
+        )
+        assert result["success"] is True
+        assert [p["session_id"] for p in result["live_sessions"]] == ["sid-peer"]
+        assert one_peer == ["pm-proj"]
+
+    def test_update_action_item_resolves_project_from_the_item(
+        self, pm_project, one_peer
+    ):
+        """This tool addresses by item id, and the peer lookup must still hit
+        the item's project."""
+        added = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="do the thing")
+        )
+        one_peer.clear()
+        result = asyncio.run(
+            tools_pm.update_action_item(item_id=added["item"]["id"], status="done")
+        )
+        assert result["success"] is True
+        assert one_peer == ["pm-proj"]
+        assert "live_sessions" in result
+
+    def test_set_stakeholder_and_ticket_and_due_date_notify(
+        self, pm_project, one_peer
+    ):
+        for coro in (
+            tools_pm.set_stakeholder(project_name="pm-proj", name="Dana"),
+            tools_pm.set_ticket(project_name="pm-proj", label="GC-1",
+                                url="https://x/GC-1"),
+            tools_pm.set_project_due_date(project_name="pm-proj",
+                                          due_date="2026-09-01"),
+        ):
+            result = asyncio.run(coro)
+            assert result["success"] is True
+            assert "live_sessions" in result
+
+    def test_no_peers_means_no_key(self, pm_project, monkeypatch):
+        """The common case stays byte-identical to the pre-feature response."""
+        import missioncache_db
+
+        monkeypatch.setattr(
+            missioncache_db, "live_sessions_for_project", lambda *a, **k: []
+        )
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-mine")
+        result = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="x")
+        )
+        assert result["success"] is True
+        assert "live_sessions" not in result
+
+    def test_unresolvable_session_id_means_no_key(self, pm_project, monkeypatch):
+        """Without its own id the caller cannot exclude itself, so the key is
+        omitted rather than returned unfiltered."""
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        result = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="x")
+        )
+        assert result["success"] is True
+        assert "live_sessions" not in result
+
+    def test_lookup_failure_does_not_fail_the_write(self, pm_project, monkeypatch):
+        """The DB write already happened; a notification failure must not turn
+        it into a failed tool call."""
+        import missioncache_db
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("lookup exploded")
+
+        monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _boom)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-mine")
+        result = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="x")
+        )
+        assert result["success"] is True
+        assert "live_sessions" not in result
+
+    def test_real_remove_notifies_noop_remove_does_not(self, pm_project, one_peer):
+        """A remove that deleted a row rewrote the mirror; one that matched
+        nothing wrote nothing, and a notify hint for it would be noise."""
+        asyncio.run(tools_pm.set_stakeholder(project_name="pm-proj", name="Dana"))
+        real = asyncio.run(
+            tools_pm.set_stakeholder(project_name="pm-proj", name="Dana", remove=True)
+        )
+        assert real["removed"] is True
+        assert [p["session_id"] for p in real["live_sessions"]] == ["sid-peer"]
+
+        noop = asyncio.run(
+            tools_pm.set_ticket(project_name="pm-proj", label="GC-404", remove=True)
+        )
+        assert noop["removed"] is False
+        assert "live_sessions" not in noop
+
+    def test_update_action_item_survives_a_raising_task_lookup(
+        self, pm_project, one_peer, monkeypatch
+    ):
+        """A lookup that RAISES must not turn the committed update into an
+        error response - it degrades to no hint, like a None return.
+
+        The break is applied to the notification seam only: pm_items completes
+        (the write committed), and the task lookup that follows it raises. A
+        blanket get_task patch would also break the mirror refresh inside
+        pm_items, which is a different failure than the one under test.
+        """
+        created = asyncio.run(
+            tools_pm.add_action_item(project_name="pm-proj", what="x")
+        )
+        real_update = tools_pm.pm_items.update_action_item
+
+        def _update_then_arm(db, item_id, **kwargs):
+            item = real_update(db, item_id, **kwargs)
+
+            def _boom(_task_id):
+                raise RuntimeError("db exploded mid-lookup")
+
+            monkeypatch.setattr(db, "get_task", _boom)
+            return item
+
+        monkeypatch.setattr(tools_pm.pm_items, "update_action_item", _update_then_arm)
+        result = asyncio.run(
+            tools_pm.update_action_item(item_id=created["item"]["id"], status="done")
+        )
+        assert result["success"] is True
+        assert "live_sessions" not in result

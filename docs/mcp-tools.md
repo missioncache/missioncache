@@ -191,7 +191,7 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 - `new_name: str` - Target name, kebab-case. Trimmed + lowercased before validation.
 - `task_id: int | None = None` or `project_name: str | None = None` - Provide one to identify the project.
 
-**Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, and `warnings`.
+**Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, and `warnings`. On a real rename (`changed: true`) it also carries `live_sessions` under the NEW name - a rename moves the context file out from under any live peer session, which then needs to reload its paths.
 
 Refuses with `ALREADY_EXISTS` when another project holds the target name (in the DB or on disk), with `INVALID_STATE` while a missioncache-auto run is in progress, and with `VALIDATION_ERROR` for legacy nested subtasks (rename the parent instead). Fork children are full projects and rename normally - only nested `active/<parent>/<subtask>/` directories are refused.
 
@@ -272,7 +272,7 @@ All sections are optional. Passing `None` for a section means "don't touch it". 
 
 The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched. Cap overflow and the context rewrite happen under one sidecar lock, journal written first (a crash duplicates entries into the journal rather than losing them). `imported_event` runs inside that same lock, which is the whole reason it exists as a parameter: the "Cross-project events" convention used to require a hand-written `##` section, and a direct Edit on a file another session may be writing is exactly what the parallel-session discipline forbids.
 
-**`live_sessions`** is the notification hook. It lists other live Claude Code sessions bound to the project that owns `context_file` - derived from the filename, so it covers writes into *another* project's context as well as your own - each as `{session_id, title, last_active}`. The key is omitted when the list is empty, when the context filename carries no project name (the subtask layout writes a bare `context.md`), and when this session's own id cannot be resolved (without it the caller cannot exclude itself, and since `ListAgents` never lists the calling session, its own row would always fail to match).
+**`live_sessions`** is the notification hook, and it is not unique to this tool: every MCP tool that rewrites or moves a project's files carries it - `update_context_file`, `update_tasks_file`, the five PM mutators, `rename_task`, and `complete_task` / `reopen_task` (see each tool's section). Here it lists other live Claude Code sessions bound to the project that owns `context_file` - derived from the filename, so it covers writes into *another* project's context as well as your own - each as `{session_id, title, last_active}`. The key is omitted when the list is empty, when the context filename carries no project name (the subtask layout writes a bare `context.md`), and when this session's own id cannot be resolved (without it the caller cannot exclude itself, and since `ListAgents` never lists the calling session, its own row would always fail to match). Dashboard and CLI writes do not notify: the notification is acted on by Claude reading the tool response, and those writers have no Claude on the response side.
 
 The caller identifies itself through `CLAUDE_CODE_SESSION_ID` in the MCP subprocess's own environment. Do not try to derive this from the process tree: a single `claude` process hosts many sessions at once (measured: twelve sessions under one pid), so pid to session is one-to-many and cannot identify the caller. The env var is imperfect - during a resume a subprocess was once observed carrying an id the conversation did not use - but a wrong exclusion only costs one spurious ask-the-user, never a wrong write.
 
@@ -307,7 +307,7 @@ For a **fork** (its context header carries `**Fork of:** <parent>`), `is_fork` i
 - `remaining_summary: str | None = None` - The "Remaining:" metadata line summary (max 15 words convention).
 - `notes: list[str] | None = None` - Notes to append under the "Notes" section.
 
-**Returns:** `{"success": True, ...}` plus the progress result from `project_files.update_tasks_file` (completion percentage, counts, etc.).
+**Returns:** `{"success": True, ...}` plus the progress result from `project_files.update_tasks_file` (completion percentage, counts, etc.), and `live_sessions` when other live sessions are bound to the project (same contract as `update_context_file`; the tasks file is project state a live peer works from). Legacy unprefixed `tasks.md` files carry no project name and skip the lookup.
 
 ### `get_missioncache_progress`
 
@@ -564,6 +564,8 @@ The pointer auto-clears when `update_tasks_file` marks the pointed-at items `[x]
 ## Project management tools (`tools_pm.py`)
 
 Thin wrappers over `missioncache_db.pm_items` - the single write path shared with the dashboard's REST endpoints and the `missioncache-db` CLI. Every mutation writes SQLite (the source of truth) and re-renders the read-only mirror sections in the project's context file under the sidecar lock, so a change made here is visible in the dashboard immediately and on the next `/missioncache:load`.
+
+Because every mutation rewrites the context file, each mutating tool here returns `live_sessions` when other live sessions are bound to the project (same contract as `update_context_file`, key present only when non-empty). `update_action_item` resolves the project from the item row, since it is addressed by `item_id`.
 
 ### `add_action_item`
 
