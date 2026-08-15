@@ -54,8 +54,13 @@ def probe_renamed_interpreter_walk(tmp: Path) -> None:
     live plausible ancestor (this probe process) instead of claude. Only the
     exact pid discriminates.
     """
+    # Copy the BASE interpreter, not sys.executable: inside a venv the latter
+    # is a shim that needs its pyvenv.cfg sibling, so a copy into a temp dir
+    # dies with "No pyvenv.cfg file" before running a line. The base CPython
+    # is self-contained and starts anywhere.
+    base = getattr(sys, "_base_executable", None) or sys.executable
     fake = tmp / "claude.exe"
-    shutil.copy2(Path(sys.executable), fake)
+    shutil.copy2(Path(base), fake)
 
     db_path = str(Path(proc.__file__).resolve().parents[1])
     out_file = tmp / "resolved.txt"
@@ -80,15 +85,24 @@ def probe_renamed_interpreter_walk(tmp: Path) -> None:
     env["MC_REAL_PY"] = sys.executable  # the real interpreter, not claude.exe
     env["MC_RESOLVER"] = resolver_code
 
-    spawner = subprocess.Popen([str(fake), "-c", spawner_code], env=env)
+    # Capture the spawner's output: when this probe fails, the reason is
+    # almost always an interpreter startup error printed here, and losing it
+    # turns a one-line diagnosis into another CI round trip.
+    spawner = subprocess.Popen(
+        [str(fake), "-c", spawner_code], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
     try:
-        spawner.wait(timeout=45)
+        output, _ = spawner.communicate(timeout=45)
     except subprocess.TimeoutExpired:
         spawner.kill()
         raise AssertionError("spawner (claude.exe) never finished")
+    spawner_output = (output or b"").decode("utf-8", errors="replace").strip()
 
-    assert out_file.exists() and out_file.read_text(encoding="utf-8").strip(), \
-        "grandchild resolver never wrote its answer"
+    assert out_file.exists() and out_file.read_text(encoding="utf-8").strip(), (
+        "grandchild resolver never wrote its answer; "
+        f"claude.exe exited {spawner.returncode} and said: {spawner_output or '(nothing)'}"
+    )
     resolved = int(out_file.read_text(encoding="utf-8").strip())
 
     # The grandchild's parent IS claude.exe (spawner.pid); the walk must return
