@@ -46,7 +46,7 @@ def parse_tasks_md(tasks_file: Path) -> list[TaskInfo]:
         return []
 
     tasks = []
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
 
     # Pattern matches: - [ ] or - [x] followed by optional [WAIT], then number
     # Examples: "- [ ] 1. Title", "- [x] 2: Title", "- [ ] [WAIT] 3. Title"
@@ -116,7 +116,7 @@ def parse_prompt_yaml(prompt_file: Path) -> PromptInfo | None:
     if not prompt_file.exists():
         return None
 
-    content = prompt_file.read_text()
+    content = prompt_file.read_text(encoding="utf-8")
 
     # Check for YAML frontmatter
     if not content.startswith("---"):
@@ -246,7 +246,7 @@ def mark_task_completed(tasks_file: Path, task_number: str) -> bool:
     if not tasks_file.exists():
         return False
 
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
 
     # Pattern: - [ ] N. or - [ ] N: (with optional leading whitespace)
     pattern = rf"^(\s*)- \[ \] ({task_number}[.:])"
@@ -255,7 +255,7 @@ def mark_task_completed(tasks_file: Path, task_number: str) -> bool:
     new_content, count = re.subn(pattern, replacement, content, flags=re.MULTILINE)
 
     if count > 0:
-        tasks_file.write_text(new_content)
+        tasks_file.write_text(new_content, encoding="utf-8")
         return True
     return False
 
@@ -266,11 +266,11 @@ def update_timestamps(tasks_file: Path, context_file: Path | None = None) -> Non
 
     for file_path in [tasks_file, context_file]:
         if file_path and file_path.exists():
-            content = file_path.read_text()
+            content = file_path.read_text(encoding="utf-8")
             pattern = r"^\*\*Last Updated:\*\*.*$"
             replacement = f"**Last Updated:** {timestamp}"
             new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-            file_path.write_text(new_content)
+            file_path.write_text(new_content, encoding="utf-8")
 
 
 def update_remaining_summary(tasks_file: Path, summary: str) -> None:
@@ -278,11 +278,11 @@ def update_remaining_summary(tasks_file: Path, summary: str) -> None:
     if not tasks_file.exists():
         return
 
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
     pattern = r"^\*\*Remaining:\*\*.*$"
     replacement = f"**Remaining:** {summary}"
     new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-    tasks_file.write_text(new_content)
+    tasks_file.write_text(new_content, encoding="utf-8")
 
 
 def extract_prompt_content(prompt_file: Path) -> str:
@@ -290,7 +290,7 @@ def extract_prompt_content(prompt_file: Path) -> str:
     if not prompt_file.exists():
         return ""
 
-    content = prompt_file.read_text()
+    content = prompt_file.read_text(encoding="utf-8")
 
     if content.startswith("---"):
         parts = content.split("---", 2)

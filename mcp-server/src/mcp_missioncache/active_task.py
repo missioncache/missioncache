@@ -65,7 +65,7 @@ def read_pointer(session_id: str) -> dict | None:
         return None
     path = _pointer_path(session_id)
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -133,7 +133,7 @@ def remove_task_numbers_everywhere(
 
     for path in STATE_DIR.glob("*.json"):
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if data.get("project_name") != project_name:

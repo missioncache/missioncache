@@ -198,20 +198,20 @@ def _write_local_marketplace_json(path: Path) -> None:
         "category": "productivity",
     }
     if path.exists():
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         plugins = data.setdefault("plugins", [])
         if any(p.get("name") == "missioncache" for p in plugins):
             ui.detail("missioncache already in marketplace.json")
             return
         plugins.append(entry)
-        path.write_text(json.dumps(data, indent=2))
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         ui.detail("Added missioncache to existing marketplace.json")
         return
     path.write_text(json.dumps({
         "name": "local",
         "owner": {"name": "Tomer Brami"},
         "plugins": [entry],
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     ui.detail("Created marketplace.json")
 
 
@@ -581,7 +581,7 @@ def _copy_bundled_dir(
     for item in src_files.iterdir():
         if not item.name.endswith(".md"):
             continue
-        _install_md_file(item.name, item.read_text(), dst_dir, ownership=ownership)
+        _install_md_file(item.name, item.read_text(encoding="utf-8"), dst_dir, ownership=ownership)
 
 
 def _install_md_file(
@@ -598,18 +598,18 @@ def _install_md_file(
             # Filename contract: the name is MissionCache's; replacing the
             # link never destroys its target file.
             dst.unlink()
-            dst.write_text(new_content)
+            dst.write_text(new_content, encoding="utf-8")
             ui.detail(f"Installed {name} (replaced symlink)")
             return
         # Marker policy applies to the LINK TARGET's content: a user who
         # wires this filename as a symlink into their own dotfiles owns it
         # exactly like a regular unmarked file, and must not lose the wiring.
         try:
-            existing = dst.read_text()  # follows the link
+            existing = dst.read_text(encoding="utf-8")  # follows the link
         except OSError:
             # Dangling link - not functioning config; replace it.
             dst.unlink()
-            dst.write_text(new_content)
+            dst.write_text(new_content, encoding="utf-8")
             ui.detail(f"Installed {name} (replaced broken symlink)")
             return
         if existing == new_content:
@@ -620,7 +620,7 @@ def _install_md_file(
             # A local-mode leftover pointing at MissionCache-managed content;
             # a pypi install deliberately converts it to a real copy.
             dst.unlink()
-            dst.write_text(new_content)
+            dst.write_text(new_content, encoding="utf-8")
             ui.detail(f"Refreshed {name} (replaced symlink)")
         else:
             ui.warn(
@@ -634,11 +634,11 @@ def _install_md_file(
             )
         return
     if not dst.exists():
-        dst.write_text(new_content)
+        dst.write_text(new_content, encoding="utf-8")
         ui.detail(f"Installed {name}")
         return
     try:
-        existing = dst.read_text()
+        existing = dst.read_text(encoding="utf-8")
     except OSError as e:
         ui.warn(f"Could not read existing {name} ({e}) - leaving it untouched")
         return
@@ -649,7 +649,7 @@ def _install_md_file(
     if ownership == "marker":
         first_line = existing.split("\n", 1)[0]
         if MANAGED_MARKER in first_line:
-            dst.write_text(new_content)
+            dst.write_text(new_content, encoding="utf-8")
             ui.detail(f"Refreshed {name}")
         else:
             ui.warn(
@@ -668,7 +668,7 @@ def _install_md_file(
     if not bak.exists():
         dst.rename(bak)
         ui.detail(f"Backed up existing {name} -> {name}.bak")
-    dst.write_text(new_content)
+    dst.write_text(new_content, encoding="utf-8")
     ui.detail(f"Installed {name}")
 
 

@@ -154,7 +154,7 @@ class ClaudeRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=working_dir,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             env=env,
             start_new_session=True,
         )
@@ -223,7 +223,7 @@ class ClaudeRunner:
 
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(log_file, "w") as f:
+        with open(log_file, "w", encoding="utf-8") as f:
             f.write("=== MissionCache Auto Worker Log ===\n")
             f.write(f"Started: {datetime.fromtimestamp(start_time).isoformat()}\n")
             f.write(f"Duration: {result.duration:.1f}s\n")

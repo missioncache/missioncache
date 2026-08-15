@@ -175,7 +175,7 @@ def _load_state(state_file) -> dict:
     if state_file is None:
         return {}
     try:
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
     except Exception:
         return {}
     if isinstance(data, list):
@@ -191,7 +191,7 @@ def _store_state(state_file, state: dict) -> None:
         return
     try:
         state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(json.dumps(state))
+        state_file.write_text(json.dumps(state), encoding="utf-8")
     except Exception:
         pass
 
@@ -368,14 +368,14 @@ def main() -> None:
         # Read tasks.md first and bail before touching the (larger) context.md
         # when nothing is pending - no signal can fire in that case. Clear
         # any stored dedup state on the way out so a later recurrence re-fires.
-        tasks_content = tasks_file.read_text()
+        tasks_content = tasks_file.read_text(encoding="utf-8")
         pending = parse_pending_tasks(tasks_content)
         total_pending = len(ANY_PENDING_RE.findall(tasks_content))
         if total_pending == 0:
             _clear_divergence_state(state_file)
             return
 
-        context_content = context_file.read_text()
+        context_content = context_file.read_text(encoding="utf-8")
 
         state = _load_state(state_file)
         new_state = dict(state)

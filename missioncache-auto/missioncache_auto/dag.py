@@ -264,7 +264,7 @@ class DAG:
 
     def to_adjacency_file(self, output_file: Path) -> None:
         """Write adjacency list to file."""
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             for task_id in sorted(self._adjacency.keys()):
                 deps = self._adjacency[task_id]
                 deps_csv = ",".join(deps)
@@ -274,7 +274,7 @@ class DAG:
     def from_adjacency_file(cls, adjacency_file: Path) -> "DAG":
         """Load DAG from adjacency list file."""
         dag = cls()
-        with open(adjacency_file) as f:
+        with open(adjacency_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -292,7 +292,7 @@ def _get_task_id(prompt_file: Path) -> str | None:
     if not prompt_file.exists():
         return None
 
-    content = prompt_file.read_text()
+    content = prompt_file.read_text(encoding="utf-8")
     match = re.search(r'^task_id:\s*["\']?([^"\'\n]+)["\']?', content, re.MULTILINE)
     return match.group(1).strip() if match else None
 
@@ -313,7 +313,7 @@ def _get_dependencies(prompt_file: Path, task_id: str) -> list[str]:
     if not prompt_file.exists():
         return []
 
-    content = prompt_file.read_text()
+    content = prompt_file.read_text(encoding="utf-8")
 
     # Detect a `dependencies:` field within the YAML frontmatter only.
     frontmatter = ""
@@ -353,6 +353,6 @@ def _get_task_title(prompt_file: Path) -> str | None:
     if not prompt_file.exists():
         return None
 
-    content = prompt_file.read_text()
+    content = prompt_file.read_text(encoding="utf-8")
     match = re.search(r'^task_title:\s*["\']?([^"\'\n]+)["\']?', content, re.MULTILINE)
     return match.group(1).strip() if match else None

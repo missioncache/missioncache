@@ -304,7 +304,7 @@ def get_commits_with_loc(repo_path: str, date: str) -> list[dict]:
             try:
                 email_result = subprocess.run(
                     ["git", "-C", repo_path, "config", "user.email"],
-                    capture_output=True, text=True, timeout=2,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2,
                 )
                 repo_email = email_result.stdout.strip()
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -341,7 +341,7 @@ def get_commits_with_loc(repo_path: str, date: str) -> list[dict]:
             ]
             + author_args,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
 
@@ -957,7 +957,7 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
 
         content = ""
         if tasks_file:
-            content = tasks_file.read_text()
+            content = tasks_file.read_text(encoding="utf-8")
 
         if content:
             # Parse **Status:** field
@@ -1049,7 +1049,7 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
         # Parse description from context file
         if context_file:
             try:
-                ctx_content = context_file.read_text()
+                ctx_content = context_file.read_text(encoding="utf-8")
 
                 # Look for ## Description section
                 desc_match = re.search(
@@ -1492,7 +1492,7 @@ async def api_task_files(task_id: int):
         filepath = task_dir / filename
         if filepath.exists() and key not in result["files"]:
             try:
-                content = filepath.read_text()
+                content = filepath.read_text(encoding="utf-8")
                 result["files"][key] = {
                     "filename": filename,
                     "content": content,
@@ -1567,7 +1567,7 @@ async def api_task_prompt(task_id: int, subtask_id: str):
         if not prompt_file.exists():
             return {"error": True, "message": f"Prompt file not found: {filename}"}
 
-        content = prompt_file.read_text()
+        content = prompt_file.read_text(encoding="utf-8")
         return {
             "subtask_id": subtask_id,
             "filename": filename,
@@ -1997,7 +1997,7 @@ def _parse_missioncache_tasks(tasks_file: Path) -> list[dict]:
     if not tasks_file.exists():
         return []
 
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
     tasks = []
 
     # Pattern matches: - [ ] or - [x] followed by optional [WAIT], then number
@@ -2113,7 +2113,7 @@ def _parse_prompt_dependencies(prompts_dir: Path) -> list[dict]:
 
     links = []
     for prompt_file in prompts_dir.glob("task-*-prompt.md"):
-        content = prompt_file.read_text()
+        content = prompt_file.read_text(encoding="utf-8")
 
         # Extract YAML frontmatter
         if not content.startswith("---"):
@@ -2590,7 +2590,7 @@ async def update_statusline_addons(payload: StatuslineAddonsPayload):
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     """Serve the main dashboard HTML from bundled package data."""
-    html = importlib.resources.files("missioncache_dashboard").joinpath("index.html").read_text()
+    html = importlib.resources.files("missioncache_dashboard").joinpath("index.html").read_text(encoding="utf-8")
     return HTMLResponse(html)
 
 
@@ -3655,12 +3655,14 @@ def _display_name() -> str | None:
             ["git", "config", "--global", "user.name"],
             capture_output=True, text=True, timeout=2,
             # A name with non-ASCII characters on a machine whose preferred
-            # encoding is not UTF-8 (LC_ALL=C, say) makes text=True raise
-            # UnicodeDecodeError while decoding. That is a ValueError, so it is
-            # not a SubprocessError and was not caught: it escaped this helper
-            # and 500'd the whole /api/today endpoint, blanking the board over
-            # a greeting. Replacing undecodable bytes keeps a mangled name,
-            # which is a far better outcome than no dashboard.
+            # encoding is not UTF-8 (LC_ALL=C on POSIX, cp1252 on Windows)
+            # makes text=True raise UnicodeDecodeError while decoding. That is
+            # a ValueError, so it is not a SubprocessError and was not caught:
+            # it escaped this helper and 500'd the whole /api/today endpoint,
+            # blanking the board over a greeting. Decoding as UTF-8 with
+            # undecodable bytes replaced keeps a mangled name, which is a far
+            # better outcome than no dashboard.
+            encoding="utf-8",
             errors="replace",
         )
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
@@ -3901,7 +3903,7 @@ async def get_today():
                     break
                 seen_context[key] = task.name
                 try:
-                    content = ctx.read_text()
+                    content = ctx.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     content = None
                 break

@@ -208,9 +208,9 @@ def _read_canonical_command(name: str, ctx: "InstallContext") -> str:
         path = _require_repo(ctx) / "commands" / f"{name}.md"
         if not path.exists():
             raise FileNotFoundError(f"Local command source missing: {path}")
-        return path.read_text()
+        return path.read_text(encoding="utf-8")
     files = resources.files("missioncache_install.bundled.commands")
-    return (files / f"{name}.md").read_text()
+    return (files / f"{name}.md").read_text(encoding="utf-8")
 
 
 def _write_command_files(
@@ -233,7 +233,7 @@ def _write_command_files(
             ui.warn(str(e))
             continue
         out_path = dest_dir / f"missioncache-{name}{suffix}"
-        out_path.write_text(_render_for_non_claude(content))
+        out_path.write_text(_render_for_non_claude(content), encoding="utf-8")
         written.append(str(out_path))
     return written
 
@@ -641,7 +641,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     }
     (codex_plugin_dir / "plugin.json").write_text(
         json.dumps(plugin_manifest, indent=2) + "\n"
-    )
+    , encoding="utf-8")
 
     marketplace = {
         "name": "missioncache",
@@ -659,7 +659,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
             }
         ],
     }
-    registry_path.write_text(json.dumps(marketplace, indent=2) + "\n")
+    registry_path.write_text(json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
 
     written = 0
     for name in CANONICAL_COMMANDS:
@@ -668,7 +668,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
         except FileNotFoundError as e:
             ui.warn(str(e))
             continue
-        (commands_dir / f"missioncache-{name}.md").write_text(_render_for_non_claude(content))
+        (commands_dir / f"missioncache-{name}.md").write_text(_render_for_non_claude(content), encoding="utf-8")
         written += 1
     ui.detail(f"Built Codex marketplace at {CODEX_MARKETPLACE_DIR} ({written} commands)")
     return written
@@ -777,7 +777,7 @@ def uninstall_codex_commands(ctx: "InstallContext") -> None:
                 )
 
     if CODEX_CONFIG_TOML.exists():
-        text = CODEX_CONFIG_TOML.read_text()
+        text = CODEX_CONFIG_TOML.read_text(encoding="utf-8")
         new_text = _strip_codex_plugin_stanza(text)
         if new_text != text:
             fs_utils.write_config_text(CODEX_CONFIG_TOML, new_text)

@@ -23,7 +23,7 @@ def load() -> dict[str, Any]:
     """Load settings.json. Returns {} if missing."""
     if not SETTINGS_FILE.exists():
         return {}
-    return json.loads(SETTINGS_FILE.read_text())
+    return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
 
 
 def save(settings: dict[str, Any]) -> None:

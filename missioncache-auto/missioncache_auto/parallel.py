@@ -269,7 +269,7 @@ class ParallelRunner:
             ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
 
@@ -292,7 +292,7 @@ class ParallelRunner:
             ["git", "status", "--porcelain"],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return [line for line in result.stdout.splitlines() if line.strip()]
 

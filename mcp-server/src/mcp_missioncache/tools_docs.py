@@ -595,10 +595,10 @@ async def get_context_digest(
         # parent branch below) - the shared-seen stamp must baseline exactly
         # the snapshot the caller consumed, never a racing writer's newer one.
         own_mtime = path.stat().st_mtime
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if path.stat().st_mtime != own_mtime:
             own_mtime = path.stat().st_mtime
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
         digest = context_health.build_digest(content, path)
 
         # PM layer extras (DB-side, best-effort). Inline import + broad
@@ -667,10 +667,10 @@ async def get_context_digest(
                     # file mid-read, re-read once so mtime and digest describe
                     # the same snapshot. (A content hash is the v2 contract.)
                     pmtime = ppath.stat().st_mtime
-                    pcontent = ppath.read_text()
+                    pcontent = ppath.read_text(encoding="utf-8")
                     if ppath.stat().st_mtime != pmtime:
                         pmtime = ppath.stat().st_mtime
-                        pcontent = ppath.read_text()
+                        pcontent = ppath.read_text(encoding="utf-8")
                     pdigest = context_health.build_digest(pcontent, ppath)
                     parent_digest = {
                         "name": fork_name,
@@ -845,7 +845,7 @@ async def get_missioncache_progress(
         if not path.exists():
             raise MissionCacheFileNotFoundError(file_path)
 
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         progress = project_files.parse_task_progress(content)
 
         return {
