@@ -1876,6 +1876,29 @@ ADDON_LINE_COUNT = len(ADDON_ROW_GROUPS)
 
 
 def main() -> None:
+    """Guarded entry point (pip script and `python statusline.py` alike).
+
+    The crash guard lives here, not in the `__main__` block, because the
+    installed `missioncache-statusline` entry point calls main() directly -
+    a guard only in `__main__` would leave the entry point rendering a blank
+    statusline on any unhandled exception, with no trace written anywhere.
+    """
+    try:
+        _run()
+    except Exception:
+        import traceback
+        try:
+            log_path = Path.home() / ".claude" / "logs" / "statusline-errors.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n--- {datetime.now().isoformat()} ---\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
+        _fallback_output()
+
+
+def _run() -> None:
     _suppress_stderr()
     raw = sys.stdin.read()
     if not raw.strip():
@@ -1998,7 +2021,11 @@ def main() -> None:
         addon_pool.shutdown(wait=False, cancel_futures=True)
 
     dir_name = Path.cwd().name
-    if dir_name == os.environ.get("USER", ""):
+    # USERNAME is the Windows spelling of USER. Require a non-empty dir_name so
+    # that at the filesystem root (where Path.cwd().name is "") a machine with
+    # neither var set does not collapse "" to "~".
+    user = os.environ.get("USER") or os.environ.get("USERNAME") or ""
+    if dir_name and dir_name == user:
         dir_name = "~"
 
     # --- Build items per line ---
@@ -2346,16 +2373,4 @@ def _fallback_output() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        import traceback
-        try:
-            log_path = Path.home() / ".claude" / "logs" / "statusline-errors.log"
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(f"\n--- {datetime.now().isoformat()} ---\n")
-                traceback.print_exc(file=f)
-        except Exception:
-            pass
-        _fallback_output()
+    main()

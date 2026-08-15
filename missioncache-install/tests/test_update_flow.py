@@ -282,6 +282,12 @@ def test_update_refreshes_own_statusline(isolated_home: Path) -> None:
 # _install_plugin_pypi: update must refresh marketplace + plugin
 # ---------------------------------------------------------------------------
 
+# The which-resolved CLI path every recorded call starts with: installers
+# resolve `claude` via shutil.which (Windows .cmd shims cannot be spawned by
+# bare name), and the fixture's which() mock returns this.
+CLAUDE = "claude"
+
+
 def _record_claude_calls(
     monkeypatch: pytest.MonkeyPatch, *, failing_prefixes: tuple[tuple[str, ...], ...] = ()
 ) -> list[list[str]]:
@@ -298,7 +304,7 @@ def _record_claude_calls(
         return subprocess.CompletedProcess(list(cmd), 0, "", "")
 
     monkeypatch.setattr(installers.subprocess_utils, "run", fake_run)
-    monkeypatch.setattr(installers.shutil, "which", lambda _n: "/usr/bin/claude")
+    monkeypatch.setattr(installers.shutil, "which", lambda _n: CLAUDE)
     return calls
 
 
@@ -313,10 +319,10 @@ def test_plugin_update_refreshes_marketplace_and_updates(
 
     installers._install_plugin_pypi(updating=True)
 
-    assert ["claude", "plugins", "marketplace", "update",
+    assert [CLAUDE, "plugins", "marketplace", "update",
             installers.PLUGIN_MARKETPLACE_NAME] in calls
-    assert ["claude", "plugins", "update", installers.PLUGIN_ID_PYPI] in calls
-    assert not any(c[:3] == ["claude", "plugins", "install"] for c in calls), \
+    assert [CLAUDE, "plugins", "update", installers.PLUGIN_ID_PYPI] in calls
+    assert not any(c[:3] == [CLAUDE, "plugins", "install"] for c in calls), \
         "A successful plugin update must not fall through to install"
 
 
@@ -326,12 +332,12 @@ def test_plugin_update_falls_back_to_install(
     """`plugins update` failing (e.g. plugin not actually installed) falls
     back to the plain install path instead of aborting the update."""
     calls = _record_claude_calls(
-        monkeypatch, failing_prefixes=(("claude", "plugins", "update"),)
+        monkeypatch, failing_prefixes=((CLAUDE, "plugins", "update"),)
     )
 
     installers._install_plugin_pypi(updating=True)
 
-    assert ["claude", "plugins", "install", installers.PLUGIN_ID_PYPI] in calls
+    assert [CLAUDE, "plugins", "install", installers.PLUGIN_ID_PYPI] in calls
 
 
 def test_plugin_fresh_install_does_not_run_update_commands(
@@ -343,7 +349,7 @@ def test_plugin_fresh_install_does_not_run_update_commands(
 
     installers._install_plugin_pypi(updating=False)
 
-    assert ["claude", "plugins", "install", installers.PLUGIN_ID_PYPI] in calls
+    assert [CLAUDE, "plugins", "install", installers.PLUGIN_ID_PYPI] in calls
     assert not any("update" in c for c in calls)
 
 
@@ -356,17 +362,17 @@ def test_plugin_marketplace_refresh_failure_propagates(
     propagates so the component is recorded failed and retried next update."""
     calls = _record_claude_calls(
         monkeypatch,
-        failing_prefixes=(("claude", "plugins", "marketplace", "update"),),
+        failing_prefixes=((CLAUDE, "plugins", "marketplace", "update"),),
     )
 
     with pytest.raises(subprocess_utils.CommandFailed):
         installers._install_plugin_pypi(updating=True)
 
     assert not any(
-        c[:3] == ["claude", "plugins", "update"] for c in calls
+        c[:3] == [CLAUDE, "plugins", "update"] for c in calls
     ), "plugins update must not run against a stale marketplace"
     assert not any(
-        c[:3] == ["claude", "plugins", "install"] for c in calls
+        c[:3] == [CLAUDE, "plugins", "install"] for c in calls
     ), "the install fallback must not mask the refresh failure either"
 
 
@@ -377,7 +383,7 @@ def test_plugin_refresh_failure_is_recorded_for_retry(
     failed_components, so the next --update retries the plugin."""
     _record_claude_calls(
         monkeypatch,
-        failing_prefixes=(("claude", "plugins", "marketplace", "update"),),
+        failing_prefixes=((CLAUDE, "plugins", "marketplace", "update"),),
     )
 
     failed = installers.install_components(["plugin"], _make_ctx(updating=True))

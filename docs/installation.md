@@ -31,7 +31,7 @@ Required for the plugin core (adds MCP server and hooks):
 
 Required only for the full install (dashboard, MissionCache Auto, statusline):
 
-- **macOS or Linux** for the dashboard background service (launchd on macOS, systemd user units on Linux; on systemd-less Linux such as default WSL, a shell-profile autostart block starts the dashboard on login instead). Windows is supported for the plugin, MissionCache Auto, and statusline components; the dashboard prints manual run instructions instead of registering a service.
+- The dashboard background service registers per platform: launchd on macOS, systemd user units on Linux (on systemd-less Linux such as default WSL, a shell-profile autostart block starts it on login instead), and a Task Scheduler ONLOGON task on native Windows (falling back to an HKCU Run-key entry when run without elevation). All of plugin, MissionCache Auto, dashboard, and statusline are supported on native Windows; the hooks require Claude Code 2.1.139+ (exec form).
 
 ## Full install (via `uvx missioncache-install`)
 

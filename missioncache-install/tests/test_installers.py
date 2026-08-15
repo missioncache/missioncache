@@ -117,6 +117,157 @@ def test_symlink_md_dir_replaces_stale_symlink(tmp_path: Path) -> None:
 # _copy_bundled_dir - mocked resources.files
 # ---------------------------------------------------------------------------
 
+# Captured at import time - the conftest autouse fixture rebinds the module
+# attribute to a no-op, but this reference still points at the real function.
+_REAL_WARM = installers._warm_hook_interpreter
+
+
+class TestWarmHookInterpreter:
+    """The pre-warm that keeps a first-run uv Python download from racing the
+    5s UserPromptSubmit timeout. conftest stubs it autouse; these drive the real."""
+
+    def test_missing_uv_warns_and_returns(self, monkeypatch):
+        monkeypatch.setattr(installers.shutil, "which", lambda _n: None)
+        warns = []
+        monkeypatch.setattr(installers.ui, "warn", lambda m, **k: warns.append(m))
+        ran = []
+        monkeypatch.setattr(installers.subprocess_utils, "run_streaming",
+                            lambda *a, **k: ran.append(a))
+        _REAL_WARM()
+        assert not ran  # never spawns when uv is absent
+        assert any("uv not found" in w for w in warns)
+
+    def test_success_streams_and_reports(self, monkeypatch):
+        monkeypatch.setattr(installers.shutil, "which", lambda _n: "/usr/bin/uv")
+        cmds = []
+        monkeypatch.setattr(installers.subprocess_utils, "run_streaming",
+                            lambda cmd, **k: cmds.append(cmd) or 0)
+        monkeypatch.setattr(installers.ui, "detail", lambda *a, **k: None)
+        _REAL_WARM()
+        assert cmds == [["uv", "run", "--no-project", "--python", ">=3.11", "python", "-V"]]
+
+    def test_failed_warm_does_not_raise(self, monkeypatch):
+        """A warm failure must never fail the plugin install."""
+        monkeypatch.setattr(installers.shutil, "which", lambda _n: "/usr/bin/uv")
+
+        def boom(cmd, **k):
+            raise installers.subprocess_utils.CommandFailed(cmd, 1, "", "boom")
+
+        monkeypatch.setattr(installers.subprocess_utils, "run_streaming", boom)
+        monkeypatch.setattr(installers.ui, "warn", lambda *a, **k: None)
+        monkeypatch.setattr(installers.ui, "detail", lambda *a, **k: None)
+        _REAL_WARM()  # no raise
+
+
+class TestIsOurStatusline:
+    def test_bare_name(self):
+        assert installers._is_our_statusline("missioncache-statusline")
+
+    def test_windows_absolute_path(self):
+        assert installers._is_our_statusline("C:/Users/jane/Scripts/missioncache-statusline.exe")
+
+    def test_quoted_spaced_path(self):
+        assert installers._is_our_statusline('"C:/Users/Jane Doe/Scripts/missioncache-statusline.exe"')
+
+    def test_user_wrapper_mentioning_the_name_is_not_ours(self):
+        """The substring form would wrongly claim this and overwrite it."""
+        assert not installers._is_our_statusline("my-status --fallback missioncache-statusline")
+
+    def test_non_string_is_not_ours(self):
+        assert not installers._is_our_statusline({"cmd": "x"})
+        assert not installers._is_our_statusline(None)
+
+
+def _raise_winerror_1314(self, target):
+    """A symlink_to stand-in that raises the no-Developer-Mode OSError."""
+    err = OSError("privilege not held")
+    err.winerror = 1314  # type: ignore[attr-defined]
+    raise err
+
+
+class TestSymlinkOrCopyFallback:
+    """The WinError 1314 (no Developer Mode) symlink->copy fallback. Reachable
+    on POSIX by making symlink_to raise a 1314 OSError."""
+
+    def test_symlink_success_returns_true(self, tmp_path):
+        src = tmp_path / "src.md"
+        src.write_text("x", encoding="utf-8")
+        assert installers._symlink_or_copy(tmp_path / "dst.md", src) is True
+
+    def test_file_fallback_copies_and_returns_false(self, tmp_path, monkeypatch):
+        src = tmp_path / "src.md"
+        src.write_text("content", encoding="utf-8")
+        dst = tmp_path / "dst.md"
+        monkeypatch.setattr(Path, "symlink_to", _raise_winerror_1314)
+        monkeypatch.setattr(installers.ui, "warn", lambda *a, **k: None)
+        assert installers._symlink_or_copy(dst, src) is False
+        assert dst.read_text(encoding="utf-8") == "content"
+
+    def test_dir_fallback_copies_with_ignore_patterns(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "keep.md").write_text("k", encoding="utf-8")
+        (src / ".env").write_text("SECRET=1", encoding="utf-8")
+        (src / "local.db").write_text("db", encoding="utf-8")
+        dst = tmp_path / "dst"
+
+        def raise_1314(self, target):
+            err = OSError("privilege not held")
+            err.winerror = 1314  # type: ignore[attr-defined]
+            raise err
+
+        monkeypatch.setattr(Path, "symlink_to", raise_1314)
+        monkeypatch.setattr(installers.ui, "warn", lambda *a, **k: None)
+        assert installers._symlink_or_copy(dst, src) is False
+        assert (dst / "keep.md").exists()
+        assert not (dst / ".env").exists()  # secret excluded
+        assert not (dst / "local.db").exists()  # local DB excluded
+
+    def test_non_1314_oserror_reraises(self, tmp_path, monkeypatch):
+        src = tmp_path / "src.md"
+        src.write_text("x", encoding="utf-8")
+
+        def raise_other(self, target):
+            err = OSError("something else")
+            err.winerror = 5  # type: ignore[attr-defined]
+            raise err
+
+        monkeypatch.setattr(Path, "symlink_to", raise_other)
+        with pytest.raises(OSError):
+            installers._symlink_or_copy(tmp_path / "dst.md", src)
+
+
+class TestStatuslineCommand:
+    """The statusLine command written to settings.json on win32."""
+
+    def test_posix_uses_bare_entry_point(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "darwin")
+        assert installers._statusline_command() == "missioncache-statusline"
+
+    def test_win32_writes_forward_slash_path(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "win32")
+        monkeypatch.setattr(
+            installers.shutil, "which",
+            lambda _n: r"C:\Users\jane\Scripts\missioncache-statusline.exe",
+        )
+        assert installers._statusline_command() == "C:/Users/jane/Scripts/missioncache-statusline.exe"
+
+    def test_win32_quotes_a_spaced_path(self, monkeypatch):
+        """An unquoted space splits the command in every shell the statusline
+        can run under - the quoted form at least works under Git Bash."""
+        monkeypatch.setattr(installers.sys, "platform", "win32")
+        monkeypatch.setattr(
+            installers.shutil, "which",
+            lambda _n: r"C:\Users\Jane Doe\Scripts\missioncache-statusline.exe",
+        )
+        assert installers._statusline_command() == '"C:/Users/Jane Doe/Scripts/missioncache-statusline.exe"'
+
+    def test_win32_falls_back_to_bare_name_when_unresolvable(self, monkeypatch):
+        monkeypatch.setattr(installers.sys, "platform", "win32")
+        monkeypatch.setattr(installers.shutil, "which", lambda _n: None)
+        assert installers._statusline_command() == "missioncache-statusline"
+
+
 class _FakeTraversable:
     """Minimal stand-in for importlib.resources Traversable, backed by Path."""
 
@@ -127,8 +278,8 @@ class _FakeTraversable:
     def iterdir(self) -> list[_FakeTraversable]:
         return [_FakeTraversable(p) for p in self._path.iterdir()]
 
-    def read_text(self) -> str:
-        return self._path.read_text()
+    def read_text(self, encoding: str | None = None) -> str:
+        return self._path.read_text(encoding=encoding)
 
 
 def test_copy_bundled_dir_copies_md_files(

@@ -59,7 +59,9 @@ SEEN_MTIME='<parent_digest.context_mtime, verbatim>'
 SESSION_ID='<SESSION_ID from Step 3>'
 if [ -n "$SESSION_ID" ] && [ -n "$SEEN_MTIME" ]; then
   mkdir -p "$HOME/.claude/hooks/state/shared-seen"
-  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" python3 -c '
+  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
+  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" "$PY" -c '
 import json, os, pathlib, datetime
 marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")
 marker.write_text(json.dumps({

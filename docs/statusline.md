@@ -269,11 +269,11 @@ Fields:
 
 ### Change what is shown
 
-For your own fields, prefer the addon system above - it needs no code and survives package updates. To change the built-in lines, note that the two environment variables documented above are the easiest knob. Beyond that, the script is a single flat file - the layout is determined by the order of `out.write()` calls in `main()`, and the contents of each line are built in the `# Build items per line` section of `main()`. To add, remove, or reorder lines:
+For your own fields, prefer the addon system above - it needs no code and survives package updates. To change the built-in lines, note that the two environment variables documented above are the easiest knob. Beyond that, the script is a single flat file - the layout is determined by the order of `out.write()` calls in `_run()` (the render body; `main()` is only the crash guard that wraps it), and the contents of each line are built in the `# Build items per line` section of `_run()`. To add, remove, or reorder lines:
 
-1. Find the line-building block (`line1`, `line2`, `line3`, ..., `line_codex`) in `main()`.
+1. Find the line-building block (`line1`, `line2`, `line3`, ..., `line_codex`) in `_run()`.
 2. Modify or add an `_item(COLORS[...], ICONS[...], "Label", value)` call.
-3. If you added a new line, include it in `all_lines`, `joined`, and `line_widths` tuples, then add an `out.write()` call in the output block at the bottom of `main()` and bump the `lines` count in `_fallback_output()` to match.
+3. If you added a new line, include it in `all_lines`, `joined`, and `line_widths` tuples, then add an `out.write()` call in the output block at the bottom of `_run()` and bump the `lines` count in `_fallback_output()` to match.
 
 Remember that the output block intentionally emits every line unconditionally (using blank-padded strings if a line has no content) so Claude Code allocates a fixed-height status area. If you add a conditional line, either make it always present with a blank fallback, or accept that the status area height will jump.
 

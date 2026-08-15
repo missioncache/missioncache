@@ -59,11 +59,15 @@ SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 # authoritative current-session pointer at ~/.claude/hooks/state/cwd-session/
 # <sanitized-cwd>.json; transcript mtime walk catches sessions that started
 # before the pointer mechanism landed.
+# Probe-run each python candidate (catches Windows' Store-stub python, which resolves on PATH but does not run); the result is a single path so it stays quotable, with uv's pre-warmed interpreter as the last fallback.
+PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
 if [ -z "$SESSION_ID" ]; then
-  CWD_KEY=$(pwd | sed 's|/|-|g')
+  # Claude Code's projects-dir encoding (every non-alphanumeric -> "-"). The sed fallback is POSIX-correct only: on Windows Git Bash `pwd` prints the MSYS form (/c/Users/...), which encodes to a key that matches nothing - there the CLI is the only correct source.
+  CWD_KEY=$(missioncache-db encode-cwd 2>/dev/null || pwd | sed 's|[^A-Za-z0-9]|-|g')
   POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
   if [ -r "$POINTER_FILE" ]; then
-    SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
+    SESSION_ID=$("$PY" -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
   fi
   [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
 fi
@@ -72,7 +76,7 @@ fi
 # Python <=3.11 rejects backslashes inside f-string expressions and the
 # outer single-quoted bash heredoc forces escaped double quotes inside.
 if [ -n "$SESSION_ID" ]; then
-  SESSION_ID="$SESSION_ID" python3 -c '
+  SESSION_ID="$SESSION_ID" "$PY" -c '
 import os, sqlite3
 sid = os.environ["SESSION_ID"]
 conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))

@@ -22,6 +22,12 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+# INVARIANT: no runtime `dependencies`. The plugin hooks import missioncache_db
+# under `uv run --no-project`, which installs nothing, so a single third-party
+# runtime dependency here would break all six hooks on every platform. Keep this
+# package stdlib-only; if a dependency ever becomes unavoidable, the hook
+# launcher in hooks/hooks.json must change with it.
+
 [project.urls]
 Homepage = "https://github.com/missioncache/missioncache"
 Repository = "https://github.com/missioncache/missioncache"

@@ -43,7 +43,7 @@ class StateManager:
     """
     Manages execution state with file-based locking for concurrent access.
 
-    State is persisted as JSON and protected by fcntl locks for safe
+    State is persisted as JSON and protected by file locks for safe
     multi-process access.
     """
 

@@ -11,7 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from missioncache_install import command_clients, fs_utils, mcp_clients, settings, state
+from missioncache_install import command_clients, fs_utils, installers, mcp_clients, settings, state
+
+
+@pytest.fixture(autouse=True)
+def _no_real_hook_warm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never spawn the real `uv run ... python -V` warm inside the unit suite.
+
+    _warm_hook_interpreter runs on every successful install_plugin and can
+    trigger a python-build-standalone download. Autouse so no test that drives
+    a plugin install accidentally reaches out to uv or the network. A test
+    that wants to exercise the warm monkeypatches it back.
+    """
+    monkeypatch.setattr(installers, "_warm_hook_interpreter", lambda: None)
 
 
 @pytest.fixture
