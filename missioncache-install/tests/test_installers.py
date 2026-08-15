@@ -46,9 +46,7 @@ def _same_link_target(link: Path, expected: Path) -> bool:
     expected path is a plain C:\\... path, so a raw == is always False there.
     Compares normalized real paths, matching installers._links_to.
     """
-    return os.path.normcase(os.path.realpath(link.readlink())) == os.path.normcase(
-        os.path.realpath(expected)
-    )
+    return link.exists() and os.path.samefile(link, expected)
 
 
 def test_symlink_md_dir_creates_links_for_md_files(tmp_path: Path) -> None:

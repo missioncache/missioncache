@@ -204,7 +204,11 @@ def fork_reader(project, tmp_path, monkeypatch):
     (fork_dir / "fork-proj-context.md").write_text(
         "# Fork - Context\n**Fork of:** demo-project\n\n## Description\n"
     )
+    # USERPROFILE alongside HOME: Path.home() reads USERPROFILE on Windows and
+    # ignores HOME, so setting only HOME left the stamp writing into the real
+    # user profile and the assertions reading an empty sandbox.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-stamp-1")
     state_db = tmp_path / "hooks-state.db"
     monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", state_db)
