@@ -58,7 +58,7 @@ def init_task(
         description=description or f"Description for {task_name}",
     )
     tasks_file = task_dir / f"{task_name}-tasks.md"
-    tasks_file.write_text(tasks_content)
+    tasks_file.write_text(tasks_content, encoding="utf-8")
 
     # Create context file
     context_content = CONTEXT_TEMPLATE.format(
@@ -67,7 +67,7 @@ def init_task(
         description=description or f"Context for {task_name}",
     )
     context_file = task_dir / f"{task_name}-context.md"
-    context_file.write_text(context_content)
+    context_file.write_text(context_content, encoding="utf-8")
 
     # Create plan file
     plan_content = PLAN_TEMPLATE.format(
@@ -76,6 +76,6 @@ def init_task(
         description=description or f"Implementation plan for {task_name}",
     )
     plan_file = task_dir / f"{task_name}-plan.md"
-    plan_file.write_text(plan_content)
+    plan_file.write_text(plan_content, encoding="utf-8")
 
     return task_dir

@@ -414,7 +414,7 @@ class SequentialRunner:
 ---
 
 """
-        self.paths.auto_log.write_text(content)
+        self.paths.auto_log.write_text(content, encoding="utf-8")
 
     def _write_iteration_log(
         self,
@@ -465,7 +465,7 @@ class SequentialRunner:
             entry += f"### Try Next\n{result.try_next}\n\n"
 
         # Append to log
-        with open(self.paths.auto_log, "a") as f:
+        with open(self.paths.auto_log, "a", encoding="utf-8") as f:
             f.write(entry)
 
     def _add_to_codebase_knowledge(self, kind: str, content: str) -> None:
@@ -473,7 +473,7 @@ class SequentialRunner:
         if not self.paths.auto_log.exists():
             return
 
-        log_content = self.paths.auto_log.read_text()
+        log_content = self.paths.auto_log.read_text(encoding="utf-8")
 
         # Format the content
         if ":" in content:
@@ -502,7 +502,7 @@ class SequentialRunner:
             log_content,
         )
 
-        self.paths.auto_log.write_text(log_content)
+        self.paths.auto_log.write_text(log_content, encoding="utf-8")
 
     def _handle_completion(self, run_summary: str | None = None) -> None:
         """Handle completion of all tasks."""
@@ -522,7 +522,7 @@ class SequentialRunner:
 ## Run Summary
 {run_summary or "All tasks completed successfully."}
 """
-        with open(self.paths.auto_log, "a") as f:
+        with open(self.paths.auto_log, "a", encoding="utf-8") as f:
             f.write(completion_entry)
 
         # Update timestamps

@@ -26,7 +26,7 @@ def _extract_task_title(prompt_file: Path) -> str:
             return info.task_title
 
         # Fallback: first markdown heading
-        content = prompt_file.read_text()
+        content = prompt_file.read_text(encoding="utf-8")
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.startswith("# "):
@@ -66,7 +66,7 @@ def git_commit_task(task_id: str, prompt_file: Path, project_root: Path) -> tupl
             ["git", "status", "--porcelain", "--", *env_exclude],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if not status.stdout.strip():
             return False, ""

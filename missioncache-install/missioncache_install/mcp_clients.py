@@ -155,7 +155,7 @@ def _ensure_codex_auto_approval() -> None:
     user's deliberate choice - is never overridden.
     """
     try:
-        text = CODEX_CONFIG_TOML.read_text()
+        text = CODEX_CONFIG_TOML.read_text(encoding="utf-8")
     except OSError:
         ui.warn(
             "Could not read ~/.codex/config.toml to set tool approval - "
@@ -503,7 +503,7 @@ def _load_json_object(path: Path) -> tuple[dict[str, Any], str, bool]:
     """
     if not path.exists():
         return {}, "  ", False
-    raw = path.read_text()
+    raw = path.read_text(encoding="utf-8")
     if not raw.strip():
         return {}, "  ", False
     used_jsonc = False

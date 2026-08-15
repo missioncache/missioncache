@@ -86,7 +86,7 @@ def log_iteration(
 
     # Append to log
     if log_path.exists():
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
     else:
         # Create new log with header
@@ -96,7 +96,7 @@ def log_iteration(
 **Max Iterations:** 20
 
 ---
-{entry}""")
+{entry}""", encoding="utf-8")
 
     return entry
 
@@ -121,7 +121,7 @@ def log_completion(
 """
 
     if log_path.exists():
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
     return entry
@@ -147,7 +147,7 @@ def log_timeout(
 """
 
     if log_path.exists():
-        with open(log_path, "a") as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
     return entry
@@ -182,7 +182,7 @@ def get_iteration_status(task_dir: str | Path, task_name: str) -> dict[str, Any]
             "blocked": False,
         }
 
-    content = log_path.read_text()
+    content = log_path.read_text(encoding="utf-8")
 
     # Parse started time
     started_match = re.search(r"\*\*Started:\*\* (.+)", content)
@@ -246,7 +246,7 @@ def _is_task_completed(tasks_file: Path, task_id: str) -> bool:
     if not tasks_file.exists():
         return False
 
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
     display_id = _task_id_to_display(task_id)
 
     # Escape dots for regex
@@ -311,7 +311,7 @@ def get_prompts_status(
     next_prompt = None
 
     for pf in sorted(prompt_files):
-        content = pf.read_text()
+        content = pf.read_text(encoding="utf-8")
 
         # Extract task_id from YAML frontmatter
         task_id_match = re.search(

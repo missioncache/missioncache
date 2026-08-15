@@ -101,7 +101,7 @@ async def set_active_missioncache_tasks(
         # Permission errors and other OSError surface as the outer
         # ``except Exception`` catch-all instead of being remapped to
         # FILE_NOT_FOUND, which would mislead the caller.
-        content = Path(files.tasks_file).read_text()
+        content = Path(files.tasks_file).read_text(encoding="utf-8")
 
         items = parse_tasks_md(content)
         unknown: list[str] = []

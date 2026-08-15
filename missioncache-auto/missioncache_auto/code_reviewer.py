@@ -30,7 +30,7 @@ def run_tdd_review(
 
     Returns (passed, summary).
     """
-    prompt_content = prompt_file.read_text() if prompt_file.exists() else ""
+    prompt_content = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
 
     review_prompt = f"""You are reviewing code changes for TDD compliance.
 
@@ -86,7 +86,7 @@ def run_spec_review(
 
     Returns (passed, summary).
     """
-    prompt_content = prompt_file.read_text() if prompt_file.exists() else ""
+    prompt_content = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
 
     review_prompt = f"""You are reviewing code changes for spec compliance.
 

@@ -60,7 +60,7 @@ def parse_task_modes(tasks_file: Path) -> list[TaskModeInfo]:
     if not tasks_file.exists():
         return []
 
-    content = tasks_file.read_text()
+    content = tasks_file.read_text(encoding="utf-8")
     results = []
 
     # Pattern for checkbox items with optional mode markers

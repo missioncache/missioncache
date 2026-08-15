@@ -50,7 +50,7 @@ def run(
         result = subprocess.run(
             list(cmd),
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
             input=input_,
             check=False,

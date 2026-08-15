@@ -30,7 +30,7 @@ def load() -> dict[str, Any]:
     if not STATE_FILE.exists():
         return _empty_state()
     try:
-        state = json.loads(STATE_FILE.read_text())
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         corrupt = STATE_FILE.with_suffix(".json.corrupt")
         STATE_FILE.rename(corrupt)
@@ -62,7 +62,7 @@ def save(state: dict[str, Any]) -> None:
     """Persist state to disk. Stamps updated_at."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     state["updated_at"] = _now_iso()
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def record_component(component: str, info: dict[str, Any]) -> None:

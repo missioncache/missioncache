@@ -202,7 +202,7 @@ def install_launchd(port: int) -> None:
         print(f"  Replacing existing service definition at {plist}")
         subprocess.run(["launchctl", "unload", str(plist)], check=False)
 
-    plist.write_text(render_plist(binary, port))
+    plist.write_text(render_plist(binary, port), encoding="utf-8")
     subprocess.run(["launchctl", "load", str(plist)], check=True)
     print(f"  launchd service loaded: {LAUNCHD_LABEL}")
     print(f"  Logs: {log_dir()}/missioncache-dashboard-{{stdout,stderr}}.log")
@@ -234,7 +234,7 @@ def install_systemd(port: int) -> None:
     binary = resolve_binary()
     unit = systemd_unit_path()
     unit.parent.mkdir(parents=True, exist_ok=True)
-    unit.write_text(render_systemd_unit(binary, port))
+    unit.write_text(render_systemd_unit(binary, port), encoding="utf-8")
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     subprocess.run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT], check=True)
     print(f"  systemd --user unit enabled: {SYSTEMD_UNIT}")
@@ -319,11 +319,11 @@ def install_profile_autostart(port: int) -> None:
     systemd_unit_path().unlink(missing_ok=True)
 
     profile = autostart_profile_path()
-    existing = profile.read_text() if profile.exists() else ""
+    existing = profile.read_text(encoding="utf-8") if profile.exists() else ""
     body = _strip_autostart_block(existing)
     if body:
         body = body.rstrip("\n") + "\n\n"
-    profile.write_text(body + render_autostart_block(port))
+    profile.write_text(body + render_autostart_block(port), encoding="utf-8")
     print(f"  Autostart block written to {profile} (starts on next login shell)")
 
     if port_in_use(port):
@@ -342,10 +342,10 @@ def install_profile_autostart(port: int) -> None:
 def uninstall_profile_autostart() -> None:
     profile = autostart_profile_path()
     if profile.exists():
-        text = profile.read_text()
+        text = profile.read_text(encoding="utf-8")
         stripped = _strip_autostart_block(text)
         if stripped != text:
-            profile.write_text(stripped)
+            profile.write_text(stripped, encoding="utf-8")
             print(f"  Removed autostart block from {profile}")
     subprocess.run(["pkill", "-f", AUTOSTART_MATCH], check=False)
 
@@ -446,7 +446,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
             result = subprocess.run(
                 ["launchctl", "list", LAUNCHD_LABEL],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=False,
             )
             running = result.returncode == 0
@@ -459,7 +459,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
             result = subprocess.run(
                 ["systemctl", "--user", "is-active", SYSTEMD_UNIT],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=False,
             )
             running = result.stdout.strip() == "active"
@@ -468,7 +468,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
             # autostart block; without this branch, status reported "not
             # installed / not running" on the very platform that path serves.
             profile = autostart_profile_path()
-            installed = profile.exists() and AUTOSTART_BEGIN in profile.read_text()
+            installed = profile.exists() and AUTOSTART_BEGIN in profile.read_text(encoding="utf-8")
             if installed:
                 port = int(os.environ.get("MISSIONCACHE_DASHBOARD_PORT", str(DEFAULT_PORT)))
                 running = port_in_use(port)

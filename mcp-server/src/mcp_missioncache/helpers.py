@@ -455,7 +455,7 @@ def _parse_task_progress(task_dir: Path, task_name: str) -> TaskProgress | None:
     for tasks_file in tasks_files:
         if tasks_file.exists():
             try:
-                content = tasks_file.read_text()
+                content = tasks_file.read_text(encoding="utf-8")
                 return project_files.parse_task_progress(content)
             except Exception as e:
                 logger.warning(f"Failed to parse {tasks_file}: {e}")
