@@ -265,7 +265,10 @@ jobs:
       - name: Run the full test suites on Windows
         run: |
           $env:PYTHONUTF8 = "1"
-          .venv\Scripts\python -m pytest -q `
+          # -p no:cacheprovider and an explicit override of the repo-root addopts
+          # "-x": on the first Windows runs we want the COMPLETE failure list in
+          # one go, not one failure per push.
+          .venv\Scripts\python -m pytest -q -p no:cacheprovider --maxfail=50 `
             missioncache-db/tests `
             missioncache-auto/tests `
             missioncache-dashboard/tests `

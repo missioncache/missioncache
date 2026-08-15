@@ -395,11 +395,23 @@ class TestWorktree:
 
 
 class TestNonGitRepo:
-    def test_non_git_repo_is_anchor_with_warning(self, mc, tmp_path):
+    def test_non_git_repo_outside_home_is_anchor_with_warning(self, mc, tmp_path, monkeypatch):
+        """A non-git repo dir that is NOT under HOME exports as an anchor ref.
+
+        HOME is pinned away from the repo dir on purpose: which branch of
+        _anchor_or_home_relative fires depends entirely on whether the path
+        sits under HOME, and the pytest temp dir does on Windows
+        (C:/Users/<user>/AppData/Local/Temp) but not on macOS
+        (/private/var/folders). Without pinning, this test asserted the macOS
+        layout and failed on Windows for an environment reason, not a defect.
+        """
         name = "proj"
         _seed_files(mc, name, _default_md(name))
         plain = tmp_path / "plain-dir"
         plain.mkdir()
+        elsewhere_home = tmp_path / "not-the-repo-parent"
+        elsewhere_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: elsewhere_home)
         rid = mc.db.add_repo(str(plain))
         _insert_task(mc.db, name=name, repo_id=rid)
 
@@ -407,6 +419,25 @@ class TestNonGitRepo:
         repo_ref = report["manifest"]["references"]["repo"]
 
         assert repo_ref["kind"] == "anchor"
+        assert any("no 'origin' git remote" in w for w in report["warnings"])
+
+    def test_non_git_repo_under_home_is_home_relative(self, mc, tmp_path, monkeypatch):
+        """The sibling branch: under HOME, the same non-git dir exports as a
+        home-relative ref so the target machine can re-root it."""
+        name = "proj"
+        _seed_files(mc, name, _default_md(name))
+        home = tmp_path / "home"
+        plain = home / "code" / "plain-dir"
+        plain.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: home)
+        rid = mc.db.add_repo(str(plain))
+        _insert_task(mc.db, name=name, repo_id=rid)
+
+        report = _export(mc, name, out=str(tmp_path / "b"))
+        repo_ref = report["manifest"]["references"]["repo"]
+
+        assert repo_ref["kind"] == "home-relative"
+        assert repo_ref["home_relative"] == "code/plain-dir"
         assert any("no 'origin' git remote" in w for w in report["warnings"])
 
     def test_non_coding_task_has_null_repo(self, mc, tmp_path):
