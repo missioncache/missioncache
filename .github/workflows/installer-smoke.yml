@@ -317,15 +317,26 @@ jobs:
 
       - name: Dashboard is actually serving
         run: |
+          # 127.0.0.1, not localhost: the server binds IPv4 explicitly, and on
+          # Windows "localhost" resolves to ::1 first, so an IPv6-first client
+          # gets connection-refused against a perfectly healthy server.
           $ok = $false
-          for ($i = 0; $i -lt 20; $i++) {
+          for ($i = 0; $i -lt 30; $i++) {
             try {
-              Invoke-WebRequest -UseBasicParsing "http://localhost:8787/health" -TimeoutSec 2 | Out-Null
+              Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/health" -TimeoutSec 2 | Out-Null
               $ok = $true; break
             } catch { Start-Sleep -Seconds 2 }
           }
-          if (-not $ok) { Write-Error "dashboard never came up"; exit 1 }
-          (Invoke-WebRequest -UseBasicParsing "http://localhost:8787/api/version").Content
+          if (-not $ok) {
+            Write-Host "--- dashboard processes ---"
+            Get-Process missioncache-dashboard -ErrorAction SilentlyContinue | Format-List Id, ProcessName, StartTime
+            Write-Host "--- listening sockets on 8787 ---"
+            Get-NetTCPConnection -LocalPort 8787 -ErrorAction SilentlyContinue | Format-List LocalAddress, LocalPort, State
+            Write-Host "--- windows dashboard log ---"
+            Get-Content "$env:USERPROFILE\.claude\logs\missioncache-dashboard-windows.log" -ErrorAction SilentlyContinue
+            Write-Error "dashboard never came up"; exit 1
+          }
+          (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/api/version").Content
 
       - name: schtasks task body runs (not just registers)
         run: |
