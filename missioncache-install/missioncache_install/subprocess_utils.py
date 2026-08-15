@@ -5,7 +5,6 @@ Never swallows stdout/stderr on failure - the user needs to see what broke.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -38,8 +37,8 @@ def _resolve_windows_executable(cmd: Sequence[str]) -> list[str]:
     if sys.platform != "win32" or not cmd:
         return list(cmd)
     name = cmd[0]
-    if os.sep in name or (os.altsep and os.altsep in name):
-        return list(cmd)  # already an explicit path
+    if "\\" in name or "/" in name:
+        return list(cmd)  # already an explicit path (both separators are Windows path chars)
     found = shutil.which(name)
     if not found:
         return list(cmd)

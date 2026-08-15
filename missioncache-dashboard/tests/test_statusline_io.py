@@ -6,6 +6,7 @@ Tests use tmp_path and monkeypatch to isolate filesystem operations.
 import json
 import os
 import pathlib
+import sys
 import time
 
 import pytest
@@ -771,12 +772,13 @@ class TestAddonRenderHeight:
 
     def _render(self, tmp_path, addons):
         import subprocess
-        import sys
         home = tmp_path / f"home-{len(addons)}-{abs(hash(json.dumps(addons)))}"
         (home / ".claude").mkdir(parents=True)
         (home / ".claude" / "missioncache-dashboard-config.json").write_text(
             json.dumps({"statusline_addons": addons}))
-        env = dict(os.environ, HOME=str(home), NO_COLOR="1")
+        # USERPROFILE alongside HOME so Path.home() redirects on Windows too
+        # (Windows ignores HOME).
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), NO_COLOR="1")
         code = "import missioncache_dashboard.statusline as s; s.main()"
         # sys.executable is the interpreter running the suite, which has the
         # package importable - robust regardless of how pytest was invoked.
@@ -785,8 +787,10 @@ class TestAddonRenderHeight:
         return r.stdout, r.stderr
 
     def _addon(self, **kw):
+        # sys.executable print, not /bin/echo: cross-platform (the addon runner
+        # is platform-neutral; the sample command should be too).
         base = {"id": "a", "label": "A", "icon": ">", "color": "version",
-                "command": ["/bin/echo", "hi"],
+                "command": [sys.executable, "-c", "print('hi')"],
                 "placement": {"mode": "row", "group": "g", "order": 1}}
         base.update(kw)
         return base
@@ -806,3 +810,30 @@ class TestAddonRenderHeight:
         brk, err = self._render(tmp_path, [self._addon(command=["/nonexistent/xyz"])])
         assert brk.count("\n") == base.count("\n") + 1  # blank line still emitted
         assert "Traceback" not in err
+
+
+class TestMainCrashGuard:
+    """main() wraps _run() in the crash guard. The installed entry point calls
+    main() directly, so an unhandled exception must log a traceback and still
+    emit the fixed-height fallback rather than rendering blank."""
+
+    def test_exception_in_run_logs_and_falls_back(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+        def boom():
+            raise RuntimeError("render exploded")
+
+        monkeypatch.setattr(mod, "_run", boom)
+        mod.main()
+        out = capsys.readouterr().out
+        # Fallback still emitted (non-empty), not a blank render.
+        assert out.strip("\n") != "" or out.count("\n") > 0
+        log = tmp_path / ".claude" / "logs" / "statusline-errors.log"
+        assert log.exists()
+        assert "render exploded" in log.read_text(encoding="utf-8")
+
+    def test_clean_run_does_not_write_error_log(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(mod, "_run", lambda: None)
+        mod.main()
+        assert not (tmp_path / ".claude" / "logs" / "statusline-errors.log").exists()

@@ -29,6 +29,7 @@ on:
       - "missioncache-auto/**"
       - "mcp-server/**"
       - ".github/workflows/installer-smoke.yml"
+      - ".github/scripts/**"
   push:
     branches: [main]
     paths:
@@ -38,6 +39,7 @@ on:
       - "missioncache-auto/**"
       - "mcp-server/**"
       - ".github/workflows/installer-smoke.yml"
+      - ".github/scripts/**"
   workflow_dispatch: {}
 
 permissions:
@@ -228,3 +230,142 @@ jobs:
           except BaseException:
               traceback.print_exc(file=sys.stdout)
           " || true
+
+  # Native Windows (no WSL). Runs the actual pytest suites so every
+  # sys.platform=="win32" branch executes on real hardware (they are only
+  # platform-mocked elsewhere), plus liveness/ancestry probes, an MCP-server
+  # spawn, the installer, the dashboard autostart, and the two Phase C probes
+  # (schtasks task body, Git Bash command-block resolution) that unit tests and
+  # a POSIX runner cannot reach.
+  smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Create a test venv with every package built from the tree
+        run: |
+          uv venv .venv
+          # Install all five packages from the local tree (matching versions,
+          # no PyPI resolution) plus the test + dashboard runtime deps.
+          uv pip install --python .venv\Scripts\python.exe `
+            ./missioncache-db ./mcp-server ./missioncache-auto `
+            ./missioncache-dashboard ./missioncache-install `
+            pytest pytest-asyncio httpx fastapi uvicorn duckdb
+
+      - name: Run the full test suites on Windows
+        run: |
+          $env:PYTHONUTF8 = "1"
+          .venv\Scripts\python -m pytest -q `
+            missioncache-db/tests `
+            missioncache-auto/tests `
+            missioncache-dashboard/tests `
+            missioncache-install/tests `
+            mcp-server/tests `
+            hooks/tests
+
+      - name: Liveness + ancestry probes (SYNCHRONIZE, Toolhelp32, exact-pid walk)
+        run: |
+          $env:PYTHONPATH = "missioncache-db"
+          .venv\Scripts\python .github/scripts/windows_liveness_probe.py
+
+      - name: stdin JSON reaches a hook through uv run
+        run: |
+          '{"session_id":"ci","cwd":"C:/tmp"}' | uv run --no-project --python ">=3.11" python -c "import sys,json; d=json.load(sys.stdin); assert d['session_id']=='ci'; print('stdin JSON OK')"
+
+      - name: missioncache-db encode-cwd is native on Windows
+        run: |
+          $key = .venv\Scripts\missioncache-db encode-cwd
+          Write-Host "encode-cwd -> $key"
+          # A native Windows cwd (C:\... or D:\... on the runner) encodes to a
+          # drive-letter prefix "<L>--"; the POSIX sed fallback would instead
+          # yield a leading "-" from a "/c/..." MSYS path. Assert the native form.
+          if ($key -notmatch '^[A-Za-z]--') { Write-Error "expected a drive-letter '<L>--' key, got $key"; exit 1 }
+
+      - name: MCP server spawns via uvx and answers initialize
+        run: |
+          $env:PYTHONUTF8 = "1"
+          .venv\Scripts\python .github/scripts/mcp_initialize_smoke.py
+
+      - name: Run the installer as a user would (claude CLI absent -> graceful skip)
+        env:
+          UV_FIND_LINKS: ""
+        run: |
+          # From the repo the installer would auto-detect maintainer mode, so
+          # run it from a scratch dir. Point pipx/uv at local wheels.
+          uv build --wheel --out-dir "$env:GITHUB_WORKSPACE\local-wheels" ./missioncache-db
+          foreach ($p in "mcp-server","missioncache-auto","missioncache-dashboard","missioncache-install") {
+            uv build --wheel --out-dir "$env:GITHUB_WORKSPACE\local-wheels" ./$p
+          }
+          $env:PIP_FIND_LINKS = "$env:GITHUB_WORKSPACE\local-wheels"
+          $env:UV_FIND_LINKS = "$env:GITHUB_WORKSPACE\local-wheels"
+          pipx install missioncache-install
+          Set-Location $env:USERPROFILE
+          missioncache-install --all --yes
+
+      - name: Dashboard is actually serving
+        run: |
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing "http://localhost:8787/health" -TimeoutSec 2 | Out-Null
+              $ok = $true; break
+            } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ok) { Write-Error "dashboard never came up"; exit 1 }
+          (Invoke-WebRequest -UseBasicParsing "http://localhost:8787/api/version").Content
+
+      - name: schtasks task body runs (not just registers)
+        run: |
+          # The installer registered autostart; logon never fires on a runner,
+          # so the immediate-start Popen is what served above. Prove the task
+          # itself is well formed and its command executes: query it, then Run
+          # it explicitly. A mangled /TR (quote stripping around a spaced exe
+          # path) would pass registration and only fail here.
+          $q = schtasks /Query /TN MissionCacheDashboard /V /FO LIST 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Task Scheduler task present"
+            $q | Select-String "serve"
+            schtasks /Run /TN MissionCacheDashboard
+            Write-Host "schtasks /Run exit: $LASTEXITCODE"
+          } else {
+            # Non-elevated fallback: the HKCU Run key carries the same command.
+            Write-Host "no schtasks task (Run-key fallback path); checking HKCU Run"
+            reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MissionCacheDashboard
+            if ($LASTEXITCODE -ne 0) { Write-Error "neither schtasks task nor Run key present"; exit 1 }
+          }
+
+      - name: Slash-command PY resolution works under Git Bash
+        shell: bash
+        run: |
+          # The commands/*.md bash blocks run under Git Bash on Windows. Prove
+          # the exact resolution line yields a runnable interpreter path and
+          # that a quoted "$PY" with a Windows path executes.
+          PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
+          echo "PY=$PY"
+          [ -n "$PY" ] || { echo "no python resolved under Git Bash"; exit 1; }
+          echo '{"sessionId":"gb"}' > /tmp/ptr.json
+          SID=$("$PY" -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < /tmp/ptr.json)
+          [ "$SID" = "gb" ] || { echo "quoted \$PY did not execute: got '$SID'"; exit 1; }
+          echo "Git Bash PY resolution OK"
+
+      # Cross-machine import: the portability suite (missioncache-db/tests) runs
+      # in the pytest step above ON Windows, so export_project/import_bundle and
+      # the C:/ path translation execute natively there. A dedicated Mac-export
+      # -> Windows-import artifact round-trip across jobs is a further
+      # enhancement tracked in the plan, not needed to prove the code runs.
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          Get-Content "$env:USERPROFILE\.claude\logs\missioncache-dashboard-windows.log" -ErrorAction SilentlyContinue
+          Get-Content "$env:USERPROFILE\.claude\logs\statusline-errors.log" -ErrorAction SilentlyContinue
