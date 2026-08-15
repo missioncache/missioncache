@@ -323,7 +323,22 @@ If you have a new event you want to hook into, the pattern is straightforward:
 
 **Cause:** Either `missioncache_db` failed to import (bundled path wrong, Python version mismatch), or `find_task_for_cwd` returned `None` for the current directory, or the hook crashed in the try block and was silently swallowed.
 
-**Fix:** Run the hook manually, with the same launcher hooks.json uses: `echo '{}' | uv run --no-project --python ">=3.11" python ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py` and watch for import errors or exceptions. (On macOS/Linux a plain `echo '{}' | python3 session_start.py` also works when your system Python is 3.11+, but the uv form reproduces exactly what Claude Code spawns.) Most commonly the answer is "your cwd is not matching any MissionCache task" - check `~/.missioncache/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
+**Fix:** Run the hook manually, with the same launcher hooks.json uses. `${CLAUDE_PLUGIN_ROOT}` is only set when Claude Code spawns the hook, so substitute the plugin directory yourself and quote it (the path contains spaces on some machines).
+
+```bash
+# bash / zsh / Git Bash. PLUGIN is your installed plugin dir, e.g.
+# ~/.claude/plugins/cache/<marketplace>/missioncache/<version>
+PLUGIN="$HOME/.claude/plugins/cache/missioncache/missioncache/<version>"
+echo '{}' | uv run --no-project --python ">=3.11" python "$PLUGIN/hooks/session_start.py"
+```
+
+```powershell
+# PowerShell (Windows without Git Bash)
+$Plugin = "$env:USERPROFILE\.claude\plugins\cache\missioncache\missioncache\<version>"
+'{}' | uv run --no-project --python ">=3.11" python "$Plugin\hooks\session_start.py"
+```
+
+Watch for import errors or exceptions. (On macOS/Linux a plain `echo '{}' | python3 session_start.py` also works when your system Python is 3.11+, but the uv form reproduces exactly what Claude Code spawns.) Most commonly the answer is "your cwd is not matching any MissionCache task" - check `~/.missioncache/active/` for a project whose `full_path` corresponds to your cwd, or use `mcp__plugin_missioncache_pm__find_task_for_directory` from a live Claude session to see what it returns.
 
 ### "Heartbeats aren't being recorded"
 

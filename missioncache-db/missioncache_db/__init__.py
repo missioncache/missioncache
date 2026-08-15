@@ -57,6 +57,7 @@ Cleanup:
 
 Diagnostics:
     python missioncache_db.py health                    # Report context-file health for all active projects
+    python missioncache_db.py encode-cwd [path]         # Claude Code's projects-dir key for a path (default: cwd)
 
 Cross-Machine Sharing:
     python missioncache_db.py export <name> [--out <path>] [--no-time] [--json]  # Build a portable bundle (markdown + missioncache.json manifest)

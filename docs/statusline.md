@@ -184,7 +184,7 @@ Empty on a session with no active MissionCache project.
 
 ### Line 2: Dir + Git
 
-- **Dir** - `Path.cwd().name` with a `~` collapse if cwd matches `$USER`. Appends `(wt: <name>)` if a worktree is present in the Claude Code stdin.
+- **Dir** - `Path.cwd().name` with a `~` collapse if cwd matches `$USER` (or `$USERNAME` on Windows). Appends `(wt: <name>)` if a worktree is present in the Claude Code stdin.
 - **Git** - `get_git_info()` runs `git rev-parse --git-dir`, `git rev-parse --show-toplevel`, `git branch --show-current`, and `git status --porcelain`. Color is green for clean, yellow for dirty. If worktree is active, appends `(worktree)` to the branch name.
 
 Always renders dir; git cell is only shown inside a git repo.
