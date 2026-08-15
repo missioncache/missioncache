@@ -427,11 +427,22 @@ def _relative_time(iso_ts: str) -> str:
         return ""
 
 
+def _no_pad(value: int) -> str:
+    """A day/hour number with no leading zero.
+
+    The glibc "%-d" / "%-I" strftime extension is not portable: on Windows
+    (MSVC) it raises ValueError("Invalid format string"), which would take
+    down every statusline render through the crash guard. Formatting the
+    number ourselves works everywhere.
+    """
+    return str(value)
+
+
 def _format_reset_time(iso_ts: str) -> str:
     """Format ISO timestamp to compact 'thu 11am' format."""
     try:
         dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-        return dt.astimezone().strftime("%a %-I%p").lower()
+        return (lambda d: f"{d.strftime('%a')} {_no_pad(int(d.strftime('%I')))}{d.strftime('%p')}".lower())(dt.astimezone())
     except Exception:
         return "?"
 
@@ -440,7 +451,7 @@ def _format_unix_reset(ts) -> str:
     """Format unix timestamp to compact 'thu 11am' format."""
     try:
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-        return dt.astimezone().strftime("%a %-I%p").lower()
+        return (lambda d: f"{d.strftime('%a')} {_no_pad(int(d.strftime('%I')))}{d.strftime('%p')}".lower())(dt.astimezone())
     except Exception:
         return "?"
 
@@ -469,7 +480,7 @@ def _parse_extra_usage(extra: dict | None) -> dict | None:
         reset_date = date(today.year + 1, 1, 1)
     else:
         reset_date = date(today.year, today.month + 1, 1)
-    reset_str = reset_date.strftime("%b %-d").lower()
+    reset_str = (lambda d: f"{d.strftime('%b')} {_no_pad(d.day)}".lower())(reset_date)
 
     fmt = lambda d: f"${d:.0f}" if d == int(d) else f"${d:.2f}"
     return {
@@ -811,14 +822,14 @@ def _format_wall_time(mtime: float) -> str:
     dt = datetime.fromtimestamp(mtime)
     if dt.date() == datetime.now().date():
         return dt.strftime("%H:%M")
-    return dt.strftime("%b %-d %H:%M")
+    return f"{dt.strftime('%b')} {_no_pad(dt.day)} {dt.strftime('%H:%M')}"
 
 
 def _format_saved_time(mtime: float) -> str:
     """The project context's last-save time, ALWAYS with the date ("Jul 14
     23:15", never bare HH:MM): a project resumed days after its last save
     must not read as saved today. Same shape as the Last Action cell."""
-    return datetime.fromtimestamp(mtime).strftime("%b %-d %H:%M")
+    return (lambda d: f"{d.strftime('%b')} {_no_pad(d.day)} {d.strftime('%H:%M')}")(datetime.fromtimestamp(mtime))
 
 
 def _project_is_active_in_db(name: str) -> bool:
@@ -941,7 +952,7 @@ def _format_last_action(last_prompt_at: str) -> str:
     if not last_prompt_at:
         return ""
     try:
-        return datetime.fromisoformat(last_prompt_at).strftime("%b %-d %H:%M")
+        return (lambda d: f"{d.strftime('%b')} {_no_pad(d.day)} {d.strftime('%H:%M')}")(datetime.fromisoformat(last_prompt_at))
     except (ValueError, TypeError):
         return ""
 

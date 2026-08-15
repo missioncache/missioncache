@@ -46,6 +46,22 @@ def mc(tmp_path, monkeypatch):
     return SimpleNamespace(root=root, db=db)
 
 
+@pytest.fixture
+def home_outside_tmp(tmp_path, monkeypatch):
+    """Pin HOME somewhere that does NOT contain tmp_path.
+
+    The anchor-vs-home-relative branch turns entirely on whether a path sits
+    under Path.home(). The pytest temp dir is under HOME on Windows
+    (C:/Users/<user>/AppData/Local/Temp) but not on macOS
+    (/private/var/folders), so any test asserting the "outside HOME" branch
+    has to say so explicitly instead of inheriting the platform's layout.
+    """
+    elsewhere = tmp_path.parent / f"{tmp_path.name}-home"
+    elsewhere.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: elsewhere)
+    return elsewhere
+
+
 @pytest.fixture(autouse=True)
 def _no_live_dashboard_sync(monkeypatch):
     """Pin the DuckDB-sync URL to a closed port so the suite never POSTs to a
@@ -395,7 +411,7 @@ class TestWorktree:
 
 
 class TestNonGitRepo:
-    def test_non_git_repo_outside_home_is_anchor_with_warning(self, mc, tmp_path, monkeypatch):
+    def test_non_git_repo_outside_home_is_anchor_with_warning(self, mc, tmp_path, home_outside_tmp):
         """A non-git repo dir that is NOT under HOME exports as an anchor ref.
 
         HOME is pinned away from the repo dir on purpose: which branch of
@@ -409,9 +425,6 @@ class TestNonGitRepo:
         _seed_files(mc, name, _default_md(name))
         plain = tmp_path / "plain-dir"
         plain.mkdir()
-        elsewhere_home = tmp_path / "not-the-repo-parent"
-        elsewhere_home.mkdir()
-        monkeypatch.setattr(Path, "home", lambda: elsewhere_home)
         rid = mc.db.add_repo(str(plain))
         _insert_task(mc.db, name=name, repo_id=rid)
 
@@ -765,7 +778,7 @@ class TestClassifyRepo:
         assert ref["kind"] == "home-relative"
         assert any("missing on disk" in w for w in warns)
 
-    def test_missing_on_disk_repo_outside_home_is_anchor(self, mc, tmp_path):
+    def test_missing_on_disk_repo_outside_home_is_anchor(self, mc, tmp_path, home_outside_tmp):
         gone = tmp_path / "gone-repo"  # under tmp, not HOME
         rid = mc.db.add_repo(str(gone))
         task = mc.db.get_task(_insert_task(mc.db, name="proj", repo_id=rid))
@@ -773,7 +786,7 @@ class TestClassifyRepo:
         assert ref["kind"] == "anchor"
         assert any("missing on disk" in w for w in warns)
 
-    def test_local_path_origin_is_anchor_not_fake_remote(self, mc, tmp_path):
+    def test_local_path_origin_is_anchor_not_fake_remote(self, mc, tmp_path, home_outside_tmp):
         repo = _committed_repo(tmp_path / "r", remote="/tmp/some/local/mirror")
         rid = mc.db.add_repo(str(repo))
         task = mc.db.get_task(_insert_task(mc.db, name="proj", repo_id=rid))
@@ -781,7 +794,7 @@ class TestClassifyRepo:
         assert ref["kind"] == "anchor"
         assert any("local path" in w for w in warns)
 
-    def test_file_url_origin_is_anchor_not_fake_remote(self, mc, tmp_path):
+    def test_file_url_origin_is_anchor_not_fake_remote(self, mc, tmp_path, home_outside_tmp):
         # file:// is a URL but addresses the local filesystem - must not become
         # a portable git key.
         repo = _committed_repo(tmp_path / "r", remote="file:///tmp/mirror/repo")
@@ -1616,7 +1629,7 @@ class TestImportCollision:
 
 
 class TestImportNonGitRepo:
-    def test_anchor_needs_mapping_then_resolves(self, mc, mc_b, tmp_path, monkeypatch):
+    def test_anchor_needs_mapping_then_resolves(self, mc, mc_b, tmp_path, monkeypatch, home_outside_tmp):
         name = "proj"
         plain_a = tmp_path / "plainA"
         plain_a.mkdir()  # a non-git tracked folder
@@ -1645,7 +1658,7 @@ class TestImportNonGitRepo:
 
 
 class TestImportMissingRefs:
-    def test_missing_vault_and_unmapped_anchor(self, mc, mc_b, tmp_path, monkeypatch):
+    def test_missing_vault_and_unmapped_anchor(self, mc, mc_b, tmp_path, monkeypatch, home_outside_tmp):
         name = "proj"
         plain_a = tmp_path / "claude-plans"
         plain_a.mkdir()
@@ -2626,6 +2639,11 @@ class TestImportMisc:
         assert report["dry_run"] is True
         assert report["exit_code"] == 0  # clean bundle would fully resolve
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="DrvFs is a WSL concept; on Windows a /mnt/... path resolves to "
+        "<drive>:\\mnt\\... so the prefix check cannot apply",
+    )
     def test_under_drvfs_detection(self):
         assert portability._under_drvfs(Path("/mnt/c/Users/x/.missioncache")) is True
         assert portability._under_drvfs(Path("/home/x/.missioncache")) is False

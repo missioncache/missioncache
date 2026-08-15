@@ -301,7 +301,11 @@ def _validate_path(
     resolved = Path(path).resolve()
     if must_be_under is not None:
         root = must_be_under.resolve()
-        if resolved != root and not str(resolved).startswith(str(root) + "/"):
+        # is_relative_to, not a string prefix with a hardcoded "/": the
+        # separator is "\" on Windows, so the old check rejected every
+        # legitimate path there (and a string prefix also treats /a/bc as
+        # inside /a/b). This compares path components, so both problems go.
+        if resolved != root and not resolved.is_relative_to(root):
             raise ValidationError(
                 f"{field_name} must be within {root}", field=field_name
             )

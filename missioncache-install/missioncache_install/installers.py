@@ -14,6 +14,7 @@ Two modes:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from dataclasses import dataclass, field, replace
@@ -194,7 +195,7 @@ def _install_plugin_local(ctx: InstallContext) -> None:
             ui.detail(f"{verb} copy of {repo} (symlinks need Developer Mode)")
 
     if plugin_link.is_symlink():
-        if plugin_link.readlink() == repo:
+        if _links_to(plugin_link, repo):
             ui.detail("Plugin symlink already correct")
         else:
             plugin_link.unlink()
@@ -653,6 +654,23 @@ _COPYTREE_IGNORE = shutil.ignore_patterns(
 )
 
 
+def _links_to(link: Path, target: Path) -> bool:
+    """Whether an existing symlink already points at target.
+
+    Compares normalized paths rather than raw readlink() output: on Windows
+    readlink() returns the extended-length form (\\\\?\\C:\\...) while the
+    target is a plain C:\\... path, so a raw == is always False there and the
+    installer would tear down and re-create a correct link on every run.
+    """
+    try:
+        current = link.readlink()
+    except OSError:
+        return False
+    return os.path.normcase(os.path.realpath(current)) == os.path.normcase(
+        os.path.realpath(target)
+    )
+
+
 def _symlink_or_copy(link: Path, target: Path) -> bool:
     """symlink_to, with a copy fallback for Windows without Developer Mode.
 
@@ -692,7 +710,7 @@ def _symlink_md_dir(src_dir: Path, dst_dir: Path) -> None:
     for src in sorted(src_dir.glob("*.md")):
         link = dst_dir / src.name
         if link.is_symlink():
-            if link.readlink() == src:
+            if _links_to(link, src):
                 ui.detail(f"Already linked: {src.name}")
                 continue
             link.unlink()
