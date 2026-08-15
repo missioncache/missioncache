@@ -11,6 +11,7 @@ recoverable from the last-known-good copy.
 from __future__ import annotations
 
 import os
+import time
 import shutil
 import tempfile
 from pathlib import Path
@@ -21,6 +22,26 @@ from pathlib import Path
 # process, so this is exactly "once per run". Tests reset it via the
 # isolated_home fixture.
 _backed_up: set[Path] = set()
+
+
+def _replace_with_retry(src, dst, attempts=8):
+    """os.replace with bounded PermissionError retry (Windows sharing violations,
+    e.g. settings.json held open by an editor). Mirrors missioncache_db's helper -
+    the installer cannot import missioncache-db before installing it."""
+    delay = 0.01
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            # Retry is a Windows sharing-violation workaround. On POSIX a
+            # PermissionError here (read-only mount, immutable dir) never
+            # clears, so raise immediately instead of sleeping through the
+            # backoff inside a hook's 5-10s budget.
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def backup_once(path: Path) -> Path | None:
@@ -53,7 +74,7 @@ def atomic_write_text(path: Path, text: str) -> None:
             os.fsync(f.fileno())
         if path.exists():
             shutil.copymode(path, tmp)
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     except BaseException:
         try:
             tmp.unlink()

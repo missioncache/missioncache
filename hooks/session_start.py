@@ -11,7 +11,6 @@ import json
 import os
 import re
 import sqlite3
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -92,7 +91,7 @@ def install_bundled_rules() -> None:
     try:
         dst_dir.mkdir(parents=True, exist_ok=True)
         for src in src_dir.glob("*.md"):
-            new_content = src.read_text()
+            new_content = src.read_text(encoding="utf-8")
             if not new_content.startswith(OWNERSHIP_MARKER):
                 # Source file isn't marked plugin-managed; skip it entirely.
                 continue
@@ -102,14 +101,14 @@ def install_bundled_rules() -> None:
                 # the marker-based ownership check works going forward.
                 dst.unlink()
             elif dst.exists():
-                existing = dst.read_text()
+                existing = dst.read_text(encoding="utf-8")
                 if not existing.startswith(OWNERSHIP_MARKER):
                     # User has taken ownership (removed the marker). Leave alone.
                     continue
                 if existing == new_content:
                     # Already up to date.
                     continue
-            dst.write_text(new_content)
+            dst.write_text(new_content, encoding="utf-8")
     except OSError:
         pass
 
@@ -130,7 +129,19 @@ def write_term_session_mapping(session_id: str) -> None:
     term_dir.mkdir(parents=True, exist_ok=True)
 
     mapping_file = term_dir / term_id
-    mapping_file.write_text(session_id)
+    mapping_file.write_text(session_id, encoding="utf-8")
+
+
+def _cwd_key(cwd) -> str:
+    r"""Claude Code's projects-dir encoding of a working directory.
+
+    MIRROR of ``missioncache_db.encode_claude_project_dir`` (the hook stays
+    importable when missioncache_db is not): the documented rule is every
+    non-alphanumeric character becomes ``-`` - not just ``/``, which the old
+    copy replaced. On Windows that turns ``C:\Users\x`` into ``C--Users-x``.
+    If the rule changes, change both.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
 def _read_cwd_pointer_sid(cwd: Path) -> str | None:
@@ -148,7 +159,7 @@ def _read_cwd_pointer_sid(cwd: Path) -> str | None:
 
     Returns None when the pointer is missing, stale (>24h), or corrupt.
     """
-    cwd_key = str(cwd).replace("/", "-")
+    cwd_key = _cwd_key(cwd)
     pointer_file = (
         Path.home() / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
     )
@@ -159,35 +170,20 @@ def _read_cwd_pointer_sid(cwd: Path) -> str | None:
     if time.time() - stat.st_mtime > _PICKUP_MAX_AGE_SECONDS:
         return None
     try:
-        data = json.loads(pointer_file.read_text())
+        data = json.loads(pointer_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return None
+    # The encoding is lossy (every non-alphanumeric flattens to "-"), so two
+    # different cwds can share a pointer filename. The pointer JSON carries
+    # the raw cwd - verify it so a colliding sibling checkout never hands us
+    # another project's session id.
+    stored_cwd = data.get("cwd")
+    if isinstance(stored_cwd, str) and stored_cwd and stored_cwd != str(cwd):
         return None
     sid = data.get("sessionId")
     if not isinstance(sid, str) or not sid or len(sid) > _MAX_PREV_SESSION_ID_LEN:
         return None
     return sid
-
-
-def _ps_field(pid: int, fmt: str) -> str | None:
-    """Return a single ``ps -o <fmt>=`` field for ``pid``, or None.
-
-    Best-effort and portable across macOS and Linux (no ``/proc`` dependency,
-    which macOS lacks). Returns None when the process is gone, ps is missing,
-    or the call errors/times out.
-    """
-    try:
-        out = subprocess.run(
-            ["ps", "-o", f"{fmt}=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
-        return None
-    val = out.stdout.strip()
-    return val or None
 
 
 def _resolve_session_pid() -> int | None:
@@ -238,6 +234,7 @@ def write_session_pid(session_id: str) -> None:
 
     from missioncache_db import (  # type: ignore[import-not-found]
         atomic_write_json,
+        proc,
         session_pid_path,
     )
 
@@ -246,7 +243,10 @@ def write_session_pid(session_id: str) -> None:
         {
             "sessionId": session_id,
             "pid": pid,
-            "startTime": _ps_field(pid, "lstart"),
+            # Opaque token (ps lstart on POSIX, FILETIME on Windows) - MUST
+            # come from the same backend session_is_alive compares with, or
+            # every live session reads as pid-recycled.
+            "startTime": proc.process_start_token(pid),
             "updatedAt": datetime.now().astimezone().isoformat(),
         },
     )
@@ -271,7 +271,9 @@ def _session_is_alive(session_id: str) -> bool | None:
     return session_is_alive(session_id)
 
 
-def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
+def _detect_parallel_sessions(
+    cwd: Path, my_session_id: str, transcript_dir: Path | None = None
+) -> list[str]:
     """Return session_ids whose transcripts in ``cwd`` were modified recently.
 
     Reads ``~/.claude/projects/<cwd-key>/*.jsonl`` (Claude Code's transcript
@@ -304,8 +306,13 @@ def _detect_parallel_sessions(cwd: Path, my_session_id: str) -> list[str]:
     """
     if not my_session_id:
         return []
-    cwd_key = str(cwd).replace("/", "-")
-    proj_dir = Path.home() / ".claude" / "projects" / cwd_key
+    if transcript_dir is not None:
+        # The parent of the transcript_path Claude Code handed this hook -
+        # the documented way to find the projects dir, immune to encoding
+        # drift and to Windows drive-letter case instability.
+        proj_dir = transcript_dir
+    else:
+        proj_dir = Path.home() / ".claude" / "projects" / _cwd_key(cwd)
     if not proj_dir.is_dir():
         return []
 
@@ -450,7 +457,7 @@ def write_cwd_session_pointer(session_id: str) -> None:
 
     from missioncache_db import atomic_write_json  # type: ignore[import-not-found]
 
-    cwd_key = str(Path.cwd()).replace("/", "-")
+    cwd_key = _cwd_key(Path.cwd())
     pointer_file = (
         Path.home() / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
     )
@@ -479,8 +486,8 @@ def write_session_project(task_name: str, session_id: str, task_id: int | None =
     write_session_binding(session_id, task_name, task_id=task_id)
 
 
-def get_session_context() -> tuple[str | None, str | None]:
-    """Get ``(session_id, source)`` from env var or stdin JSON.
+def get_session_context() -> tuple[str | None, str | None, str | None]:
+    """Get ``(session_id, source, transcript_path)`` from env var or stdin JSON.
 
     ``source``, when present, is expected to be one of ``"startup"``,
     ``"resume"``, ``"clear"``, or ``"compact"`` per Claude Code's
@@ -497,26 +504,45 @@ def get_session_context() -> tuple[str | None, str | None]:
     session_ids are dropped (returned as None) so the hook fails closed
     rather than propagating a hostile value.
 
-    The ``select.select`` poll is a non-blocking peek so this hook still
-    works under env-var-only invocation (manual testing, older bootstrap
-    scripts) without hanging on an empty interactive stdin.
+    Also returns ``transcript_path`` (the documented stdin field) so callers
+    can locate the transcripts directory without reconstructing Claude Code's
+    cwd encoding - the docs name that field as the stable interface.
+
+    The stdin peek is platform-split. On POSIX, ``select.select`` is a
+    non-blocking poll so the hook still works under env-var-only invocation
+    (manual testing) without hanging on an empty interactive stdin. On
+    Windows ``select`` works only on sockets and raises on the pipe Claude
+    Code attaches, so the gate is ``isatty()`` instead: a piped stdin (every
+    real hook invocation) is read directly, an interactive one is skipped.
     """
     session_id = os.environ.get("CLAUDE_SESSION_ID")
     source: str | None = None
+    transcript_path: str | None = None
     try:
-        import select
+        if sys.stdin is None:
+            # pythonw / detached launchers close stdin entirely; the hook
+            # falls back to env-var-only mode instead of dying on isatty().
+            readable = False
+        elif sys.platform == "win32":
+            readable = not sys.stdin.isatty()
+        else:
+            import select
 
-        if select.select([sys.stdin], [], [], 0)[0]:
+            readable = bool(select.select([sys.stdin], [], [], 0)[0])
+        if readable:
             data = json.load(sys.stdin)
             session_id = session_id or data.get("session_id")
             source = data.get("source")
-    except (json.JSONDecodeError, OSError, ValueError):
+            raw_transcript = data.get("transcript_path")
+            if isinstance(raw_transcript, str) and raw_transcript:
+                transcript_path = raw_transcript
+    except (json.JSONDecodeError, OSError, ValueError, AttributeError):
         # Malformed JSON, stdin OS error, or value error from select.
         # Hook falls back to env-var-only mode below.
         pass
     if not _is_valid_session_id(session_id):
         session_id = None
-    return session_id, source
+    return session_id, source, transcript_path
 
 
 def _resume_hint_for_cwd(db, cwd: str) -> str | None:
@@ -566,7 +592,7 @@ def _resume_hint_for_cwd(db, cwd: str) -> str | None:
 def main():
     """Check for active task and output context."""
     # Write term-session mapping BEFORE MissionCacheDB (independent of task detection)
-    session_id, source = get_session_context()
+    session_id, source, transcript_path = get_session_context()
     if session_id:
         write_term_session_mapping(session_id)
         # Record THIS session's process pid so a later SessionStart can tell
@@ -580,7 +606,10 @@ def main():
         # misrouting). On resume/compact, exclude the resumed-from session:
         # its transcript is often still fresh, but it is the conversation
         # being continued, not a competing parallel session.
-        parallel_sids = _detect_parallel_sessions(Path.cwd(), session_id)
+        transcript_dir = Path(transcript_path).parent if transcript_path else None
+        parallel_sids = _detect_parallel_sessions(
+            Path.cwd(), session_id, transcript_dir=transcript_dir
+        )
         if source in ("resume", "compact"):
             prev_sid_from_pointer = _read_cwd_pointer_sid(Path.cwd())
             if prev_sid_from_pointer:

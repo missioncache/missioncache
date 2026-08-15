@@ -27,21 +27,20 @@ context replace never happened) re-rolls the same entries and duplicates
 them in the journal - the documented duplication-over-loss tradeoff, same
 as the live writer's.
 
-NOTE: ``_file_lock`` and the journal-before-context write order are
-duplicated from ``mcp_missioncache.project_files`` on purpose (same reason
-as ``hooks/pre_compact.py``): the script must not depend on the mcp-server
-package. If you change locking semantics there, mirror the change here.
+NOTE: the sidecar lock is DELEGATED to ``missioncache_db.filelock`` (the
+single portable owner) - no lock copy lives here anymore. Only the
+journal-before-context write ORDER is still mirrored from
+``mcp_missioncache.project_files``; if that order changes there, mirror it
+here.
 """
 
-import contextlib
-import fcntl
 import os
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from missioncache_db import context_health
+from missioncache_db import context_health, replace_with_retry
 
 # Projects to leave fully untouched (e.g. one with a live session mid-work).
 # centra-aip-e2e-integration sat here during the 2026-07-11 migration until
@@ -57,17 +56,11 @@ _RC_H2_RE = re.compile(r"^## Recent Changes([^\n]*)$", re.MULTILINE)
 _H3_DATED_RE = re.compile(r"^### ", re.MULTILINE)
 
 
-@contextlib.contextmanager
 def _file_lock(path):
-    """Sidecar-lockfile flock, mirroring mcp_missioncache.project_files."""
-    lock_path = path.with_name(path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "w") as lockfd:
-        fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+    """Exclusive lock on the ``<path>.lock`` sidecar (portable, shared impl)."""
+    from missioncache_db import filelock
+
+    return filelock.sidecar_lock(path)
 
 
 def _find_misplaced_run(content):
@@ -226,7 +219,7 @@ def migrate_one(context_path, dry_run):
     """Migrate a single project's context file (locked, atomic, journal-first)."""
     journal_path = context_health.derive_journal_path(context_path)
     with _file_lock(context_path):
-        original = context_path.read_text()
+        original = context_path.read_text(encoding="utf-8")
         new_content, journal_append, summary = migrate_content(
             original, journal_path.name
         )
@@ -237,18 +230,18 @@ def migrate_one(context_path, dry_run):
             return summary
         if journal_append:
             if journal_path.exists():
-                journal_content = journal_path.read_text().rstrip("\n") + "\n\n"
+                journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
             else:
                 journal_content = (
                     context_health.journal_header(context_path.parent.name) + "\n"
                 )
             journal_content += journal_append
             journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
-            journal_tmp.write_text(journal_content)
-            os.replace(journal_tmp, journal_path)
+            journal_tmp.write_text(journal_content, encoding="utf-8")
+            replace_with_retry(journal_tmp, journal_path)
         tmp_path = context_path.with_name(context_path.name + ".tmp")
-        tmp_path.write_text(new_content)
-        os.replace(tmp_path, context_path)
+        tmp_path.write_text(new_content, encoding="utf-8")
+        replace_with_retry(tmp_path, context_path)
     return summary
 
 

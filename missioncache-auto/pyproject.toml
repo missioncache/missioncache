@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "missioncache-db>=1.0.0",
+    "missioncache-db>=1.0.20",
 ]
 
 [project.scripts]

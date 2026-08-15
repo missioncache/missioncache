@@ -94,7 +94,8 @@ class TestSessionStart:
         importlib.reload(mod)
         mod.write_cwd_session_pointer("abc-123")
 
-        cwd_key = str(fake_cwd).replace("/", "-")
+        from hooks import session_start as _ss
+        cwd_key = _ss._cwd_key(fake_cwd)
         pointer_file = tmp_path / ".claude" / "hooks" / "state" / "cwd-session" / f"{cwd_key}.json"
         assert pointer_file.exists()
 
@@ -226,7 +227,8 @@ class TestSessionStartStrictBinding:
 
         # Previous session "prev-sid" owned this cwd and was bound to "avc".
         # Under the old inherit logic, new-sid would copy "avc".
-        cwd_key = str(cwd).replace("/", "-")
+        from hooks import session_start as _ss
+        cwd_key = _ss._cwd_key(cwd)
         pointer_dir = tmp_path / ".claude" / "hooks" / "state" / "cwd-session"
         pointer_dir.mkdir(parents=True, exist_ok=True)
         (pointer_dir / f"{cwd_key}.json").write_text(
@@ -485,7 +487,7 @@ class TestGetSessionContextValidation:
         )
 
         mod = self._reload_module()
-        sid, source = mod.get_session_context()
+        sid, source, _tp = mod.get_session_context()
         assert sid is None
         # source still propagates - the source field is documented as a
         # plain enum string and isn't a security boundary.
@@ -506,7 +508,7 @@ class TestGetSessionContextValidation:
         )
 
         mod = self._reload_module()
-        sid, _source = mod.get_session_context()
+        sid, _source, _tp = mod.get_session_context()
         assert sid is None
 
     def test_rejects_non_string_session_id(self, monkeypatch):
@@ -524,7 +526,7 @@ class TestGetSessionContextValidation:
         )
 
         mod = self._reload_module()
-        sid, _source = mod.get_session_context()
+        sid, _source, _tp = mod.get_session_context()
         assert sid is None
 
     def test_accepts_uuid_shaped_session_id(self, monkeypatch):
@@ -546,7 +548,7 @@ class TestGetSessionContextValidation:
         )
 
         mod = self._reload_module()
-        sid, source = mod.get_session_context()
+        sid, source, _tp = mod.get_session_context()
         assert sid == "00000000-0000-0000-0000-000000000000"
         assert source == "resume"
 
@@ -567,7 +569,7 @@ class TestGetSessionContextValidation:
         )
 
         mod = self._reload_module()
-        sid, source = mod.get_session_context()
+        sid, source, _tp = mod.get_session_context()
         assert sid == "env-sid"
         assert source == "resume"
 
@@ -583,7 +585,7 @@ class TestGetSessionContextValidation:
         # No stdin payload - exercise the env-var-only path.
 
         mod = self._reload_module()
-        sid, _source = mod.get_session_context()
+        sid, _source, _tp = mod.get_session_context()
         assert sid is None
 
 
@@ -1964,7 +1966,8 @@ class TestParallelSessionDetection:
 
         Negative offsets backdate the transcript to simulate stale sessions.
         """
-        cwd_key = str(cwd).replace("/", "-")
+        from hooks import session_start as _ss
+        cwd_key = _ss._cwd_key(cwd)
         proj_dir = home / ".claude" / "projects" / cwd_key
         proj_dir.mkdir(parents=True, exist_ok=True)
         jsonl = proj_dir / f"{session_id}.jsonl"
@@ -2067,13 +2070,21 @@ class TestParallelSessionDetection:
         )
         return rec
 
-    @staticmethod
-    def _dead_pid() -> int:
-        """Return a pid that is guaranteed dead: spawn a trivial process and
-        reap it, so the kernel has released it before we hand it back."""
-        proc = subprocess.Popen([sys.executable, "-c", ""])
-        proc.wait()
-        return proc.pid
+    _REAPED: list = []  # holds Windows process handles so pids cannot recycle
+
+    @classmethod
+    def _dead_pid(cls) -> int:
+        """A pid verified dead, resilient to Windows pid recycling (the Popen
+        object keeps the pid reserved; the loop verifies instead of assumes)."""
+        from missioncache_db import proc as _proc
+
+        for _ in range(10):
+            p = subprocess.Popen([sys.executable, "-c", ""])
+            p.wait()
+            cls._REAPED.append(p)
+            if _proc.process_alive(p.pid) is False:
+                return p.pid
+        raise AssertionError("could not obtain a reliably dead pid")
 
     def test_session_is_alive_none_when_no_record(self, tmp_path, monkeypatch):
         """No pid record -> None (unknown), so the caller falls back to mtime."""
@@ -2094,7 +2105,9 @@ class TestParallelSessionDetection:
         """Live pid AND a matching recorded start time -> True (not a reuse)."""
         self._redirect_state(monkeypatch, tmp_path)
         mod = self._reload_module()
-        start = mod._ps_field(os.getpid(), "lstart")
+        from missioncache_db import proc
+
+        start = proc.process_start_token(os.getpid())
         self._seed_pid_record(tmp_path, "live-sid", os.getpid(), start_time=start)
         assert mod._session_is_alive("live-sid") is True
 
@@ -2852,11 +2865,19 @@ class TestSessionTitleHook:
         out = self._run(monkeypatch, capsys, {"session_id": "sid-b", "prompt": "hi"})
         assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj-2"
 
-    @staticmethod
-    def _dead_pid_static():
-        proc = subprocess.Popen([sys.executable, "-c", ""])
-        proc.wait()
-        return proc.pid
+    _REAPED_STATIC: list = []  # Windows pid-recycle guard, same as _dead_pid
+
+    @classmethod
+    def _dead_pid_static(cls):
+        from missioncache_db import proc as _proc
+
+        for _ in range(10):
+            p = subprocess.Popen([sys.executable, "-c", ""])
+            p.wait()
+            cls._REAPED_STATIC.append(p)
+            if _proc.process_alive(p.pid) is False:
+                return p.pid
+        raise AssertionError("could not obtain a reliably dead pid")
 
     def test_silent_in_a_subagent(self, tmp_path, monkeypatch, capsys):
         """A subagent is not a session anyone addresses, and titling from one
@@ -2887,3 +2908,119 @@ class TestSessionTitleHook:
         monkeypatch.setattr(sys, "stdin", StringIO("not json"))
         mod.main()
         assert capsys.readouterr().out == ""
+
+
+class TestMirrorDrift:
+    """Drift guards for the deliberately-inlined hook mirrors, precedent
+    test_statusline_fork's regex-equality assertion. The mirrors exist because
+    this harness mocks missioncache_db wholesale in other tests; these tests
+    import the real package and hold each mirror to its canonical twin.
+    """
+
+    CWD_TABLE = [
+        "/Users/x/work",             # plain POSIX
+        "/Users/x/.claude",          # dot
+        "/Users/x/my_project",       # underscore
+        r"C:\Users\x\work",          # Windows drive + backslashes
+        "/Users/x/שלום/דוד",         # non-ASCII flattens entirely
+    ]
+
+    def test_cwd_key_equals_the_canonical_encoder(self):
+        import importlib
+
+        import missioncache_db
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        for path in self.CWD_TABLE:
+            assert mod._cwd_key(path) == missioncache_db.encode_claude_project_dir(
+                path
+            ), path
+
+    def test_encoder_pins_the_documented_rule(self):
+        import missioncache_db
+
+        assert missioncache_db.encode_claude_project_dir("/a/b_c/.d") == "-a-b-c--d"
+        assert (
+            missioncache_db.encode_claude_project_dir(r"C:\Users\x")
+            == "C--Users-x"
+        )
+
+    def test_replace_retry_mirrors_share_the_contract(self):
+        """attempts default and backoff shape must match across all copies -
+        drift here is invisible until a Windows box hits contention."""
+        import inspect
+
+        import importlib
+        import hooks.pre_compact as pc
+        from missioncache_db import filelock
+
+        importlib.reload(pc)
+        canonical = inspect.signature(filelock.replace_with_retry)
+        mirror = inspect.signature(pc._replace_with_retry)
+        assert (
+            canonical.parameters["attempts"].default
+            == mirror.parameters["attempts"].default
+        )
+        # Backoff constants: both start at 0.01 and double - assert via source
+        # rather than execution (executing needs a stuck file).
+        canon_src = inspect.getsource(filelock.replace_with_retry)
+        mirror_src = inspect.getsource(pc._replace_with_retry)
+        for token in ("0.01", "delay *= 2", 'os.name != "nt"'):
+            assert token in canon_src, token
+            assert token in mirror_src, token
+
+    def test_pre_compact_lock_passes_the_cross_process_contract(self, tmp_path):
+        """The hook's inlined lock copy against the canonical lock, both ways:
+        this process HOLDS via the hook mirror while a real child using the
+        canonical filelock must block, and acquires only after release.
+        Same mutation-verified safe shape as test_filelock's contract test.
+        """
+        import importlib
+        import subprocess
+        import sys as _sys
+        import time as _time
+        from pathlib import Path as _Path
+
+        import hooks.pre_compact as pc
+        from missioncache_db import filelock
+
+        importlib.reload(pc)
+        target = tmp_path / "demo-context.md"
+        lock_path = tmp_path / "demo-context.md.lock"
+        started = tmp_path / "started"
+        acquired = tmp_path / "acquired"
+        pkg_dir = str(_Path(filelock.__file__).resolve().parents[1])
+        child_code = (
+            "import sys\n"
+            f"sys.path.insert(0, {pkg_dir!r})\n"
+            "from pathlib import Path\n"
+            "from missioncache_db import filelock\n"
+            f"Path({str(started)!r}).write_text('x', encoding='utf-8')\n"
+            f"with filelock.exclusive_lock(Path({str(lock_path)!r})):\n"
+            f"    Path({str(acquired)!r}).write_text('x', encoding='utf-8')\n"
+        )
+        child = None
+
+        def _wait_for(path, what, timeout=30):
+            deadline = _time.monotonic() + timeout
+            while _time.monotonic() < deadline:
+                if path.exists():
+                    return
+                _time.sleep(0.05)
+            raise AssertionError(what)
+
+        try:
+            with pc._file_lock(target):
+                child = subprocess.Popen([_sys.executable, "-c", child_code])
+                _wait_for(started, "child never started")
+                _time.sleep(1.0)
+                assert not acquired.exists(), (
+                    "canonical lock acquired while the hook mirror held"
+                )
+            _wait_for(acquired, "the blocked waiter never acquired after release")
+            assert child.wait(timeout=30) == 0
+        finally:
+            if child and child.poll() is None:
+                child.kill()
+                child.wait(timeout=30)

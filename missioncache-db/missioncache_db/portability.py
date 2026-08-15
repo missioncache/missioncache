@@ -27,6 +27,8 @@ import fnmatch
 import hashlib
 import json
 import os
+
+from .filelock import replace_with_retry
 import re
 import shutil
 import socket
@@ -672,14 +674,14 @@ def _atomic_swap_dir(staging: Path, dest: Path) -> str:
         backup = dest.with_name(f".{dest.name}.old-{os.getpid()}")
         if backup.exists():
             shutil.rmtree(backup, ignore_errors=True)
-        os.replace(dest, backup)
+        replace_with_retry(dest, backup)
     try:
-        os.replace(staging, dest)  # same-filesystem sibling -> atomic
+        replace_with_retry(staging, dest)  # same-filesystem sibling -> atomic
     except OSError:
         # Swap-in failed with dest already moved aside: restore the old tree so
         # the failure leaves dest intact rather than deleted, then re-raise.
         if backup is not None and not dest.exists():
-            os.replace(backup, dest)
+            replace_with_retry(backup, dest)
         raise
     if backup:
         shutil.rmtree(backup, ignore_errors=True)
@@ -698,7 +700,7 @@ def _atomic_write_tarball(staging: Path, dest: Path, name: str) -> str:
     try:
         with tarfile.open(tmp, "w:gz") as tar:
             tar.add(staging, arcname=f"{name}.missioncache-bundle")
-        os.replace(tmp, dest)
+        replace_with_retry(tmp, dest)
     finally:
         if tmp.exists():
             tmp.unlink()

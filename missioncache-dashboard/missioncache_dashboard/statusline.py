@@ -50,6 +50,27 @@ except ImportError:
 IS_MACOS = platform.system() == "Darwin"
 
 
+def _replace_with_retry(src, dst, attempts=8):
+    """MIRROR of missioncache_db.filelock.replace_with_retry (statusline stays
+    stdlib-only). The statusline is the highest-contention writer in the
+    system - every prompt, every tab - which is exactly the Windows
+    sharing-violation case the retry exists for."""
+    delay = 0.01
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            # Retry is a Windows sharing-violation workaround. On POSIX a
+            # PermissionError here (read-only mount, immutable dir) never
+            # clears, so raise immediately instead of sleeping through the
+            # backoff inside a hook's 5-10s budget.
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
+
+
 def _suppress_stderr() -> None:
     """Silence fd 2 for the statusline render - stray stderr from subprocesses
     or libraries would corrupt the status display. Called from main(), NOT at
@@ -163,8 +184,8 @@ def _atomic_write_json(path: Path, payload: object) -> None:
             except OSError:
                 pass
         tmp_path = path.parent / f"{path.name}.tmp.{os.getpid()}"
-        tmp_path.write_text(json.dumps(payload))
-        os.replace(tmp_path, path)
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        _replace_with_retry(tmp_path, path)
     except OSError:
         pass
 
@@ -264,7 +285,7 @@ def _load_statusline_config() -> dict:
     to defaults - the statusline must keep rendering even without a dashboard.
     """
     try:
-        data = json.loads(_DASHBOARD_CONFIG_FILE.read_text())
+        data = json.loads(_DASHBOARD_CONFIG_FILE.read_text(encoding="utf-8"))
     except Exception:
         return dict(_DEFAULT_STATUSLINE_CONFIG)
     section = data.get("statusline")
@@ -301,7 +322,7 @@ def _get_codex_model() -> str | None:
     """Return the model name configured in ~/.codex/config.toml, or None on any failure."""
     try:
         import tomllib
-        return tomllib.loads(CODEX_CONFIG_FILE.read_text()).get("model")
+        return tomllib.loads(CODEX_CONFIG_FILE.read_text(encoding="utf-8")).get("model")
     except Exception:
         return None
 
@@ -384,7 +405,7 @@ def display_width(s: str) -> int:
 def run_cmd(cmd: list[str], timeout: int = 5) -> str | None:
     """Run a command, return stdout stripped or None on failure."""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.stdout.strip() if r.returncode == 0 else None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
@@ -677,7 +698,7 @@ def _read_tasks_content(project_dir: Path, project_name: str) -> str:
     """Return the contents of the project's tasks.md, or "" if unreadable."""
     tasks_file = project_dir / f"{project_name}-tasks.md"
     try:
-        return tasks_file.read_text()
+        return tasks_file.read_text(encoding="utf-8")
     except OSError:
         return ""
 
@@ -766,7 +787,7 @@ def _shared_stale_mtime(
         return None
     marker = STATE_DIR / "shared-seen" / f"{session_id}.json"
     try:
-        data = json.loads(marker.read_text())
+        data = json.loads(marker.read_text(encoding="utf-8"))
         if data.get("parent") != parent_name:
             return None
         seen = data.get("seen_mtime")
@@ -973,7 +994,7 @@ def is_version_reviewed(version: str) -> bool:
     if not reviewed_file.exists():
         return False
     try:
-        reviewed = reviewed_file.read_text().strip()
+        reviewed = reviewed_file.read_text(encoding="utf-8").strip()
     except OSError:
         return False
     if not reviewed:
@@ -1006,7 +1027,7 @@ def get_version_info(running: str) -> tuple[str, str]:
     cache: dict = {}
     if cache_file.exists():
         try:
-            cache = json.loads(cache_file.read_text())
+            cache = json.loads(cache_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             cache = {}
 
@@ -1131,7 +1152,7 @@ def get_health_status() -> list[dict]:
     # Check cache
     if HEALTH_CACHE.exists():
         try:
-            cache = json.loads(HEALTH_CACHE.read_text())
+            cache = json.loads(HEALTH_CACHE.read_text(encoding="utf-8"))
             if time.time() - cache.get("timestamp", 0) < HEALTH_TTL and "incidents" in cache:
                 return _apply_health_filters(cache["incidents"])
         except (json.JSONDecodeError, OSError):
@@ -1210,7 +1231,7 @@ def _get_oauth_token() -> str | None:
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-                capture_output=True, text=True, timeout=2,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2,
             )
             if result.returncode != 0:
                 return None
@@ -1294,7 +1315,7 @@ def get_usage_data() -> dict | None:
     cached = None
     if USAGE_CACHE.exists():
         try:
-            cached = json.loads(USAGE_CACHE.read_text())
+            cached = json.loads(USAGE_CACHE.read_text(encoding="utf-8"))
         except Exception:
             pass
     if cached:
@@ -1344,7 +1365,7 @@ def get_codex_usage() -> dict | None:
     # Check cache
     if CODEX_USAGE_CACHE.exists():
         try:
-            cache = json.loads(CODEX_USAGE_CACHE.read_text())
+            cache = json.loads(CODEX_USAGE_CACHE.read_text(encoding="utf-8"))
             cached_at = datetime.fromisoformat(cache["cached_at"])
             if (datetime.now(timezone.utc) - cached_at).total_seconds() < CODEX_USAGE_TTL:
                 return cache["parsed"]
@@ -1353,7 +1374,7 @@ def get_codex_usage() -> dict | None:
 
     # Read auth token
     try:
-        auth = json.loads(CODEX_AUTH_FILE.read_text())
+        auth = json.loads(CODEX_AUTH_FILE.read_text(encoding="utf-8"))
         token = auth.get("tokens", {}).get("access_token")
         if not token:
             return {"codex_installed": True}
@@ -1397,7 +1418,7 @@ def get_codex_usage() -> dict | None:
         # API failed - try returning expired cache
         if CODEX_USAGE_CACHE.exists():
             try:
-                cache = json.loads(CODEX_USAGE_CACHE.read_text())
+                cache = json.loads(CODEX_USAGE_CACHE.read_text(encoding="utf-8"))
                 return cache["parsed"]
             except Exception:
                 pass
@@ -1410,7 +1431,7 @@ def get_codex_usage() -> dict | None:
 def _is_fast_mode() -> bool:
     """Check if Claude Code fast mode is enabled via settings.json."""
     try:
-        settings = json.loads(SETTINGS_FILE.read_text())
+        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         return bool(settings.get("fastMode"))
     except Exception:
         return False
@@ -1726,7 +1747,7 @@ def _normalize_addon(raw: object) -> dict | None:
 def _load_addons(cfg_path: Path = _DASHBOARD_CONFIG_FILE) -> list[dict]:
     """Load enabled, validated addons from the config file. Fail-closed to []."""
     try:
-        data = json.loads(cfg_path.read_text())
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
     except Exception:
         return []
     raw_list = data.get("statusline_addons") if isinstance(data, dict) else None
@@ -1805,7 +1826,7 @@ def get_addon_value(addon: dict) -> dict | None:
     """Run an addon's command with a per-id TTL cache + stale fallback."""
     cache = SCRIPTS_DIR / f"addon-{addon['id']}-cache.json"
     try:
-        cached = json.loads(cache.read_text())
+        cached = json.loads(cache.read_text(encoding="utf-8"))
     except Exception:
         cached = None
     if isinstance(cached, dict):
@@ -2332,7 +2353,7 @@ if __name__ == "__main__":
         try:
             log_path = Path.home() / ".claude" / "logs" / "statusline-errors.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(log_path, "a") as f:
+            with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"\n--- {datetime.now().isoformat()} ---\n")
                 traceback.print_exc(file=f)
         except Exception:

@@ -13,6 +13,8 @@ merge.
 
 import json
 import os
+
+from .filelock import replace_with_retry
 import re
 import subprocess
 import tempfile
@@ -48,7 +50,7 @@ def _read() -> dict[str, Any]:
     in lib/config.py:71 would introduce on nested dicts).
     """
     try:
-        data = json.loads(MACHINE_FILE.read_text())
+        data = json.loads(MACHINE_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return _fresh_defaults()
     if not isinstance(data, dict):
@@ -72,7 +74,7 @@ def _write(data: dict[str, Any]) -> None:
         json.dump(data, tf, indent=2, sort_keys=True)
         tf.write("\n")
         tempname = tf.name
-    os.replace(tempname, MACHINE_FILE)
+    replace_with_retry(tempname, MACHINE_FILE)
 
 
 def remote_key(url: str) -> str:
@@ -161,7 +163,7 @@ def _git_run(path: str, *args: str) -> tuple[str, Optional[str]]:
         r = subprocess.run(
             ["git", "-C", path, *args],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):

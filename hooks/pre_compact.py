@@ -16,7 +16,7 @@ surfaces on next resume.
 """
 
 import contextlib
-import fcntl
+import errno
 import json
 import os
 import re
@@ -41,32 +41,82 @@ RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 0.4  # exponential backoff between retries
 
 
-# ── Atomic write helpers (duplicated from mcp_missioncache.project_files; keeping the hook
-#    self-contained avoids dragging the full mcp_missioncache transitive imports
-#    into the PreCompact hot path) ────────────────────────────────────────
+# ── Atomic write helpers (deliberately inlined MIRROR of
+#    missioncache_db.filelock + project_files._atomic_update_text: the hooks
+#    test harness mocks missioncache_db wholesale, so a shared import would
+#    return a MagicMock here. If locking semantics change, change
+#    missioncache_db/filelock.py and this mirror together.) ────────────────
+
+try:  # POSIX
+    import fcntl
+
+    _HAVE_FCNTL = True
+except ImportError:  # Windows
+    import msvcrt
+
+    _HAVE_FCNTL = False
+
+_WIN_RETRY_INTERVAL = 0.25
 
 
 @contextlib.contextmanager
 def _file_lock(path):
-    """Hold an exclusive lock on a sidecar lockfile next to ``path``."""
+    """Exclusive cross-process lock on the ``<path>.lock`` sidecar (never deleted)."""
     lock_path = path.with_name(path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "w") as lockfd:
-        fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
+    # "a", never "w" - see missioncache_db/filelock.py (truncate-before-lock).
+    with open(lock_path, "a", encoding="utf-8") as lockfd:
+        if _HAVE_FCNTL:
+            fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+        else:
+            fileno = lockfd.fileno()
+            while True:
+                try:
+                    lockfd.seek(0)
+                    msvcrt.locking(fileno, msvcrt.LK_LOCK, 1)
+                    break
+                except OSError as e:
+                    if e.errno not in (errno.EDEADLK, errno.EACCES):
+                        raise
+                    time.sleep(_WIN_RETRY_INTERVAL)
+            try:
+                yield
+            finally:
+                with contextlib.suppress(OSError):
+                    lockfd.seek(0)
+                    msvcrt.locking(fileno, msvcrt.LK_UNLCK, 1)
+
+
+def _replace_with_retry(src, dst, attempts=8):
+    """MIRROR of missioncache_db.replace_with_retry (hook self-containment)."""
+    delay = 0.01
+    for attempt in range(attempts):
         try:
-            yield
-        finally:
-            fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            # Retry is a Windows sharing-violation workaround. On POSIX a
+            # PermissionError here (read-only mount, immutable dir) never
+            # clears, so raise immediately instead of sleeping through the
+            # backoff inside a hook's 5-10s budget.
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def _atomic_update_text(path, transform):
     """Read-modify-write under flock with os.replace for crash safety."""
     with _file_lock(path):
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         new_content = transform(content)
         tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(new_content)
-        os.replace(tmp_path, path)
+        tmp_path.write_text(new_content, encoding="utf-8")
+        _replace_with_retry(tmp_path, path)
         return new_content
 
 

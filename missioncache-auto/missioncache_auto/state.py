@@ -5,7 +5,6 @@ Provides atomic state file operations with file locking to ensure
 safe concurrent access between multiple worker processes.
 """
 
-import fcntl
 import json
 import os
 import tempfile
@@ -13,6 +12,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+
+from missioncache_db import filelock, replace_with_retry
 
 from missioncache_auto.dag import DAG
 
@@ -32,7 +33,7 @@ def _atomic_write_text(path: Path, content: str) -> None:
         raise
     else:
         os.close(fd)
-    os.replace(tmp_path, str(path))
+    replace_with_retry(tmp_path, str(path))
 
 
 from missioncache_auto.models import State, Task, TaskStatus
@@ -53,16 +54,15 @@ class StateManager:
 
     @contextmanager
     def _lock(self, exclusive: bool = True) -> Iterator[None]:
-        """Context manager for file locking."""
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        """Cross-process lock on the state file - shared for readers.
 
-        with open(self.lock_file, "w") as f:
-            try:
-                fcntl.flock(f.fileno(), lock_type)
-                yield
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        Delegates to missioncache_db.filelock (single portable owner);
+        shared-mode semantics, including the Windows readers-serialize
+        degradation, are documented there.
+        """
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        with filelock.exclusive_lock(self.lock_file, shared=not exclusive):
+            yield
 
     def init(self, tasks: list[str], pre_completed: set[str] | None = None) -> State:
         """
@@ -98,7 +98,7 @@ class StateManager:
 
     def _read_unlocked(self) -> State:
         """Read state without locking (caller must hold lock)."""
-        data = json.loads(self.state_file.read_text())
+        data = json.loads(self.state_file.read_text(encoding="utf-8"))
         return State.from_dict(data)
 
     def _write(self, state: State) -> None:
@@ -267,7 +267,7 @@ class StateManager:
         if not tasks_md.exists():
             return
 
-        content = tasks_md.read_text()
+        content = tasks_md.read_text(encoding="utf-8")
 
         for task_id in completed:
             # Convert 01 -> 1 for display

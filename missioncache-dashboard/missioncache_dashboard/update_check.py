@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+
+from missioncache_db import replace_with_retry
 import time
 import urllib.request
 from importlib import metadata
@@ -67,7 +69,7 @@ def _fetch_latest(package: str, timeout: float) -> str | None:
 
 def _read_cache() -> dict | None:
     try:
-        data = json.loads(CACHE_PATH.read_text())
+        data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict) and "checked_at" in data:
             return data
     except (OSError, ValueError):
@@ -79,8 +81,8 @@ def _write_cache(status: dict) -> None:
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = CACHE_PATH.with_name(f"{CACHE_PATH.name}.tmp.{os.getpid()}")
-        tmp.write_text(json.dumps(status))
-        os.replace(tmp, CACHE_PATH)
+        tmp.write_text(json.dumps(status), encoding="utf-8")
+        replace_with_retry(tmp, CACHE_PATH)
     except OSError:
         pass  # a failed cache write only costs an extra fetch next time
 

@@ -1,16 +1,17 @@
 """MissionCache file operations."""
 
-import contextlib
-import fcntl
 import os
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from missioncache_db import context_health
+from missioncache_db import filelock
+from missioncache_db import replace_with_retry
 from missioncache_db import validate_task_name as _missioncache_db_validate_task_name
 
 from .config import settings
@@ -19,27 +20,16 @@ from .models import MissionCacheFiles, TaskProgress
 from .tasks_parse import parse_tasks_md
 
 
-# NOTE: ``_file_lock`` and ``_atomic_update_text`` below are duplicated in
-# ``hooks/pre_compact.py`` to keep the PreCompact hook self-contained
-# (avoids dragging mcp_missioncache's transitive imports into the hook hot path).
-# If you change locking semantics here, mirror the change in the hook.
+# NOTE: the portable lock lives in ``missioncache_db.filelock`` (fcntl on
+# POSIX, msvcrt on Windows); ``_atomic_update_text`` is still mirrored in
+# ``hooks/pre_compact.py`` to keep the PreCompact hook self-contained.
+# If you change locking semantics, change ``filelock.py`` and the hook
+# mirror together.
 
 
-@contextlib.contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock on a sidecar lockfile next to ``path``.
-
-    The lockfile (``<path>.lock``) is a long-lived sidecar; we never delete
-    it because creation/deletion under contention is racy.
-    """
-    lock_path = path.with_name(path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "w") as lockfd:
-        fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+def _file_lock(path: Path) -> "AbstractContextManager[None]":
+    """Exclusive lock on the ``<path>.lock`` sidecar (never deleted)."""
+    return filelock.sidecar_lock(path)
 
 
 def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
@@ -52,11 +42,11 @@ def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
     read-modify-write cycles do not interleave.
     """
     with _file_lock(path):
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         new_content = transform(content)
         tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(new_content)
-        os.replace(tmp_path, path)
+        tmp_path.write_text(new_content, encoding="utf-8")
+        replace_with_retry(tmp_path, path)
         return new_content
 
 
@@ -76,22 +66,22 @@ def _atomic_update_context_with_journal(
     losing them. The window is one ``os.replace`` wide.
     """
     with _file_lock(context_path):
-        content = context_path.read_text()
+        content = context_path.read_text(encoding="utf-8")
         new_content, journal_append = transform(content)
         if journal_append:
             if journal_path.exists():
-                journal_content = journal_path.read_text().rstrip("\n") + "\n\n"
+                journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
             else:
                 journal_content = (
                     context_health.journal_header(context_path.parent.name) + "\n"
                 )
             journal_content += journal_append
             journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
-            journal_tmp.write_text(journal_content)
-            os.replace(journal_tmp, journal_path)
+            journal_tmp.write_text(journal_content, encoding="utf-8")
+            replace_with_retry(journal_tmp, journal_path)
         tmp_path = context_path.with_name(context_path.name + ".tmp")
-        tmp_path.write_text(new_content)
-        os.replace(tmp_path, context_path)
+        tmp_path.write_text(new_content, encoding="utf-8")
+        replace_with_retry(tmp_path, context_path)
         return new_content
 
 
@@ -302,7 +292,7 @@ def create_missioncache_files(
     templates = resources.files("mcp_missioncache.templates")
 
     # Create context.md
-    context_template = templates.joinpath("context.md").read_text()
+    context_template = templates.joinpath("context.md").read_text(encoding="utf-8")
     context_content = context_template.replace(
         "{{task_name}}", task_name.replace("-", " ").title()
     )
@@ -312,10 +302,10 @@ def create_missioncache_files(
         context_content = _inject_fork_header(context_content, fork_of)
 
     context_file = task_dir / f"{task_name}-context.md"
-    context_file.write_text(context_content)
+    context_file.write_text(context_content, encoding="utf-8")
 
     # Create tasks.md
-    tasks_template = templates.joinpath("tasks.md").read_text()
+    tasks_template = templates.joinpath("tasks.md").read_text(encoding="utf-8")
     tasks_content = tasks_template.replace(
         "{{task_name}}", task_name.replace("-", " ").title()
     )
@@ -332,10 +322,10 @@ def create_missioncache_files(
     tasks_content = tasks_content.replace("{{remaining}}", remaining)
 
     tasks_file = task_dir / f"{task_name}-tasks.md"
-    tasks_file.write_text(tasks_content)
+    tasks_file.write_text(tasks_content, encoding="utf-8")
 
     # Create plan.md
-    plan_template = templates.joinpath("plan.md").read_text()
+    plan_template = templates.joinpath("plan.md").read_text(encoding="utf-8")
     plan_content = plan_content or {}
 
     plan_md = plan_template.replace(
@@ -361,7 +351,7 @@ def create_missioncache_files(
     plan_md = plan_md.replace("{{risks}}", plan_content.get("risks", "None"))
 
     plan_file = task_dir / f"{task_name}-plan.md"
-    plan_file.write_text(plan_md)
+    plan_file.write_text(plan_md, encoding="utf-8")
 
     return MissionCacheFiles(
         task_dir=str(task_dir),
