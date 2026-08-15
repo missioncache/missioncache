@@ -78,7 +78,7 @@ class WorktreeManager:
                 ["git", "worktree", "add", "-b", branch, str(wt_path), "HEAD"],
                 cwd=self.project_root,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=True,
             )
 
@@ -110,12 +110,22 @@ class WorktreeManager:
             List of dicts with keys: worker_id, branch, status, message.
             Status is one of: "merged", "no_changes", "conflict".
         """
-        original_branch = subprocess.run(
+        probe = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
-        ).stdout.strip()
+            text=True, encoding="utf-8", errors="replace",
+        )
+        original_branch = probe.stdout.strip()
+        # errors="replace" turns a non-UTF-8 branch name into a ref carrying
+        # U+FFFD; `git log target..branch` on it fails with empty output and
+        # the worktree gets reported "no_changes" and silently never merged.
+        # Refuse loudly instead of merging into a mangled ref.
+        if probe.returncode != 0 or not original_branch or "\ufffd" in original_branch:
+            raise RuntimeError(
+                "could not resolve the current branch for merging "
+                f"(rc={probe.returncode}, name={original_branch!r})"
+            )
 
         results = []
         for worker_id in sorted(self.worktrees.keys()):
@@ -130,7 +140,7 @@ class WorktreeManager:
             ["git", "log", f"{target_branch}..{info.branch}", "--oneline"],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
 
         if not diff_result.stdout.strip():
@@ -154,7 +164,7 @@ class WorktreeManager:
             ],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
 
         if merge_result.returncode == 0:
@@ -222,7 +232,7 @@ class WorktreeManager:
             ],
             cwd=path,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return bool(result.stdout.strip())
 
@@ -248,7 +258,7 @@ class WorktreeManager:
             ["git", "branch", flag, branch],
             cwd=self.project_root,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if result.returncode != 0 and not force:
             # Branch has unmerged commits - warn instead of silently failing

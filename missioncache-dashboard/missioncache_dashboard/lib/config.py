@@ -33,6 +33,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from missioncache_db import replace_with_retry
+
 CONFIG_FILE = Path.home() / ".claude" / "missioncache-dashboard-config.json"
 
 _DEFAULT_STATUSLINE: dict[str, Any] = {
@@ -68,7 +70,7 @@ def _read() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         return dict(DEFAULTS)
     try:
-        with open(CONFIG_FILE) as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             file_data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return dict(DEFAULTS)
@@ -94,7 +96,7 @@ def _write(data: dict[str, Any]) -> None:
         json.dump(data, tf, indent=2, sort_keys=True)
         tf.write("\n")
         tempname = tf.name
-    os.replace(tempname, CONFIG_FILE)
+    replace_with_retry(tempname, CONFIG_FILE)
 
 
 def _update(key: str, value: Any) -> None:

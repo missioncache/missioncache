@@ -76,11 +76,25 @@ def _seed_pid(home, session_id, pid, start_time=None):
     )
 
 
+_REAPED = []  # keeps the Windows process handle open so the pid cannot recycle
+
+
 def _dead_pid():
-    """A pid guaranteed dead: spawn a trivial process and reap it."""
-    proc = subprocess.Popen([sys.executable, "-c", ""])
-    proc.wait()
-    return proc.pid
+    """A pid verified dead, resilient to Windows pid recycling.
+
+    Windows reuses freed pids aggressively; holding the Popen object keeps
+    the kernel process object (and so the pid) reserved, and the verification
+    loop makes the precondition observable instead of assumed.
+    """
+    from missioncache_db import proc as _proc
+
+    for _ in range(10):
+        p = subprocess.Popen([sys.executable, "-c", ""])
+        p.wait()
+        _REAPED.append(p)
+        if _proc.process_alive(p.pid) is False:
+            return p.pid
+    raise AssertionError("could not obtain a reliably dead pid")
 
 
 class TestSessionIsAlive:
@@ -234,6 +248,11 @@ class TestBoundProjectForSession:
         assert m.bound_project_for_session("sid-a") is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="drives the walk through the POSIX ps seam; Windows uses the "
+    "ctypes snapshot backend, covered by test_proc's contract tests",
+)
 class TestResolveClaudeProcessPid:
     """The walk every liveness answer derives from, previously untested.
 
@@ -242,13 +261,27 @@ class TestResolveClaudeProcessPid:
     """
 
     def _walk_over(self, monkeypatch, tree):
-        """Drive the walk over a fake process tree: {pid: (ppid, comm)}."""
+        """Drive the walk over a fake process tree: {pid: (ppid, comm)}.
+
+        Patches the proc backend's ps reader - the seam both parent_pid and
+        process_name flow through on POSIX - so the walk logic above it runs
+        for real (basename + .exe normalization included).
+        """
         monkeypatch.setattr(m.os, "getpid", lambda: 100)
-        monkeypatch.setattr(
-            m, "_ps_field", lambda pid, fmt: (tree.get(pid) or (None, None))[
-                0 if fmt == "ppid" else 1
-            ]
-        )
+
+        def _fake_ps(pid, fmt):
+            entry = tree.get(pid)
+            if entry is None:
+                return None
+            ppid, comm = entry
+            if fmt.startswith("ppid=,"):
+                # parent_and_name's fused read: "  <ppid> <comm>" on one line.
+                if ppid is None:
+                    return None
+                return f"{ppid} {comm or ''}".strip()
+            return ppid if fmt == "ppid" else comm
+
+        monkeypatch.setattr(m.proc, "_ps_field", _fake_ps)
 
     def test_returns_the_claude_ancestor_not_the_parent(self, monkeypatch):
         """The documented shape is claude -> uv -> python, so the match is the
@@ -282,19 +315,23 @@ class TestResolveClaudeProcessPid:
         assert m.resolve_claude_process_pid() is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="ps is POSIX-only; on Windows MSYS ps.exe is deliberately unused",
+)
 class TestPsField:
     def test_returns_a_field_for_a_live_pid(self):
-        assert m._ps_field(os.getpid(), "comm")
+        assert m.proc._ps_field(os.getpid(), "comm")
 
     def test_none_for_a_dead_pid(self):
-        assert m._ps_field(_dead_pid(), "comm") is None
+        assert m.proc._ps_field(_dead_pid(), "comm") is None
 
     def test_none_rather_than_raising_when_ps_is_unusable(self, monkeypatch):
         """session_is_alive treats a raise as fatal, so this must swallow."""
         def _boom(*_a, **_k):
             raise OSError("no ps")
-        monkeypatch.setattr(m.subprocess, "run", _boom)
-        assert m._ps_field(os.getpid(), "comm") is None
+        monkeypatch.setattr(m.proc.subprocess, "run", _boom)
+        assert m.proc._ps_field(os.getpid(), "comm") is None
 
 
 class TestLiveSessionOrdering:

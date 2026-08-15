@@ -72,7 +72,6 @@ import logging
 import os
 import re
 import sqlite3
-import subprocess
 import sys
 import time
 import uuid
@@ -83,6 +82,9 @@ from enum import Enum
 from glob import glob as glob_files
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
+from . import proc  # portable process backend
+from .filelock import replace_with_retry  # noqa: F401  (re-export; impl lives with the lock)
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +148,41 @@ def atomic_write_json(path: Path, payload: object) -> None:
             except OSError:
                 pass
         tmp_path = path.parent / f"{path.name}.tmp.{os.getpid()}"
-        tmp_path.write_text(json.dumps(payload))
-        os.replace(tmp_path, path)
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        replace_with_retry(tmp_path, path)
     except OSError:
         return
+
+
+def encode_claude_project_dir(path: "str | Path") -> str:
+    """Encode a working directory the way Claude Code names its projects dir.
+
+    Documented rule (docs, "Where transcripts are stored"): the directory
+    under ``~/.claude/projects/`` is the cwd with EVERY non-alphanumeric
+    character replaced by ``-``. That covers ``/`` on POSIX and both ``:``
+    and ``\\`` on Windows (``C:\\Users\\x`` -> ``C--Users-x``), and also dots,
+    which BOTH old encoders missed, and underscores, which the hook's old
+    slash-only copy missed on macOS (the db-side copy did handle them - the
+    two encoders disagreed, which was its own latent bug).
+
+    Known limitation, documented rather than implemented: for converted names
+    over 200 characters Claude Code truncates and appends a hash of the full
+    path; the hash is not reproducible from the docs, so such paths will not
+    match. Prefer the ``transcript_path`` hooks receive on stdin over
+    reconstructing this at all - this encoder is the fallback for callers
+    that have no hook payload (CLI, transcript time scan).
+
+    Windows drive-letter casing is unstable across launching shells
+    (claude-code#19910: the same cwd appears as ``C:`` or ``c:``), so a
+    consumer matching against Claude Code's projects dir should glob
+    case-insensitively. MissionCache's own state keyed on this encoding
+    (the cwd-session pointer) verifies the stored raw ``cwd`` on read
+    instead, which also defends the lossy-encoding collisions.
+
+    MIRROR: ``hooks/session_start.py`` ``_cwd_key`` inlines this rule (the
+    hook must work when missioncache_db does not import). Change both.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
 def session_binding_path(session_id: str) -> Path:
@@ -198,7 +231,7 @@ def read_session_binding(session_id: str) -> Tuple[bool, Optional[Dict[str, Any]
     if not path.exists():
         return (False, None)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return (True, None)
     return (True, data if isinstance(data, dict) else None)
@@ -228,33 +261,6 @@ def _is_valid_session_id(value: object) -> bool:
     )
 
 
-def _ps_field(pid: int, fmt: str) -> Optional[str]:
-    """Return a single ``ps -o <fmt>=`` field for ``pid``, or None.
-
-    Best-effort and portable across macOS and Linux (no ``/proc`` dependency,
-    which macOS lacks). Returns None when the process is gone, ps is missing,
-    or the call errors out.
-
-    Deliberately duplicated from ``hooks/session_start.py``, which needs its own
-    copy to record a session's process start time before ``missioncache_db`` is
-    importable under the hook test harness (the tests replace the module with a MagicMock, so a
-    shared helper would return a mock here). Same precedent as ``_file_lock``
-    being duplicated into ``hooks/pre_compact.py``: keep the two in sync.
-    """
-    try:
-        out = subprocess.run(
-            ["ps", "-o", f"{fmt}=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
-        return None
-    return out.stdout.strip() or None
-
-
 # How far up the process tree to climb when resolving the Claude Code session
 # process. A caller runs as a short-lived descendant, often under a transient
 # ``sh -c`` / ``uv`` wrapper; a handful of levels covers every observed launch
@@ -265,30 +271,41 @@ _SESSION_PID_WALK_MAX_DEPTH = 12
 def resolve_claude_process_pid() -> Optional[int]:
     """Climb from this process to the Claude Code session process and return its pid.
 
-    Walks the ancestry looking for a process whose executable name (argv0
-    basename via ``ps -o comm=``) is ``claude``, because the caller is usually a
-    grandchild rather than a direct child: an MCP server runs as
-    ``claude -> uv -> python``, and a hook as ``claude -> sh -> python3``.
+    Walks the ancestry looking for a process whose executable basename is
+    ``claude`` (``claude.exe`` normalizes to it on Windows), because the
+    caller is usually a grandchild rather than a direct child: an MCP server
+    runs as ``claude -> uv -> python``, and a hook as ``claude -> sh ->
+    python3``.
 
     Returns None when no ``claude`` ancestor is found within
     ``_SESSION_PID_WALK_MAX_DEPTH`` levels - e.g. the Claude Desktop app, whose
     process shape differs.
+
+    Windows caveat, documented rather than solved: Windows does not reparent
+    orphans, so ``th32ParentProcessID`` can point at a recycled pid whose
+    current owner is an unrelated (or wrong) ``claude`` process. The window is
+    spawn-to-walk and the walk runs immediately at process start, so the odds
+    are low - but a mis-resolved ancestor here self-records a consistent
+    (wrong) pid+token pair that the recycle guard cannot catch later.
     """
-    pid = os.getpid()
+    # Step to the parent first, then fuse each level's (grandparent, name)
+    # into one backend lookup. The name examined is always the ANCESTOR's own
+    # name - checking the current process's name would skip an ancestor whose
+    # ppid is 1 (a claude launched directly from launchd/init) and can never
+    # match the caller itself.
+    ancestor, _ = proc.parent_and_name(os.getpid())
     for _ in range(_SESSION_PID_WALK_MAX_DEPTH):
-        ppid_s = _ps_field(pid, "ppid")
-        if not ppid_s:
+        if ancestor is None or ancestor <= 1:
             return None
-        try:
-            ppid = int(ppid_s)
-        except ValueError:
-            return None
-        if ppid <= 1:
-            return None
-        comm = _ps_field(ppid, "comm") or ""
-        if os.path.basename(comm) == "claude":
-            return ppid
-        pid = ppid
+        grandparent, name = proc.parent_and_name(ancestor)
+        # Casefolded: Windows filenames are case-insensitive and Toolhelp32
+        # reports the on-disk spelling, so Claude.exe must match. OPEN
+        # QUESTION for the Windows machine: an npm-installed Claude Code may
+        # run as node.exe via a claude.cmd shim, in which case no ancestor
+        # carries the name at all - the CI walk probe exists to answer that.
+        if name is not None and name.casefold() == "claude":
+            return ancestor
+        ancestor = grandparent
     return None
 
 
@@ -327,7 +344,7 @@ def session_is_alive(session_id: str) -> Optional[bool]:
     if not _is_valid_session_id(session_id):
         return None
     try:
-        data = json.loads(session_pid_path(session_id).read_text())
+        data = json.loads(session_pid_path(session_id).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -335,15 +352,12 @@ def session_is_alive(session_id: str) -> Optional[bool]:
     pid = data.get("pid")
     if not isinstance(pid, int) or pid <= 1:
         return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return None
+    alive = proc.process_alive(pid)
+    if alive is not True:
+        return alive
     recorded_start = data.get("startTime")
     if recorded_start:
-        current_start = _ps_field(pid, "lstart")
+        current_start = proc.process_start_token(pid)
         if current_start is not None and current_start != recorded_start:
             return False  # pid was recycled by a different process
     return True
@@ -386,7 +400,7 @@ def read_session_title(session_id: str) -> Optional[Dict[str, Any]]:
     if not _is_valid_session_id(session_id):
         return None
     try:
-        data = json.loads(session_title_path(session_id).read_text())
+        data = json.loads(session_title_path(session_id).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
@@ -1725,7 +1739,7 @@ class TaskDB:
             filepath = task_dir / filename
             if filepath.exists():
                 try:
-                    content = filepath.read_text()
+                    content = filepath.read_text(encoding="utf-8")
 
                     # Extract JIRA key (pattern: GC-XXXXX or similar)
                     jira_match = re.search(r"\[([A-Z]+-\d+)\]", content)
@@ -2054,7 +2068,7 @@ class TaskDB:
             filepath = task_dir / filename
             if filepath.exists():
                 try:
-                    content = filepath.read_text()
+                    content = filepath.read_text(encoding="utf-8")
                 except OSError:
                     return  # unreadable: preserve the current link
                 break
@@ -2747,7 +2761,7 @@ class TaskDB:
                 if not f.exists():
                     continue
                 try:
-                    content = f.read_text()
+                    content = f.read_text(encoding="utf-8")
                 except OSError:
                     h1_skipped.append(f.name)
                     continue
@@ -2756,7 +2770,7 @@ class TaskDB:
                 if head.rstrip() == expected_h1:
                     new_h1 = f"# {new_titlecase} - {label}"
                     try:
-                        f.write_text(new_h1 + "\n" + rest if rest else new_h1)
+                        f.write_text(new_h1 + "\n" + rest if rest else new_h1, encoding="utf-8")
                         h1_originals.append((f, content))
                         h1_rewritten.append(f.name)
                     except OSError:
@@ -2816,7 +2830,7 @@ class TaskDB:
             # state is observable.
             for f, original in reversed(h1_originals):
                 try:
-                    f.write_text(original)
+                    f.write_text(original, encoding="utf-8")
                 except OSError:
                     logger.exception(
                         "rename rollback: H1 restore failed for %s", f
@@ -3003,10 +3017,10 @@ class TaskDB:
         if projects_dir.is_dir():
             for f in projects_dir.glob("*.json"):
                 try:
-                    data = json.loads(f.read_text())
+                    data = json.loads(f.read_text(encoding="utf-8"))
                     if data.get("projectName") == old_name:
                         data["projectName"] = new_name
-                        f.write_text(json.dumps(data))
+                        f.write_text(json.dumps(data), encoding="utf-8")
                         updated += 1
                 except (OSError, json.JSONDecodeError) as e:
                     logger.warning(
@@ -3069,7 +3083,7 @@ class TaskDB:
         pending_project_file = state_dir / "pending-project.json"
         if pending_project_file.exists():
             try:
-                with open(pending_project_file) as f:
+                with open(pending_project_file, encoding="utf-8") as f:
                     pending = json.load(f)
                 pending_cwd = Path(pending.get("cwd", "")).resolve()
                 pending_name = pending.get("projectName", "")
@@ -3802,12 +3816,12 @@ class TaskDB:
 
     @staticmethod
     def encode_path_for_claude(path: str) -> str:
-        """Encode a path to match Claude's project directory naming.
+        """Encode a path to match Claude Code's project directory naming.
 
-        Claude encodes paths by replacing '/' with '-' and '_' with '-'.
-        Example: /home/user/project -> -home-user-project
+        Thin delegate to ``encode_claude_project_dir`` (module level), the
+        single owner of the documented every-non-alphanumeric rule.
         """
-        return path.replace("/", "-").replace("_", "-")
+        return encode_claude_project_dir(path)
 
     def get_session_time_from_transcripts(
         self, task_name: str, repo_path: str
@@ -3878,7 +3892,7 @@ class TaskDB:
 
         # Read file and check for task mentions
         # Search for task name in the raw line (faster and catches paths like dev/active/task-name)
-        with open(jsonl_path, "r") as f:
+        with open(jsonl_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line_stripped = line.strip()
                 if not line_stripped:
@@ -4014,7 +4028,7 @@ class TaskDB:
             return {"has_docs": False}
 
         try:
-            content = tasks_file.read_text()
+            content = tasks_file.read_text(encoding="utf-8")
         except Exception:
             return {"has_docs": False}
 
@@ -4075,7 +4089,7 @@ class TaskDB:
         description = ""
         if context_file and context_file.exists():
             try:
-                ctx_content = context_file.read_text()
+                ctx_content = context_file.read_text(encoding="utf-8")
 
                 # Helper to check if a line is metadata or navigation
                 def is_metadata(line: str) -> bool:
@@ -5476,6 +5490,21 @@ def main():
             except ValueError as e:
                 print(str(e))
                 sys.exit(1)
+        elif command == "encode-cwd":
+            # Claude Code's projects-dir key for a path (cwd by default).
+            # Exists for the slash commands' bash blocks, which still carry
+            # `pwd | sed 's|/|-|g'` (wrong on Windows and for dots and
+            # underscores everywhere); they switch to this subcommand in the
+            # per-component port phase, deliberately sequenced after this
+            # lands.
+            target = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+            if not target:
+                # An empty key would make a caller's ${CWD_KEY} glob the whole
+                # projects directory.
+                print("Error: encode-cwd requires a non-empty path", file=sys.stderr)
+                sys.exit(1)
+            print(encode_claude_project_dir(target))
+
         elif command == "health":
             from missioncache_db import context_health
 
@@ -5502,7 +5531,7 @@ def main():
                 # finding for THAT project, never a crash that voids the
                 # sweep for every project after it.
                 try:
-                    content = context_file.read_text()
+                    content = context_file.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError) as e:
                     print(f"{name}:")
                     print(f"  - context file unreadable: {e.__class__.__name__}")

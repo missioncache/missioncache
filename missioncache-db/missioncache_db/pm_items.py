@@ -17,20 +17,18 @@ Stdlib-only, same contract as ``context_health``: the MCP server imports
 from missioncache_db, never the reverse.
 """
 
-import contextlib
-import fcntl
 import json
 import logging
-import os
 import re
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from . import context_health
+from . import context_health, filelock
 
 logger = logging.getLogger(__name__)
 
@@ -254,26 +252,20 @@ def _now() -> str:
 # File locking (mirror writes)
 # =============================================================================
 
-# NOTE: ``_file_lock`` is duplicated in mcp-server's ``project_files.py`` and
-# in ``hooks/pre_compact.py``. ``_atomic_update_context_with_journal`` is
-# duplicated in ``project_files.py`` only - the hook has the simpler
-# ``_atomic_update_text`` and deliberately skips journal rollover.
-# All copies flock the SAME ``<context>.lock`` sidecar, so writers serialize
-# across processes regardless of which copy they run. If locking semantics
-# change, change every copy.
+# NOTE: the portable lock lives in ``missioncache_db.filelock`` (fcntl on
+# POSIX, msvcrt on Windows). ``hooks/pre_compact.py`` carries a deliberately
+# inlined mirror of it (the hooks test harness mocks missioncache_db
+# wholesale). ``_atomic_update_context_with_journal`` is duplicated in
+# mcp-server's ``project_files.py``. All paths lock the SAME
+# ``<context>.lock`` sidecar, so writers serialize across processes
+# regardless of which copy they run. If locking semantics change, change
+# ``filelock.py`` and the hook mirror together.
 
 
-@contextlib.contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock on the ``<path>.lock`` sidecar (never deleted)."""
-    lock_path = path.with_name(path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "w") as lockfd:
-        fcntl.flock(lockfd.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lockfd.fileno(), fcntl.LOCK_UN)
+
+def _file_lock(path: Path) -> "AbstractContextManager[None]":
+    """Exclusive lock on the ``<path>.lock`` sidecar (never deleted)."""
+    return filelock.sidecar_lock(path)
 
 
 def _atomic_update_context_with_journal(
@@ -288,22 +280,22 @@ def _atomic_update_context_with_journal(
     ``.tmp`` + ``os.replace`` so a crash never leaves a torn file.
     """
     with _file_lock(context_path):
-        content = context_path.read_text()
+        content = context_path.read_text(encoding="utf-8")
         new_content, journal_append = transform(content)
         if journal_append:
             if journal_path.exists():
-                journal_content = journal_path.read_text().rstrip("\n") + "\n\n"
+                journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
             else:
                 journal_content = (
                     context_health.journal_header(context_path.parent.name) + "\n"
                 )
             journal_content += journal_append
             journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
-            journal_tmp.write_text(journal_content)
-            os.replace(journal_tmp, journal_path)
+            journal_tmp.write_text(journal_content, encoding="utf-8")
+            filelock.replace_with_retry(journal_tmp, journal_path)
         tmp_path = context_path.with_name(context_path.name + ".tmp")
-        tmp_path.write_text(new_content)
-        os.replace(tmp_path, context_path)
+        tmp_path.write_text(new_content, encoding="utf-8")
+        filelock.replace_with_retry(tmp_path, context_path)
         return new_content
 
 
@@ -657,7 +649,7 @@ def jira_url_for(label: str) -> Optional[str]:
     dependency.
     """
     try:
-        document = json.loads(_dashboard_config_file().read_text())
+        document = json.loads(_dashboard_config_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     # isinstance on the DOCUMENT, not just the mapping: a config whose top
