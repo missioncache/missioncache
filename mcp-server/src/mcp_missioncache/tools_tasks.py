@@ -32,6 +32,7 @@ from .helpers import (
     _task_to_detail,
     _task_to_summary,
     _validate_path,
+    live_peer_sessions_for_project,
 )
 from .models import (
     CreateTaskResult,
@@ -576,6 +577,12 @@ async def complete_task(
                     "Task is already completed", current_state="completed"
                 )
             raise TaskNotFoundError(task.id)
+        # Completion moves the whole project directory to completed/, the
+        # strongest form of "the files moved out from under a live peer" -
+        # same notification contract as rename_task.
+        peers = live_peer_sessions_for_project(task.name)
+        if peers:
+            result["live_sessions"] = peers
         return result
 
     except MissionCacheError as e:
@@ -630,6 +637,11 @@ async def reopen_task(
                     expected_state="completed",
                 )
             raise TaskNotFoundError(task.id)
+        # Mirror of complete_task: the directory moved back to active/ under
+        # any live peer session.
+        peers = live_peer_sessions_for_project(task.name)
+        if peers:
+            result["live_sessions"] = peers
         return result
 
     except MissionCacheError as e:
@@ -703,7 +715,7 @@ async def rename_task(
             # original message.
             raise ValidationError(str(e), field="new_name")
 
-        return RenameTaskResult(
+        response = RenameTaskResult(
             success=result["success"],
             changed=result["changed"],
             task_id=task.id,
@@ -717,6 +729,21 @@ async def rename_task(
             sessions_updated=result["sessions_updated"],
             warnings=result.get("warnings", []),
         ).model_dump()
+        # A rename moves the context file out from under any live peer session,
+        # so it joins the notification contract. Looked up under BOTH names,
+        # deduplicated by session: the rename's session-pointer sweep rewrites
+        # project_state rows to the new name, but the sweep is best-effort
+        # (a failure surfaces only as a warning while changed stays True), and
+        # a peer left under the old name is precisely the one that most needs
+        # to hear its directory moved.
+        if result["changed"]:
+            merged: dict[str, dict] = {}
+            for lookup_name in (result["name"], result["old_name"]):
+                for peer in live_peer_sessions_for_project(lookup_name):
+                    merged.setdefault(peer["session_id"], peer)
+            if merged:
+                response["live_sessions"] = list(merged.values())
+        return response
 
     except MissionCacheError as e:
         return e.to_dict()

@@ -197,7 +197,7 @@ def _resolve_session_pid() -> int | None:
     so the walk sits next to ``session_pid_path`` and ``session_is_alive``, the
     record it feeds and the reader of that record. It is used only for recording
     a session's pid: identity must NOT be derived from it, because one ``claude``
-    process hosts many sessions (see ``tools_docs._live_peer_sessions``).
+    process hosts many sessions (see ``helpers.live_peer_sessions_for_project``).
     An ImportError degrades to None, the same answer an unresolvable process
     shape gives, so rules installation still runs where the db will not import.
     """

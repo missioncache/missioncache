@@ -29,6 +29,8 @@ from .helpers import (
     _resolve_session_id,
     _resolve_to_git_root,
     _validate_path,
+    live_peer_sessions_for_context_file,
+    live_peer_sessions_for_project,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,51 +79,6 @@ def _validate_imported_event(imported_event: dict) -> None:
             "(letters, digits, dot, underscore, hyphen; no slashes or newlines)",
             field="imported_event.related_project",
         )
-
-
-def _live_peer_sessions(context_file: str | Path) -> list[dict]:
-    """Other live Claude Code sessions bound to the project owning ``context_file``.
-
-    The project name comes from the filename (``<name>-context.md``), so this
-    works for a write into any project, not only the caller's own - which is the
-    case that matters, since the whole point is telling another project's session
-    that its context moved under it.
-
-    Identity comes from ``CLAUDE_CODE_SESSION_ID`` in THIS MCP subprocess's own
-    environment, which Claude Code sets per session. Do not try to derive it
-    from the process tree: one ``claude`` process hosts many sessions at once, so
-    pid to session is one-to-many and cannot identify the caller.
-
-    The env var is not perfect either - during a resume the subprocess can carry
-    an id the conversation is not using - but it is the only
-    per-session signal available here, and a wrong exclusion merely costs one
-    spurious ask-the-user, never a wrong write.
-
-    Returns an empty list when the session id cannot be resolved at all.
-    Without it the caller cannot be excluded from its own results, and since
-    ListAgents never lists the calling session, its row would always fail to
-    match and send the caller into the ask-the-user fallback for no reason.
-
-    Best-effort throughout: a failure here must not turn a successful write into
-    a failed tool call.
-    """
-    try:
-        session_id = _resolve_session_id(None)
-        if not session_id:
-            return []
-        name = Path(context_file).name
-        if not name.endswith("-context.md"):
-            # Subtask layout writes a bare `context.md`, which carries no project
-            # name. Those are nested under a parent and are not addressed as
-            # projects, so there is nobody to notify.
-            return []
-        project_name = name[: -len("-context.md")]
-        return missioncache_db.live_sessions_for_project(
-            project_name, exclude_session_id=session_id
-        )
-    except Exception:
-        logger.exception("Error resolving live peer sessions")
-        return []
 
 
 @mcp.tool()
@@ -508,7 +465,7 @@ async def update_context_file(
         if imported_event and not result["imported_event_applied"]:
             response["imported_event_duplicate"] = True
 
-        peers = _live_peer_sessions(context_file)
+        peers = live_peer_sessions_for_context_file(context_file)
         if peers:
             response["live_sessions"] = peers
         return response
@@ -816,11 +773,21 @@ async def update_tasks_file(
                 project_name, completed_numbers
             )
 
-        return {
+        response = {
             "success": True,
             **result,
             "active_pointers_cleared_for_sessions": cleared_sessions,
         }
+        # Same notification contract as update_context_file: the tasks file is
+        # project state a live peer session works from (the rules put both
+        # files in one parallel-session hazard class), so its writers get told
+        # who to notify. Legacy unprefixed tasks.md yields project_name None
+        # and skips, like the bare context.md case.
+        if project_name:
+            peers = live_peer_sessions_for_project(project_name)
+            if peers:
+                response["live_sessions"] = peers
+        return response
 
     except MissionCacheError as e:
         return e.to_dict()

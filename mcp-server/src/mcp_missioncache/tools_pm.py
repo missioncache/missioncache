@@ -18,6 +18,7 @@ from missioncache_db import pm_items
 from .app import mcp
 from .db import get_db
 from .errors import MissionCacheError, TaskNotFoundError
+from .helpers import live_peer_sessions_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,22 @@ def _resolve_project(project_name: str):
     if task is None:
         raise TaskNotFoundError(project_name)
     return db, task
+
+
+def _with_live_sessions(response: dict, project_name: str | None) -> dict:
+    """Attach ``live_sessions`` to a mutation response, key only when non-empty.
+
+    Every mutation in this module writes the DB and best-effort re-renders the
+    context-file mirror sections under the sidecar lock - either way a live
+    session on this project is now working from stale load-time state, which
+    is what the cross-session notification contract covers. Same contract as
+    update_context_file: presence of the key is the signal.
+    """
+    if project_name:
+        peers = live_peer_sessions_for_project(project_name)
+        if peers:
+            response["live_sessions"] = peers
+    return response
 
 
 def _clear_sentinel(value: str | None) -> str | None:
@@ -73,7 +90,7 @@ async def add_action_item(
             db, task.id, what, requested_by=requested_by, assignee=assignee,
             due_date=due_date, source=source, notes=notes,
         )
-        return {"success": True, "item": asdict(item)}
+        return _with_live_sessions({"success": True, "item": asdict(item)}, task.name)
     except MissionCacheError as e:
         return e.to_dict()
     except ValueError as e:
@@ -125,7 +142,16 @@ async def update_action_item(
         if notes is not None:
             kwargs["notes"] = notes
         item = pm_items.update_action_item(db, item_id, **kwargs)
-        return {"success": True, "item": asdict(item)}
+        # By-id path: the project is not a parameter here, so resolve it from
+        # the item row for the notification contract. Best-effort in full: a
+        # lookup that RAISES must not turn the committed update into an error
+        # response, so it degrades to "no hint" exactly like a None return.
+        try:
+            task = db.get_task(item.task_id)
+            project = task.name if task else None
+        except Exception:
+            project = None
+        return _with_live_sessions({"success": True, "item": asdict(item)}, project)
     except ValueError as e:
         return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
     except Exception as e:
@@ -207,9 +233,14 @@ async def set_stakeholder(
         db, task = _resolve_project(project_name)
         if remove:
             removed = pm_items.remove_stakeholder(db, task.id, name)
-            return {"success": True, "removed": removed}
+            # A no-op remove rewrote nothing - a notify hint would be noise.
+            return _with_live_sessions(
+                {"success": True, "removed": removed}, task.name if removed else None
+            )
         stakeholder = pm_items.add_stakeholder(db, task.id, name, role=role, notes=notes)
-        return {"success": True, "stakeholder": asdict(stakeholder)}
+        return _with_live_sessions(
+            {"success": True, "stakeholder": asdict(stakeholder)}, task.name
+        )
     except MissionCacheError as e:
         return e.to_dict()
     except ValueError as e:
@@ -249,13 +280,15 @@ async def set_ticket(
         db, task = _resolve_project(project_name)
         if remove:
             removed = pm_items.remove_ticket(db, task.id, label)
-            return {"success": True, "removed": removed}
+            return _with_live_sessions(
+                {"success": True, "removed": removed}, task.name if removed else None
+            )
         if url is None:
             url = pm_items.jira_url_for(label)
         ticket = pm_items.add_ticket(
             db, task.id, label, url=url, system=system, status=status, notes=notes
         )
-        return {"success": True, "ticket": asdict(ticket)}
+        return _with_live_sessions({"success": True, "ticket": asdict(ticket)}, task.name)
     except MissionCacheError as e:
         return e.to_dict()
     except ValueError as e:
@@ -284,7 +317,9 @@ async def set_project_due_date(
     try:
         db, task = _resolve_project(project_name)
         value = pm_items.set_project_due_date(db, task.id, _clear_sentinel(due_date))
-        return {"success": True, "task_id": task.id, "due_date": value}
+        return _with_live_sessions(
+            {"success": True, "task_id": task.id, "due_date": value}, task.name
+        )
     except MissionCacheError as e:
         return e.to_dict()
     except ValueError as e:

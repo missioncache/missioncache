@@ -16,11 +16,13 @@ contract the caller depends on:
   sessions, so pid to session is one-to-many.
 """
 
+import asyncio
+
 import pytest
 
 import missioncache_db
 
-from mcp_missioncache import tools_docs
+from mcp_missioncache import helpers, tools_docs
 
 
 @pytest.fixture
@@ -38,30 +40,30 @@ def peers(monkeypatch):
 
 
 def _resolve_to(monkeypatch, session_id):
-    monkeypatch.setattr(tools_docs, "_resolve_session_id", lambda _: session_id)
+    monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: session_id)
 
 
 def test_project_comes_from_the_context_filename(monkeypatch, peers, tmp_path):
     _resolve_to(monkeypatch, "sid-mine")
-    tools_docs._live_peer_sessions(tmp_path / "other-proj-context.md")
+    helpers.live_peer_sessions_for_context_file(tmp_path / "other-proj-context.md")
     assert peers["project_name"] == "other-proj"
 
 
 def test_caller_is_excluded(monkeypatch, peers, tmp_path):
     _resolve_to(monkeypatch, "sid-mine")
-    tools_docs._live_peer_sessions(tmp_path / "demo-context.md")
+    helpers.live_peer_sessions_for_context_file(tmp_path / "demo-context.md")
     assert peers["exclude_session_id"] == "sid-mine"
 
 
 def test_returns_the_peers(monkeypatch, peers, tmp_path):
     _resolve_to(monkeypatch, "sid-mine")
-    found = tools_docs._live_peer_sessions(tmp_path / "demo-context.md")
+    found = helpers.live_peer_sessions_for_context_file(tmp_path / "demo-context.md")
     assert [p["session_id"] for p in found] == ["sid-peer"]
 
 
 def test_empty_when_the_session_id_is_unresolvable(monkeypatch, peers, tmp_path):
     _resolve_to(monkeypatch, None)
-    assert tools_docs._live_peer_sessions(tmp_path / "demo-context.md") == []
+    assert helpers.live_peer_sessions_for_context_file(tmp_path / "demo-context.md") == []
     assert peers == {}, "must not query at all without a caller id to exclude"
 
 
@@ -69,7 +71,7 @@ def test_empty_for_a_bare_context_filename(monkeypatch, peers, tmp_path):
     """The subtask layout writes `context.md`, which carries no project name.
     Those are nested under a parent and nobody addresses them as projects."""
     _resolve_to(monkeypatch, "sid-mine")
-    assert tools_docs._live_peer_sessions(tmp_path / "context.md") == []
+    assert helpers.live_peer_sessions_for_context_file(tmp_path / "context.md") == []
 
 
 def test_a_lookup_failure_does_not_propagate(monkeypatch, tmp_path):
@@ -81,7 +83,7 @@ def test_a_lookup_failure_does_not_propagate(monkeypatch, tmp_path):
         raise RuntimeError("db exploded")
 
     monkeypatch.setattr(missioncache_db, "live_sessions_for_project", _boom)
-    assert tools_docs._live_peer_sessions(tmp_path / "demo-context.md") == []
+    assert helpers.live_peer_sessions_for_context_file(tmp_path / "demo-context.md") == []
 
 
 # ── the MCP wrapper's imported_event guard ────────────────────────────────
@@ -194,3 +196,59 @@ def test_duplicate_event_is_reported_not_claimed(tmp_path, monkeypatch):
     assert "imported_event" in first["sections_updated"]
     assert "imported_event" not in second["sections_updated"]
     assert second["imported_event_duplicate"] is True
+
+
+# ── the notification contract across every mutating writer ────────────────
+#
+# Spec source: rules/missioncache.md "Cross-session notifications" - a
+# project's files changing under a live session means that session gets told.
+# The PM mutators, update_tasks_file and rename_task rewrite project state
+# exactly like update_context_file does, so they carry the same live_sessions
+# contract: key present with peers, absent without.
+
+
+def _fake_peers(monkeypatch, peers):
+    monkeypatch.setattr(
+        missioncache_db, "live_sessions_for_project", lambda *a, **k: list(peers)
+    )
+    monkeypatch.setattr(helpers, "_resolve_session_id", lambda _=None: "sid-mine")
+
+
+def test_update_tasks_file_reports_live_sessions(tmp_path, monkeypatch):
+    from mcp_missioncache.config import Settings
+
+    monkeypatch.setattr(tools_docs, "settings", Settings(root=tmp_path))
+    monkeypatch.setattr(
+        "mcp_missioncache.project_files.settings", Settings(root=tmp_path)
+    )
+    _fake_peers(monkeypatch, [{"session_id": "sid-peer", "title": "demo", "last_active": "now"}])
+    tasks = tmp_path / "demo-tasks.md"
+    tasks.write_text(
+        "# Demo - Tasks\n**Last Updated:** 2026-08-01\n\n## Tasks\n\n- [ ] 1. First\n",
+        encoding="utf-8",
+    )
+    result = asyncio.run(
+        tools_docs.update_tasks_file(tasks_file=str(tasks), completed_tasks=["First"])
+    )
+    assert result["success"] is True
+    assert result["live_sessions"][0]["session_id"] == "sid-peer"
+
+def test_update_tasks_file_legacy_unprefixed_skips_lookup(tmp_path, monkeypatch):
+    """A bare tasks.md carries no project name - documented as the skip case."""
+    from mcp_missioncache.config import Settings
+
+    monkeypatch.setattr(tools_docs, "settings", Settings(root=tmp_path))
+    monkeypatch.setattr(
+        "mcp_missioncache.project_files.settings", Settings(root=tmp_path)
+    )
+    _fake_peers(monkeypatch, [{"session_id": "s", "title": "t", "last_active": "now"}])
+    tasks = tmp_path / "tasks.md"
+    tasks.write_text(
+        "# Legacy - Tasks\n**Last Updated:** 2026-08-01\n\n## Tasks\n\n- [ ] 1. First\n",
+        encoding="utf-8",
+    )
+    result = asyncio.run(
+        tools_docs.update_tasks_file(tasks_file=str(tasks), completed_tasks=["First"])
+    )
+    assert result["success"] is True
+    assert "live_sessions" not in result
