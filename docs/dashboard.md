@@ -431,7 +431,18 @@ Load it with `launchctl load ~/Library/LaunchAgents/com.missioncache.dashboard.p
 
 **Use the `missioncache-dashboard` console script, not a raw `python3 server.py` command.** `missioncache-install` writes the plist for you via `missioncache-dashboard install-service` - use that rather than hand-rolling. If you do need to roll your own, point `ProgramArguments` at the absolute path from `which missioncache-dashboard`. DuckDB is distributed as a compiled wheel that is Python-version-specific; installing `missioncache-dashboard` into the wrong Python and then pointing launchd at a different one will give you `ModuleNotFoundError: No module named 'duckdb'` at startup. `pipx install missioncache-dashboard` avoids this by pinning the package to its own venv.
 
-### Running without launchd
+### Task Scheduler deployment (native Windows)
+
+On native Windows (no WSL), `missioncache-dashboard install-service` registers a Task Scheduler task named `MissionCacheDashboard` with an ONLOGON trigger. Creating an ONLOGON trigger is refused from a non-elevated prompt on stock Windows, so the installer falls back to an HKCU `Software\Microsoft\Windows\CurrentVersion\Run` entry, which needs no elevation. Both mechanisms run the same command line, and `missioncache-dashboard status` reports whichever is registered.
+
+The registered command is `"<path>\missioncache-dashboard.exe" serve --hidden`, plus `--port <n>` when the port is not the default. Two flags matter here:
+
+- `--hidden` hides the console window the mechanism would otherwise leave on your desktop for the whole login session, and redirects the server's own output to `~/.claude/logs/missioncache-dashboard-windows.log`. Neither schtasks nor a Run key gives you a shell to redirect with, so the process does it itself. It is a no-op off Windows, and it deliberately does nothing when the console is shared (running `serve --hidden` by hand from cmd.exe will not hide your own terminal).
+- `--port` rides on the command line because neither mechanism can set per-task environment variables, which is how the launchd and systemd units pass a non-default port.
+
+`missioncache-dashboard uninstall-service` removes whichever mechanism is present and stops the running server, matching the launchd and systemd paths.
+
+### Running without a service
 
 `missioncache-dashboard serve` works fine as a foreground process. You just lose auto-restart on crash, and you have to remember to start it again after rebooting. If you use tmux or a similar session manager, a dedicated pane for the dashboard is a reasonable middle ground.
 
