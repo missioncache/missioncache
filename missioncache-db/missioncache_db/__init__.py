@@ -17,6 +17,7 @@ Usage:
     python missioncache_db.py process-heartbeats        # Aggregate heartbeats into sessions
     python missioncache_db.py task-time <task_id> [period]  # Get time spent
     python missioncache_db.py prune [days]              # Prune old completed tasks
+    python missioncache_db.py prune-sessions [--days N] [--dry-run]  # Delete state of sessions that are gone
     python missioncache_db.py complete-task <task_id>   # Mark task as completed
     python missioncache_db.py reopen-task <task_id>     # Reopen a completed task
     python missioncache_db.py rename-task <old-name> <new-name>  # Rename a project
@@ -425,11 +426,12 @@ def live_sessions_for_project(
     not make a session a notification target.
 
     A session must be **proven** alive to be listed - ``session_is_alive`` is
-    True, not merely "not False". ``project_state`` rows are never deleted on
-    session exit and survive project completion, so the table is a full history
-    of every session that ever loaded the project, and those old rows have no pid
-    record and report None (unknown). Admitting unknowns would announce every
-    context write to every session that ever touched the project.
+    True, not merely "not False". Nothing deletes a ``project_state`` row on
+    session exit or project completion (only an explicit ``prune-sessions`` run
+    does), so the table is a near-complete history of every session that ever
+    loaded the project, and those old rows have no pid record and report None
+    (unknown). Admitting unknowns would announce every context write to every
+    session that ever touched the project.
 
     Unlike ``_detect_parallel_sessions``, which keeps unknowns because it has
     already prefiltered on a 10-minute transcript window. The cost here is that a
@@ -477,6 +479,193 @@ def live_sessions_for_project(
             }
         )
     return live
+
+
+#: How recently a session's transcript must have been touched for its pid
+#: record to be off-limits to the prune. Must stay >= the hook's
+#: ``_PARALLEL_THRESHOLD_SECONDS`` (``hooks/session_start.py``), which is the
+#: window in which a dead session's pid record is still read; the headroom is
+#: so a modest bump there does not silently open the gap.
+#: ``test_prune_transcript_window_covers_the_hook_window`` pins the ordering.
+PRUNE_TRANSCRIPT_WINDOW_SECONDS = 30 * 60
+
+
+def _sessions_with_recent_transcripts(window_seconds: float) -> Optional[set]:
+    """Session ids whose Claude Code transcript was touched within the window.
+
+    One walk of ``~/.claude/projects/*/*.jsonl`` (about 1,100 files and 0.1s on
+    a year-old install) rather than a per-session glob, which would be O(project
+    dirs) for every candidate.
+
+    ``None`` means "could not tell", and the caller must then protect every pid
+    record. An empty set is the opposite claim - the walk succeeded and nothing
+    is recent - so the two cannot be collapsed.
+    """
+    root = Path.home() / ".claude" / "projects"
+    cutoff = time.time() - window_seconds
+    recent = set()
+    try:
+        for entry in root.glob("*/*.jsonl"):
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    recent.add(entry.stem)
+            except OSError:
+                continue  # vanished mid-walk; it cannot be recent AND gone
+    except OSError as e:
+        logger.warning("prune_session_state: transcript walk failed: %s", e)
+        return None
+    return recent
+
+
+def prune_session_state(
+    max_age_days: int = 7, dry_run: bool = False
+) -> Dict[str, int]:
+    """Delete per-session state belonging to sessions that are gone.
+
+    Sweeps three stores, all keyed by session id and none of which is ever
+    cleaned up on session exit: ``session-pids/<sid>.json`` (the liveness
+    record), ``projects/<sid>.json`` (the project pointer), and the
+    ``project_state`` row (the explicit binding). They grow for the life of the
+    install - a real machine reached 2,318 pid files at 9 MB, against 16
+    bindings touched in the preceding week.
+
+    Three guards, each covering a different failure:
+
+    * **Liveness.** Only a session that is not *proven* alive is pruned, so a
+      session whose pid still resolves survives however long ago it started.
+      Note what this does NOT cover: a session whose pid never resolved reports
+      unknown, and unknown is swept on age alone. That set is not only ancient
+      pre-feature rows - it includes *live* sessions on any process shape where
+      ``resolve_claude_process_pid`` comes up empty (Claude Desktop, an import
+      failure at SessionStart). Sweeping one of those costs it its statusline
+      binding until the next ``/missioncache:load``; nothing is unrecoverable.
+    * **Age.** Keeps the sweep off anything recent. Note what age is NOT: it is
+      not time since the session died. ``write_session_pid`` runs only on a
+      SessionStart event, so the record's mtime is time since the last start,
+      resume or compact - measured at 10.6 hours for sessions still running. A
+      session that outlives the floor and then exits leaves a record that is old
+      and a fresh corpse at the same time, which is why age alone cannot carry
+      the guard below.
+    * **Transcript freshness.** ``_detect_parallel_sessions`` is the one
+      consumer that reads a *dead* session's pid record: it prefilters
+      transcripts on a 10-minute mtime window and then drops a candidate only
+      when the pid proves it dead. Deleting the record flips that from proven
+      dead to unknown, and unknown is kept, so the session comes back as a
+      phantom parallel session. Pid records are therefore held back for any
+      session whose transcript is newer than
+      ``PRUNE_TRANSCRIPT_WINDOW_SECONDS``, which is the same clock that path
+      filters on. The other two stores are not gated: neither one can produce a
+      phantom.
+
+    Age is per record (file mtime, or ``project_state.updated_at``), not per
+    session, so the three stores are judged independently and a pointer that
+    outlived its row is still swept. Records whose session id fails validation
+    are left alone: current writers cannot produce one, so anything else there
+    was not written by this code and is not ours to delete.
+
+    Returns a count per store plus the ``max_age_days`` actually applied after
+    clamping. ``dry_run`` reports the same counts without deleting.
+    """
+    max_age_days = max(1, int(max_age_days))
+    cutoff = time.time() - max_age_days * 86400
+    counts = {
+        "session_pids": 0,
+        "project_pointers": 0,
+        "project_state_rows": 0,
+        "max_age_days": max_age_days,
+    }
+
+    # Cached, which also pins each verdict to its pre-deletion value: removing
+    # a pid file turns that session's answer from False into None, so a later
+    # store would otherwise judge a different fact than an earlier one did. The
+    # decision comes out the same either way, but the cache makes the sweep
+    # order-independent rather than merely harmless.
+    verdicts: Dict[str, Optional[bool]] = {}
+
+    def _proven_alive(session_id: str) -> bool:
+        if session_id not in verdicts:
+            verdicts[session_id] = session_is_alive(session_id)
+        return verdicts[session_id] is True
+
+    def _sweep(directory: Path, key: str, protected: Optional[set]) -> None:
+        """``protected`` lists session ids to leave alone; ``None`` means the
+        protected set could not be computed, so every id in this store is left
+        alone. Fail-safe by construction: an unanswerable question deletes
+        nothing."""
+        if protected is None:
+            return
+        if not directory.is_dir():
+            return
+        try:
+            entries = list(directory.glob("*.json"))
+        except OSError as e:
+            logger.warning("prune_session_state: glob %s failed: %s", directory, e)
+            return
+        for entry in entries:
+            session_id = entry.stem
+            if not _is_valid_session_id(session_id):
+                continue
+            if session_id in protected:
+                continue
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue  # vanished under us; nothing to prune
+            if _proven_alive(session_id):
+                continue
+            if not dry_run:
+                try:
+                    entry.unlink()
+                except OSError as e:
+                    logger.warning("prune_session_state: unlink %s failed: %s", entry, e)
+                    continue
+            counts[key] += 1
+
+    # None here means the walk failed, and _sweep then skips the pid store
+    # entirely rather than pruning blind.
+    recent = _sessions_with_recent_transcripts(PRUNE_TRANSCRIPT_WINDOW_SECONDS)
+
+    # The directories come from the path helpers that own those conventions
+    # (each says so in its own docstring), so a layout change lands in one
+    # place. session-pids goes first: every session about to lose its record is
+    # then cached with the verdict that record still supports. Only that store
+    # takes the transcript gate - a stale pointer or binding row cannot be
+    # mistaken for a live parallel session.
+    _sweep(session_pid_path("x").parent, "session_pids", recent)
+    _sweep(session_binding_path("x").parent, "project_pointers", set())
+
+    if not HOOKS_STATE_DB_PATH.exists():
+        return counts
+
+    # updated_at is written with datetime('now','localtime'), so the cutoff has
+    # to be a local-time string too.
+    cutoff_local = datetime.fromtimestamp(cutoff).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            rows = conn.execute(
+                "SELECT session_id FROM project_state WHERE updated_at < ?",
+                (cutoff_local,),
+            ).fetchall()
+            doomed = [
+                sid
+                for (sid,) in rows
+                if _is_valid_session_id(sid) and not _proven_alive(sid)
+            ]
+            if doomed and not dry_run:
+                conn.executemany(
+                    "DELETE FROM project_state WHERE session_id = ?",
+                    [(sid,) for sid in doomed],
+                )
+                conn.commit()
+            counts["project_state_rows"] = len(doomed)
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("prune_session_state: hooks-state.db prune failed: %s", e)
+
+    return counts
 
 
 def choose_session_title(project_name: str, session_id: str) -> str:
@@ -4877,6 +5066,43 @@ def main():
             days = int(sys.argv[2]) if len(sys.argv) > 2 else None
             count = db.prune_completed_tasks(days)
             print(f"Archived {count} completed tasks")
+
+        elif command == "prune-sessions":
+            usage = "Usage: missioncache_db.py prune-sessions [--days N] [--dry-run]"
+            dry_run = False
+            days = 7
+            args = sys.argv[2:]
+            i = 0
+            # Hand-parsed rather than argparse to match every other command
+            # here, but unknown flags are a hard error, not a shrug: this
+            # command deletes files, and a typo'd flag silently falling back to
+            # the default would delete on terms the user did not ask for.
+            while i < len(args):
+                if args[i] == "--dry-run":
+                    dry_run = True
+                elif args[i] == "--days":
+                    if i + 1 >= len(args):
+                        print(f"--days needs a number\n{usage}")
+                        sys.exit(1)
+                    try:
+                        days = int(args[i + 1])
+                    except ValueError:
+                        print(f"--days needs a number, got {args[i + 1]!r}\n{usage}")
+                        sys.exit(1)
+                    i += 1
+                else:
+                    print(f"Unknown argument {args[i]!r}\n{usage}")
+                    sys.exit(1)
+                i += 1
+            counts = prune_session_state(max_age_days=days, dry_run=dry_run)
+            prefix = "DRY RUN: would delete " if dry_run else "Deleted "
+            print(
+                f"{prefix}{counts['session_pids']} pid records, "
+                f"{counts['project_pointers']} project pointers, "
+                f"{counts['project_state_rows']} binding rows "
+                f"(sessions not proven alive, older than "
+                f"{counts['max_age_days']}d)"
+            )
 
         elif command == "get-task":
             if len(sys.argv) < 3:

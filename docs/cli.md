@@ -62,10 +62,21 @@ Projects get auto-tagged by matching the parts of their name against a keyword l
 
 ```bash
 missioncache-db prune [days]
+missioncache-db prune-sessions [--days N] [--dry-run]
 missioncache-db cleanup [--dry-run]
 ```
 
 `prune` archives completed projects older than the retention period (default 30 days, or pass a number explicitly). Archived projects drop out of the completed lists but stay in the database.
+
+`prune-sessions` deletes the per-session state left behind by sessions that are gone: the pid record (`~/.claude/hooks/state/session-pids/<id>.json`), the project pointer (`projects/<id>.json`), and the `project_state` binding row. Nothing removes these on session exit, so they accumulate one set per session for the life of the install - an install a few months old can hold a couple of thousand pid records. Run `--dry-run` first; it prints the same counts without deleting.
+
+Three things have to line up before a record goes:
+
+- **Its session is not proven alive.** A session whose pid still resolves is never touched, however long ago it started.
+- **The record is older than `--days`** (default 7, minimum 1).
+- **For pid records only, the session's transcript is also idle.** Parallel-session detection reads a dead session's pid record to tell "closed a moment ago" from "still running", and it decides on transcript mtime. Deleting the record turns "proven dead" into "unknown", and unknown is kept, so the session would come back as a phantom parallel session in the next session's startup banner. Record age cannot prevent that on its own, because the pid record is only rewritten on a session start, resume or compact: a session that runs for two days and then exits leaves a two-day-old record the moment it dies. So the pid sweep skips any session whose transcript was touched in the last 30 minutes. Pointers and binding rows have no such reader and are not gated.
+
+One case to know about, because it is the only way a running session can lose state here: liveness is a three-way answer, and "unknown" is swept the same as "dead". Unknown is not only ancient records - it also covers live sessions whose pid never resolved, which today means Claude Desktop and any startup where the hook could not import `missioncache_db`. If one of those gets swept it loses its statusline binding, and a `/missioncache:load` puts it back.
 
 `cleanup` is the broader housekeeping pass, in four phases: archive orphaned active tasks whose files no longer exist on disk, move stray repo-local MissionCache files into the centralized `~/.missioncache/` layout, resolve duplicate task names, and normalize non-standard paths. Run it with `--dry-run` first - it prints exactly what each phase would touch.
 
