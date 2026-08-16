@@ -71,6 +71,10 @@ The `activity_tracker.py` hook is the one exception to this pattern - it uses a 
 
 **When:** Every time Claude Code starts a new session in a directory. Runs before the first user prompt.
 
+**Session identity (the invariant every step below depends on):** `get_session_context` takes the session ID from the hook's **stdin JSON**, and falls back to the `CLAUDE_SESSION_ID` env var only when stdin carries no session ID at all. stdin names the session this event belongs to; an env var is ambient and a parent process can hand it down, so it can never outrank the event's own identity. Every state file listed below is keyed by that ID, so getting it wrong writes another session's pointer and attributes its time.
+
+The fallback is keyed on `CLAUDE_SESSION_ID`, which Claude Code does **not** inject - the name it injects is `CLAUDE_CODE_SESSION_ID`. That mismatch is deliberate, not a bug to fix: the injected name is inherited by child sessions (they also carry `CLAUDE_CODE_CHILD_SESSION=1`), so keying the fallback on it would let a parent's identity decide a child's binding in exactly the no-stdin case the fallback exists for. The one place `CLAUDE_SESSION_ID` is genuinely set is `activity_tracker.py`, which synthesizes it from its own stdin for the `heartbeat-auto` subprocess it spawns - a private parent-to-child contract, not an ambient value.
+
 **What it does:**
 
 1. **Write terminal-session mapping.** Looks up `TERM_SESSION_ID` (iTerm2) or `WT_SESSION` (Windows Terminal) from the environment and, if present, writes a row into `hooks-state.db:term_sessions` mapping the terminal tab to the Claude session ID. This is the bridge that lets the statusline find the current session when it runs, because the statusline only gets its session ID from Claude Code's statusline JSON and has no direct access to the SessionStart event.
