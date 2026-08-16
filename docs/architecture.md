@@ -50,7 +50,7 @@ This is the best way to build intuition for the component boundaries: follow one
 
 When Claude Code starts a new session in a repo, it fires the `SessionStart` hook. `hooks/session_start.py` does four things, in order:
 
-1. Resolves the session ID from `CLAUDE_SESSION_ID` or stdin JSON.
+1. Resolves the session ID from the stdin JSON, falling back to `CLAUDE_SESSION_ID` only when stdin carries no session ID. stdin is the authority: it names the session this event belongs to, whereas an env var is ambient and a parent process can hand it down. The fallback is keyed on `CLAUDE_SESSION_ID` rather than the `CLAUDE_CODE_SESSION_ID` that Claude Code actually injects, and that is deliberate - the injected name is inherited by child sessions, so keying the fallback on it would let a parent's identity decide a child's binding.
 2. Writes a `term-session` mapping file so that the statusline can later map terminal IDs back to session IDs.
 3. Calls `db.find_task_for_cwd(cwd, session_id)` to see if the current directory belongs to a tracked MissionCache project.
 4. If a task is found, writes `~/.claude/hooks/state/projects/<session-id>.json` - the per-session project pointer used both by the statusline (to render the active project name) and by `TaskDB.find_task_for_cwd` on subsequent prompts (to resolve which task a heartbeat belongs to). (A legacy `pending-task.json` file used to be written here but was removed in mcp-orbit 0.2.13; see CHANGELOG.)

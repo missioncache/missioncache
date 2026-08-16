@@ -552,21 +552,61 @@ class TestGetSessionContextValidation:
         assert sid == "00000000-0000-0000-0000-000000000000"
         assert source == "resume"
 
-    def test_env_var_wins_for_session_id_when_both_set(self, monkeypatch):
-        """env CLAUDE_SESSION_ID wins for sid; source still comes from stdin.
+    def test_stdin_wins_for_session_id_when_both_set(self, monkeypatch):
+        """stdin session_id wins over the env var; source comes from stdin.
 
-        This is the documented split-precedence rule: env carries only
-        session_id (no source field), so when both are set, the env
-        value is the session_id but source still has to come from
-        stdin. A regression that returns early on the env var path
-        (skipping the stdin read) would silently break inheritance for
-        users whose terminal sets ``CLAUDE_SESSION_ID``.
+        stdin carries the identity of the event this hook is handling,
+        so it is the authority. The env var is ambient - a parent
+        process can hand it down - and only fills in when stdin has no
+        session_id. Binding a SessionStart event to an inherited
+        identity would attribute the wrong session's time and write the
+        wrong ``projects/<sid>.json`` pointer.
+
+        ``source`` is asserted alongside because a regression that
+        returns early on the env var path (skipping the stdin read)
+        would drop it, which is the failure this test also guards.
         """
         monkeypatch.setenv("CLAUDE_SESSION_ID", "env-sid")
         _patch_stdin_payload(
             monkeypatch,
             {"session_id": "stdin-sid", "source": "resume"},
         )
+
+        mod = self._reload_module()
+        sid, source, _tp = mod.get_session_context()
+        assert sid == "stdin-sid"
+        assert source == "resume"
+
+    def test_invalid_stdin_session_id_does_not_fall_back_to_env(self, monkeypatch):
+        """A hostile stdin session_id yields None, not the env value.
+
+        stdin winning must be fail-closed, not fail-over: the traversal
+        payload wins the precedence check and is then dropped by the
+        validation gate. Falling back to ``env-sid`` here would mean a
+        hostile producer could steer the hook onto an arbitrary other
+        session's identity just by sending an invalid one.
+        """
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-sid")
+        _patch_stdin_payload(
+            monkeypatch,
+            {"session_id": "../../../tmp/pwn", "source": "resume"},
+        )
+
+        mod = self._reload_module()
+        sid, source, _tp = mod.get_session_context()
+        assert sid is None
+        assert source == "resume"
+
+    def test_env_var_fills_in_when_stdin_has_no_session_id(self, monkeypatch):
+        """The env var still fills in when stdin carries no session_id.
+
+        The fallback is what keeps manual invocation working (and any
+        launcher that hands the hook a payload without the field). It
+        is a fallback, not a preference - this is the only shape in
+        which it is allowed to decide the identity.
+        """
+        monkeypatch.setenv("CLAUDE_SESSION_ID", "env-sid")
+        _patch_stdin_payload(monkeypatch, {"source": "resume"})
 
         mod = self._reload_module()
         sid, source, _tp = mod.get_session_context()

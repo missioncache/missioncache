@@ -487,7 +487,17 @@ def write_session_project(task_name: str, session_id: str, task_id: int | None =
 
 
 def get_session_context() -> tuple[str | None, str | None, str | None]:
-    """Get ``(session_id, source, transcript_path)`` from env var or stdin JSON.
+    """Get ``(session_id, source, transcript_path)`` from stdin JSON or env var.
+
+    **stdin is the authority for ``session_id``.** The value Claude Code
+    puts on this hook's stdin IS the identity of the event being handled;
+    the env var is an ambient value that a parent process can hand down,
+    so it only fills in when stdin carries no session_id at all (manual
+    invocation, or a launcher that closed stdin). Note the fallback is
+    deliberately keyed on ``CLAUDE_SESSION_ID``, which Claude Code does
+    not inject - the injected name is ``CLAUDE_CODE_SESSION_ID``, and it
+    IS inherited by child sessions, so keying on it would let a parent's
+    identity win here. Do not "fix" the name to match.
 
     ``source``, when present, is expected to be one of ``"startup"``,
     ``"resume"``, ``"clear"``, or ``"compact"`` per Claude Code's
@@ -531,7 +541,10 @@ def get_session_context() -> tuple[str | None, str | None, str | None]:
             readable = bool(select.select([sys.stdin], [], [], 0)[0])
         if readable:
             data = json.load(sys.stdin)
-            session_id = session_id or data.get("session_id")
+            # stdin wins. A hostile or malformed stdin session_id still
+            # wins this ``or`` and is then dropped by the validation gate
+            # below - fail closed, never a silent fall-through to env.
+            session_id = data.get("session_id") or session_id
             source = data.get("source")
             raw_transcript = data.get("transcript_path")
             if isinstance(raw_transcript, str) and raw_transcript:
