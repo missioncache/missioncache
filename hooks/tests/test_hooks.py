@@ -1984,6 +1984,26 @@ class TestParallelSessionDetection:
     the conversation being continued, not a parallel session.
     """
 
+    def test_prune_transcript_window_covers_the_hook_window(self):
+        """``prune-sessions`` must never delete a pid record this path would
+        still read.
+
+        The two constants live in different packages - the threshold is the
+        hook's own policy, the prune window is missioncache-db's - so nothing
+        but this assertion stops them drifting apart. Raise
+        ``_PARALLEL_THRESHOLD_SECONDS`` above the prune window and a dead
+        session inside the widened window loses the record that proves it dead,
+        which brings it back here as a phantom (unknowns are kept below).
+        """
+        import missioncache_db  # type: ignore[import-not-found]
+
+        import hooks.session_start as mod
+
+        assert (
+            missioncache_db.PRUNE_TRANSCRIPT_WINDOW_SECONDS
+            >= mod._PARALLEL_THRESHOLD_SECONDS
+        )
+
     @staticmethod
     def _redirect_state(monkeypatch, home: Path) -> Path:
         """Redirect Path.home() + HOOKS_STATE_DB_PATH into a tmp home."""
