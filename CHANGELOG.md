@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-17
+
+Published package versions: missioncache-db 1.0.20, mcp-missioncache 1.0.25, missioncache-auto 1.0.3, missioncache-dashboard 1.0.15, missioncache-install 1.0.10. Claude Code plugin 1.0.15.
+
 ### Native Windows
 
 Ported and covered by platform-mocked unit tests; not yet exercised on Windows hardware (the windows-latest CI job is a later phase). **Requires Claude Code 2.1.139 or newer**, where hook `args` (exec form) was added: an older client silently drops `args` and runs bare `uv`, which exits non-zero. plugin.json has no field to express this, so it is stated here and in the README.
