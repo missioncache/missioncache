@@ -398,5 +398,19 @@
       "title": "/blob/main/docs/hooks.md",
       "uniques": 1
     }
+  ],
+  "2026-08-17": [
+    {
+      "count": 2,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/docs/hooks.md",
+      "title": "/blob/main/docs/hooks.md",
+      "uniques": 1
+    }
   ]
 }
