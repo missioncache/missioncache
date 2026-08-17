@@ -233,6 +233,14 @@ STATE_DIR = Path.home() / ".claude" / "hooks" / "state"
 HOOKS_STATE_DB = Path.home() / ".claude" / "hooks-state.db"
 SCRIPTS_DIR = Path.home() / ".claude" / "scripts"
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
+# Deliberately does NOT honor MISSIONCACHE_ROOT, unlike every other consumer.
+# This file mirrors missioncache_db rather than importing it so it keeps working
+# as a bare script with no package installed (see the note above on why the
+# imports are guarded), and reading the override would require the import. The
+# visible cost: with MISSIONCACHE_ROOT set, the statusline reads project dirs
+# from the real home while the update-check cache it shows comes from the
+# override. Acceptable, because the override is an internal test and
+# fresh-root-import mechanism, not a supported way to move a user's data.
 MISSIONCACHE_ACTIVE = Path.home() / ".missioncache" / "active"
 
 

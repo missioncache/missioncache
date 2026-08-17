@@ -20,13 +20,20 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 import duckdb
+import missioncache_db
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
-DUCKDB_PATH = Path.home() / ".missioncache" / "tasks.duckdb"
-SQLITE_PATH = Path.home() / ".missioncache" / "tasks.db"  # Fallback
+# Both derive from missioncache_db, the single owner of the data root, so the
+# MISSIONCACHE_ROOT override reaches them instead of being silently ignored.
+# They stay module constants on purpose: tasks.duckdb is this module's own
+# artifact, this is the one second reader of tasks.db the architecture allows,
+# and several tests patch SQLITE_PATH by name. Turning them into functions would
+# make those monkeypatches silent no-ops - green tests reading the real home.
+DUCKDB_PATH = missioncache_db.MISSIONCACHE_ROOT / "tasks.duckdb"
+SQLITE_PATH = missioncache_db.DB_PATH  # Fallback
 
 
 # =============================================================================

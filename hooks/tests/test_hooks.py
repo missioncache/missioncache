@@ -1094,10 +1094,23 @@ class TestTaskTracker:
         )
 
     def _run_tracker(self, monkeypatch, stdin_data, mock_db=None):
-        """Helper to run task_tracker.main() with given stdin and mock DB."""
+        """Helper to run task_tracker.main() with given stdin and mock DB.
+
+        ``MISSIONCACHE_ROOT`` is supplied off the patched ``Path.home()`` rather
+        than left to the MagicMock: the tracker resolves the data root through
+        it, and a bare MagicMock root would make every ``.exists()`` truthy and
+        every ``read_text()`` a mock. The callers below either go through
+        ``_setup_project`` or patch ``Path.home`` themselves before this runs, so
+        this lands on the same sandbox they already built.
+        """
         monkeypatch.setattr("sys.stdin", StringIO(json.dumps(stdin_data)))
 
-        module_patch = {"missioncache_db": MagicMock(TaskDB=lambda: mock_db)}
+        module_patch = {
+            "missioncache_db": MagicMock(
+                TaskDB=lambda: mock_db,
+                MISSIONCACHE_ROOT=Path.home() / ".missioncache",
+            )
+        }
         with patch.dict("sys.modules", module_patch):
             import importlib
             import hooks.task_tracker as mod
