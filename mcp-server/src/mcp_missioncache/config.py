@@ -34,11 +34,11 @@ class Settings(BaseSettings):
     # root/active/<name> to root/<name>. It applies to every field, which is
     # why it beats a per-field guard here.
     #
-    # It covers env values only. A non-empty but relative value still resolves
-    # against the working directory, so MISSIONCACHE_ROOT=. reproduces the hole
-    # for "". Hardening that belongs at the owner's own resolution, or the MCP
-    # server and the dashboard would read one env value two different ways,
-    # which is the class of bug this whole arrangement removes.
+    # A relative MISSIONCACHE_ROOT is handled at the owner rather than here:
+    # missioncache_db refuses anything non-absolute, because the consumers do
+    # not share a working directory and a relative value would mean a different
+    # directory per process. Doing it there rather than in this class is what
+    # keeps the MCP server and the dashboard reading one env value one way.
     model_config = SettingsConfigDict(
         env_prefix="MISSIONCACHE_", env_ignore_empty=True
     )

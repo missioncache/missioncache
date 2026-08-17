@@ -107,9 +107,16 @@ logger = logging.getLogger(__name__)
 # targeted (cross-machine import into a throwaway root, tests). This is an
 # INTERNAL mechanism, deliberately undocumented: it is not a supported way to
 # relocate a user's data dir, and the service launchers do not propagate it.
-# Mirrors the SHADOW_TRACKED_FOLDER override. `or` (not a default arg) so a
-# set-but-empty MISSIONCACHE_ROOT falls back to the real dir instead of
-# Path("") == cwd (which would silently relocate data).
+# Mirrors the SHADOW_TRACKED_FOLDER override.
+#
+# The override must be ABSOLUTE, and a relative one is refused rather than
+# resolved. A relative value means a different physical directory per process,
+# because the consumers do not share a working directory - measured, the
+# launchd dashboard runs from `/` while the MCP server runs from the user's
+# repo - so `MISSIONCACHE_ROOT=data` would put project files, SQLite, DuckDB and
+# the caches in two places off one env value. That is the same split this block
+# exists to prevent, one level up. Empty is refused for the same reason:
+# Path("") == Path("."), the process's own cwd.
 #
 # How to consume these, in three cases. What all three have in common: the
 # value is read at CALL time. A MODULE-LEVEL `from missioncache_db import
@@ -137,7 +144,31 @@ logger = logging.getLogger(__name__)
 # on this package at all; and analytics_db.SQLITE_PATH holds a derived module
 # constant for tasks.db against case 1, because it is the one second reader of
 # that file the architecture allows and several tests patch the name directly.
-MISSIONCACHE_ROOT = Path(os.environ.get("MISSIONCACHE_ROOT") or str(Path.home() / ".missioncache"))
+def _resolve_data_root() -> Path:
+    """The data root: ``$MISSIONCACHE_ROOT`` when absolute, else the default.
+
+    Refusing a relative override is not pedantry - see the block above. It warns
+    rather than falling back silently, because someone who set the variable
+    meant something by it and would otherwise read their data from the default
+    dir with no clue why.
+    """
+    default = Path.home() / ".missioncache"
+    override = os.environ.get("MISSIONCACHE_ROOT")
+    if not override:
+        return default
+    candidate = Path(override)
+    if not candidate.is_absolute():
+        logger.warning(
+            "Ignoring MISSIONCACHE_ROOT=%r: it must be an absolute path, or it "
+            "would resolve to a different directory in every process. Using %s.",
+            override,
+            default,
+        )
+        return default
+    return candidate
+
+
+MISSIONCACHE_ROOT = _resolve_data_root()
 DB_PATH = MISSIONCACHE_ROOT / "tasks.db"
 
 # Shared session-state database used by the dashboard, statusline, and hooks.
