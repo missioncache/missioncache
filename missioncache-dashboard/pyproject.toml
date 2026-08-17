@@ -28,7 +28,7 @@ dependencies = [
     # with no release on our side (how mcp 2.0.0 broke the MCP server in
     # every fresh env on 2026-07-28). Raise a cap only after testing on the
     # new major.
-    "missioncache-db>=1.0.20",
+    "missioncache-db>=1.0.22",
     "fastapi>=0.115.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "duckdb>=1.1.0,<2",

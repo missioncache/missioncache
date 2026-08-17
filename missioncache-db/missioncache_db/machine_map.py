@@ -25,12 +25,18 @@ from typing import Any, Optional
 # throwaway root for tests / cross-machine import is respected. Computed
 # independently of the heavy package __init__ (mirrors lib/config.CONFIG_FILE).
 # Tests monkeypatch this constant directly.
-# `or` (not a default arg) so a set-but-empty MISSIONCACHE_ROOT falls back to
-# the real dir instead of Path("") == cwd.
+#
+# The absolute-only rule has to be copied here along with the resolution, or
+# this file and missioncache_db.MISSIONCACHE_ROOT would disagree about a
+# relative override, which is precisely the drift the duplication risks. Both
+# refuse anything non-absolute, empty included (Path("") == the process's cwd),
+# because a relative root means a different directory per process.
+_root_override = os.environ.get("MISSIONCACHE_ROOT")
 MACHINE_FILE = (
-    Path(os.environ.get("MISSIONCACHE_ROOT") or str(Path.home() / ".missioncache"))
-    / "machine.json"
-)
+    Path(_root_override)
+    if _root_override and Path(_root_override).is_absolute()
+    else Path.home() / ".missioncache"
+) / "machine.json"
 
 # CLI <kind> -> machine.json section name. Public: the CLI validates against it.
 SECTION = {"repo": "repos", "vault": "vaults", "anchor": "anchors"}
