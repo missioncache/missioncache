@@ -926,7 +926,7 @@ record_heartbeat          log_iteration   <b>+36 more</b></div>
           </div>
           <div class="kit-pane" data-kit="fork">
             <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>Project forks</h4>
-            <p>A second project that shares the first one's memory. Fork a project and the parent's context file becomes the memory every lane reads. Any session can update it, and the others are told when it changed. Each fork keeps its own plan and its own tasks.</p>
+            <p>A second project that shares the first one's memory. Fork a project and the parent's context file becomes the memory every fork reads. Any session can update it, and the others are told when it changed. Each fork keeps its own plan and its own tasks.</p>
             <p class="wired">wired: memory is shared, tasks are not - nothing is copied between a parent and its forks</p>
             <div class="kit-snip">/missioncache:fork data-pipeline ios-tests
 <b>&#10003; shared context &middot; data-pipeline</b>
@@ -1288,7 +1288,7 @@ record_heartbeat          log_iteration   <b>+36 more</b></div>
         </ul>
       </div>
       <div class="term">
-        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two lanes, one memory</span></div>
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two forks, one memory</span></div>
         <div class="term-body demo-body">
           <span class="ln c-cmd"><span class="pr">$</span> /missioncache:fork data-pipeline ios-tests</span>
           <span class="ln c-ok">&#10003; ios-tests created &middot; Fork of: data-pipeline</span>
@@ -1303,6 +1303,77 @@ record_heartbeat          log_iteration   <b>+36 more</b></div>
           <span class="ln c-cmd"><span class="pr">$</span> /missioncache:load ios-tests</span>
           <span class="ln c-warn">&#9679; shared context updated by a sibling session</span>
           <span class="ln c-next">&rarr; re-read data-pipeline context before you continue</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="feat rev rv">
+      <div class="feat-txt">
+        <span class="eyebrow">Parallel sessions &middot; shared state</span>
+        <h3>Your agents run in parallel. Their memory doesn't.</h3>
+        <p>Right now each session only knows what happened inside its own conversation. Two terminals on one project drift apart quietly, and the second write erases the first.</p>
+        <p style="margin-top:14px;">MissionCache gives them one project file to work from. Every write queues on the project's own lock and lands atomically, so no session silently overwrites another. And when one moves the project, the rest find out - the live ones get told directly, the statusline shows a dot, and the next load pulls what changed.</p>
+        <ul class="feat-list">
+          <li>Writes queue on a per-project lock and land atomically, so nobody ever reads a half-written context file</li>
+          <li>Every tool that rewrites a project reports which other sessions are live on it</li>
+          <li>Works across forks too: update the shared memory once, and the projects reading it know</li>
+        </ul>
+      </div>
+      <div class="term">
+        <div class="term-bar"><span class="d d-r"></span><span class="d d-y"></span><span class="d d-g"></span><span class="t">claude &middot; two sessions, one project</span></div>
+        <div style="padding:20px 16px 22px;">
+          <svg viewBox="0 0 620 340" role="img" aria-labelledby="ps-t ps-d" style="width:100%;height:auto;display:block;font-family:'SF Mono','JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;">
+            <title id="ps-t">Two Claude sessions working on one MissionCache project</title>
+            <desc id="ps-d">Session one runs the save command and its write goes into the project files, queued on the project's own lock so it cannot collide. The project then reports that its context changed to every session that is live on it, and session two re-reads it before continuing.</desc>
+            <defs>
+              <marker id="ps-head-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" style="fill:var(--con-ink-2)"/>
+              </marker>
+              <marker id="ps-head-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" style="fill:var(--con-warn)"/>
+              </marker>
+            </defs>
+
+            <!-- session 1 -->
+            <rect x="14" y="12" width="236" height="110" rx="10" style="fill:var(--con-bg-2);stroke:var(--con-border)"/>
+            <line x1="14" y1="46" x2="250" y2="46" style="stroke:var(--con-border)"/>
+            <circle cx="32" cy="29" r="4.5" style="fill:#ff5f57"/>
+            <circle cx="46" cy="29" r="4.5" style="fill:#febc2e"/>
+            <circle cx="60" cy="29" r="4.5" style="fill:#28c840"/>
+            <text x="78" y="33.5" style="fill:var(--con-ink-2);font-size:12px">session 1</text>
+            <text x="30" y="74" style="font-size:13px"><tspan style="fill:var(--signal-2)">$</tspan><tspan style="fill:var(--con-ink)"> /missioncache:save</tspan></text>
+            <text x="30" y="97" style="fill:var(--con-ok);font-size:13px">&#10003; context written</text>
+
+            <!-- session 2 -->
+            <rect x="370" y="12" width="236" height="110" rx="10" style="fill:var(--con-bg-2);stroke:var(--con-border)"/>
+            <line x1="370" y1="46" x2="606" y2="46" style="stroke:var(--con-border)"/>
+            <circle cx="388" cy="29" r="4.5" style="fill:#ff5f57"/>
+            <circle cx="402" cy="29" r="4.5" style="fill:#febc2e"/>
+            <circle cx="416" cy="29" r="4.5" style="fill:#28c840"/>
+            <text x="434" y="33.5" style="fill:var(--con-ink-2);font-size:12px">session 2</text>
+            <text x="386" y="74" style="fill:var(--con-warn);font-size:13px">&#9679; context updated</text>
+            <text x="386" y="97" style="fill:var(--con-blue);font-size:13px">&rarr; re-read it first</text>
+
+            <!-- session 1 writes into the project -->
+            <path d="M92,122 C92,186 122,214 156,231" style="fill:none;stroke:var(--con-ink-2);stroke-width:1.6" marker-end="url(#ps-head-dim)"/>
+            <text x="135" y="170" style="fill:var(--con-ink);font-size:12px">write</text>
+            <text x="135" y="188" style="fill:var(--con-ink-2);font-size:11px">queued on the lock</text>
+
+            <!-- the project reports the change to the live sessions -->
+            <path d="M464,231 C498,214 528,186 528,122" style="fill:none;stroke:var(--con-warn);stroke-width:1.6;opacity:.85" marker-end="url(#ps-head-warn)"/>
+            <text x="485" y="170" text-anchor="end" style="fill:var(--con-warn);font-size:12px">context updated</text>
+            <text x="485" y="188" text-anchor="end" style="fill:var(--con-ink-2);font-size:11px">to every live session</text>
+
+            <!-- the project files -->
+            <rect x="160" y="230" width="300" height="100" rx="10" style="fill:var(--con-bg-2);stroke:var(--con-border)"/>
+            <g style="fill:none;stroke:var(--con-ok);stroke-width:1.8">
+              <rect x="186" y="256" width="17" height="14" rx="2.5"/>
+              <path d="M189.5,256 v-4.5 a5,5 0 0 1 10,0 v4.5"/>
+            </g>
+            <text x="215" y="268" style="fill:var(--con-ink);font-size:15px">auth-refactor</text>
+            <text x="186" y="296" style="fill:var(--con-ink-2);font-size:12px">context &middot; tasks &middot; plan</text>
+            <text x="186" y="316" style="fill:var(--con-ok);font-size:12px">one writer at a time</text>
+          </svg>
         </div>
       </div>
     </div>
@@ -1364,6 +1435,7 @@ record_heartbeat          log_iteration   <b>+36 more</b></div>
     <div class="faq rv">
       <details><summary>How is this different from CLAUDE.md or built-in memory?</summary><p>CLAUDE.md is a static rules file you maintain by hand. MissionCache keeps <strong>living project state</strong> - the plan, your decisions, the gotchas you flagged, and progress - that updates as you work and reloads with one command. It complements CLAUDE.md, it does not replace it.</p></details>
       <details><summary>When should I fork a project instead of starting a new one?</summary><p>First, what a fork is here: a project fork, not a Claude conversation fork. It creates a real second project that shares the parent's memory (its context file) while keeping its own tasks. Fork when two efforts share one base and still need their own task lists. A data pipeline with a separate test layer per product is the normal shape. Architecture, access patterns, environment facts, the gotchas you already hit - they live once in the parent, and every fork reads them. <strong>Tasks are never copied.</strong> Start a fresh project instead when the two efforts have nothing real in common.</p></details>
+      <details><summary>Can I run two sessions on the same project?</summary><p>Yes, and that is the point. Every write queues on the project's own lock and lands atomically, so two sessions never corrupt the context file or silently overwrite each other's state. When one session moves the project, the others find out: the live ones can be told directly, the statusline shows a dot, and the next <span class="mono" style="font-size:.85em">/missioncache:load</span> pulls what changed. What MissionCache does <strong>not</strong> do is merge two conversations. Each session keeps its own reasoning, and the project files are what they share.</p></details>
       <details><summary>Where does my data live?</summary><p><strong>On your machine.</strong> Project files are plain markdown under <span class="mono" style="font-size:.9em">~/.missioncache/</span>, and the dashboard runs locally at <span class="mono" style="font-size:.9em">localhost:8787</span>. <strong>Nothing is sent anywhere.</strong> The whole thing is local-first and self-hosted.</p></details>
       <details><summary>Do I have to install every component?</summary><p>No. The MCP server plus the database is the minimum, and everything else is opt-in. The wizard lets you deselect the dashboard, auto, or statusline, and each package can be used on its own.</p></details>
       <details><summary>Which tools does it work with?</summary><p>Claude Code gets the full experience. Codex, OpenCode, and VSCode Copilot Chat get the project state, the slash commands, and the 42-tool MCP suite today, with hooks, statusline, and auto tracked as a follow-up. The key part: <strong>the whole project - plan, tasks, progress, decisions - is one shared set of files</strong>, not recalled snippets, so you start in Claude Code and pick it up in Codex or OpenCode exactly where you left off.</p></details>
