@@ -33,6 +33,8 @@ Required only for the full install (dashboard, MissionCache Auto, statusline):
 
 - The dashboard background service registers per platform: launchd on macOS, systemd user units on Linux (on systemd-less Linux such as default WSL, a shell-profile autostart block starts it on login instead), and a Task Scheduler ONLOGON task on native Windows (falling back to an HKCU Run-key entry when run without elevation). All of plugin, MissionCache Auto, dashboard, and statusline are supported on native Windows; the hooks require Claude Code 2.1.139+ (exec form).
 
+On Windows, read [Windows: native or WSL2](#windows-native-or-wsl2) before installing - the two are separate installs that cannot see each other's projects, so it is a choice to make up front rather than after.
+
 ## Full install (via `uvx missioncache-install`)
 
 One command, no clone needed. Takes a minute or two on a clean machine.
@@ -80,6 +82,35 @@ uvx missioncache-install --local
 ```
 
 This is the workflow described in [`CONTRIBUTING.md`](../CONTRIBUTING.md). End users do not need `--local`.
+
+## Windows: native or WSL2
+
+Both work, and they are separate installs rather than two views of one. **Install MissionCache where Claude Code runs.** If Claude Code is the Windows app, install natively; if you work inside WSL, install inside WSL. Do not do both and expect one set of projects: WSL has its own home directory, so `~/.missioncache/` and `~/.claude/` are different directories in each, and neither install can see the other's projects, task DB, or time tracking.
+
+### Native Windows
+
+The install command is the same, `uvx missioncache-install`. What differs from macOS and Linux:
+
+| Piece | On native Windows |
+|-------|-------------------|
+| Plugin hooks | Launch through `uv` in exec form, so they work the same under Git Bash and PowerShell. **Requires Claude Code 2.1.139+**, where hook `args` was added. An older client silently drops `args`, runs bare `uv`, and the hooks never run. `plugin.json` has no field to express that requirement, which is why it is stated here. |
+| Python | The hooks resolve their own interpreter (`uv run --no-project --python ">=3.11"`) and will download one if the machine has none, so you do not need a `python3` on `PATH`. The installer pre-warms that resolution at install time so a first-use download cannot race the hooks' 5-second timeout. A marketplace-only install skips the warm; if a hook times out once on a fresh machine, run `uv python install` and retry. |
+| Dashboard service | A Task Scheduler ONLOGON task, falling back to an HKCU Run-key entry when `schtasks` refuses from a non-elevated prompt (stock Windows denies ONLOGON triggers without elevation; the Run key never needs it). Both run `serve --hidden`, which keeps a console window from parking on the desktop for the whole session. |
+| Statusline | Written into `settings.json` as the absolute forward-slash path to the executable, quoted when it contains a space. Git Bash eats backslashes and word-splits on spaces, and the scripts directory is not guaranteed to be on the statusline's `PATH`. |
+| Slash-command bash blocks | Probe `python3` then `python` by actually executing them, not just resolving them: the Windows Store stub resolves on `PATH` but does not run. |
+| `--local` maintainer mode | Falls back from symlinks to copies when Windows refuses them without Developer Mode (WinError 1314). |
+| VSCode client | Not registered yet, macOS only. Codex and OpenCode register normally. |
+| Cross-machine sharing | Importing a bundle onto Windows works, including Windows-shaped path rewriting. Exporting **from** Windows does not: the embedded-path scanner only recognizes `/`-rooted absolutes. |
+
+One honest limit: native Windows is covered by platform-mocked unit tests, not yet by a run on real Windows hardware (the windows-latest CI job is a later phase). Treat it as supported but newer than the macOS and Linux paths.
+
+### WSL2
+
+WSL2 is the ordinary Linux path, with one difference that bites on a fresh install. **Default WSL ships without systemd**, so `missioncache-dashboard install-service` cannot register a user unit. It detects that (using the check systemd's own docs recommend) and installs a managed autostart block in your shell profile instead, which starts the dashboard when you open a shell. A fresh WSL Ubuntu used to crash here with `Failed to connect to bus` before that fallback existed. The block assumes bash; on a `~/.bash_login`-only setup you need to add the line yourself.
+
+If you would rather have a real service, enable systemd in `/etc/wsl.conf` and re-run `missioncache-dashboard install-service` - it will then take the normal Linux user-unit path.
+
+Everything else is unchanged from Linux, and your state lives in `~/.missioncache/` inside the WSL filesystem.
 
 ## Plugin-only install (via marketplace)
 

@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- `installation.md` now covers Windows properly, in a section of its own for native Windows and WSL2. It had one prerequisites line, while the fuller note lived in the README, which is backwards for the doc that calls itself the comprehensive reference. The lead is the part a reader needs before installing rather than after: the two are separate installs, WSL has its own home directory, so `~/.missioncache/` and `~/.claude/` differ and neither install sees the other's projects, task DB or time tracking. Install where Claude Code runs. Native Windows then gets a table of the real differences (hook exec form and the 2.1.139 floor, `uv`-resolved Python and the installer's pre-warm, the Task Scheduler task with its Run-key fallback, the quoted forward-slash statusline path, the executing `python3`/`python` probe, the symlink-to-copy fallback on WinError 1314, VSCode registration still being macOS-only, and import-yes/export-no for cross-machine bundles), plus a plain statement that the platform is covered by mocked unit tests rather than a run on real hardware. WSL2 gets the systemd-less default and the profile-autostart fallback it lands on, and the note that enabling systemd in `/etc/wsl.conf` and re-running `install-service` takes the normal Linux path, since the check reads `/run/systemd/system` at call time. (docs)
+
 ## 2026-08-17
 
 Published package versions: missioncache-db 1.0.20, mcp-missioncache 1.0.25, missioncache-auto 1.0.3, missioncache-dashboard 1.0.15, missioncache-install 1.0.10. Claude Code plugin 1.0.15.
