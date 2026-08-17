@@ -95,11 +95,48 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-# MISSIONCACHE_ROOT can be overridden via the MISSIONCACHE_ROOT env var so a
-# fresh data dir can be targeted (cross-machine import into a throwaway root,
-# tests). DB_PATH derives from it. Mirrors the SHADOW_TRACKED_FOLDER override.
-# `or` (not a default arg) so a set-but-empty MISSIONCACHE_ROOT falls back to
-# the real dir instead of Path("") == cwd (which would silently relocate data).
+# Single owner of the ~/.missioncache convention and of the task DB path. Every
+# consumer resolves through these two names; nothing else may re-derive them.
+# The failure this prevents is two names for one root inside one process, and it
+# has shipped twice: the MCP server wrote project files under an overridden root
+# while sending DB rows to the real home (config.py kept root and db_path as
+# independent fields), and the dashboard's /api/today honored the override while
+# the endpoints beside it did not.
+#
+# Overridable via the MISSIONCACHE_ROOT env var so a fresh data dir can be
+# targeted (cross-machine import into a throwaway root, tests). This is an
+# INTERNAL mechanism, deliberately undocumented: it is not a supported way to
+# relocate a user's data dir, and the service launchers do not propagate it.
+# Mirrors the SHADOW_TRACKED_FOLDER override. `or` (not a default arg) so a
+# set-but-empty MISSIONCACHE_ROOT falls back to the real dir instead of
+# Path("") == cwd (which would silently relocate data).
+#
+# How to consume these, in three cases. What all three have in common: the
+# value is read at CALL time. A MODULE-LEVEL `from missioncache_db import
+# MISSIONCACHE_ROOT` is the one shape that is always wrong, because it snapshots
+# the value at import, so the override is ignored and a patched root cannot
+# reach it.
+#   1. A second copy of the root or of tasks.db is never a local constant.
+#      Read the attribute at the use site - `import missioncache_db` then
+#      `missioncache_db.MISSIONCACHE_ROOT`. See mcp_missioncache/helpers.py for
+#      the shape, and missioncache-auto/tests/test_task_paths_init.py for the
+#      rule enforced as a test.
+#   2. A path that EXTENDS the root into an artifact one module owns
+#      (tasks.duckdb, update-check.json) may stay a module constant, provided
+#      its right-hand side derives from these names.
+#   3. Code that must stay importable without this package - the hooks - does a
+#      function-level `from missioncache_db import MISSIONCACHE_ROOT` inside the
+#      try/except that already guards its other imports. Also read at call time,
+#      so it honors a patched root. See hooks/task_tracker.py, stop.py,
+#      pre_compact.py and session_start.py.
+#
+# Sanctioned exceptions, each for a stated reason: missioncache_dashboard's
+# statusline.py mirrors rather than imports, so it survives as a bare script
+# with no package installed; machine_map.py and scripts/ copy the resolution to
+# stay independent of this heavy module; missioncache-install has no dependency
+# on this package at all; and analytics_db.SQLITE_PATH holds a derived module
+# constant for tasks.db against case 1, because it is the one second reader of
+# that file the architecture allows and several tests patch the name directly.
 MISSIONCACHE_ROOT = Path(os.environ.get("MISSIONCACHE_ROOT") or str(Path.home() / ".missioncache"))
 DB_PATH = MISSIONCACHE_ROOT / "tasks.db"
 

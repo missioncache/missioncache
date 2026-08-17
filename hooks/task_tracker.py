@@ -318,19 +318,24 @@ def main() -> None:
     session_id = data.get("session_id", "")
 
     try:
-        from missioncache_db import TaskDB  # type: ignore[import-not-found]
+        from missioncache_db import (  # type: ignore[import-not-found]
+            MISSIONCACHE_ROOT,
+            TaskDB,
+        )
 
         db = TaskDB()
         task = db.find_task_for_cwd(cwd, session_id)
         if not task or not task.full_path or not task.name:
             return
 
-        # MissionCache files live under ~/.missioncache/<full_path>/, not under the
-        # repo path. `task.full_path` already includes the "active/<name>"
-        # segment. This matches settings.root in the MCP server
-        # (mcp_missioncache/config.py:15) and the helpers in mcp_missioncache/helpers.py.
-        missioncache_root = Path.home() / ".missioncache"
-        missioncache_dir = missioncache_root / task.full_path
+        # MissionCache files live under the data root, not the repo path, and
+        # `task.full_path` already carries the "active/<name>" segment. The root
+        # comes from missioncache_db rather than a hand-rolled
+        # `Path.home() / ".missioncache"`, which would ignore the
+        # MISSIONCACHE_ROOT override the rest of the process honors. Imported in
+        # the function, like stop.py and pre_compact.py, so the value is read at
+        # call time and the hook stays importable without the package.
+        missioncache_dir = MISSIONCACHE_ROOT / task.full_path
 
         # Two supported filename layouts:
         # - Top-level tasks: `{task.name}-tasks.md` / `{task.name}-context.md`

@@ -15,11 +15,10 @@ from __future__ import annotations
 import json
 import os
 
-from missioncache_db import replace_with_retry
+from missioncache_db import MISSIONCACHE_ROOT, replace_with_retry
 import time
 import urllib.request
 from importlib import metadata
-from pathlib import Path
 
 # Release sentinels: every release to date bumped at least one of these
 # (verified against the CHANGELOG's "Published package versions" lines).
@@ -29,7 +28,10 @@ from pathlib import Path
 PACKAGES = ("missioncache-db", "missioncache-dashboard", "missioncache-auto")
 
 UPDATE_COMMAND = "uvx --refresh missioncache-install@latest --update"
-CACHE_PATH = Path.home() / ".missioncache" / "update-check.json"
+# Derives from missioncache_db's root rather than re-deriving it, so the
+# MISSIONCACHE_ROOT override reaches this cache too. Stays a module constant
+# because the file is this module's own artifact and a test patches the name.
+CACHE_PATH = MISSIONCACHE_ROOT / "update-check.json"
 CACHE_TTL = 6 * 60 * 60  # seconds; PyPI is CDN-backed, be a polite client
 
 

@@ -54,6 +54,10 @@ from missioncache_dashboard.lib.analytics_db import (
     import_tasks_md,
 )
 
+# Plain module import so the data-root and DB-path constants are dereferenced at
+# call time (see _mc_root below), not snapshotted here.
+import missioncache_db
+
 # Import SQLite MissionCacheDB for the SQLite-only tables (auto executions and the PM layer)
 from missioncache_db import (
     CATEGORIES,
@@ -87,7 +91,17 @@ def get_sqlite_db() -> TaskDB:
 # Configuration
 # =============================================================================
 
-MISSIONCACHE_ROOT = Path.home() / ".missioncache"
+
+def _mc_root() -> Path:
+    """The data root, read from ``missioncache_db`` at CALL time.
+
+    Deliberately not a module constant, and not a module-level
+    ``from missioncache_db import MISSIONCACHE_ROOT`` either: both snapshot the
+    value at import, so the override is ignored and the canonical
+    ``monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", ...)`` cannot
+    reach it. ``test_data_root_env`` asserts the name stays absent here.
+    """
+    return missioncache_db.MISSIONCACHE_ROOT
 
 
 def _init_hooks_state_db() -> None:
@@ -124,7 +138,7 @@ def _resolve_missioncache_path(full_path: str) -> Path:
     """Resolve DB full_path to centralized MissionCache directory, stripping legacy dev/ prefix."""
     if full_path.startswith("dev/"):
         full_path = full_path[4:]
-    return MISSIONCACHE_ROOT / full_path
+    return _mc_root() / full_path
 
 
 # Background sync task
@@ -549,7 +563,7 @@ def get_loc_for_date(date: str | None = None) -> dict:
                 by_task[task_id]["commit_count"] += loc["commit_count"]
 
     # 2. Get shadow commits from SQLite (non-git repos with shadow tracking)
-    sqlite_path = Path.home() / ".missioncache" / "tasks.db"
+    sqlite_path = missioncache_db.DB_PATH
     if sqlite_path.exists():
         try:
             conn = sqlite3.connect(str(sqlite_path))
@@ -908,8 +922,8 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
         candidate_dirs = []
 
         # Centralized MissionCache root (primary)
-        candidate_dirs.append(MISSIONCACHE_ROOT / "active" / task_name)
-        candidate_dirs.append(MISSIONCACHE_ROOT / "completed" / task_name)
+        candidate_dirs.append(_mc_root() / "active" / task_name)
+        candidate_dirs.append(_mc_root() / "completed" / task_name)
 
         # Legacy: repo-local paths for unmigrated tasks
         if repo_path:
@@ -1142,7 +1156,7 @@ def _get_jsonl_task_times(task_ids: list[int]) -> dict[int, int]:
     """
     import sqlite3
 
-    db_path = Path.home() / ".missioncache" / "tasks.db"
+    db_path = missioncache_db.DB_PATH
     if not db_path.exists() or not task_ids:
         return {}
 
@@ -1461,8 +1475,8 @@ async def api_task_files(task_id: int):
     if not task_dir.exists():
         # Try alternate paths
         possible_paths = [
-            MISSIONCACHE_ROOT / "active" / task.name,
-            MISSIONCACHE_ROOT / "completed" / task.name,
+            _mc_root() / "active" / task.name,
+            _mc_root() / "completed" / task.name,
             # Legacy: repo-local paths
             repo_path / "dev" / "active" / task.name,
             repo_path / "dev" / "completed" / task.name,
@@ -2030,7 +2044,7 @@ async def api_auto_projects():
     - Repo short_name (looked up from the task DB)
     """
     projects = []
-    active_dir = MISSIONCACHE_ROOT / "active"
+    active_dir = _mc_root() / "active"
     db = get_sqlite_db()
 
     if active_dir.exists():
@@ -3772,7 +3786,7 @@ async def get_today():
     who_self = _who_self()
     from datetime import date as _date
 
-    from missioncache_db import MISSIONCACHE_ROOT, context_health, pm_items
+    from missioncache_db import context_health, pm_items
 
     sqlite_db = get_sqlite_db()
     today = _date.today()
@@ -3888,8 +3902,8 @@ async def get_today():
         content = None
         is_duplicate = False
         for candidate in (
-            MISSIONCACHE_ROOT / "active" / task.name,
-            MISSIONCACHE_ROOT / task.full_path,
+            _mc_root() / "active" / task.name,
+            _mc_root() / task.full_path,
         ):
             ctx = candidate / f"{task.name}-context.md"
             if ctx.exists():

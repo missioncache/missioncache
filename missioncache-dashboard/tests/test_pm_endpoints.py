@@ -68,13 +68,10 @@ def sandboxed(tmp_path, monkeypatch):
     monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_DB", tmp_path / "no-legacy-orbit-db")
     monkeypatch.setattr(missioncache_db, "_LEGACY_ORBIT_ROOT", tmp_path / "no-legacy-orbit-root")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
-    # server.py binds its OWN MISSIONCACHE_ROOT at import time from the real
-    # home, so patching Path.home and missioncache_db's copy leaves it pointing
-    # at the developer's actual ~/.missioncache. The endpoint re-imports the
-    # patched value locally, but parse_missioncache_progress reads this global -
-    # without this line the progress assertions below silently measure real
-    # projects instead of the sandbox.
-    monkeypatch.setattr(server, "MISSIONCACHE_ROOT", mc_root)
+    # server.py used to bind its own MISSIONCACHE_ROOT at import time, so this
+    # fixture also had to patch that copy or the progress assertions below
+    # silently measured the developer's real projects. It now resolves through
+    # missioncache_db at call time, so the patch above is the only one needed.
     # Pin the reader's display name. _who_self() derives it from `git config
     # --global user.name`, so whether a row naming "Tomer" counts as mine
     # depended on the developer's own git config: it passed on a machine
