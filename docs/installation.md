@@ -102,7 +102,7 @@ The install command is the same, `uvx missioncache-install`. What differs from m
 | VSCode client | Not registered yet, macOS only. Codex and OpenCode register normally. |
 | Cross-machine sharing | Importing a bundle onto Windows works, including Windows-shaped path rewriting. Exporting **from** Windows does not: the embedded-path scanner only recognizes `/`-rooted absolutes. |
 
-One honest limit: native Windows is covered by platform-mocked unit tests, not yet by a run on real Windows hardware (the windows-latest CI job is a later phase). Treat it as supported but newer than the macOS and Linux paths.
+How well this is verified: a `windows-latest` CI job runs on every push and does more than compile. It runs all six test suites on Windows, then runs `missioncache-install --all --yes` from a scratch directory the way a user would, and checks that the dashboard actually serves rather than merely registering, that the Task Scheduler task body runs (with the Run-key fallback path checked too), that stdin JSON reaches a hook through `uv run`, that `encode-cwd` produces the native drive-letter form rather than the MSYS one, and that the MCP server spawns through uvx and answers `initialize`. The known gaps are the specific ones in the table above, not general immaturity.
 
 ### WSL2
 
