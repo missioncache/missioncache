@@ -3894,13 +3894,25 @@
             text-decoration: underline;
         }
 
-        .md-rendered ul li:has(> input[type="checkbox"]) {
+        /* The second selector covers loose lists. A single blank line anywhere
+           in a markdown list makes every item loose, and marked then wraps each
+           item's content in a <p>, so the checkbox is no longer a direct child
+           of the <li> and the direct-child selector alone silently misses it:
+           the bullet stays and the text drops to its own line. */
+        .md-rendered ul li:has(> input[type="checkbox"]),
+        .md-rendered ul li:has(> p > input[type="checkbox"]) {
             list-style-type: none;
             margin-left: -20px;
             display: flex;
             align-items: flex-start;
             gap: 10px;
             line-height: 1.5;
+        }
+
+        /* display:contents so the paragraph's children become the flex items;
+           as a block it would sit under the checkbox instead of beside it. */
+        .md-rendered ul li:has(> p > input[type="checkbox"]) > p {
+            display: contents;
         }
 
         /* Custom checkbox rendering: marked.js emits disabled checkboxes for `- [x]`
@@ -5183,7 +5195,46 @@
            markdown panel (Tasks/Structure/Context/Plan/Updates) has no card of
            its own, so it carries the surface treatment the deleted modal's
            .task-modal-content-area used to provide. */
-        .project-page-panel { display: block; }
+        .project-page-panel { display: block; position: relative; }
+        /* Reference material that belongs beside a panel rather than in its
+           reading flow. A real button rather than a title attribute, for the
+           same reason .bd-i is one: the native tooltip has a ~1s delay and no
+           keyboard path. */
+        .panel-help { position: absolute; top: 18px; right: 18px; z-index: 5; }
+        /* The help div is the panel's first child, so the h1:first-child reset
+           above stops matching and the title picks up its 24px top margin. */
+        .md-rendered .panel-help + h1 { margin-top: 0; }
+        .panel-help-i {
+            width: 18px; height: 18px; padding: 0;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: none;
+            color: var(--text-muted);
+            font-family: inherit; font-weight: 600; font-size: 11px; line-height: 1;
+            display: inline-flex; align-items: center; justify-content: center;
+            cursor: help;
+        }
+        .panel-help-i:hover, .panel-help-i:focus-visible {
+            border-color: var(--accent-purple);
+            color: var(--accent-purple);
+        }
+        .panel-help-tip {
+            position: absolute; top: calc(100% + 6px); right: 0;
+            width: 360px; max-width: 70vw;
+            background: var(--bg-card-solid);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+            font-size: 12px;
+            opacity: 0; visibility: hidden; transform: translateY(-3px);
+            transition: opacity .16s ease, transform .16s ease, visibility .16s;
+        }
+        .panel-help:hover .panel-help-tip, .panel-help:focus-within .panel-help-tip {
+            opacity: 1; visibility: visible; transform: translateY(0);
+        }
+        .panel-help-tip > :first-child { margin-top: 0; }
+        .panel-help-tip > :last-child { margin-bottom: 0; }
         .project-page-panel.md-rendered {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -11644,6 +11695,37 @@ function renderAttention(data) {
             });
         }
 
+        // The tasks file carries a "Task Numbering Format" block explaining the
+        // prompt-alignment convention to whoever edits the file. It is reference
+        // material, not task content, so the Tasks panel lifts it out of the
+        // reading flow and into the help affordance in the corner. Returns the
+        // body with the section removed, plus the section's own body.
+        function splitNumberingHelp(md) {
+            const lines = md.split('\n');
+            const isRule = l => /^(-{3,}|\*{3,}|_{3,})$/.test(l.trim());
+            const start = lines.findIndex(l => /^##\s+Task Numbering Format/i.test(l));
+            if (start === -1) return { body: md, help: '' };
+            let end = start + 1;
+            while (end < lines.length && !/^#{1,2}\s/.test(lines[end])) end++;
+            // The rule closing the section is a separator, not help text.
+            let helpEnd = end;
+            while (helpEnd > start + 1 && lines[helpEnd - 1].trim() === '') helpEnd--;
+            const closedByRule = helpEnd > start + 1 && isRule(lines[helpEnd - 1]);
+            if (closedByRule) helpEnd--;
+            // The section sits between two rules. Keep exactly one, so removing
+            // it leaves the header separated from the first phase rather than
+            // two rules stacked on each other.
+            let from = start;
+            if (closedByRule) {
+                let probe = start - 1;
+                while (probe >= 0 && lines[probe].trim() === '') probe--;
+                if (probe >= 0 && isRule(lines[probe])) from = probe;
+            }
+            const help = lines.slice(start + 1, helpEnd).join('\n').trim();
+            const body = lines.slice(0, from).concat(lines.slice(helpEnd)).join('\n');
+            return { body, help };
+        }
+
         async function renderTaskTab(tab) {
             // Special handling for updates tab - fetch from API
             if (tab === 'updates') {
@@ -11673,6 +11755,14 @@ function renderAttention(data) {
             }
 
             // Render markdown content
+            if (tab === 'tasks') {
+                const { body, help } = splitNumberingHelp(fileData.content);
+                const helpHtml = help
+                    ? `<div class="panel-help"><button class="panel-help-i" type="button" aria-label="Task numbering format" aria-describedby="taskNumberingHelp">?</button><div class="panel-help-tip" role="tooltip" id="taskNumberingHelp">${renderMarkdown(help)}</div></div>`
+                    : '';
+                document.getElementById(tabTargetId).innerHTML = helpHtml + renderMarkdown(body);
+                return;
+            }
             const html = renderMarkdown(fileData.content);
             document.getElementById(tabTargetId).innerHTML = html;
         }
@@ -12068,6 +12158,12 @@ function renderAttention(data) {
 
         function renderMarkdown(content) {
             marked.setOptions({ gfm: true, breaks: true });
+            // In `- [ ] 1. Task`, GFM consumes the `[ ] ` marker and the item
+            // content then starts with `1. `, which marked parses as a nested
+            // ordered list. That list is a block, so the text renders on its own
+            // line under the checkbox. Escaping the dot keeps the number as
+            // literal text and the item stays on one line.
+            content = content.replace(/^([ \t]*[-*+][ \t]+\[[ xX]\][ \t]+)(\d+(?:\.\d+)*)\.(\s)/gm, '$1$2\\.$3');
             // Sanitize the marked output before it reaches innerHTML: task
             // context and update notes are user-authored files that could carry
             // a <script> or an onerror payload. If DOMPurify did not load, fail
