@@ -216,6 +216,112 @@ def test_render_strips_claude_only_regions() -> None:
     assert "Keep this tail." in rendered
 
 
+REPO_COMMANDS_DIR = Path(__file__).resolve().parents[2] / "commands"
+
+# Session machinery that must never reach a non-Claude tool. The runtime notice
+# names all of these on purpose (it tells the model to skip them), so it is
+# removed before the scan or every command would look like it leaks.
+_CLAUDE_MACHINERY = (
+    "CLAUDE_CODE_SESSION_ID",
+    "hooks-state.db",
+    "shared-seen",
+    ".claude/projects",
+)
+
+
+@pytest.mark.skipif(
+    not REPO_COMMANDS_DIR.is_dir(), reason="repo command sources not available"
+)
+@pytest.mark.parametrize("name", ["fork", "rename"])
+def test_real_command_source_renders_without_claude_machinery(name: str) -> None:
+    """Renders the REAL command file, not a fixture.
+
+    fork and rename were absent from CANONICAL_COMMANDS until 2026-08-19, so
+    neither carried a single marker. Adding the names alone would have shipped
+    commands telling Codex to resolve a Claude session id and write
+    ~/.claude/hooks/state/. This is the guard that fails when a command joins
+    the tuple without being marked up.
+    """
+    src = (REPO_COMMANDS_DIR / f"{name}.md").read_text(encoding="utf-8")
+    body = command_clients._render_for_non_claude(src).replace(
+        command_clients._NON_CLAUDE_NOTICE, ""
+    )
+    leaked = [token for token in _CLAUDE_MACHINERY if token in body]
+    assert not leaked, f"{name}.md leaks {leaked} into the non-Claude render"
+
+
+@pytest.mark.skipif(
+    not REPO_COMMANDS_DIR.is_dir(), reason="repo command sources not available"
+)
+def test_real_rename_render_keeps_a_working_resolution_path() -> None:
+    """Stripping rename's Claude path must not leave it unable to identify the
+    project. The other tools have no session binding, so the render has to ask
+    the user instead - and rename by name needs project_name, not task_id."""
+    src = (REPO_COMMANDS_DIR / "rename.md").read_text(encoding="utf-8")
+    rendered = command_clients._render_for_non_claude(src)
+    assert "list_active_tasks" in rendered, "no way to offer the user a choice"
+    assert "project_name=" in rendered, "rename by name needs project_name"
+
+
+def test_render_reveals_non_claude_only_block() -> None:
+    """The body of a non-claude-only block sits INSIDE the HTML comment, because
+    Claude ships these command files unrendered: a marker PAIR would leave the
+    body visible there. Only this render uncomments it."""
+    src = (
+        "Shared intro.\n"
+        "\n"
+        "<!-- non-claude-only\n"
+        "Ask the user which project to rename.\n"
+        "Never guess.\n"
+        "-->\n"
+        "\n"
+        "Shared tail.\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "Ask the user which project to rename." in rendered
+    assert "Never guess." in rendered
+    assert "non-claude-only" not in rendered, "marker itself must not survive"
+    assert "-->" not in rendered
+    assert "Shared intro." in rendered and "Shared tail." in rendered
+
+
+def test_render_rewrites_inside_revealed_non_claude_block() -> None:
+    """The reveal runs BEFORE the prefix and cross-reference rewrites, so a
+    revealed block gets the same treatment as the rest of the file. Reversed,
+    the block would ship pointing at Claude-only tool and command names."""
+    src = (
+        "<!-- non-claude-only\n"
+        "Call `mcp__plugin_missioncache_pm__list_active_tasks`, then run /missioncache:load.\n"
+        "-->\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "mcp__missioncache__list_active_tasks" in rendered
+    assert "/missioncache-load" in rendered
+    assert "mcp__plugin_missioncache_pm__" not in rendered
+
+
+def test_render_rejects_unbalanced_non_claude_only_marker() -> None:
+    """Fails LOUD, mirroring the claude-code-only guard with the damage
+    reversed: an unclosed marker leaves the block commented out, so the tool
+    silently ships a command missing the only path that works there."""
+    src = "<!-- non-claude-only\nbody with no terminator\n"
+    with pytest.raises(ValueError, match="non-claude-only"):
+        command_clients._render_for_non_claude(src)
+
+
+def test_claude_only_and_non_claude_only_are_complementary() -> None:
+    """The two markers must not see each other's regions: the claude-only
+    pattern must not match the non-claude opener, or a rename would ship with
+    neither resolution path."""
+    src = (
+        "<!-- claude-code-only -->\nclaude path\n<!-- /claude-code-only -->\n"
+        "<!-- non-claude-only\nother path\n-->\n"
+    )
+    rendered = command_clients._render_for_non_claude(src)
+    assert "claude path" not in rendered
+    assert "other path" in rendered
+
+
 def test_render_strips_multiple_claude_only_regions_independently() -> None:
     src = (
         "A.\n"
@@ -304,7 +410,7 @@ def test_all_real_commands_render_without_claude_state_access() -> None:
 # OpenCode install/uninstall
 # ---------------------------------------------------------------------------
 
-def test_install_opencode_commands_writes_six_files(
+def test_install_opencode_commands_writes_all_files(
     isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     fake_bundled_commands: Path,
@@ -318,7 +424,7 @@ def test_install_opencode_commands_writes_six_files(
         f"missioncache-{name}.md" for name in command_clients.CANONICAL_COMMANDS
     )
     info = state.load()["components"]["opencode_commands"]
-    assert len(info["files"]) == 6
+    assert len(info["files"]) == len(command_clients.CANONICAL_COMMANDS)
 
 
 def test_install_opencode_commands_renders_transformations(
@@ -956,8 +1062,8 @@ def test_install_opencode_commands_warns_on_partial(
 ) -> None:
     """Missing source files emit ui.warn rather than misleading ui.success.
 
-    The ui.success path used to hardcode all six command names regardless of
-    how many actually wrote. Now success only fires when every CANONICAL_COMMANDS
+    The ui.success path used to hardcode the command names regardless of how
+    many actually wrote. Now success only fires when every CANONICAL_COMMANDS
     entry was written.
     """
     _set_opencode_detected(monkeypatch, True)
@@ -971,8 +1077,9 @@ def test_install_opencode_commands_warns_on_partial(
 
     command_clients.install_opencode_commands(_make_ctx())
 
+    total = len(command_clients.CANONICAL_COMMANDS)
     assert success_calls == [], "no success on partial install"
-    assert any("5/6" in m or "incomplete" in m.lower() for m in warn_calls), (
+    assert any(f"{total - 1}/{total}" in m or "incomplete" in m.lower() for m in warn_calls), (
         f"expected partial-install warn; got {warn_calls!r}"
     )
 

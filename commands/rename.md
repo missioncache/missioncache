@@ -5,7 +5,7 @@ argument-hint: "[new-name]"
 
 # Rename Project
 
-Rename the MissionCache project bound to the current Claude session. Updates the
+Rename a MissionCache project<!-- claude-code-only --> - the one bound to the current Claude session<!-- /claude-code-only -->. Updates the
 DB row, moves the MissionCache directory, renames files inside, and rewrites the
 template H1 titles. Time tracking, heartbeats, sessions, and JIRA links
 all survive because they're keyed by task_id, not by name.
@@ -30,6 +30,7 @@ no client-side validation is needed - just pass the user's input through.
 
 ### Step 2: Find the current project
 
+<!-- claude-code-only -->
 Resolve the current Claude session id so `find_task_for_directory` can
 use the per-session project pointer written by `/missioncache:load` and
 `/missioncache:new`. Without this, the lookup can only match when cwd is under
@@ -70,17 +71,45 @@ If the lookup returns `found: false`, stop and tell the user:
 
 Do not guess by cwd, do not rename by name without the binding - the
 slash command operates on the CURRENT session's project, period.
+<!-- /claude-code-only -->
+<!-- non-claude-only
+This tool has no per-session project binding, so the project has to be
+named rather than inferred. Call
+`mcp__plugin_missioncache_pm__find_task_for_directory(directory="<cwd>")`
+first: it resolves only when cwd sits inside the project's own directory.
+
+If that returns `found: false`, call
+`mcp__plugin_missioncache_pm__list_active_tasks(repo_path="<cwd>")`, show the
+user the active projects, and ask which one to rename. Wait for an explicit
+answer.
+
+Never pick for the user, and never fall back to "the most recently worked
+project". Renaming the wrong project moves its directory and rewrites its
+files. An explicit answer is the only acceptable input here.
+-->
 
 ### Step 3: Call rename_task
 
 Once the project is identified, call:
 
+<!-- claude-code-only -->
 ```
 mcp__plugin_missioncache_pm__rename_task(
     task_id=<task_id from Step 2>,
     new_name="<$ARGUMENTS>"
 )
 ```
+<!-- /claude-code-only -->
+<!-- non-claude-only
+```
+mcp__plugin_missioncache_pm__rename_task(
+    project_name="<the project identified in Step 2>",
+    new_name="<$ARGUMENTS>"
+)
+```
+
+Pass `task_id` instead when Step 2's directory lookup returned one.
+-->
 
 Pre-launch check: do not run this when an `missioncache-auto` execution is
 active for this project. The MCP tool refuses with INVALID_STATE in that
@@ -121,12 +150,16 @@ No change - new name matches the current name.
 If the response is an error (`error: true`), surface the friendly
 `message` directly without paraphrasing.
 
+<!-- claude-code-only -->
 ### Step 5: Update the statusline
 
 The MCP tool's session-pointer sweep already updates
 `hooks-state.db.project_state` and `hooks/state/projects/<sid>.json`,
 but the running statusline only re-reads on the next prompt render.
 Tell the user the statusline updates on the next prompt.
+<!-- /claude-code-only -->
+
+### Step 6: Tell the user what else moves
 
 The dashboard's read path (DuckDB) is refreshed by the dashboard's own
 `POST /api/tasks/{id}/rename` endpoint, NOT by the MCP tool. When the
@@ -137,14 +170,14 @@ think the rename failed.
 
 If the response includes a non-empty ``warnings`` list, surface each
 warning verbatim - those are best-effort failures (session-pointer
-sweep targets that couldn't be rewritten) that affect statusline
-behavior on existing sessions.
+sweep targets that couldn't be rewritten)<!-- claude-code-only --> that affect statusline
+behavior on existing sessions<!-- /claude-code-only -->.
 
 ## MCP Tools Used
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__plugin_missioncache_pm__find_task_for_directory` | Resolve the current session's project to its task_id |
+| `mcp__plugin_missioncache_pm__find_task_for_directory` | Resolve the project to rename |
 | `mcp__plugin_missioncache_pm__rename_task` | Atomic rename across DB, filesystem, H1s, and session pointers |
 
 ## Notes
@@ -154,8 +187,8 @@ behavior on existing sessions.
 - **Renaming a parent that has forks breaks its children.** The rename does
   not touch them. Each child's context file still carries a
   `**Fork of:** <old-name>` header, which now names a project that does not
-  exist, so the scan can no longer re-heal the link and the statusline drops
-  the fork cell. Before renaming a parent, check whether anything forks from
+  exist, so the scan can no longer re-heal the link<!-- claude-code-only --> and the statusline drops
+  the fork cell<!-- /claude-code-only -->. Before renaming a parent, check whether anything forks from
   it, and update every child's `**Fork of:**` line to the new name in the
   same breath. See [`docs/forks.md`](../docs/forks.md).
 - **The CLI equivalent** is `missioncache-db rename-task <old-name> <new-name>`
