@@ -1,11 +1,12 @@
 """Per-tool slash command installers for non-Claude AI coding tools.
 
-Phase 11.1 ships MissionCache's six canonical slash commands (load, save, new, done,
-prompts, mode) into Codex, OpenCode, and VSCode Copilot Chat alongside the
-existing Claude plugin. The MCP server is registered by mcp_clients.py; this
+Ships MissionCache's canonical slash commands (load, save, new, done, prompts,
+mode, fork, rename) into Codex, OpenCode, and VSCode Copilot Chat alongside the
+existing Claude plugin. Phase 11.1 shipped the first six; fork and rename
+followed once they carried per-tool markup. The MCP server is registered by mcp_clients.py; this
 module handles only the slash command surface.
 
-Six transformations apply to every non-Claude variant. All but the filename
+Seven transformations apply to every non-Claude variant. All but the filename
 prefix are applied by `_render_for_non_claude`:
 
 1. Filename gets a `missioncache-` prefix (missioncache-load.md etc.). All three tools have
@@ -23,7 +24,11 @@ prefix are applied by `_render_for_non_claude`:
    dropped - session-id resolution and statusline/binding steps that are
    meaningless in other tools and, worse, can hijack a live Claude session's
    binding via the transcript-mtime fallback.
-6. A runtime notice is inserted after the frontmatter telling the executing
+6. `<!-- non-claude-only ... -->` blocks are revealed. The body sits inside
+   the comment because Claude ships these files unrendered, so a marker pair
+   would leave it visible there. This is how a command carries a different
+   path per tool rather than just a smaller one.
+7. A runtime notice is inserted after the frontmatter telling the executing
    model to skip Claude-session machinery and omit session_id arguments.
 
 Per-tool destination summary:
@@ -62,7 +67,7 @@ if TYPE_CHECKING:
 
 # Canonical MissionCache commands. Order matches the existing Claude plugin layout.
 CANONICAL_COMMANDS: tuple[str, ...] = (
-    "load", "save", "new", "done", "prompts", "mode",
+    "load", "save", "new", "done", "prompts", "mode", "fork", "rename",
 )
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
@@ -79,7 +84,7 @@ CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 # installer-tooling changes. Codex caches the plugin by this version, so any
 # change to the rendered command content MUST bump it or updated installs
 # keep serving the old cached copy.
-CODEX_PLUGIN_VERSION = "1.1.0"
+CODEX_PLUGIN_VERSION = "1.2.0"
 
 # Substitution regex for the MCP tool prefix. Anchored at a word boundary so
 # the rewrite only matches the full `mcp__plugin_missioncache_pm__` literal and not
@@ -102,6 +107,25 @@ _MISSIONCACHE_SLASH_REF_RE = re.compile(r"/missioncache:([a-z]+)")
 # hijacked a live Claude session's project binding this way (2026-07-16).
 _CLAUDE_ONLY_RE = re.compile(
     r"[ \t]*<!--\s*claude-code-only\s*-->.*?<!--\s*/claude-code-only\s*-->[ \t]*\n?",
+    re.DOTALL,
+)
+
+# Inverse marker, for steps that must exist ONLY outside Claude Code. The body
+# lives inside the HTML comment rather than between two marker comments,
+# because Claude ships these files unrendered: anything between two markers
+# would be visible there. Commented out, Claude sees nothing and only this
+# render reveals it.
+#
+#     <!-- non-claude-only
+#     ...instructions for Codex / OpenCode / VSCode...
+#     -->
+#
+# Needed where a command's Claude path and non-Claude path genuinely differ
+# rather than one being a subset of the other. /missioncache-rename is the first case:
+# Claude resolves the project from the session binding, which does not exist
+# in the other tools, so they must ask the user which project instead.
+_NON_CLAUDE_ONLY_RE = re.compile(
+    r"[ \t]*<!--[ \t]*non-claude-only[ \t]*\n(.*?)\n[ \t]*-->[ \t]*\n?",
     re.DOTALL,
 )
 
@@ -281,7 +305,9 @@ def _render_for_non_claude(content: str) -> str:
        that actually exists in the target tool.
     4. Drop `<!-- claude-code-only -->` ... `<!-- /claude-code-only -->`
        regions (session-id resolution, statusline/binding steps).
-    5. Insert the non-Claude runtime notice after the frontmatter, covering
+    5. Reveal `<!-- non-claude-only ... -->` blocks, which carry the steps
+       that replace what 4 removed.
+    6. Insert the non-Claude runtime notice after the frontmatter, covering
        Claude-specific references that survive outside marked regions.
 
     Frontmatter is the leading `---\\n...---\\n` block. If absent, the
@@ -305,6 +331,14 @@ def _render_for_non_claude(content: str) -> str:
         # silently. Fail loudly at build/install time instead.
         raise ValueError(
             "unbalanced <!-- claude-code-only --> markers in command source"
+        )
+    content = _NON_CLAUDE_ONLY_RE.sub(lambda m: m.group(1) + "\n", content)
+    if "non-claude-only" in content:
+        # Fails LOUD for the same reason as above, with the damage reversed: an
+        # unpaired marker leaves the block commented out, so the tool silently
+        # ships a command missing the only path that works there.
+        raise ValueError(
+            "unbalanced <!-- non-claude-only ... --> marker in command source"
         )
     content = _MCP_PREFIX_RE.sub("mcp__missioncache__", content)
     content = _MISSIONCACHE_SLASH_REF_RE.sub(r"/missioncache-\1", content)
@@ -591,10 +625,10 @@ def install_codex_commands(ctx: "InstallContext") -> None:
             "fixing them."
         )
         return
+    listed = ", ".join(f"/missioncache-{name}" for name in CANONICAL_COMMANDS)
     ui.success(
         f"Installed Codex MissionCache plugin ({command_count} commands). "
-        "Restart Codex to load /missioncache-load, /missioncache-save, /missioncache-new, /missioncache-done, "
-        "/missioncache-prompts, /missioncache-mode."
+        f"Restart Codex to load {listed}."
     )
 
 
@@ -604,7 +638,7 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     Layout:
       <root>/.agents/plugins/marketplace.json   - registry pointing at MissionCache
       <root>/plugins/missioncache/.codex-plugin/plugin.json   - plugin manifest
-      <root>/plugins/missioncache/commands/missioncache-<name>.md    - the six commands
+      <root>/plugins/missioncache/commands/missioncache-<name>.md    - the canonical commands
 
     Returns the count of commands written.
     """
@@ -629,10 +663,10 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
             "displayName": "MissionCache",
             "shortDescription": "Project management with time tracking",
             "longDescription": (
-                "MissionCache's slash commands inside Codex. Provides /missioncache-load, /missioncache-save, "
-                "/missioncache-new, /missioncache-done, /missioncache-prompts, and /missioncache-mode for managing "
-                "MissionCache projects. Requires the MissionCache MCP server to be registered "
-                "separately via `codex mcp add missioncache -- mcp-missioncache`."
+                "MissionCache's slash commands inside Codex. Provides "
+                + ", ".join(f"/missioncache-{name}" for name in CANONICAL_COMMANDS)
+                + " for managing MissionCache projects. Requires the MissionCache MCP server "
+                "to be registered separately via `codex mcp add missioncache -- mcp-missioncache`."
             ),
             "developerName": "Tomer Brami",
             "category": "Productivity",

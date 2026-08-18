@@ -26,10 +26,12 @@ Same conversation as `/missioncache:new` Step 1, plus the fork rules:
 - Short description - describe the child's OWN lane, not the parent's mandate.
 - Initial subtasks: the child's own new tasks ONLY. Never copy tasks from the parent - parent-owned work stays in the parent's tasks file.
 
+<!-- claude-code-only -->
 ### Step 3: Resolve Session ID
 
 Reuse the exact bash block from `/missioncache:new` (Step 4 there): resolve `$CLAUDE_CODE_SESSION_ID` with the cwd-pointer and transcript-mtime fallbacks, capture `SESSION_ID`.
 
+<!-- /claude-code-only -->
 ### Step 4: Create the Fork
 
 ```
@@ -39,7 +41,9 @@ mcp__plugin_missioncache_pm__create_missioncache_files(
     description="...",
     fork_of="<parent>",
     tasks=[...child-only tasks...],
+    <!-- claude-code-only -->
     session_id="<SESSION_ID>",
+    <!-- /claude-code-only -->
 )
 ```
 
@@ -48,6 +52,7 @@ This writes the child's files with a `**Fork of:** <parent>` line in the context
 - `fork_linked: true` - the link is live.
 - `fork_linked: false` + `fork_warning` - the header was written but the parent did not resolve unambiguously; surface the warning. The link self-heals on the next scan once resolvable.
 
+<!-- claude-code-only -->
 ### Step 5: Seed the Shared-Seen Marker
 
 Baseline this session's view of the shared layer so freshness tracking starts clean. Call `mcp__plugin_missioncache_pm__get_context_digest(project_name="<child>")` - its `parent_digest` block carries the exact `context_file` path (works for prefixed AND legacy context filenames, active or completed) and a `context_mtime` coupled to the bytes the digest read. You just presented the parent's knowledge in Step 1, so stamping this snapshot is honest. Then run:
@@ -73,6 +78,7 @@ marker.write_text(json.dumps({
 '
 fi
 ```
+<!-- /claude-code-only -->
 
 ### Step 6 (optional): Migrate Shared Content Out of a Monolith Parent
 
@@ -89,7 +95,7 @@ Only when the user says the parent is a pre-fork monolith they want to split:
 Show the user:
 - The child's files and its `Fork of: <parent>` relationship.
 - Both dashboard links: `http://localhost:8787/#projects?task=<child>` and `...?task=<parent>`.
-- How sharing works from now on (one paragraph): any session updates the shared layer by calling `update_context_file` on the PARENT's context path (resolve it via `get_missioncache_files(<parent>)`); `/missioncache:load` on any sibling shows a banner when the shared layer changed since that session last synced, and the statusline marks the fork with a staleness dot.
+- How sharing works from now on (one paragraph): any session updates the shared layer by calling `update_context_file` on the PARENT's context path (resolve it via `get_missioncache_files(<parent>)`); `/missioncache:load` on any sibling shows a banner when the shared layer changed since that session last synced<!-- claude-code-only -->, and the statusline marks the fork with a staleness dot<!-- /claude-code-only -->.
 
 ## Rules That Keep Forks Sane
 
