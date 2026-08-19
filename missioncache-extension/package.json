@@ -1,0 +1,33 @@
+{
+  "name": "missioncache",
+  "displayName": "MissionCache",
+  "description": "Project status for MissionCache - active project, task progress, and quick access from the status bar. Companion to the MissionCache CLI install.",
+  "version": "0.1.0",
+  "publisher": "missioncache",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": { "type": "git", "url": "https://github.com/missioncache/missioncache.git" },
+  "engines": { "vscode": "^1.96.0" },
+  "categories": ["Other"],
+  "keywords": ["project management", "tasks", "time tracking", "missioncache", "ai"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "missioncache.showMenu", "title": "Show Menu", "category": "MissionCache" },
+      { "command": "missioncache.refresh", "title": "Refresh", "category": "MissionCache" },
+      { "command": "missioncache.openDashboard", "title": "Open Dashboard", "category": "MissionCache" }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "build:prod": "node esbuild.js --production",
+    "typecheck": "tsc --noEmit",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.96.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  }
+}
