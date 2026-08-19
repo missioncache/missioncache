@@ -195,7 +195,7 @@ def _set_opencode_detected(monkeypatch: pytest.MonkeyPatch, present: bool) -> No
 def _set_mcp_missioncache_path_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pretend mcp-missioncache is already on PATH so the prereq check returns True."""
     monkeypatch.setattr(
-        mcp_clients, "_ensure_mcp_missioncache_on_path", lambda: True
+        mcp_clients, "_ensure_mcp_missioncache_on_path", lambda upgrade=False: True
     )
 
 
@@ -910,6 +910,41 @@ def test_ensure_mcp_missioncache_on_path_returns_true_when_already_present(
 
     assert mcp_clients._ensure_mcp_missioncache_on_path() is True
     pipx_called.assert_not_called()
+
+
+def test_ensure_mcp_missioncache_on_path_upgrades_on_an_update_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--update must move the binary, not skip it because it exists.
+
+    Without this the server Codex, OpenCode and VSCode run stayed pinned at
+    whatever version was current when it was first installed, for the life of
+    the install: every later --update saw it on PATH and returned early.
+    Claude Code was unaffected because it runs the server out of the plugin
+    cache, which is why nobody noticed.
+    """
+    monkeypatch.setattr(mcp_clients, "_MCP_BINARY_REFRESHED", False)
+    monkeypatch.setattr(mcp_clients.shutil, "which", lambda _: "/x/mcp-missioncache")
+    pipx_called = MagicMock()
+    monkeypatch.setattr(installers, "_pipx_install", pipx_called)
+
+    assert mcp_clients._ensure_mcp_missioncache_on_path(upgrade=True) is True
+    pipx_called.assert_called_once_with("mcp-missioncache")
+
+
+def test_ensure_mcp_missioncache_on_path_upgrades_once_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An --update touching all three clients pays for one install, not three."""
+    monkeypatch.setattr(mcp_clients, "_MCP_BINARY_REFRESHED", False)
+    monkeypatch.setattr(mcp_clients.shutil, "which", lambda _: "/x/mcp-missioncache")
+    pipx_called = MagicMock()
+    monkeypatch.setattr(installers, "_pipx_install", pipx_called)
+
+    for _ in range(3):
+        assert mcp_clients._ensure_mcp_missioncache_on_path(upgrade=True) is True
+
+    assert pipx_called.call_count == 1
 
 
 # ---------------------------------------------------------------------------
