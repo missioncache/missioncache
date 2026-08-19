@@ -866,13 +866,20 @@ def _pipx_install(package: str) -> None:
     Prefers a bare `pipx` on PATH; falls back to `python -m pipx` (for users
     who bootstrap'd pipx this session without a shell restart); finally falls
     back to `uv tool install`.
+
+    The uv path also passes --refresh. --force reinstalls but resolves from
+    uv's cached index metadata, so an --update run shortly after a release
+    reinstalls the version the user already had and reports success. Measured
+    2026-08-19 minutes after publishing: --force alone kept 1.0.17 and 1.0.4,
+    --force --refresh took 1.0.18 and 1.0.5 in the same minute. The pipx
+    branches are left alone because that behaviour was not tested here.
     """
     if shutil.which("pipx"):
         cmd = ["pipx", "install", package, "--force"]
     elif _has_pipx_module():
         cmd = [sys.executable, "-m", "pipx", "install", package, "--force"]
     elif shutil.which("uv"):
-        cmd = ["uv", "tool", "install", package, "--force"]
+        cmd = ["uv", "tool", "install", package, "--force", "--refresh"]
     else:
         ui.fail(f"Cannot install {package}: neither pipx nor uv is available.")
         return
