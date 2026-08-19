@@ -248,8 +248,12 @@ def mark_task_completed(tasks_file: Path, task_number: str) -> bool:
 
     content = tasks_file.read_text(encoding="utf-8")
 
-    # Pattern: - [ ] N. or - [ ] N: (with optional leading whitespace)
-    pattern = rf"^(\s*)- \[ \] ({task_number}[.:])"
+    # Pattern: - [ ] N. or - [ ] N: (with optional leading whitespace).
+    # The trailing (?!\d) disqualifies a following digit, so completing parent
+    # "1" matches "- [ ] 1. Parent" but not the "1." prefix of "- [ ] 1.2.".
+    # Without it subn flips every child too, silently marking work as done.
+    # The number is escaped because a task number carries dots.
+    pattern = rf"^(\s*)- \[ \] ({re.escape(task_number)}[.:])(?!\d)"
     replacement = r"\1- [x] \2"
 
     new_content, count = re.subn(pattern, replacement, content, flags=re.MULTILINE)

@@ -161,3 +161,34 @@ class TestMarkTaskCompleted:
         f.write_text(tasks_md_content)
         result = mark_task_completed(f, "99")
         assert result is False
+
+    def test_completing_a_parent_leaves_its_subtasks_alone(self, tmp_path):
+        """Completing "1" must not tick "1.2" and "1.3".
+
+        The number is a prefix of its own children, so without a
+        following-digit guard subn flips the whole subtree and reports work
+        as done that nobody did. The MCP writer has carried this guard and
+        its explanation for a while; this copy did not.
+        """
+        f = tmp_path / "tasks.md"
+        f.write_text(
+            "- [ ] 1. Parent\n"
+            "- [ ] 1.2. Child\n"
+            "- [ ] 1.3. Other child\n"
+            "- [ ] 2. Unrelated\n"
+        )
+        assert mark_task_completed(f, "1") is True
+        updated = f.read_text()
+        assert "- [x] 1. Parent" in updated
+        assert "- [ ] 1.2. Child" in updated, "a subtask was completed by its parent"
+        assert "- [ ] 1.3. Other child" in updated
+        assert updated.count("- [x]") == 1
+
+    def test_a_subtask_still_completes_on_its_own(self, tmp_path):
+        """The guard must not make a dotted number uncompletable."""
+        f = tmp_path / "tasks.md"
+        f.write_text("- [ ] 1. Parent\n- [ ] 1.2. Child\n")
+        assert mark_task_completed(f, "1.2") is True
+        updated = f.read_text()
+        assert "- [x] 1.2. Child" in updated
+        assert "- [ ] 1. Parent" in updated
