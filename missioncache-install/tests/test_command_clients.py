@@ -659,10 +659,19 @@ def test_install_codex_commands_builds_full_marketplace_tree(
     assert (
         command_clients.CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
     ).exists()
-    cmds = sorted(p.name for p in (plugin_dir / "commands").glob("*.md"))
-    assert cmds == sorted(
-        f"missioncache-{name}.md" for name in command_clients.CANONICAL_COMMANDS
+    skills = sorted(p.parent.name for p in (plugin_dir / "skills").glob("*/SKILL.md"))
+    assert skills == sorted(
+        f"missioncache-{name}" for name in command_clients.CANONICAL_COMMANDS
     )
+    # No commands/ dir: Codex would migrate any sub-4,000-byte command into a
+    # duplicate skill next to the native one.
+    assert not (plugin_dir / "commands").exists()
+
+    load_skill = (plugin_dir / "skills" / "missioncache-load" / "SKILL.md").read_text()
+    assert load_skill.startswith("---\nname: missioncache-load\n")
+    assert "description: >-" in load_skill
+    # Source frontmatter is stripped from the body, not carried through.
+    assert "argument-hint" not in load_skill
 
     manifest = json.loads(
         (plugin_dir / ".codex-plugin" / "plugin.json").read_text()
