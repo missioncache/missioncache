@@ -23,6 +23,7 @@ Usage:
     python missioncache_db.py rename-task <old-name> <new-name>  # Rename a project
     python missioncache_db.py list-completed [days]     # List recently completed tasks
     python missioncache_db.py get-task-by-name <name>   # Find task by name
+    python missioncache_db.py extension-state [--dir PATH]  # Editor-extension snapshot (JSON)
 
 Keyword Management:
     python missioncache_db.py add-keyword <keyword>     # Add custom tag keyword
@@ -4518,6 +4519,8 @@ class TaskDB:
             "phases_total": len(phases),
             "description": description,
             "is_parent_task": is_parent_task,
+            "tasks_file": str(tasks_file),
+            "context_file": str(context_file) if context_file else None,
         }
 
     # =========================================================================
@@ -4993,6 +4996,90 @@ class TaskDB:
             ).fetchall()
         return [row["depends_on"] for row in rows]
 
+    # =========================================================================
+    # Editor extension state (consumed by the MissionCache VSCode/Cursor extension)
+    # =========================================================================
+
+    def get_extension_state(self, directory: Optional[str] = None) -> Dict[str, Any]:
+        """One-call snapshot for the editor extension's status bar and sidebar.
+
+        Returns all active projects sorted by last_worked_on (newest first),
+        each carrying progress from its tasks file, the context file's last
+        save time, and a dir_match flag when `directory` (walked up to its
+        git root) equals the project's registered repo_path. The extension
+        picks the first dir_match, falls back to the most recent, and lets
+        the user override via Quick Pick.
+        """
+        resolved = None
+        if directory:
+            probe = Path(directory).expanduser().resolve()
+            resolved = str(probe)
+            for candidate in (probe, *probe.parents):
+                if (candidate / ".git").exists():
+                    resolved = str(candidate)
+                    break
+
+        projects = []
+        for task in self.get_active_tasks():
+            repo = self.get_repo(task.repo_id) if task.repo_id else None
+            repo_path = repo.path if repo else None
+            progress = self.parse_missioncache_progress(
+                repo_path or "", task.full_path, task.parent_id
+            )
+            # File paths come from the progress parser - it owns the five
+            # layout patterns (active/manual/global, standalone vs subtask
+            # naming, completed fallbacks). Never reconstruct them here.
+            context_path = progress.get("context_file")
+            context_saved_at = None
+            if context_path and Path(context_path).exists():
+                context_saved_at = datetime.fromtimestamp(
+                    Path(context_path).stat().st_mtime
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            parent_name = None
+            if task.parent_id:
+                parent = self.get_task(task.parent_id)
+                parent_name = parent.name if parent else None
+            projects.append({
+                "id": task.id,
+                "name": task.name,
+                "repo_path": repo_path,
+                "dir_match": bool(resolved and repo_path == resolved),
+                "status": task.status,
+                "last_worked_on": task.last_worked_on,
+                "context_saved_at": context_saved_at,
+                "fork_of": parent_name,
+                "has_docs": progress.get("has_docs", False),
+                "completed_count": progress.get("completed_count"),
+                "total_count": progress.get("total_count"),
+                "completion_pct": progress.get("completion_pct"),
+                "remaining_summary": progress.get("remaining_summary"),
+                "tasks_file": progress.get("tasks_file"),
+                "context_file": context_path,
+            })
+        # get_active_tasks already orders by last_worked_on DESC; restated here
+        # because the sort order is part of this method's contract.
+        projects.sort(key=lambda p: p["last_worked_on"] or "", reverse=True)
+
+        update_available = False
+        update_command = None
+        update_check = MISSIONCACHE_ROOT / "update-check.json"
+        try:
+            payload = json.loads(update_check.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                update_available = bool(payload.get("update_available"))
+                update_command = payload.get("command")
+        except (OSError, ValueError):
+            pass
+
+        return {
+            "schema": 1,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "directory": resolved,
+            "update_available": update_available,
+            "update_command": update_command,
+            "projects": projects,
+        }
+
 
 # =============================================================================
 # Tree Rendering
@@ -5278,6 +5365,16 @@ def main():
         if command == "init":
             db.initialize()
             print(f"Database initialized at {db.db_path}")
+
+        elif command == "extension-state":
+            directory = None
+            if "--dir" in sys.argv:
+                idx = sys.argv.index("--dir")
+                if idx + 1 >= len(sys.argv):
+                    print("Usage: missioncache-db extension-state [--dir PATH]")
+                    sys.exit(1)
+                directory = sys.argv[idx + 1]
+            print(json.dumps(db.get_extension_state(directory)))
 
         elif command == "add-repo":
             if len(sys.argv) < 3:
