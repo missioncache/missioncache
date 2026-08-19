@@ -6,6 +6,12 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-19.3
+
+Published package versions: missioncache-install 1.0.13. Everything else is unchanged since 2026-08-19.2.
+
+- `uvx missioncache-install --update` now installs the update. `uv tool install --force` reinstalls but resolves from uv's cached index metadata, so a run shortly after a release reinstalled the version the user already had and reported every component green. It bit the 2026-08-19.2 release on the machine it was published from: the run finished clean and left `missioncache-dashboard` at 1.0.17 and `missioncache-auto` at 1.0.4. The uv path passes `--refresh` now. Worth recording how the diagnosis went, because the first answer was wrong: an A/B test suggested `--force` alone was fine, but it was contaminated - an earlier cache-clean loop had cleared `mcp-missioncache` before stalling on a lock held by live MCP server processes, so that one package alone resolved fresh and looked like proof. Rerun against the two untouched packages in the same minute, `--force` alone kept 1.0.17 and 1.0.4 while `--force --refresh` took 1.0.18 and 1.0.5. The pipx branches are unchanged: whether pip's cache behaves the same way was not tested, and putting a guess in the code is worse than leaving the branch alone. (missioncache-install)
+
 ## 2026-08-19.2
 
 Published package versions: mcp-missioncache 1.0.27, missioncache-dashboard 1.0.18, missioncache-auto 1.0.5. Claude Code plugin 1.0.18, missioncache-db 1.0.22 and missioncache-install 1.0.12 are unchanged.
