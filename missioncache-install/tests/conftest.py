@@ -1,8 +1,16 @@
 """Shared fixtures for missioncache-install tests.
 
-All tests that touch disk get a sandboxed home directory via `isolated_home`.
-This redirects Path.home() and the module-level STATE_FILE / SETTINGS_FILE
-constants to a pytest tmp_path, so real ~/.claude is never touched.
+Every test gets a sandboxed home directory via `isolated_home`, which
+redirects Path.home() and the module-level STATE_FILE / SETTINGS_FILE
+constants to a pytest tmp_path, so the real ~/.claude is never touched.
+
+The fixture is autouse because opt-in did not hold: on 2026-08-19 a full
+suite run rewrote the developer's real install state to mode "local" (31
+tests here never requested the fixture, and those reaching main() hit
+state.set_mode against the real file, resolving "local" because pytest runs
+with the repo root as cwd). The next `--update` from outside the clone then
+died on a repo_root it had no reason to have. A fixture that has to be
+remembered is a fixture that will be forgotten.
 """
 
 from __future__ import annotations
@@ -26,11 +34,12 @@ def _no_real_hook_warm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(installers, "_warm_hook_interpreter", lambda: None)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect Path.home() and module-level state/settings paths to tmp_path.
 
-    Every test that writes to ~/.claude should depend on this fixture.
+    Autouse, so a test cannot reach the real ~/.claude by forgetting to ask.
+    Tests still declare it by name when they need the sandbox path itself.
     """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(

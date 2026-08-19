@@ -176,6 +176,51 @@ def test_update_all_retries_previously_failed_components(
     assert state.failed_components() == []
 
 
+def test_update_all_refuses_recorded_local_mode_without_a_clone(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A maintainer install updated from outside its clone must fail with a
+    readable message before any component runs.
+
+    update_all adopts the RECORDED mode so an update cannot flip a pypi install
+    to an editable one. Adopting "local" without a repo_root used to produce
+    `RuntimeError: Internal error: local-mode installer called without
+    repo_root set` partway through, after the first step header had printed.
+    It reached a real machine on 2026-08-19."""
+    state.set_mode("local")
+    state.record_component("dashboard", {"mode": "local"})
+    calls = _fake_installers(monkeypatch)
+    messages: list[str] = []
+
+    def fake_fail(msg: str, exit_code: int = 1) -> None:
+        messages.append(msg)
+        raise SystemExit(exit_code)
+
+    monkeypatch.setattr(installers.ui, "fail", fake_fail)
+
+    with pytest.raises(SystemExit):
+        installers.update_all(_make_ctx(mode="pypi", repo_root=None))
+
+    assert calls == [], "must fail before running any component"
+    assert messages, "must fail through ui.fail, not an internal traceback"
+    assert "clone" in messages[0].lower(), \
+        f"the message must name what to do about it; got {messages[0]!r}"
+
+
+def test_update_all_accepts_recorded_local_mode_from_a_clone(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The guard keys on a missing repo_root, not on the recorded mode itself:
+    the same maintainer install updates normally from inside its clone."""
+    state.set_mode("local")
+    state.record_component("dashboard", {"mode": "local"})
+    calls = _fake_installers(monkeypatch)
+
+    installers.update_all(_make_ctx(mode="pypi", repo_root=tmp_path / "clone"))
+
+    assert calls == ["dashboard"]
+
+
 def test_update_all_reports_untracked_without_acting(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
