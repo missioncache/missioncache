@@ -693,6 +693,40 @@ def test_uninstall_preserves_user_data_directory(isolated_home: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# _pipx_install command construction
+# ---------------------------------------------------------------------------
+
+
+def test_uv_install_refreshes_the_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The uv fallback must pass --refresh alongside --force.
+
+    --force reinstalls but resolves from uv's cached index metadata, so an
+    --update run shortly after a release reinstalls the version the user
+    already had and reports success. Measured on 2026-08-19 minutes after
+    publishing: --force alone kept missioncache-dashboard at 1.0.17 and
+    missioncache-auto at 1.0.4, --force --refresh took 1.0.18 and 1.0.5 in
+    the same minute.
+    """
+    captured: list[list[str]] = []
+    monkeypatch.setattr(installers.shutil, "which", lambda name: None if name == "pipx" else "/usr/bin/uv")
+    monkeypatch.setattr(installers, "_has_pipx_module", lambda: False)
+    monkeypatch.setattr(
+        installers.subprocess_utils, "run_streaming", lambda cmd, **kw: captured.append(cmd)
+    )
+
+    installers._pipx_install("missioncache-dashboard")
+
+    assert captured, "no command was run"
+    cmd = captured[0]
+    assert cmd[:4] == ["uv", "tool", "install", "missioncache-dashboard"]
+    assert "--force" in cmd
+    assert "--refresh" in cmd, (
+        "without --refresh an update run right after a release silently "
+        f"reinstalls the old version; got {cmd}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # pipx dist-name literals - rename tripwires
 # ---------------------------------------------------------------------------
 #
