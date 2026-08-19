@@ -3915,6 +3915,77 @@
             display: contents;
         }
 
+        /* .pm-empty centres, which suits a one-line placeholder and not a
+           paragraph of explanation. */
+        .md-rendered .stub-plan { color: var(--text-secondary); font-size: 13px; text-align: left; }
+        .md-rendered .stub-plan p { margin: 0 0 10px; }
+        .md-rendered .stub-plan > .md-rendered {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+            opacity: .75;
+        }
+
+        /* Task list: the summary is the item's own description, the <details>
+           holds the shipping narrative that used to sit inline. */
+        /* One flex child, so the disclosure sits under the text rather than
+           becoming a third flex item beside it. */
+        .md-rendered .task-body { min-width: 0; }
+        .md-rendered .task-sum { display: block; }
+        .md-rendered .task-sum.is-clamped {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .md-rendered .task-sum.is-clamped.is-open {
+            display: block;
+            -webkit-line-clamp: none;
+            overflow: visible;
+        }
+        .md-rendered .task-more {
+            display: block;
+            margin-top: 2px;
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-purple);
+            font: inherit;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .md-rendered .task-more:hover { text-decoration: underline; }
+
+        .md-rendered details.task-detail { margin-top: 4px; }
+        .md-rendered details.task-detail > summary {
+            display: inline-block;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 11px;
+            list-style: none;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 0 8px;
+            line-height: 17px;
+        }
+        .md-rendered details.task-detail > summary::-webkit-details-marker { display: none; }
+        .md-rendered details.task-detail > summary::after { content: " \25BE"; }
+        .md-rendered details.task-detail[open] > summary::after { content: " \25B4"; }
+        .md-rendered details.task-detail > summary:hover {
+            color: var(--accent-purple);
+            border-color: var(--accent-purple);
+        }
+        .md-rendered details.task-detail[open] > summary { margin-bottom: 6px; }
+        .md-rendered details.task-detail > :not(summary) {
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        /* The strip sits inside a markdown panel, which sets its own list and
+           heading rhythm; give it back the tile spacing it has on the briefing. */
+        .md-rendered .task-strip { margin: 0 0 20px; }
+
         /* Custom checkbox rendering: marked.js emits disabled checkboxes for `- [x]`
            and `- [ ]` list items, and browsers dim disabled form controls to ~50%
            opacity, which makes the accent-color-filled checked state visually
@@ -6974,12 +7045,15 @@
                         </div>
                     </div>
                     <div class="project-page-tabs" id="projectPageTabs">
+                        <!-- Order: what the project IS (Overview, Plan), then where it
+                             stands (Tasks, Structure, Context), then who owes what.
+                             Switching is keyed on data-ptab, not position. -->
                         <button class="tab-btn active" data-ptab="overview" onclick="switchProjectPageTab('overview')">Overview</button>
-                        <button class="tab-btn" data-ptab="action-items" onclick="switchProjectPageTab('action-items')">Action Items</button>
+                        <button class="tab-btn" data-ptab="plan" onclick="switchProjectPageTab('plan')">Plan</button>
                         <button class="tab-btn" data-ptab="tasks" onclick="switchProjectPageTab('tasks')">Tasks</button>
                         <button class="tab-btn" data-ptab="structure" onclick="switchProjectPageTab('structure')">Structure</button>
                         <button class="tab-btn" data-ptab="context" onclick="switchProjectPageTab('context')">Context</button>
-                        <button class="tab-btn" data-ptab="plan" onclick="switchProjectPageTab('plan')">Plan</button>
+                        <button class="tab-btn" data-ptab="action-items" onclick="switchProjectPageTab('action-items')">Action Items</button>
                         <button class="tab-btn" data-ptab="updates" onclick="switchProjectPageTab('updates')">Updates</button>
                     </div>
                     <div id="projectPageOverview" class="project-page-panel"></div>
@@ -11726,6 +11800,126 @@ function renderAttention(data) {
             return { body, help };
         }
 
+        // A completed checklist item carries its shipping narrative inline, in a
+        // trailing `*(complete <date>: ...)*`. They run 100-400 words: on the
+        // project this was built for they are 66% of all checklist text (51,829
+        // of 78,433 chars across 58 of 112 items), so the tab reads as a wall.
+        //
+        // The split happens on the SOURCE, not on the rendered DOM. In the DOM
+        // the narrative is not one <em>: an asterisk inside it (a glob like
+        // `commands/*.md`) re-opens emphasis and marked hands back several
+        // fragments, so the longest item's trailing <em> covers barely half its
+        // narrative. In the source the boundary is exact - " *(" appears once
+        // per line on every item that has one.
+        const TASK_LINE_RE = /^(\s*[-*+] \[[ xX]\] )(.*)$/;
+
+        function collapseTaskNarratives(md) {
+            return md.split('\n').map(line => {
+                const m = line.match(TASK_LINE_RE);
+                if (!m) return line;
+                const body = m[2];
+                const cut = body.indexOf(' *(');
+                if (cut === -1) return `${m[1]}<span class="task-body"><span class="task-sum">${body}</span></span>`;
+                let detail = body.slice(cut).trim();
+                // Drop the *( )* wrapper so its markers do not render as text.
+                // What is left goes back through marked as markdown, which is
+                // what keeps the code spans inside a narrative formatted.
+                if (detail.startsWith('*(')) detail = detail.slice(2);
+                if (detail.endsWith(')*')) detail = detail.slice(0, -2);
+                const date = detail.match(/^complete[d]?\s+(\d{4}-\d{2}-\d{2})/i);
+                const label = date ? date[1] : 'details';
+                return `${m[1]}<span class="task-body">`
+                     + `<span class="task-sum">${body.slice(0, cut)}</span>`
+                     + `<details class="task-detail"><summary>${label}</summary>`
+                     + `${detail}</details></span>`;
+            }).join('\n');
+        }
+
+        // Counts stated, not inferred. The file's physical order does not follow
+        // its numbering (the write path appends into an existing section), so a
+        // reader who scrolls to the bottom lands on a mid-range number and
+        // concludes the list is truncated. current_phase is computed server-side
+        // but does not reach this payload, so it is not a tile here.
+        function taskStatStrip() {
+            const t = currentProjectPage;
+            if (!t || t.total_count == null) return '';
+            const open = (t.total_count || 0) - (t.completed_count || 0);
+            const tile = (v, l) => `<div class="bd-stat"><div class="bd-stat-v">${escapeHtml(String(v))}</div><div class="bd-stat-l">${escapeHtml(l)}</div></div>`;
+            return '<div class="bd-strip task-strip">'
+                + tile(`${t.completed_count}/${t.total_count}`, 'done')
+                + tile(open, 'open')
+                + tile(`${t.completion_pct}%`, 'complete')
+                + tile(t.last_worked_ago || '-', 'last worked')
+                + '</div>';
+        }
+
+        // The narrative split handles the trailing story. A long DESCRIPTION is a
+        // separate problem needing the opposite treatment: it says what the work
+        // IS, so it gets clamped in place with a toggle rather than hidden behind
+        // a disclosure. Measured on the source project, 40 of 112 summaries still
+        // exceed 200 chars after the narrative is removed.
+        // In a LOOSE list marked wraps each item's content in a <p>, and the HTML
+        // parser closes an open <p> the moment a <details> starts. The disclosure
+        // therefore escapes the wrapper span and becomes a third flex child of the
+        // <li>, landing beside the text as a narrow column instead of under it.
+        // Putting it back is deterministic; the alternative, flex-wrap on the row,
+        // was tried and reverted because it makes long items break to a new line
+        // rather than shrink.
+        function reuniteTaskDetails(root) {
+            root.querySelectorAll('li > details.task-detail').forEach(det => {
+                const body = det.parentElement.querySelector('.task-body');
+                if (body) body.appendChild(det);
+            });
+        }
+
+        function clampLongSummaries(root) {
+            const sums = [...root.querySelectorAll('.task-sum')];
+            // Clamp first, measure second. Without the clamp applied there is no
+            // overflow to detect: an unconstrained box reports scrollHeight equal
+            // to clientHeight however long its text is. Batched into two passes so
+            // this costs two reflows rather than two per item.
+            sums.forEach(s => s.classList.add('is-clamped'));
+            const overflowing = sums.filter(s => s.scrollHeight > s.clientHeight + 1);
+            const keep = new Set(overflowing);
+            sums.forEach(s => { if (!keep.has(s)) s.classList.remove('is-clamped'); });
+            overflowing.forEach(sum => {
+                const more = document.createElement('button');
+                more.type = 'button';
+                more.className = 'task-more';
+                more.textContent = 'more';
+                more.addEventListener('click', () => {
+                    more.textContent = sum.classList.toggle('is-open') ? 'less' : 'more';
+                });
+                sum.after(more);
+            });
+        }
+
+        // A plan file that was never filled in after creation. Measured across the
+        // 24 active projects on the machine this was written for: 22 still carry
+        // the template's placeholders and only 2 were ever written. Rendering
+        // "Success Criteria: TBD" as if it were the plan is worse than saying so,
+        // because a stale page reads as a current one.
+        function planIsStub(md) {
+            const body = md.replace(/^---\n[\s\S]*?\n---\n/, '');
+            const empty = (h) => {
+                const v = (extractSection(body, h) || '').trim();
+                return v === '' || v.toUpperCase() === 'TBD';
+            };
+            return empty('Success Criteria') && empty('Files to Modify');
+        }
+
+        function stubPlanNotice(md, filePath) {
+            const created = (md.match(/^created:\s*(\S+)/m) || [])[1];
+            const title = (md.match(/^#\s+(.+)$/m) || [])[1];
+            return `<div class="pm-empty stub-plan">
+                <p>This plan is still the template it was created from${created ? ` on ${escapeHtml(created)}` : ''}. Success Criteria and Files to Modify were never filled in${title ? `, and the title still reads "${escapeHtml(title)}"` : ''}.</p>
+                <p>The live picture is in <strong>Tasks</strong> and <strong>Context</strong>.</p>
+                <p>To fill it in, edit <code>${escapeHtml(filePath || 'the plan file')}</code>, or ask your agent to write the plan.</p>
+                <button type="button" class="task-more" onclick="this.nextElementSibling.hidden = !this.nextElementSibling.hidden">Show template anyway</button>
+                <div class="md-rendered" hidden></div>
+            </div>`;
+        }
+
         async function renderTaskTab(tab) {
             // Special handling for updates tab - fetch from API
             if (tab === 'updates') {
@@ -11760,7 +11954,17 @@ function renderAttention(data) {
                 const helpHtml = help
                     ? `<div class="panel-help"><button class="panel-help-i" type="button" aria-label="Task numbering format" aria-describedby="taskNumberingHelp">?</button><div class="panel-help-tip" role="tooltip" id="taskNumberingHelp">${renderMarkdown(help)}</div></div>`
                     : '';
-                document.getElementById(tabTargetId).innerHTML = helpHtml + renderMarkdown(body);
+                document.getElementById(tabTargetId).innerHTML =
+                    helpHtml + taskStatStrip() + renderMarkdown(collapseTaskNarratives(body));
+                reuniteTaskDetails(document.getElementById(tabTargetId));
+                clampLongSummaries(document.getElementById(tabTargetId));
+                return;
+            }
+            if (tab === 'plan' && planIsStub(fileData.content)) {
+                const target = document.getElementById(tabTargetId);
+                target.innerHTML = stubPlanNotice(fileData.content, fileData.filename);
+                target.querySelector('.stub-plan > .md-rendered').innerHTML =
+                    renderMarkdown(fileData.content);
                 return;
             }
             const html = renderMarkdown(fileData.content);
