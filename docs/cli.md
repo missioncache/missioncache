@@ -110,6 +110,14 @@ Scans every active project's context file and reports, per project: a stale `Las
 
 Report-only: exit code is always 0, warnings or not. The thresholds are constants in `missioncache_db/context_health.py`, not config keys. The same warnings surface per-project in the `/missioncache:load` digest, so `health` is mainly the fleet-wide sweep.
 
+## Editor-extension snapshot
+
+```bash
+missioncache-db extension-state [--dir PATH]
+```
+
+One-call JSON snapshot consumed by the MissionCache editor extension (VSCode/Cursor): every active project newest-first, each with task progress, resolved tasks/context file paths, the context file's last-save time, fork parent, and a `dir_match` flag when `--dir` (walked up to its git root) equals the project's registered repo path, plus update-availability from `update-check.json`. The output is machine-oriented; humans want `list-active`. The `schema` field versions the payload - the extension refuses shapes it does not know.
+
 ## Bulk repo registration
 
 ```bash
