@@ -6,6 +6,12 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-19.1
+
+Published package versions: missioncache-install 1.0.12. Claude Code plugin 1.0.18 and the other four packages are unchanged since 2026-08-19.
+
+- The missioncache-install test suite no longer rewrites the developer's own install state. `isolated_home` redirects `Path.home()` and the module-level state paths at a pytest tmp dir, but it was opt-in and 31 tests in `test_cli.py` never asked for it; those that reach `main()` hit `state.set_mode` against the real `~/.claude/missioncache-install.state.json`, and the mode resolved to `local` because pytest runs with the repo root as cwd, where the plugin marker lives. So a full suite run silently converted a PyPI install's record to a maintainer one, and the next `uvx missioncache-install --update` from anywhere but the clone died with `RuntimeError: Internal error: local-mode installer called without repo_root set`. That reached a real machine on 2026-08-19 and cost a failed update. The fixture is autouse now, since one that has to be remembered gets forgotten, and a test that deliberately requests no fixture asserts `STATE_FILE` never resolves under the real home (comparing against `os.path.expanduser`, because the fixture patches `Path.home` and the obvious comparison compares the sandbox with itself). The second half is independent: `update_all` deliberately adopts the RECORDED mode so an update cannot flip a pypi install to an editable one, but adopting `local` needs a clone and nothing checked, so the mismatch surfaced as an internal error partway through rather than a message. It now fails through `ui.fail` before any component runs, and says to re-run from the clone or reinstall to switch to PyPI mode; state records the mode but never where the clone was, so there is nothing to recover the path from. The reverse pairing (recorded `pypi`, run from a clone, `repo_root` set) needs no guard: all seven `_require_repo` call sites sit behind `ctx.mode == "local"`. Each of the three new tests was confirmed to fail with its fix removed. (missioncache-install)
+
 ## 2026-08-19
 
 Published package versions: missioncache-dashboard 1.0.17, missioncache-install 1.0.11. Claude Code plugin 1.0.18. (missioncache-db 1.0.22, mcp-missioncache 1.0.26 and missioncache-auto 1.0.4 are unchanged this cycle and keep their versions.)
