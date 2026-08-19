@@ -730,34 +730,35 @@ def update_tasks_file(
         }
         completed_numbers_seen.extend(sorted(pre_unchecked & post_checked))
 
-        # Add new tasks (before Phase 2/Validation section)
         if new_tasks:
-            # Find the highest existing task number to continue numbering
-            existing_numbers = re.findall(
-                r"^\s*[-*]\s*\[[x\s]\]\s*(\d+)\.", content, re.MULTILINE
-            )
-            next_num = max([int(n) for n in existing_numbers], default=0) + 1
-
-            new_tasks_lines = []
-            for i, task in enumerate(new_tasks):
-                new_tasks_lines.append(f"- [ ] {next_num + i}. {task}")
-            new_tasks_md = "\n".join(new_tasks_lines)
-
-            # Find a good insertion point (before Phase 2 or Validation)
-            insertion_patterns = [
-                r"(## Phase 2)",
-                r"(## Validation)",
-                r"(## Notes)",
+            # Numbering comes from the canonical parser, not a local regex. The
+            # old one matched `[x\s]` and a bare `\d+`, so a hand-edited `[X]`
+            # or a letter-suffixed `54a` did not raise the max and the next task
+            # collided with an existing number.
+            # parse_tasks_md only yields numbers matching [0-9]+(\.[0-9]+)*[a-z]?,
+            # so the leading integer is always there to take.
+            tops = [
+                int(re.match(r"\d+", item.number).group())
+                for item in parse_tasks_md(content)
             ]
-            inserted = False
-            for pattern in insertion_patterns:
-                if re.search(pattern, content):
-                    content = re.sub(pattern, f"{new_tasks_md}\n\n\\1", content)
-                    inserted = True
-                    break
+            next_num = max(tops, default=0) + 1
 
-            if not inserted:
-                content += f"\n{new_tasks_md}\n"
+            new_tasks_md = "\n".join(
+                f"- [ ] {next_num + i}. {task}" for i, task in enumerate(new_tasks)
+            )
+
+            # Append to a dated section instead of hunting for an anchor. The
+            # old code ran an UNANCHORED re.sub with the default count=0 against
+            # `## Phase 2` / `## Validation` / `## Notes`, so it inserted at every
+            # occurrence including one inside an existing task's description,
+            # splitting that line in half and creating the new task twice. It
+            # also landed mid-file (the first anchor is usually near the top),
+            # which is why physical order drifted away from numbering over time.
+            # A dated section keeps same-day additions together and keeps the
+            # file's order matching its numbers.
+            content = _append_to_section(
+                content, f"Additions ({datetime.now().strftime('%Y-%m-%d')})", new_tasks_md
+            )
 
             updates_made.append(f"Added {len(new_tasks)} new tasks")
 

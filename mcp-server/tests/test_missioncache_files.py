@@ -364,6 +364,62 @@ class TestRecentChangesConsolidation:
 
 
 class TestUpdateTasksFile:
+    def test_new_task_does_not_corrupt_a_line_mentioning_the_anchor(self, tmp_path):
+        """A task whose own text names a heading must survive an insertion.
+
+        The insertion used to run an unanchored re.sub with the default
+        count=0 against "## Phase 2" / "## Validation" / "## Notes", so every
+        occurrence got an insertion, including one inside an existing task's
+        description. That split the existing line in half and wrote the new
+        task twice.
+        """
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(
+            "# T - Tasks\n\n## Phase 1\n\n"
+            "- [x] 1. Refactor the `## Phase 2` anchor handling\n\n"
+            "## Phase 2: Real heading\n\n- [ ] 2. Something\n\n## Notes\n\n- none\n"
+        )
+
+        update_tasks_file(str(tasks_file), new_tasks=["NEW TASK"])
+
+        content = tasks_file.read_text()
+        assert "- [x] 1. Refactor the `## Phase 2` anchor handling" in content, \
+            "the existing task line was split by the insertion"
+        assert content.count("NEW TASK") == 1, "the new task was inserted more than once"
+
+    def test_new_task_numbering_sees_uppercase_and_letter_suffixes(self, tmp_path):
+        """next_num comes from the canonical parser, not a local regex.
+
+        The old regex matched `[x\\s]` and a bare `\\d+`, so a hand-edited
+        `[X]` and a letter-suffixed `54a` were both invisible to it and the
+        next number collided with an item already in the file.
+        """
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text(
+            "# T\n\n## Phase 1\n\n- [X] 7. upper-case checkbox\n- [ ] 54a. letter suffix\n"
+        )
+
+        update_tasks_file(str(tasks_file), new_tasks=["after"])
+
+        assert "- [ ] 55. after" in tasks_file.read_text()
+
+    def test_same_day_additions_share_one_section(self, tmp_path):
+        """Two calls on one day append to the same dated section.
+
+        A section per call would produce a heading per call on a busy day.
+        """
+        tasks_file = tmp_path / "tasks.md"
+        tasks_file.write_text("# T\n\n## Phase 1\n\n- [ ] 1. a\n")
+
+        update_tasks_file(str(tasks_file), new_tasks=["first"])
+        update_tasks_file(str(tasks_file), new_tasks=["second"])
+
+        content = tasks_file.read_text()
+        headings = [l for l in content.splitlines() if l.startswith("## Additions (")]
+        assert len(headings) == 1, f"expected one dated section, got {headings}"
+        assert "- [ ] 2. first" in content
+        assert "- [ ] 3. second" in content
+
     def test_marks_task_completed(self, tmp_path, sample_tasks_md):
         """update_tasks_file marks matching task descriptions as [x]."""
         tasks_file = tmp_path / "tasks.md"
