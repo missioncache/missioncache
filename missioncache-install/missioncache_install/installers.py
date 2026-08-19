@@ -1077,6 +1077,19 @@ def update_all(ctx: InstallContext) -> None:
     # a pypi install to an editable one (or vice versa).
     recorded = st.get("mode")
     if recorded in ("pypi", "local") and recorded != ctx.mode:
+        # Adopting "local" needs a clone: every local-mode installer resolves
+        # paths through _require_repo, and repo_root is only populated when the
+        # run started inside one. Without this check the mismatch surfaces as an
+        # internal-error traceback partway through the update, after the first
+        # component has already printed its step header. State is not enough to
+        # recover the path - it records the mode, never where the clone was.
+        if recorded == "local" and ctx.repo_root is None:
+            ui.fail(
+                "This install is recorded as maintainer (local) mode, which updates "
+                "from a missioncache clone, but this is not a clone. Either re-run "
+                "the update from your clone, or run `uvx missioncache-install` from a "
+                "non-clone directory to switch the install to PyPI mode."
+            )
         ctx = replace(ctx, mode=recorded)
     ctx = replace(ctx, updating=True)
     ui.info(f"Updating: {', '.join(c.replace('_', '-') for c in tracked)}")

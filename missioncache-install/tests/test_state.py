@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from missioncache_install import state
@@ -123,3 +124,23 @@ def test_load_migrates_legacy_orbit_component_keys(isolated_home: Path) -> None:
     state.load()
     assert state.STATE_FILE.stat().st_mtime_ns == first_mtime, \
         "A second load() on already-migrated state must not rewrite the file"
+
+
+def test_state_file_never_points_at_the_real_home() -> None:
+    """The sandbox must hold without being asked for.
+
+    This test deliberately requests NO fixture. `isolated_home` is autouse, so
+    STATE_FILE still resolves under the pytest tmp dir; if someone makes it
+    opt-in again, this is the test that says so. Before 2026-08-19 it was
+    opt-in, and a full suite run rewrote the developer's real install state to
+    mode "local", which broke `uvx missioncache-install --update` from any
+    directory outside the clone.
+    """
+    # os.path.expanduser is the real home: the fixture patches Path.home, so
+    # comparing against that would compare the sandbox with itself.
+    real_home = Path(os.path.expanduser("~")).resolve()
+    assert real_home not in state.STATE_FILE.resolve().parents, (
+        f"STATE_FILE resolves to {state.STATE_FILE} under the real home - the "
+        "isolation fixture is not autouse, and running this suite will "
+        "corrupt the developer's install state"
+    )
