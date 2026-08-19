@@ -3926,6 +3926,10 @@
             opacity: .75;
         }
 
+        /* The table counts differently from the header above it: numbered items
+           only. Say so where the counts are, not in a footnote. */
+        .structure-summary .structure-unnumbered { color: var(--text-muted); cursor: help; }
+
         /* Task list: the summary is the item's own description, the <details>
            holds the shipping narrative that used to sit inline. */
         /* One flex child, so the disclosure sits under the text rather than
@@ -12140,6 +12144,9 @@ function renderAttention(data) {
                             ${data.project_mode === 'hybrid' ? `
                                 <span>• ${data.auto_count} auto (${autoRemaining} remaining)</span>
                                 <span>• ${data.inter_count} interactive (${interRemaining} remaining)</span>
+                            ` : ''}
+                            ${data.unnumbered_count ? `
+                                <span class="structure-unnumbered" title="Items without a leading number have no identity to hang a dependency on, so the table and the graph leave them out.">• ${data.unnumbered_count} unnumbered, not listed</span>
                             ` : ''}
                         </div>
                         ${hasGraph ? `
