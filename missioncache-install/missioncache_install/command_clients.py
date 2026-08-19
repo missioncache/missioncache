@@ -38,8 +38,8 @@ Per-tool destination summary:
 | OpenCode | ~/.config/opencode/commands/missioncache-<name>.md         | filesystem only (filename = cmd)    |
 | VSCode   | ~/.missioncache/vscode/prompts/missioncache-<name>.prompt.md      | chat.promptFilesLocations in user   |
 |          |                                                     | settings.json                       |
-| Codex    | ~/.missioncache/codex-marketplace/plugins/missioncache/commands/  | codex plugin marketplace add +      |
-|          | missioncache-<name>.md (plus marketplace.json + plugin.json) | [plugins."missioncache@missioncache"] stanza in |
+| Codex    | ~/.missioncache/codex-marketplace/plugins/missioncache/skills/    | codex plugin marketplace add +      |
+|          | missioncache-<name>/SKILL.md (plus marketplace.json + plugin.json) | [plugins."missioncache@missioncache"] stanza in |
 |          |                                                     | ~/.codex/config.toml                |
 
 Source of truth: MissionCache's repo `commands/*.md`. PyPI mode reads from the
@@ -84,7 +84,7 @@ CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 # installer-tooling changes. Codex caches the plugin by this version, so any
 # change to the rendered command content MUST bump it or updated installs
 # keep serving the old cached copy.
-CODEX_PLUGIN_VERSION = "1.2.0"
+CODEX_PLUGIN_VERSION = "1.3.0"
 
 # Substitution regex for the MCP tool prefix. Anchored at a word boundary so
 # the rewrite only matches the full `mcp__plugin_missioncache_pm__` literal and not
@@ -625,9 +625,9 @@ def install_codex_commands(ctx: "InstallContext") -> None:
             "fixing them."
         )
         return
-    listed = ", ".join(f"/missioncache-{name}" for name in CANONICAL_COMMANDS)
+    listed = ", ".join(f"$missioncache-{name}" for name in CANONICAL_COMMANDS)
     ui.success(
-        f"Installed Codex MissionCache plugin ({command_count} commands). "
+        f"Installed Codex MissionCache plugin ({command_count} skills). "
         f"Restart Codex to load {listed}."
     )
 
@@ -638,16 +638,29 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
     Layout:
       <root>/.agents/plugins/marketplace.json   - registry pointing at MissionCache
       <root>/plugins/missioncache/.codex-plugin/plugin.json   - plugin manifest
-      <root>/plugins/missioncache/commands/missioncache-<name>.md    - the canonical commands
+      <root>/plugins/missioncache/skills/missioncache-<name>/SKILL.md  - native skills
 
-    Returns the count of commands written.
+    Commands ship as NATIVE SKILLS, not commands/*.md. Codex has no plugin
+    slash commands (hardcoded enum); it migrates plugin commands/*.md into
+    skills at install time, but only files under MAX_MIGRATED_COMMAND_SKILL_BYTES
+    = 4,000 bytes (codex-rs/core-plugins/src/command_migration/plugin.rs), which
+    covered exactly 1 of our 8 (done, 3,607 bytes; the rest are 5,231-13,620).
+    Native skills under skills/ have no content cap (name capped at 64 chars)
+    and are invoked as `$missioncache-<name>`. No commands/ dir is written -
+    it would make Codex migrate `done` into a SECOND, duplicate skill.
+
+    Returns the count of skills written.
     """
     plugin_dir = CODEX_MARKETPLACE_DIR / "plugins" / "missioncache"
-    commands_dir = plugin_dir / "commands"
+    skills_dir = plugin_dir / "skills"
     codex_plugin_dir = plugin_dir / ".codex-plugin"
     registry_path = CODEX_MARKETPLACE_DIR / ".agents" / "plugins" / "marketplace.json"
 
-    commands_dir.mkdir(parents=True, exist_ok=True)
+    # Drop the pre-1.3.0 commands/ tree: stale copies would be re-migrated by
+    # Codex into a duplicate `done` skill alongside the native one.
+    shutil.rmtree(plugin_dir / "commands", ignore_errors=True)
+
+    skills_dir.mkdir(parents=True, exist_ok=True)
     codex_plugin_dir.mkdir(parents=True, exist_ok=True)
     registry_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -663,8 +676,8 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
             "displayName": "MissionCache",
             "shortDescription": "Project management with time tracking",
             "longDescription": (
-                "MissionCache's slash commands inside Codex. Provides "
-                + ", ".join(f"/missioncache-{name}" for name in CANONICAL_COMMANDS)
+                "MissionCache's project workflows inside Codex, as skills. Provides "
+                + ", ".join(f"$missioncache-{name}" for name in CANONICAL_COMMANDS)
                 + " for managing MissionCache projects. Requires the MissionCache MCP server "
                 "to be registered separately via `codex mcp add missioncache -- mcp-missioncache`."
             ),
@@ -702,10 +715,45 @@ def _build_codex_marketplace(ctx: "InstallContext") -> int:
         except FileNotFoundError as e:
             ui.warn(str(e))
             continue
-        (commands_dir / f"missioncache-{name}.md").write_text(_render_for_non_claude(content), encoding="utf-8")
+        skill_dir = skills_dir / f"missioncache-{name}"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            _render_codex_skill(name, content), encoding="utf-8"
+        )
         written += 1
-    ui.detail(f"Built Codex marketplace at {CODEX_MARKETPLACE_DIR} ({written} commands)")
+    ui.detail(f"Built Codex marketplace at {CODEX_MARKETPLACE_DIR} ({written} skills)")
     return written
+
+
+# Frontmatter description extractor for skill generation. The canonical
+# command files carry `description: "..."` in their YAML frontmatter.
+_COMMAND_DESCRIPTION_RE = re.compile(
+    r'^description:\s*"?([^"\n]+?)"?\s*$', re.MULTILINE
+)
+# Leading YAML frontmatter block (--- ... ---) of a command source.
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
+
+
+def _render_codex_skill(name: str, content: str) -> str:
+    """Render one canonical command as a Codex native skill document.
+
+    The skill body is the non-Claude render of the command with the source
+    frontmatter stripped; the skill's own frontmatter carries the name Codex
+    invokes it by ($missioncache-<name>) and a description that keeps the
+    command's one-liner as the trigger text.
+    """
+    match = _COMMAND_DESCRIPTION_RE.search(content)
+    description = match.group(1).strip() if match else f"MissionCache {name} workflow"
+    body = _FRONTMATTER_RE.sub("", _render_for_non_claude(content), count=1)
+    frontmatter = (
+        "---\n"
+        f"name: missioncache-{name}\n"
+        f"description: >-\n  {description}.\n"
+        f"  Use when the user invokes $missioncache-{name} or asks for this "
+        "MissionCache workflow by name.\n"
+        "---\n\n"
+    )
+    return frontmatter + body
 
 
 def _register_codex_marketplace() -> bool:
