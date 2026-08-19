@@ -60,7 +60,13 @@ VSCODE_APP_PATHS: tuple[Path, ...] = (
 # Shared: ensure mcp-missioncache is on PATH (prereq for every non-Claude tool)
 # ---------------------------------------------------------------------------
 
-def _ensure_mcp_missioncache_on_path() -> bool:
+# Set once the binary has been (re)installed in this process, so an --update
+# touching all three clients pays for one install rather than three. A run is
+# one process, so this needs no clearing.
+_MCP_BINARY_REFRESHED = False
+
+
+def _ensure_mcp_missioncache_on_path(upgrade: bool = False) -> bool:
     """Install mcp-missioncache via pipx/uv if not already on PATH. Idempotent.
 
     Returns True when registration should proceed, False when the prereq
@@ -68,10 +74,25 @@ def _ensure_mcp_missioncache_on_path() -> bool:
     yet propagated into the current process's PATH still returns True - the
     config entry is stored as a literal command string, and the tool resolves
     it on its own next session, after the user's shell rehashes.
+
+    ``upgrade`` is set on --update runs. Without it this returned early on
+    "already on PATH" and never moved the version, so the binary Codex,
+    OpenCode and VSCode actually run stayed pinned at whatever was current
+    when it was first installed - for the life of the install. Claude Code was
+    unaffected, since it runs the server out of the plugin cache instead,
+    which is why this stayed invisible: the tool that gets the most use is the
+    one that does not depend on this path.
     """
-    if shutil.which("mcp-missioncache"):
-        ui.detail(f"mcp-missioncache already on PATH at {shutil.which('mcp-missioncache')}")
+    global _MCP_BINARY_REFRESHED
+    on_path = shutil.which("mcp-missioncache")
+    if on_path and not upgrade:
+        ui.detail(f"mcp-missioncache already on PATH at {on_path}")
         return True
+    if on_path and _MCP_BINARY_REFRESHED:
+        ui.detail(f"mcp-missioncache already refreshed this run ({on_path})")
+        return True
+    if on_path:
+        ui.detail("Refreshing mcp-missioncache (the server Codex/OpenCode/VSCode run)")
     ui.detail("Installing mcp-missioncache (required for non-Claude MCP clients)")
     # Late import: installers imports this module at the top, so dodge the
     # circular at module-load time. _pipx_install handles pipx -> uv fallback.
@@ -81,6 +102,7 @@ def _ensure_mcp_missioncache_on_path() -> bool:
     except subprocess_utils.CommandFailed as e:
         ui.warn(f"Failed to install mcp-missioncache: {e.stderr.strip() or 'unknown error'}")
         return False
+    _MCP_BINARY_REFRESHED = True
     if shutil.which("mcp-missioncache"):
         ui.detail(f"mcp-missioncache installed at {shutil.which('mcp-missioncache')}")
     else:
@@ -102,7 +124,7 @@ def install_codex(ctx: "InstallContext") -> None:
         )
         ctx.mcp_success["codex"] = False
         return
-    if not _ensure_mcp_missioncache_on_path():
+    if not _ensure_mcp_missioncache_on_path(upgrade=ctx.updating):
         ctx.mcp_success["codex"] = False
         raise subprocess_utils.CommandFailed(
             ["missioncache-install", "codex"], 1, "",
@@ -275,7 +297,7 @@ def install_opencode(ctx: "InstallContext") -> None:
         )
         ctx.mcp_success["opencode"] = False
         return
-    if not _ensure_mcp_missioncache_on_path():
+    if not _ensure_mcp_missioncache_on_path(upgrade=ctx.updating):
         ctx.mcp_success["opencode"] = False
         raise subprocess_utils.CommandFailed(
             ["missioncache-install", "opencode"], 1, "",
@@ -386,7 +408,7 @@ def install_vscode(ctx: "InstallContext") -> None:
         )
         ctx.mcp_success["vscode"] = False
         return
-    if not _ensure_mcp_missioncache_on_path():
+    if not _ensure_mcp_missioncache_on_path(upgrade=ctx.updating):
         ctx.mcp_success["vscode"] = False
         raise subprocess_utils.CommandFailed(
             ["missioncache-install", "vscode"], 1, "",
