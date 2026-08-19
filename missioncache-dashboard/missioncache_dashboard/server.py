@@ -1025,6 +1025,17 @@ def parse_missioncache_progress(repo_path: str, task_full_path: str) -> dict[str
 
             # Parse per-task mode markers
             task_modes = parse_task_modes_from_content(content)
+
+            # The counts above come from a raw checkbox regex, the table below
+            # from a parser that requires a leading task number. A file with
+            # unnumbered items (older projects carry an "Already Completed"
+            # section written before numbering was a convention) makes the two
+            # disagree, and the table silently rendered fewer rows than its own
+            # header claimed. Report the gap rather than hide it: an unnumbered
+            # item has no identity, so it cannot join the dependency graph, and
+            # inventing one would be worse than saying it is not shown.
+            result["unnumbered_count"] = max(0, total_items - len(task_modes))
+
             if task_modes:
                 result["task_modes"] = task_modes
 
@@ -1355,6 +1366,10 @@ async def api_task_structure(task_id: int):
             "inter_remaining": progress.get("inter_remaining", 0),
             "completed_count": progress.get("completed_count", 0),
             "total_count": progress.get("total_count", 0),
+            # Checkbox lines the table cannot show, because they carry no
+            # number. The panel states the gap rather than rendering fewer
+            # rows than its own header claims.
+            "unnumbered_count": progress.get("unnumbered_count", 0),
             "has_prompts_dir": has_prompts_dir,
             # Blocking summary
             "runnable_count": blocking_info["runnable_count"],
