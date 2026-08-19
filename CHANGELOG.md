@@ -6,6 +6,12 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-19.5
+
+Published package versions: missioncache-install 1.0.14. Everything else is unchanged since 2026-08-19.4.
+
+- `--update` upgrades the MCP server for the non-Claude tools instead of skipping it. `_ensure_mcp_missioncache_on_path` returned early whenever `mcp-missioncache` was already on PATH, so the binary Codex, OpenCode and VSCode run stayed pinned at whatever version was current when it was first installed, for the life of the install. Claude Code was unaffected because it runs the server out of the plugin cache rather than from PATH, which is exactly why this stayed invisible: the tool that gets the most use is the one that does not depend on this path, and the three that do are the ones the multi-tool story rests on. Update runs refresh it now, once per run rather than once per client. Found immediately after the release that fixed the mirror-image problem on the plugin side, where the plugin was missing a version bump; between them a fix could reach either half of the user base and not the other. (missioncache-install)
+
 ## 2026-08-19.4
 
 Published package versions: mcp-missioncache 1.0.28, missioncache-dashboard 1.0.19. Claude Code plugin 1.0.19, which is what carries the 1.0.27 MCP fixes to Claude Code for the first time. missioncache-db 1.0.22, missioncache-auto 1.0.5 and missioncache-install 1.0.13 are unchanged.
