@@ -1351,6 +1351,46 @@ CREATE INDEX IF NOT EXISTS idx_action_items_task ON action_items(task_id);
 CREATE INDEX IF NOT EXISTS idx_action_items_status_due ON action_items(status, due_date);
 CREATE INDEX IF NOT EXISTS idx_stakeholders_task ON stakeholders(task_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_task ON tickets(task_id);
+
+-- Parallel agent execution plans (consumed by the MCP planning tools)
+CREATE TABLE IF NOT EXISTS plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    started_at TEXT,
+    completed_at TEXT,
+    metadata TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    agent_name TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    prompt TEXT,
+    result TEXT,
+    error_message TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    started_at TEXT,
+    completed_at TEXT,
+    metadata TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    depends_on TEXT NOT NULL,
+    UNIQUE(plan_id, agent_id, depends_on)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+CREATE INDEX IF NOT EXISTS idx_plans_task_id ON plans(task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_exec_plan_agent ON agent_executions(plan_id, agent_id);
 """
 
 
@@ -4756,6 +4796,202 @@ class TaskDB:
                 "executions_deleted": len(ids_to_delete),
                 "logs_deleted": logs_count,
             }
+
+    # =========================================================================
+    # Planning (parallel agent execution plans)
+    # =========================================================================
+
+    def create_plan(
+        self,
+        name: str,
+        task_id: Optional[int] = None,
+        metadata: Optional[dict] = None,
+    ) -> int:
+        """Create an execution plan and return its ID. Status starts at 'draft'."""
+        metadata_json = json.dumps(metadata) if metadata else None
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO plans (name, task_id, status, metadata)
+                   VALUES (?, ?, 'draft', ?)""",
+                (name, task_id, metadata_json),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_plan(self, plan_id: int) -> Optional[dict]:
+        """Get a plan as a dict (metadata JSON-decoded), or None."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM plans WHERE id = ?", (plan_id,)
+            ).fetchone()
+        if not row:
+            return None
+        plan = dict(row)
+        plan["metadata"] = json.loads(plan["metadata"]) if plan["metadata"] else None
+        return plan
+
+    def update_plan(
+        self,
+        plan_id: int,
+        name: Optional[str] = None,
+        status: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> Optional[dict]:
+        """Update a plan and return it.
+
+        Transitioning to 'running' stamps started_at; transitioning to
+        'completed' or 'failed' stamps completed_at.
+        """
+        updates = []
+        params: list = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+            if status == "running":
+                updates.append("started_at = datetime('now', 'localtime')")
+            elif status in ("completed", "failed"):
+                updates.append("completed_at = datetime('now', 'localtime')")
+        if metadata is not None:
+            updates.append("metadata = ?")
+            params.append(json.dumps(metadata))
+        if not updates:
+            return self.get_plan(plan_id)
+        params.append(plan_id)
+        with self.connection() as conn:
+            conn.execute(
+                f"UPDATE plans SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            conn.commit()
+        return self.get_plan(plan_id)
+
+    def update_plan_status(self, plan_id: int, status: str) -> Optional[dict]:
+        """Set a plan's status (timestamps stamped per update_plan)."""
+        return self.update_plan(plan_id, status=status)
+
+    def add_agent_execution(
+        self,
+        plan_id: int,
+        agent_id: str,
+        agent_name: Optional[str] = None,
+        prompt: Optional[str] = None,
+        max_attempts: int = 3,
+        metadata: Optional[dict] = None,
+    ) -> int:
+        """Register an agent execution in a plan. Status starts at 'pending'."""
+        metadata_json = json.dumps(metadata) if metadata else None
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO agent_executions
+                   (plan_id, agent_id, agent_name, status, prompt, max_attempts, metadata)
+                   VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
+                (plan_id, agent_id, agent_name, prompt, max_attempts, metadata_json),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_plan_agents(self, plan_id: int) -> List[dict]:
+        """Get all agent executions for a plan, ordered by agent_id."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM agent_executions WHERE plan_id = ? ORDER BY agent_id",
+                (plan_id,),
+            ).fetchall()
+        agents = []
+        for row in rows:
+            agent = dict(row)
+            agent["metadata"] = (
+                json.loads(agent["metadata"]) if agent["metadata"] else None
+            )
+            agents.append(agent)
+        return agents
+
+    def update_agent_execution(
+        self,
+        plan_id: int,
+        agent_id: str,
+        status: Optional[str] = None,
+        output: Optional[dict] = None,
+        error: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Update an agent execution, addressed by (plan_id, agent_id).
+
+        Transitioning to 'running' stamps started_at and counts an attempt;
+        transitioning to 'completed' or 'failed' stamps completed_at.
+        `output` is stored JSON-encoded in the result column.
+        """
+        updates = []
+        params: list = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+            if status == "running":
+                updates.append("started_at = datetime('now', 'localtime')")
+                updates.append("attempt_count = attempt_count + 1")
+            elif status in ("completed", "failed"):
+                updates.append("completed_at = datetime('now', 'localtime')")
+        if output is not None:
+            updates.append("result = ?")
+            params.append(json.dumps(output))
+        if error is not None:
+            updates.append("error_message = ?")
+            params.append(error)
+        with self.connection() as conn:
+            if updates:
+                params.extend([plan_id, agent_id])
+                cursor = conn.execute(
+                    f"""UPDATE agent_executions SET {', '.join(updates)}
+                        WHERE plan_id = ? AND agent_id = ?""",
+                    tuple(params),
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return None
+            row = conn.execute(
+                "SELECT * FROM agent_executions WHERE plan_id = ? AND agent_id = ?",
+                (plan_id, agent_id),
+            ).fetchone()
+        if not row:
+            return None
+        agent = dict(row)
+        agent["metadata"] = json.loads(agent["metadata"]) if agent["metadata"] else None
+        return agent
+
+    def add_agent_dependency(self, plan_id: int, agent_id: str, depends_on: str) -> int:
+        """Add a dependency edge (agent_id depends on depends_on). Idempotent.
+
+        Returns the edge's row ID (existing ID when the edge is already there).
+        Raises ValueError on a self-dependency.
+        """
+        if agent_id == depends_on:
+            raise ValueError(f"Agent '{agent_id}' cannot depend on itself")
+        with self.connection() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO agent_dependencies (plan_id, agent_id, depends_on)
+                   VALUES (?, ?, ?)""",
+                (plan_id, agent_id, depends_on),
+            )
+            conn.commit()
+            row = conn.execute(
+                """SELECT id FROM agent_dependencies
+                   WHERE plan_id = ? AND agent_id = ? AND depends_on = ?""",
+                (plan_id, agent_id, depends_on),
+            ).fetchone()
+            return row["id"]
+
+    def get_agent_dependencies(self, plan_id: int, agent_id: str) -> List[str]:
+        """Get the agent_ids this agent depends on, sorted."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """SELECT depends_on FROM agent_dependencies
+                   WHERE plan_id = ? AND agent_id = ?
+                   ORDER BY depends_on""",
+                (plan_id, agent_id),
+            ).fetchall()
+        return [row["depends_on"] for row in rows]
 
 
 # =============================================================================

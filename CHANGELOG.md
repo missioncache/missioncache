@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- The seven planning tools (`create_plan`, `register_agent_execution`, `update_agent_status`, `get_plan_status`, `get_ready_agents`, `spawn_parallel_agents`, `complete_plan`) work for the first time. Every one of them crashed on first call with `'TaskDB' object has no attribute ...`: the tool layer was written against a DB interface that existed only on the dashboard's DuckDB analytics class, and even that class had different method signatures than the ones the tools call, so no wiring could have saved it - the feature had never run once. The plan, agent-execution and agent-dependency tables now live in SQLite next to everything else (source of truth for writes, per the documented contract), TaskDB implements the nine methods the tools actually call, and existing databases pick the tables up automatically on next open. Covered by 22 DB-layer tests and 23 tool-layer tests including the full three-agents-one-dependency workflow. (missioncache-db, mcp-server)
+
 ## 2026-08-19.5
 
 Published package versions: missioncache-install 1.0.14. Everything else is unchanged since 2026-08-19.4.
