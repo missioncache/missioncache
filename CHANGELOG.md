@@ -6,6 +6,10 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-19.7
+
+Published package versions: missioncache-install 1.0.15. Claude Code plugin 1.0.21. Everything else is unchanged since 2026-08-19.6.
+
 - Codex gets all eight MissionCache workflows as native skills, invoked as `$missioncache-<name>`, replacing the commands/ delivery that Codex could not load. Codex has no plugin slash commands (hardcoded command enum); it migrates a plugin's commands/*.md into skills at install time, but only files under 4,000 bytes (`MAX_MIGRATED_COMMAND_SKILL_BYTES`, codex-rs/core-plugins/src/command_migration/plugin.rs) - which covered exactly one of the eight (done, 3,607 bytes; the rest run 5,231-13,620). The installer now writes `skills/missioncache-<name>/SKILL.md` with proper name/description frontmatter into the local marketplace, drops the commands/ tree so the migrator cannot create a duplicate `done` skill, and bumps the Codex plugin to 1.3.0 so the plugin cache refreshes. Native skills have no content cap (verified in codex-rs skill parser: only the name is capped, at 64 chars). (missioncache-install)
 
 ## 2026-08-19.6
