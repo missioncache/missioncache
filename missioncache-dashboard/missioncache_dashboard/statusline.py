@@ -1894,6 +1894,22 @@ ADDON_ROW_GROUPS = _addon_row_groups(ADDONS)
 ADDON_LINE_COUNT = len(ADDON_ROW_GROUPS)
 
 
+def _force_utf8_stdout() -> None:
+    """Reconfigure stdout to UTF-8 when the platform default is anything else.
+
+    Claude Code spawns the statusline with a PIPED stdout, and on Windows a
+    piped Python stdout defaults to cp1252 - which cannot encode the emoji
+    every rendered line carries, so out.write() raised UnicodeEncodeError on
+    every render and the crash guard drew a blank statusline. The terminal
+    itself speaks UTF-8 (PEP 528), only the pipe default is wrong.
+    """
+    try:
+        if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def main() -> None:
     """Guarded entry point (pip script and `python statusline.py` alike).
 
@@ -1902,6 +1918,7 @@ def main() -> None:
     a guard only in `__main__` would leave the entry point rendering a blank
     statusline on any unhandled exception, with no trace written anywhere.
     """
+    _force_utf8_stdout()
     try:
         _run()
     except Exception:

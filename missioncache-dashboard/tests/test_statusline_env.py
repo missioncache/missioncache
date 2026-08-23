@@ -103,3 +103,44 @@ class TestDashboardUrlEnvVar:
         monkeypatch.setenv("MISSIONCACHE_DASHBOARD_URL", "")
         reloaded = reload_statusline()
         assert reloaded._DASHBOARD_URL == ""
+
+
+class TestUtf8StdoutForcing:
+    """The Windows blank-statusline bug: a piped stdout defaulting to cp1252
+    cannot encode the emoji in every rendered line. _force_utf8_stdout must
+    win over the environment's legacy default."""
+
+    def test_reconfigures_cp1252_pipe_to_utf8(self):
+        import subprocess
+        import sys
+
+        code = (
+            "import sys\n"
+            "from missioncache_dashboard.statusline import _force_utf8_stdout\n"
+            "_force_utf8_stdout()\n"
+            "sys.stdout.write('\\U0001f4c1 ok')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env={**__import__("os").environ, "PYTHONIOENCODING": "cp1252"},
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert "\U0001f4c1 ok".encode("utf-8") in result.stdout
+
+    def test_utf8_stdout_left_untouched(self):
+        import io
+        import sys
+
+        from missioncache_dashboard import statusline
+
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        original = sys.stdout
+        sys.stdout = stream
+        try:
+            statusline._force_utf8_stdout()
+            assert sys.stdout is stream
+            assert (sys.stdout.encoding or "").lower().replace("-", "") == "utf8"
+        finally:
+            sys.stdout = original

@@ -295,6 +295,14 @@ def build_stale_reminder(
 
 def main() -> None:
     """Entry point - read stdin, check for divergence, print reminder if any."""
+    # Windows: hook stdout is a pipe defaulting to cp1252, which cannot
+    # encode the reminder's warning emoji - same failure class as the
+    # statusline's blank-render bug. Force UTF-8 before any print.
+    try:
+        if (sys.stdout.encoding or "").lower().replace("-", "") != "utf8":
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):

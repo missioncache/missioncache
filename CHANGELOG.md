@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- Windows renders the statusline instead of a blank block. Claude Code spawns the statusline with a piped stdout, and on Windows a piped Python stdout defaults to cp1252 - which cannot encode the emoji every rendered line carries, so every render died on UnicodeEncodeError and the crash guard drew empty lines. The entry point now reconfigures stdout to UTF-8 when the platform default is anything else (the terminal itself already speaks UTF-8 - only the pipe default was wrong). Same guard added to the task-tracking reminder hook, the one other entry point that prints a character cp1252 cannot encode. Found and diagnosed live on a Windows machine; the PYTHONIOENCODING=utf-8 workaround in settings.json is no longer needed once this ships. (missioncache-dashboard, plugin)
+
 ## 2026-08-19.7
 
 Published package versions: missioncache-install 1.0.15. Claude Code plugin 1.0.21. Everything else is unchanged since 2026-08-19.6.
