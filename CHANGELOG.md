@@ -6,7 +6,12 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+## 2026-08-23
+
+Published package versions: missioncache-db 1.0.24, missioncache-dashboard 1.0.20. Claude Code plugin 1.0.22. mcp-missioncache, missioncache-auto and missioncache-install are unchanged.
+
 - Windows renders the statusline instead of a blank block. Claude Code spawns the statusline with a piped stdout, and on Windows a piped Python stdout defaults to cp1252 - which cannot encode the emoji every rendered line carries, so every render died on UnicodeEncodeError and the crash guard drew empty lines. The entry point now reconfigures stdout to UTF-8 when the platform default is anything else (the terminal itself already speaks UTF-8 - only the pipe default was wrong). Same guard added to the task-tracking reminder hook, the one other entry point that prints a character cp1252 cannot encode. Found and diagnosed live on a Windows machine; the PYTHONIOENCODING=utf-8 workaround in settings.json is no longer needed once this ships. (missioncache-dashboard, plugin)
+- New `missioncache-db extension-state [--dir PATH]` command: a one-call JSON snapshot of every active project (progress, resolved file paths, context-save time, fork parent, a dir-match flag for the given directory's git root, update availability). It is the data layer for the MissionCache editor extension, whose v0.1 source now lives in the repo under missioncache-extension/ - status bar + quick pick for VSCode and the Open VSX fork family, marketplace publication to follow. (missioncache-db)
 
 ## 2026-08-19.7
 
