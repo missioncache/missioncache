@@ -144,3 +144,57 @@ class TestUtf8StdoutForcing:
             assert (sys.stdout.encoding or "").lower().replace("-", "") == "utf8"
         finally:
             sys.stdout = original
+
+
+class TestOauthTokenNonMac:
+    """The Windows missing-Fable-counter bug: _get_oauth_token read only the
+    CLAUDE_OAUTH_TOKEN env var off macOS, never Claude Code's own
+    ~/.claude/.credentials.json, so the usage fetch (and the per-model
+    weekly row) silently never ran on Windows/Linux."""
+
+    @staticmethod
+    def _with_home(monkeypatch, tmp_path):
+        import pathlib
+
+        from missioncache_dashboard import statusline
+
+        monkeypatch.setattr(statusline, "IS_MACOS", False)
+        monkeypatch.delenv("CLAUDE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
+        return statusline
+
+    def test_reads_credentials_file(self, monkeypatch, tmp_path):
+        import json
+
+        statusline = self._with_home(monkeypatch, tmp_path)
+        creds_dir = tmp_path / ".claude"
+        creds_dir.mkdir()
+        (creds_dir / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": "file-token"}}),
+            encoding="utf-8",
+        )
+        assert statusline._get_oauth_token() == "file-token"
+
+    def test_env_var_overrides_file(self, monkeypatch, tmp_path):
+        import json
+
+        statusline = self._with_home(monkeypatch, tmp_path)
+        creds_dir = tmp_path / ".claude"
+        creds_dir.mkdir()
+        (creds_dir / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": "file-token"}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CLAUDE_OAUTH_TOKEN", "env-token")
+        assert statusline._get_oauth_token() == "env-token"
+
+    def test_missing_file_returns_none(self, monkeypatch, tmp_path):
+        statusline = self._with_home(monkeypatch, tmp_path)
+        assert statusline._get_oauth_token() is None
+
+    def test_corrupt_file_returns_none(self, monkeypatch, tmp_path):
+        statusline = self._with_home(monkeypatch, tmp_path)
+        creds_dir = tmp_path / ".claude"
+        creds_dir.mkdir()
+        (creds_dir / ".credentials.json").write_text("{not json", encoding="utf-8")
+        assert statusline._get_oauth_token() is None

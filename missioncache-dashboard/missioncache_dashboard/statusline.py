@@ -1245,7 +1245,13 @@ def get_health_status() -> list[dict]:
 # ============ USAGE DATA ============
 
 def _get_oauth_token() -> str | None:
-    """Read OAuth token from macOS Keychain or CLAUDE_OAUTH_TOKEN env var."""
+    """Read the Claude Code OAuth token, per platform.
+
+    macOS keeps it in the Keychain. Everywhere else Claude Code writes
+    ~/.claude/.credentials.json, which is what makes the usage-API rows
+    (including the per-model Fable cap) render on Windows and Linux; the
+    CLAUDE_OAUTH_TOKEN env var stays as an explicit override.
+    """
     if IS_MACOS:
         try:
             result = subprocess.run(
@@ -1258,8 +1264,15 @@ def _get_oauth_token() -> str | None:
             return creds.get("claudeAiOauth", {}).get("accessToken")
         except Exception:
             return None
-    else:
-        return os.environ.get("CLAUDE_OAUTH_TOKEN")
+    env_token = os.environ.get("CLAUDE_OAUTH_TOKEN")
+    if env_token:
+        return env_token
+    try:
+        creds_path = Path.home() / ".claude" / ".credentials.json"
+        creds = json.loads(creds_path.read_text(encoding="utf-8"))
+        return creds.get("claudeAiOauth", {}).get("accessToken")
+    except Exception:
+        return None
 
 
 def _parse_scoped_limit(limits: object) -> dict | None:
