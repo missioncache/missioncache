@@ -502,5 +502,25 @@
       "title": "/pulls",
       "uniques": 1
     }
+  ],
+  "2026-08-24": [
+    {
+      "count": 11,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 9
+    },
+    {
+      "count": 2,
+      "path": "/missioncache/missioncache/pulls",
+      "title": "/pulls",
+      "uniques": 2
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/docs/hooks.md",
+      "title": "/blob/main/docs/hooks.md",
+      "uniques": 1
+    }
   ]
 }
