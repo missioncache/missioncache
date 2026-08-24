@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- The per-model usage counter (the Fable weekly cap row) renders on Windows and Linux. The statusline's usage-API fetch is gated on the Claude Code OAuth token, and off macOS the token reader only looked at the CLAUDE_OAUTH_TOKEN env var - never at ~/.claude/.credentials.json, where Claude Code actually stores credentials on those platforms - so the fetch silently never ran and every API-driven usage row was macOS-only by construction. The reader now falls back to the credentials file, with the env var kept as an explicit override. Confirmed live on a Windows machine: credentials file present with the token key, env var unset, and the usage cache never written. (missioncache-dashboard)
+
 ## 2026-08-23
 
 Published package versions: missioncache-db 1.0.24, missioncache-dashboard 1.0.20. Claude Code plugin 1.0.22. mcp-missioncache, missioncache-auto and missioncache-install are unchanged.
