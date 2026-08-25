@@ -1305,3 +1305,68 @@ class TestImportedEventCannotForgeStructure:
             s["name"] for s in ch.section_index(ctx.read_text()) if "Ticket" in s["name"]
         )
         assert re.search(r"\(\d{4}-\d{2}-\d{2}\)$", heading), heading
+
+
+class TestPlanContentNormalization:
+    """Task-86 finding: agents pass lists and dicts in plan_content despite
+    the declared dict[str, str], and str.replace crashed on them
+    (TypeError: replace() argument 2 must be str, not list). Valid-shaped
+    agent input must render as markdown, never crash."""
+
+    def test_list_values_render_as_bullets(self, tmp_path):
+        result = create_missioncache_files(
+            task_name="plan-list-task",
+            tasks=["one"],
+            plan_content={"goals": ["ship it", "test it"], "risks": ["none really"]},
+        )
+        from pathlib import Path
+
+        plan = Path(result.plan_file).read_text(encoding="utf-8")
+        assert "- ship it\n- test it" in plan
+        assert "- none really" in plan
+
+    def test_dict_value_renders_as_key_bullets(self, tmp_path):
+        result = create_missioncache_files(
+            task_name="plan-dict-task",
+            tasks=["one"],
+            plan_content={"files": {"a.py": "entry point", "b.py": "helpers"}},
+        )
+        from pathlib import Path
+
+        plan = Path(result.plan_file).read_text(encoding="utf-8")
+        assert "- **a.py**: entry point" in plan
+        assert "- **b.py**: helpers" in plan
+
+    def test_strings_and_defaults_unchanged(self, tmp_path):
+        result = create_missioncache_files(
+            task_name="plan-str-task",
+            tasks=["one"],
+            plan_content={"summary": "just a string"},
+        )
+        from pathlib import Path
+
+        plan = Path(result.plan_file).read_text(encoding="utf-8")
+        assert "just a string" in plan
+        assert "N/A - research phase skipped" in plan
+
+    def test_empty_string_falls_back_to_default(self, tmp_path):
+        result = create_missioncache_files(
+            task_name="plan-empty-task",
+            tasks=["one"],
+            plan_content={"research_findings": ""},
+        )
+        from pathlib import Path
+
+        plan = Path(result.plan_file).read_text(encoding="utf-8")
+        assert "N/A - research phase skipped" in plan
+
+    def test_non_container_value_stringified(self, tmp_path):
+        result = create_missioncache_files(
+            task_name="plan-num-task",
+            tasks=["one"],
+            plan_content={"dependencies": 3},
+        )
+        from pathlib import Path
+
+        plan = Path(result.plan_file).read_text(encoding="utf-8")
+        assert "3" in plan
