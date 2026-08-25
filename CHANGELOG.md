@@ -6,6 +6,8 @@ All notable changes to MissionCache are documented in this file. Dates are ISO 8
 
 ## Unreleased
 
+- Updating on Windows no longer risks breaking the dashboard install. Windows refuses to delete a directory that holds a running executable, the dashboard server runs out of its own tool directory (uv or pipx layout alike), and uv removes site-packages before it fails - so an update against a live dashboard could leave a half-dead venv: statusline broken, zombie server answering from memory. The installer now stops every process running from the dashboard's tool roots before upgrading (found by executable path via a PowerShell probe that passes the paths through the environment, never interpolated into the script), verifies they are actually gone, and refuses the upgrade when they are not - an intact old venv beats a half-deleted one. A probe that cannot run is treated as "could not check", with matching wording, never as "no blockers". Failures name the processes holding the files, state that the install is incomplete, and keep the per-component isolation intact so the rest of the update still lands. The Windows CI smoke now re-runs the update against a live dashboard and asserts the server and the statusline both survive - the gate that would have caught the original bug. (missioncache-install)
+
 ## 2026-08-24
 
 Published package versions: missioncache-dashboard 1.0.21. Claude Code plugin 1.0.23. Everything else is unchanged since 2026-08-23.

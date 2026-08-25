@@ -5,6 +5,7 @@ Never swallows stdout/stderr on failure - the user needs to see what broke.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -72,6 +73,7 @@ def run(
     check: bool = True,
     timeout: float | None = None,
     input_: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command, capture output, raise CommandFailed on non-zero exit.
 
@@ -80,11 +82,16 @@ def run(
         check: Raise CommandFailed on non-zero exit (default True).
         timeout: Seconds before SIGKILL.
         input_: Stdin to pipe in.
+        extra_env: Variables layered over the inherited environment. The
+            safe channel for passing values (e.g. filesystem paths) into a
+            command that a second interpreter will parse - never interpolate
+            them into the command text.
 
     Returns:
         CompletedProcess with captured stdout/stderr.
     """
     cmd = _resolve_windows_executable(cmd)
+    env = {**os.environ, **extra_env} if extra_env else None
     try:
         result = subprocess.run(
             list(cmd),
@@ -93,6 +100,7 @@ def run(
             timeout=timeout,
             input=input_,
             check=False,
+            env=env,
         )
     except FileNotFoundError as e:
         # A missing binary raises instead of returning non-zero; callers
