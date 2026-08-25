@@ -358,6 +358,40 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Error "neither schtasks task nor Run key present"; exit 1 }
           }
 
+      - name: Update re-run while the dashboard is serving (the Windows lock gate)
+        run: |
+          # The regression this guards: the dashboard server runs out of the
+          # tool venv being replaced, Windows refuses to delete a directory
+          # holding a running executable, and uv/pipx remove site-packages
+          # BEFORE failing - so an update against a live dashboard used to
+          # leave a half-dead venv with a broken statusline. The fix stops the
+          # server first and restarts it after; this step proves that end to
+          # end on a real Windows runner, on the pipx layout the probe must
+          # also cover.
+          $env:PIP_FIND_LINKS = "$env:GITHUB_WORKSPACE\local-wheels"
+          $env:UV_FIND_LINKS = "$env:GITHUB_WORKSPACE\local-wheels"
+          Set-Location $env:USERPROFILE
+          missioncache-install --update --yes
+          # No exit-code assertion: missioncache-install --update currently
+          # exits 0 even when components fail (recorded as a product bug in
+          # the tasks file). The teeth of this gate are the probes below.
+          # The dashboard must be serving again after the update.
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/health" -TimeoutSec 2 | Out-Null
+              $ok = $true; break
+            } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $ok) { Write-Error "dashboard not serving after the update"; exit 1 }
+          # The statusline must still import and render - the half-dead-venv
+          # failure broke exactly this while /health kept answering from the
+          # zombie's memory.
+          $statusline = "$env:USERPROFILE\.local\bin\missioncache-statusline.exe"
+          '{"session_id":"ci-update-gate","model":{"display_name":"gate"}}' | & $statusline
+          if ($LASTEXITCODE -ne 0) { Write-Error "statusline broken after the update"; exit 1 }
+          Write-Host "update-while-serving gate passed"
+
       - name: Slash-command PY resolution works under Git Bash
         shell: bash
         run: |

@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from dataclasses import dataclass, field, replace
 from importlib import resources
 from pathlib import Path
@@ -276,16 +277,273 @@ def uninstall_plugin(ctx: InstallContext) -> None:
 # Dashboard (FastAPI daemon + service registration)
 # ---------------------------------------------------------------------------
 
+_DASHBOARD_DIST = "missioncache-dashboard"
+
+_ClearState = Literal["clear", "blocked", "unknown"]
+
+# The env var carrying the candidate tool roots into the PowerShell probe.
+# Values are passed through the environment, never interpolated into the
+# script text: inside a PowerShell literal the path would need escaping, and
+# a legal Windows username with an apostrophe (O'Brien) would break the
+# script into the destructive fail-open path.
+_ROOTS_ENV = "MISSIONCACHE_TOOL_ROOTS"
+
+# Three properties, all load-bearing:
+# - $ErrorActionPreference plus the try/catch: powershell -Command exits 0 on
+#   NON-terminating cmdlet errors (Get-CimInstance's default failure mode),
+#   which would masquerade as "no processes". Any failure must exit non-zero
+#   so the caller reports "could not check" instead of proceeding.
+# - StartsWith with an ordinal comparison, not -like: -like treats [ ] ? * as
+#   wildcards, so a bracketed profile path would silently match nothing.
+# - Single quotes only ('{0}|{1}' -f ...): embedded double quotes depend on
+#   list2cmdline escaping that is historically flaky with powershell.exe.
+_PROBE_SCRIPT = (
+    "$ErrorActionPreference = 'Stop'; "
+    "try { "
+    "$roots = $env:" + _ROOTS_ENV + " -split ';' | Where-Object { $_ }; "
+    "Get-CimInstance Win32_Process | ForEach-Object { "
+    "$p = $_.ExecutablePath; "
+    "if ($p) { foreach ($r in $roots) { "
+    "if ($p.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) "
+    "{ '{0}|{1}' -f $_.ProcessId, $_.Name; break } } } } "
+    "} catch { exit 1 }"
+)
+
+
+class DashboardUpgradeBlocked(subprocess_utils.CommandFailed):
+    """The dashboard upgrade was refused because its files are still in use.
+
+    A CommandFailed subclass so install_components' per-component isolation
+    treats it like any other component failure (recorded, retried on the
+    next --update, later components still run).
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(["dashboard-upgrade"], 1, "", detail)
+
+
+def _dashboard_tool_roots() -> list[str]:
+    """Every directory the dashboard's executables may run from, per installer.
+
+    _pipx_install prefers pipx over uv, so both layouts are candidates: probing
+    only the uv layout made the whole guard inert for pipx users. Env overrides
+    (UV_TOOL_DIR, PIPX_HOME) are honored, and each root is returned WITH a
+    trailing separator so prefix matching cannot reach a sibling directory
+    that merely shares the name prefix (missioncache-dashboard-backup).
+    """
+    appdata = os.environ.get("APPDATA") or str(Path.home())
+    uv_dir = os.environ.get("UV_TOOL_DIR") or str(Path(appdata) / "uv" / "tools")
+    localappdata = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    pipx_home = os.environ.get("PIPX_HOME") or str(Path(localappdata) / "pipx")
+    legacy_pipx = str(Path.home() / ".local" / "pipx")
+    roots = [
+        str(Path(uv_dir) / _DASHBOARD_DIST),
+        str(Path(pipx_home) / "venvs" / _DASHBOARD_DIST),
+        str(Path(legacy_pipx) / "venvs" / _DASHBOARD_DIST),
+    ]
+    return [root.rstrip("\\/") + os.sep for root in roots]
+
+
+def _windows_tool_processes(*, quiet: bool = False) -> list[tuple[int, str]] | None:
+    """PIDs whose executable runs from a dashboard tool root, or None if unknown.
+
+    Windows refuses to delete a directory that holds a running executable, so
+    these are exactly the processes that make a forced reinstall fail - the
+    dashboard's own server tree is the usual occupant. None means the probe
+    itself failed; callers MUST treat that differently from an empty list,
+    because "could not check" is not "nothing is running". `quiet` suppresses
+    the warning for repeated calls (the verify poll), so a persistently
+    failing probe warns once instead of once per poll tick.
+
+    Deliberately does NOT go through the package's own CLI: a previously
+    failed upgrade can leave the venv unimportable (uv removes site-packages
+    before it fails on Scripts), and this must still work there.
+    """
+    try:
+        result = subprocess_utils.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", _PROBE_SCRIPT],
+            check=True,
+            timeout=20,
+            extra_env={_ROOTS_ENV: ";".join(_dashboard_tool_roots())},
+        )
+    except subprocess_utils.CommandFailed as e:
+        if not quiet:
+            detail = (e.stderr or e.stdout or "").strip() or f"exit {e.returncode}"
+            ui.warn(
+                "Could not check what is running from the dashboard's install "
+                f"directory: {detail}"
+            )
+        return None
+    found: list[tuple[int, str]] = []
+    for line in (result.stdout or "").splitlines():
+        pid, _, name = line.strip().partition("|")
+        if pid.isdigit():
+            found.append((int(pid), name or "unknown"))
+    return found
+
+
+def _describe_processes(processes: list[tuple[int, str]]) -> str:
+    if not processes:
+        return "unidentified processes"
+    return ", ".join(f"{name} (pid {pid})" for pid, name in processes)
+
+
+def _clear_dashboard_processes(
+    *, poll_attempts: int = 20, poll_interval: float = 0.5
+) -> tuple[_ClearState, list[tuple[int, str]]]:
+    """Stop everything running from the dashboard tool roots, and verify.
+
+    Returns (state, processes):
+      ("clear", stopped)  - nothing runs there any more; `stopped` is what was killed
+      ("blocked", still)  - kills issued but processes remain; upgrading now
+                            would destroy the venv, so the caller must NOT
+      ("unknown", killed) - the probe could not run (before or after the
+                            kills); proceed, but say so
+
+    taskkill runs per PID without /T: the enumeration already includes every
+    process running from the roots, and a tree kill both double-kills and
+    turns PID reuse between iterations into a real cross-process hazard.
+    taskkill returns when termination is REQUESTED, not when handles drop, so
+    a re-probe poll stands between the kill and any destructive step.
+    """
+    if sys.platform != "win32":
+        return ("clear", [])
+    processes = _windows_tool_processes()
+    if processes is None:
+        return ("unknown", [])
+    if not processes:
+        return ("clear", [])
+    for pid, name in processes:
+        result = subprocess_utils.run(
+            ["taskkill", "/F", "/PID", str(pid)], check=False, timeout=15
+        )
+        if result.returncode != 0:
+            reason = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+            ui.warn(f"Could not stop {name} (pid {pid}): {reason}")
+    remaining: list[tuple[int, str]] | None = processes
+    for _ in range(poll_attempts):
+        remaining = _windows_tool_processes(quiet=True)
+        if remaining is None:
+            # We killed everything we could see and can no longer verify.
+            return ("unknown", processes)
+        if remaining == []:
+            return ("clear", processes)
+        time.sleep(poll_interval)
+    return ("blocked", remaining or [])
+
+
+def _report_windows_dashboard_failure() -> None:
+    """Explain a failed Windows dashboard install honestly, then let it propagate.
+
+    Never exits: install_components' per-component isolation depends on the
+    CommandFailed reaching it, and everything after the dashboard (statusline,
+    rules, commands, MCP clients) must still install.
+    """
+    blockers = _windows_tool_processes()
+    if blockers is None:
+        ui.warn(
+            "The dashboard upgrade failed, and what is running from its install "
+            "directory could not be checked. Stop the dashboard manually (or "
+            "reboot), then re-run: missioncache-install --update"
+        )
+    elif blockers:
+        ui.warn(
+            "The dashboard upgrade could not replace its files: these are still "
+            f"running from them - {_describe_processes(blockers)}. Stop them (or "
+            "reboot) and re-run: missioncache-install --update"
+        )
+    else:
+        roots = ", ".join(_dashboard_tool_roots())
+        ui.warn(
+            "The dashboard upgrade failed partway (no processes found running "
+            f"from {roots}). Re-run: missioncache-install --update"
+        )
+    ui.detail(
+        "Until it succeeds the dashboard install is incomplete: the dashboard "
+        "is down right now, the statusline will not render, and autostart at "
+        "next logon will not fix it - this is not a case of keeping the "
+        "previous version. Re-run the update once the blockers are gone."
+    )
+
+
 def install_dashboard(ctx: InstallContext) -> None:
     """Install missioncache-dashboard and register it as a background service.
 
     Also wires the PostToolUse edit-count HTTP hook that the statusline needs.
+
+    On Windows the running dashboard is stopped first: it runs out of the very
+    tool directory the upgrade must replace, and Windows cannot delete a
+    directory holding a running executable. The failure is worse than a no-op
+    (uv removes site-packages before failing on Scripts, leaving a broken
+    venv), so whenever processes are known to remain the upgrade is refused -
+    an intact old venv beats a half-deleted one. The service registration
+    right after the install restarts the server, mirroring launchd on macOS.
     """
     ui.step("2", "Dashboard")
     if ctx.mode == "local":
         _pip_install_editable(_require_repo(ctx) / "missioncache-dashboard")
     else:
-        _pipx_install("missioncache-dashboard")
+        state_kind, stopped = _clear_dashboard_processes()
+        if stopped and state_kind == "clear":
+            ui.detail(
+                "Stopped the running dashboard so Windows releases its files: "
+                + _describe_processes(stopped)
+            )
+        elif state_kind == "blocked":
+            ui.warn(
+                "These are still running from the dashboard's install directory "
+                f"after taskkill: {_describe_processes(stopped)}. Upgrading now "
+                "would destroy the install, so the dashboard upgrade is skipped. "
+                "Stop them (or reboot), then re-run: missioncache-install --update"
+            )
+            raise DashboardUpgradeBlocked(
+                "dashboard executables still running; upgrade refused to protect the venv"
+            )
+        elif state_kind == "unknown":
+            ui.warn(
+                "Proceeding with the dashboard upgrade without the pre-check. "
+                "If it fails, stop the dashboard yourself and re-run."
+            )
+        # Windows gets bounded retries: the statusline ships in the same venv
+        # and spawns its python on every prompt render, so a short-lived
+        # locker can appear between our verify and uv's delete. The retry is
+        # not conditioned on the error text - run_streaming inherits stdio,
+        # so the exception carries none. A bounded retry on any failure is
+        # harmless: a non-lock failure just fails again.
+        attempts = 3 if sys.platform == "win32" else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                _pipx_install("missioncache-dashboard")
+                break
+            except subprocess_utils.CommandFailed:
+                if attempt == attempts:
+                    if sys.platform == "win32":
+                        _report_windows_dashboard_failure()
+                    raise
+                ui.detail(
+                    f"Dashboard install failed (attempt {attempt}/{attempts}) - "
+                    "clearing lockers and retrying"
+                )
+                retry_kind, retry_stopped = _clear_dashboard_processes()
+                stopped = stopped + retry_stopped
+                if retry_kind == "blocked":
+                    # The invariant is "never upgrade while blocked" - it must
+                    # hold on retries exactly as it does on the first pass.
+                    ui.warn(
+                        "Processes reappeared in the dashboard's install directory "
+                        f"and would not stop: {_describe_processes(retry_stopped)}. "
+                        "The upgrade is skipped to protect the install. Stop them "
+                        "(or reboot), then re-run: missioncache-install --update"
+                    )
+                    raise DashboardUpgradeBlocked(
+                        "dashboard executables reappeared mid-upgrade; refused to continue"
+                    ) from None
+                time.sleep(attempt)
+        if stopped and ctx.skip_service:
+            ui.warn(
+                "The dashboard was stopped for the upgrade and --no-service means it "
+                "is not restarted. Start it with: missioncache-dashboard serve"
+            )
     if ctx.skip_service:
         ui.detail("Skipping service registration (--no-service)")
     else:
