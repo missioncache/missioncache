@@ -137,10 +137,15 @@ def test_state_file_never_points_at_the_real_home() -> None:
     directory outside the clone.
     """
     # os.path.expanduser is the real home: the fixture patches Path.home, so
-    # comparing against that would compare the sandbox with itself.
+    # comparing against that would compare the sandbox with itself. Compare
+    # against the exact file an unpatched run would corrupt, not "anywhere
+    # under home" - on Windows the pytest tmp dir lives INSIDE the user
+    # profile (%LOCALAPPDATA%\Temp), so an ancestry check false-positives
+    # there while the isolation is working perfectly.
     real_home = Path(os.path.expanduser("~")).resolve()
-    assert real_home not in state.STATE_FILE.resolve().parents, (
-        f"STATE_FILE resolves to {state.STATE_FILE} under the real home - the "
+    real_state = real_home / ".claude" / "missioncache-install.state.json"
+    assert state.STATE_FILE.resolve() != real_state, (
+        f"STATE_FILE resolves to the developer's real install state - the "
         "isolation fixture is not autouse, and running this suite will "
-        "corrupt the developer's install state"
+        "corrupt it"
     )

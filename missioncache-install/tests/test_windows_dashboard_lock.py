@@ -133,6 +133,7 @@ class TestProbe:
 
 class TestClearProcesses:
     def test_non_windows_is_a_clear_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(installers.sys, "platform", "darwin")
         called: list = []
         monkeypatch.setattr(
             installers, "_windows_tool_processes", lambda **k: called.append(1)
@@ -282,6 +283,7 @@ class TestInstallDashboardWindows:
     def test_posix_install_failure_does_not_retry(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(installers.sys, "platform", "darwin")
         _capture_ui(monkeypatch)
         installs: list[int] = []
 
@@ -336,6 +338,7 @@ class TestInstallDashboardWindows:
         assert any("not restarted" in w for w in seen["warn"])
 
     def test_non_windows_never_probes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(installers.sys, "platform", "darwin")
         _capture_ui(monkeypatch)
         probed: list = []
         monkeypatch.setattr(
