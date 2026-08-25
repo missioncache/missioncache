@@ -221,7 +221,7 @@ def create_missioncache_files(
     jira_key: str | None = None,
     branch: str | None = None,
     tasks: list[str] | None = None,
-    plan_content: dict[str, str] | None = None,
+    plan_content: dict[str, object] | None = None,
     force: bool = False,
     fork_of: str | None = None,
 ) -> MissionCacheFiles:
@@ -328,27 +328,40 @@ def create_missioncache_files(
     plan_template = templates.joinpath("plan.md").read_text(encoding="utf-8")
     plan_content = plan_content or {}
 
+    def _section(key: str, default: str) -> str:
+        # Agents routinely pass lists (goals, risks) or nested dicts despite
+        # the declared dict[str, str] - render them as markdown instead of
+        # crashing str.replace with a non-string.
+        value = plan_content.get(key)
+        if value is None or value == "":
+            return default
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            return "\n".join(f"- {item}" for item in value)
+        if isinstance(value, dict):
+            return "\n".join(f"- **{k}**: {v}" for k, v in value.items())
+        return str(value)
+
     plan_md = plan_template.replace(
         "{{task_name}}", task_name.replace("-", " ").title()
     )
     plan_md = plan_md.replace("{{timestamp}}", timestamp)
     plan_md = plan_md.replace("{{jira_key}}", jira_key or "")
     plan_md = plan_md.replace("{{branch}}", branch or f"feature/{task_name}")
-    plan_md = plan_md.replace("{{summary}}", plan_content.get("summary", "TBD"))
+    plan_md = plan_md.replace("{{summary}}", _section("summary", "TBD"))
     plan_md = plan_md.replace(
         "{{research_findings}}",
-        plan_content.get("research_findings", "N/A - research phase skipped"),
+        _section("research_findings", "N/A - research phase skipped"),
     )
-    plan_md = plan_md.replace("{{goals}}", plan_content.get("goals", "TBD"))
+    plan_md = plan_md.replace("{{goals}}", _section("goals", "TBD"))
     plan_md = plan_md.replace(
-        "{{success_criteria}}", plan_content.get("success_criteria", "TBD")
+        "{{success_criteria}}", _section("success_criteria", "TBD")
     )
-    plan_md = plan_md.replace("{{approach}}", plan_content.get("approach", "TBD"))
-    plan_md = plan_md.replace("{{files}}", plan_content.get("files", "TBD"))
-    plan_md = plan_md.replace(
-        "{{dependencies}}", plan_content.get("dependencies", "None")
-    )
-    plan_md = plan_md.replace("{{risks}}", plan_content.get("risks", "None"))
+    plan_md = plan_md.replace("{{approach}}", _section("approach", "TBD"))
+    plan_md = plan_md.replace("{{files}}", _section("files", "TBD"))
+    plan_md = plan_md.replace("{{dependencies}}", _section("dependencies", "None"))
+    plan_md = plan_md.replace("{{risks}}", _section("risks", "None"))
 
     plan_file = task_dir / f"{task_name}-plan.md"
     plan_file.write_text(plan_md, encoding="utf-8")
