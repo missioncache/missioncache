@@ -386,8 +386,10 @@ jobs:
           if (-not $ok) { Write-Error "dashboard not serving after the update"; exit 1 }
           # The statusline must still import and render - the half-dead-venv
           # failure broke exactly this while /health kept answering from the
-          # zombie's memory.
-          $statusline = "$env:USERPROFILE\.local\bin\missioncache-statusline.exe"
+          # zombie's memory. Resolve via PATH: pipx puts binaries in pipx_bin
+          # on the runner, uv in ~/.local/bin - never hardcode either.
+          $statusline = (Get-Command missioncache-statusline -ErrorAction SilentlyContinue).Source
+          if (-not $statusline) { Write-Error "missioncache-statusline not on PATH after the update"; exit 1 }
           '{"session_id":"ci-update-gate","model":{"display_name":"gate"}}' | & $statusline
           if ($LASTEXITCODE -ne 0) { Write-Error "statusline broken after the update"; exit 1 }
           Write-Host "update-while-serving gate passed"
