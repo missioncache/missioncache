@@ -263,5 +263,22 @@
       "referrer": "github.com",
       "uniques": 1
     }
+  ],
+  "2026-08-26": [
+    {
+      "count": 3,
+      "referrer": "Bing",
+      "uniques": 3
+    },
+    {
+      "count": 2,
+      "referrer": "pypi.org",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "referrer": "github.com",
+      "uniques": 1
+    }
   ]
 }
