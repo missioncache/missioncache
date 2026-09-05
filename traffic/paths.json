@@ -1018,5 +1018,61 @@
       "title": "/labels",
       "uniques": 1
     }
+  ],
+  "2026-09-05": [
+    {
+      "count": 6,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 4
+    },
+    {
+      "count": 2,
+      "path": "/missioncache/missioncache/pulls",
+      "title": "/pulls",
+      "uniques": 2
+    },
+    {
+      "count": 2,
+      "path": "/missioncache/missioncache/blob/main/README.md",
+      "title": "/blob/main/README.md",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/pyproject.toml",
+      "title": "/blob/main/pyproject.toml",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/commit/1cefea601be7f54a68508e7f0dba312413a42569",
+      "title": "/commit/1cefea601be7f54a68508e7f0dba312413a42569",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/commit/42a821eef5dce86c8b4cf8955d8fa24730f6c07a",
+      "title": "/commit/42a821eef5dce86c8b4cf8955d8fa24730f6c07a",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/commits",
+      "title": "/commits",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/issues",
+      "title": "/issues",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/labels",
+      "title": "/labels",
+      "uniques": 1
+    }
   ]
 }
