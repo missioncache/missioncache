@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 42 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 43 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -55,14 +55,14 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 | Module | Tools | Purpose |
 |--------|-------|---------|
 | `tools_tasks.py` | 11 | Task lifecycle: list, get, create, complete, reopen, rename, update fields and notes |
-| `tools_docs.py` | 6 | MissionCache files: create, get, update context, get digest, update tasks, get progress |
+| `tools_docs.py` | 7 | MissionCache files: create, get, update context, get digest, update tasks, get progress, move between projects |
 | `tools_tracking.py` | 7 | Time tracking and repository management |
 | `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 7 | Parallel agent execution plans |
 | `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
 | `tools_pm.py` | 6 | Project management: action items, stakeholders, tickets, project due date |
 
-**Total: 42 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
+**Total: 43 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
@@ -261,18 +261,24 @@ If the task exists in the DB, uses `task.full_path` to resolve subtask directori
 - `gotchas: list[str] | None = None` - Lines to add under "Gotchas".
 - `key_files: dict[str, str] | None = None` - `{path: description}` map to add to the "Key Files" table.
 - `waiting_on_add: list[dict] | None = None` - Waiting-on rows to append, each `{"what", "who", "since", "gates"}`. `since` defaults to today. Creates the `## Waiting on` section immediately before Next Steps when the file predates the convention.
-- `waiting_on_resolve: list[dict] | None = None` - Rows to resolve, each `{"match", "outcome"}`. Removes the first row whose What cell contains `match` and records "Resolved (was waiting on <who>): <what> - <outcome>" in today's Recent Changes subsection.
+- `waiting_on_resolve: list[dict] | None = None` - Rows to resolve, each `{"match", "outcome", "kind"}`. Removes the first row whose What cell contains `match` and records the outcome in today's Recent Changes subsection. `kind` is `resolved` (default, "Resolved (was waiting on <who>): ..."), `moved` ("Moved out (was waiting on ...)") or `dropped` ("Dropped (was waiting on ...)"); an unknown kind is a `VALIDATION_ERROR`. Pick the true one - before `kind` existed, a row that moved to another project was written up as resolved, which records an answer that never arrived.
+- `sections_remove: list[str] | None = None` - Whole `## ` sections to delete, matched on the **exact** heading text as `section_index` reports it (date suffix included). Deliberately not the prefix-tolerant match `_section_span` uses for reading: on a destructive op that would let `"Key"` delete `## Key Files`. The core sections (Description, Gotchas, Waiting on, Next Steps, Recent Changes) and the DB-rendered ones (Action Items, Stakeholders, Tickets) are refused with a `VALIDATION_ERROR` before anything is written. Names matching nothing come back in `sections_unmatched`.
+- `bullets_remove: list[dict] | None = None` - Single items to delete, each `{"section", "match"}`. Removes the first list item or table row in that section containing `match`, together with its indented continuation lines (items are legitimately multi-line since free-form text is sanitized on the way in). Table header and separator rows are never matched, so `match: "File"` cannot delete a `| File | Purpose |` header. Recent Changes (prepend-only history), Waiting on (use `waiting_on_resolve`) and the DB-rendered sections are refused. Misses come back in `bullets_unmatched`.
 - `imported_event: dict | None = None` - A cross-project event, `{"heading", "body", "related_project", "related_note"}`. Writes a self-contained `## <heading>` section immediately above Waiting on (falling back to before Next Steps, then Recent Changes, then appended at EOF when a hand-written file has none of them) and records the link on the `**Related projects:**` header line. Today's date is appended to the heading unless it already carries one. A missing or blank `heading` or `body` is **rejected** with a `VALIDATION_ERROR`, not silently ignored (same never-silently-drop contract as `waiting_on_unmatched`). `heading` must be a single line and `related_project` must be a bare project name: both are interpolated into markdown structure the digest parses, so a newline in either forges a section or a header line. Repeating an event whose heading already exists is a no-op, reported as `imported_event_duplicate: true` and omitted from `sections_updated`.
 
-**Returns:** `{"success": True, "file": str, "timestamp": str, "sections_updated": list[str], "waiting_on_unmatched": list[str], "journal_rolled_over": int}`, plus `live_sessions: list[dict]` when there are any.
+**Returns:** `{"success": True, "file": str, "timestamp": str, "sections_updated": list[str], "waiting_on_unmatched": list[str], "journal_rolled_over": int, "sections_removed": list[str], "sections_unmatched": list[str], "bullets_removed": list[str], "bullets_unmatched": list[str]}`, plus `live_sessions: list[dict]` when there are any.
 
 All sections are optional. Passing `None` for a section means "don't touch it". Passing an empty list means "touch the section but add nothing" - surprisingly useful for forcing a timestamp update without changing content. The `sections_updated` field tells you which sections actually received non-empty input.
 
-`waiting_on_unmatched` lists `match` values that resolved to no row - check it, a resolve is never silently dropped (same contract as `update_tasks_file.unmatched`). `journal_rolled_over` reports how many Recent Changes subsections the 12-entry cap moved into the per-project `<name>-journal.md` on this write (0 almost always; informational).
+Removals run **before** additions within the same call, so one call can replace a section rather than needing two.
+
+`waiting_on_unmatched` lists `match` values that resolved to no row - check it, a resolve is never silently dropped (same contract as `update_tasks_file.unmatched`). `sections_unmatched` and `bullets_unmatched` carry the same contract for the removal params. `journal_rolled_over` reports how many Recent Changes subsections the 12-entry cap moved into the per-project `<name>-journal.md` on this write (0 almost always; informational).
+
+**Free-form text is sanitized.** Every string passed to `recent_changes`, `key_decisions` or `gotchas` goes through `context_health.sanitize_bullet` first: headings are demoted and indented two spaces, and a dangling code fence is closed. This is not cosmetic. Section boundaries are found by column-0 anchors (`^## `, `^### \d{4}`), so an entry carrying a pasted block with its own `## ` heading used to end the section at that line and strand every entry below it - invisible to the cap, the digest and the dashboard. The text still renders as headings; it just cannot act as structure. See [`hooks.md`](./hooks.md) for the PreCompact snapshot, which is where this actually bit.
 
 The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched. Cap overflow and the context rewrite happen under one sidecar lock, journal written first (a crash duplicates entries into the journal rather than losing them). `imported_event` runs inside that same lock, which is the whole reason it exists as a parameter: the "Cross-project events" convention used to require a hand-written `##` section, and a direct Edit on a file another session may be writing is exactly what the parallel-session discipline forbids.
 
-**`live_sessions`** is the notification hook, and it is not unique to this tool: every MCP tool that rewrites or moves a project's files carries it - `update_context_file`, `update_tasks_file`, the five PM mutators, `rename_task`, and `complete_task` / `reopen_task` (see each tool's section). Here it lists other live Claude Code sessions bound to the project that owns `context_file` - derived from the filename, so it covers writes into *another* project's context as well as your own - each as `{session_id, title, last_active}`. The key is omitted when the list is empty, when the context filename carries no project name (the subtask layout writes a bare `context.md`), and when this session's own id cannot be resolved (without it the caller cannot exclude itself, and since `ListAgents` never lists the calling session, its own row would always fail to match). Dashboard and CLI writes do not notify: the notification is acted on by Claude reading the tool response, and those writers have no Claude on the response side.
+**`live_sessions`** is the notification hook, and it is not unique to this tool: every MCP tool that rewrites or moves a project's files carries it - `update_context_file`, `update_tasks_file`, `move_to_project`, the five PM mutators, `rename_task`, and `complete_task` / `reopen_task` (see each tool's section). Here it lists other live Claude Code sessions bound to the project that owns `context_file` - derived from the filename, so it covers writes into *another* project's context as well as your own - each as `{session_id, title, last_active}`. The key is omitted when the list is empty, when the context filename carries no project name (the subtask layout writes a bare `context.md`), and when this session's own id cannot be resolved (without it the caller cannot exclude itself, and since `ListAgents` never lists the calling session, its own row would always fail to match). Dashboard and CLI writes do not notify: the notification is acted on by Claude reading the tool response, and those writers have no Claude on the response side.
 
 The caller identifies itself through `CLAUDE_CODE_SESSION_ID` in the MCP subprocess's own environment. Do not try to derive this from the process tree: a single `claude` process hosts many sessions at once (measured: twelve sessions under one pid), so pid to session is one-to-many and cannot identify the caller. The env var is imperfect - during a resume a subprocess was once observed carrying an id the conversation did not use - but a wrong exclusion only costs one spurious ask-the-user, never a wrong write.
 
@@ -302,12 +308,48 @@ For a **fork** (its context header carries `**Fork of:** <parent>`), `is_fork` i
 
 **Parameters:**
 - `tasks_file: str` - Path validated to be under `MISSIONCACHE_ROOT`.
-- `completed_tasks: list[str] | None = None` - Task descriptions to mark as `[x]`. Matching is substring-based against task lines - pass enough of the title to be unambiguous.
+- `completed_tasks: list[str] | None = None` - Tasks to mark as `[x]`. Matching prefers the checklist **number** parsed off the front of each entry (`"7"`, `"54a"`, `"7. Implement X - done in PR #312"`), so a completion lands even when the caller adds prose; it falls back to a literal substring match against an unchecked line only when no leading number resolves to a real item, and flips only the first match.
 - `new_tasks: list[str] | None = None` - New `- [ ]` lines to append.
 - `remaining_summary: str | None = None` - The "Remaining:" metadata line summary (max 15 words convention).
 - `notes: list[str] | None = None` - Notes to append under the "Notes" section.
+- `tasks_remove: list[dict] | None = None` - Tasks to REMOVE, each `{"match", "reason"}`. `match` resolves number-first then by substring, exactly like `completed_tasks`. `reason` is required (a blank one is a `VALIDATION_ERROR`) because the record it produces is the only trace the task leaves. The line leaves the checklist and a struck-through record lands under `## Removed`:
 
-**Returns:** `{"success": True, ...}` plus the progress result from `project_files.update_tasks_file` (completion percentage, counts, etc.), and `live_sessions` when other live sessions are bound to the project (same contract as `update_context_file`; the tasks file is project state a live peer works from). Legacy unprefixed `tasks.md` files carry no project name and skip the lookup.
+  ```
+  - ~~25. Old migration task~~ (removed 2026-09-04: superseded by the Flyway direction, 14/08)
+  ```
+
+  It carries no checkbox, so `parse_tasks_md` skips it and the progress counter stops counting work nobody will do - but `new_tasks` numbering still reads the numbers back out of this section, so a freed number is never reused by a different item. Removing a task that still has dotted children is refused, listing them. Use this for a task that is superseded or that moved: marking it `[x]` claims work that never happened.
+
+**Returns:** `{"success": True, ...}` plus the progress result from `project_files.update_tasks_file` (completion percentage, counts, `completed_numbers`, `unmatched`, `removed_numbers`, `remove_unmatched`), and `live_sessions` when other live sessions are bound to the project (same contract as `update_context_file`; the tasks file is project state a live peer works from). Legacy unprefixed `tasks.md` files carry no project name and skip the lookup.
+
+Active-task pointers are swept for both completed and removed numbers, so the statusline never keeps a `Task:` line pointing at an item the file no longer has.
+
+### `move_to_project`
+
+**When to use:** Splitting a project, or moving a topic that belongs somewhere else. Use it instead of a `sections_remove` call plus an `imported_event` call: a split done as two calls can half-fail and leave the content in both files or in neither.
+
+**Parameters:**
+- `source_project: str` / `target_project: str` - Project names, resolved through `get_missioncache_files` (active first, then completed). The same name on both sides is a `VALIDATION_ERROR`, and so is a call that names nothing to move.
+- `sections: list[str] | None = None` - Whole `## ` sections, by exact heading text. A heading the target already carries is refused before anything is written, the same anti-ambiguity rule `imported_event` uses.
+- `bullets: list[dict] | None = None` - `{"section", "match"}` items, appended to the same-named section on the target.
+- `tasks: list[dict] | None = None` - `{"match"}` checklist items. The task keeps its text and its `[ ]`/`[x]` state but takes a **new** number on the target, because numbers are per-file. The source keeps a `## Removed` record naming where it went, so an old note citing the old number still resolves to an explanation. Moving a task that still has children is refused.
+- `waiting_on: list[str] | None = None` - Substrings of the What cell. The row moves with its Who/Since/Gates intact. This is the case `waiting_on_resolve` could not express.
+- `note: str | None = None` - Appended to both Recent Changes lines.
+
+**Returns:** `{"success": True, "source_project", "target_project", "sections_moved", "bullets_moved", "waiting_on_moved", "tasks_moved", "unmatched", "summary"}`, plus `live_sessions`.
+
+Both sides also get a `**Related projects:**` header line via `upsert_related_projects` - "received part of this project" on the source, "moved content here" on the target - so the link is discoverable from either file. `imported_event` is not the only writer of that line.
+
+A section name that appears more than once in the target file makes every later write to it fail with an `INVALID_STATE` error naming `missioncache-db repair`; the same guard applies to `update_context_file`'s `next_steps`, `key_decisions`, `gotchas` and `key_files` writes.
+
+`unmatched` carries anything that resolved to nothing, under the same never-silently-drop contract as `waiting_on_unmatched` - a move must never claim to have carried something it did not find.
+
+`live_sessions` here is **merged and deduped across both projects**. Both files changed, and a session bound to either one is working from content that just moved under it.
+
+**Locking.** This is the only operation in the codebase that holds more than one project's lock. It takes all four project files' sidecar locks **in sorted path order** - two sessions moving in opposite directions between the same pair would otherwise take the same two locks in opposite orders and deadlock. It also calls the unlocked write cores rather than `_atomic_update_text` / `_atomic_update_context_with_journal`: POSIX `flock` blocks a second acquisition of the same lockfile from the same process, so a lock-taking wrapper called under the outer locks would hang forever with no error and no timeout.
+
+**Crash window.** Up to six writes happen (two contexts, two tasks files, and a journal on either side if a Recent Changes entry trips the cap). The target side is written fully first and the source side last, so a crash between them leaves the content in **both** files rather than in neither - the same duplicate-rather-than-lose reasoning the journal write uses. To recover, check the target, and if the content arrived, drop the leftovers from the source with `sections_remove` / `bullets_remove` / `tasks_remove`.
+
 
 ### `get_missioncache_progress`
 

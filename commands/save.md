@@ -124,6 +124,7 @@ Ask the user or infer from conversation:
   - *New commitments:* did anyone commit to anything this session - the user promised a colleague something, a meeting transcript assigned items (to the user OR to others)? Propose each as `mcp__plugin_missioncache_pm__add_action_item(project_name=..., what=..., requested_by=..., assignee=..., due_date=..., source=...)`. `assignee` is "me" for the user's own commitments, the person's name for items you are tracking on others. `source` names where it came from (meeting + date, transcript path).
   - Rule of thumb: an action item is a commitment with an owner; a Waiting-on row is a dependency that blocks work. When both apply (a colleague promised something that gates the next step), prefer Waiting-on and skip the action item.
   - These tools write the DB AND re-render the context sections themselves - do NOT also describe the same change in `recent_changes` (that would duplicate the auto-written line).
+- **Anything that should come OUT?** A section whose subject is dead or moved (`sections_remove`), a Gotcha or decision that turned out wrong (`bullets_remove`), a task that was superseded or belongs to another project (`tasks_remove` with a reason). Propose these, do not apply them unasked. A superseded task left in the list skews the progress counter forever, and ticking it `[x]` claims work that never happened. If the content belongs in another project, propose `move_to_project` instead of a remove.
 
 ### Step 3: Update Files Atomically
 
@@ -142,9 +143,12 @@ mcp__plugin_missioncache_pm__update_context_file(
 )
 ```
 
+**Each `recent_changes` entry is a short summary line.** Never pass a paste of session output, a save report, or a chat transcript. The tools sanitize what they are given so a stray `## ` heading cannot break the file, but an entry that long is unreadable on resume and defeats the point of the section.
+
 Waiting-on notes:
 - `waiting_on_add` rows: `since` defaults to today; the section is created before Next Steps if the file predates the convention.
-- `waiting_on_resolve` removes the first row whose What cell contains `match` and writes "Resolved (was waiting on <who>): <what> - <outcome>" into today's Recent Changes. Check `waiting_on_unmatched` in the response - a non-empty list means a resolve found no row (typo or already resolved); tell the user, never drop it silently.
+- `waiting_on_resolve` removes the first row whose What cell contains `match` and writes the outcome into today's Recent Changes. Pass `kind` when the row did not actually get answered: `moved` (it belongs to another project now) or `dropped` (nobody is chasing it), so the record does not claim a reply that never came. Check `waiting_on_unmatched` in the response - a non-empty list means a resolve found no row (typo or already resolved); tell the user, never drop it silently.
+- Removals report their own misses: check `sections_unmatched` and `bullets_unmatched` the same way.
 - The response's `journal_rolled_over` reports Recent Changes entries moved to `<name>-journal.md` by the cap - no action needed, it is informational.
 - The response's `live_sessions` lists other live Claude Code sessions bound to this project. Tell each one what changed with `SendMessage`, per "Cross-session notifications" in the MissionCache rules. This also fires when the save wrote into another project's context.
 
