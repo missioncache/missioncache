@@ -326,7 +326,16 @@ def _make_transform(timestamp, snapshot_body, context_health):
     (that lives in project_files.update_context_file) - the cap re-enforces
     on the next update_context_file call. A compaction snapshot can
     therefore leave the section temporarily over cap; that is expected.
+
+    The body goes through ``context_health.sanitize_bullet`` first, and that
+    is not optional. The snapshot is raw transcript text: an assistant reply
+    routinely contains column-0 ``## `` headings, and ``_truncate`` can cut
+    inside a fenced block and leave the fence open. Both wreck the file.
+    Measured before the fix: 8 of 64 live snapshots carried a stray ``## ``
+    that ended the Recent Changes section early and stranded every entry
+    below it, across seven projects.
     """
+    snapshot_body = context_health.sanitize_bullet(snapshot_body)
 
     def transform(content):
         # Anchor to the start of a line and stamp only the first match so an

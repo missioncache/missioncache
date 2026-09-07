@@ -797,6 +797,60 @@ class TestPreCompact:
         assert "system-injected" not in content
         assert "THINKING-BLOCK-XYZZY" not in content  # thinking block dropped
 
+    def test_a_reply_carrying_markdown_headings_cannot_break_the_section(
+        self, tmp_path, monkeypatch
+    ):
+        """The 2026-09-04 damage class, at its source.
+
+        The snapshot is raw transcript text, so an assistant reply routinely
+        carries column-0 '## ' headings and _truncate can cut inside a code
+        fence. Written verbatim, the heading ended the Recent Changes section
+        and stranded every entry below it (measured: 8 of 64 live snapshots,
+        across 7 projects), and the dangling fence hid every later section
+        from the parsers. The body must be sanitized before it is written.
+        """
+        from missioncache_db import context_health as ch
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        seed = (
+            "# Context\n\n**Last Updated:** 2025-01-01 00:00\n\n"
+            "## Recent Changes\n\n### 2026-01-01 00:00\n\n- an earlier entry\n\n"
+            "## Key Files\n\n| File | Purpose |\n|------|---------|\n"
+        )
+        _task_dir, ctx_file, mock_task = self._setup_task(tmp_path, ctx_seed=seed)
+
+        poisoned_reply = (
+            "## Updated: compact-task\n\n"
+            "**Session binding:** abc\n\n"
+            "## 2026-08-14 a heading that looks dated\n\n"
+            "```markdown\n"
+            "- truncated mid-fence..."
+        )
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": poisoned_reply}],
+                },
+            })
+        )
+
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = mock_task
+        self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
+
+        content = ctx_file.read_text()
+        # The reply is still there and still readable as headings.
+        assert "### Updated: compact-task" in content
+        assert "**Session binding:** abc" in content
+        # But nothing it carried can act as structure.
+        assert ch.orphaned_recent_changes(content) == []
+        assert len(ch.parse_recent_changes_subsections(content)) == 2
+        assert ch.unbalanced_fence_line(content) is None
+        assert ch.extract_section(content, "Key Files") is not None
+
     def test_db_lock_writes_sticky_error(self, tmp_path, monkeypatch):
         """OperationalError('database is locked') after retry → sticky error file,
         no context.md write."""

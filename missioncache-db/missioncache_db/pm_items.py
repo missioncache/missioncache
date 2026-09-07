@@ -255,11 +255,25 @@ def _now() -> str:
 # NOTE: the portable lock lives in ``missioncache_db.filelock`` (fcntl on
 # POSIX, msvcrt on Windows). ``hooks/pre_compact.py`` carries a deliberately
 # inlined mirror of it (the hooks test harness mocks missioncache_db
-# wholesale). ``_atomic_update_context_with_journal`` is duplicated in
-# mcp-server's ``project_files.py``. All paths lock the SAME
-# ``<context>.lock`` sidecar, so writers serialize across processes
-# regardless of which copy they run. If locking semantics change, change
-# ``filelock.py`` and the hook mirror together.
+# wholesale). All paths lock the SAME ``<context>.lock`` sidecar, so writers
+# serialize across processes regardless of which copy they run. If locking
+# semantics change, change ``filelock.py`` and the hook mirror together.
+#
+# The journal-first / context-second write sequence below is duplicated at
+# FOUR sites, tracked for a follow-up refactor. They are behaviorally
+# identical today, so a change to the write ORDER or to its crash-window
+# tradeoff (overflow lands in the journal twice rather than being lost) has
+# to be made at all four:
+#
+#   1. here, ``_atomic_update_context_with_journal``
+#   2. mcp-server ``project_files.py`` - same function, plus the
+#      ``_unlocked_append_journal`` core it was split into so
+#      ``move_to_project`` can call it while already holding every lock
+#   3. ``missioncache_db/__init__.py``, the ``repair`` CLI command - inline
+#      rather than shared because repair reads, decides, and only then
+#      conditionally writes (a dry run must not touch the file), which this
+#      transform-and-always-write contract cannot express
+#   4. ``scripts/migrate_context_conventions.py`` - one-time, frozen
 
 
 
@@ -971,7 +985,14 @@ def _apply_managed_section(
                 f"so it was left untouched - rename it to let MissionCache manage "
                 f"that section"
             )
-        return context_health.replace_section_body(content, name, body), None
+        # strict=False: this runs AFTER the DB row is committed and the
+        # caller swallows any exception (see refresh_context_mirror), so a
+        # refusal here would silently leave the markdown out of step with
+        # the database. See replace_section_body's docstring.
+        return (
+            context_health.replace_section_body(content, name, body, strict=False),
+            None,
+        )
     if not create:
         return content, None
     section_text = f"## {name}\n\n{body}\n"
