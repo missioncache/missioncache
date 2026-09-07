@@ -47,7 +47,7 @@ Six hooks, four events: `UserPromptSubmit` runs *three* scripts (activity_tracke
 | `UserPromptSubmit` | `activity_tracker.py` | 5s | Record a heartbeat in the DB for time tracking |
 | `UserPromptSubmit` | `task_tracker.py` | 5s | Detect task-vs-context divergence and emit a reminder if Claude is forgetting to flip checkboxes |
 | `UserPromptSubmit` | `session_title.py` | 5s | Name the session after the project it is bound to, so other sessions can address it |
-| `PreCompact` | `pre_compact.py` | 30s | Update context file timestamp and add an "auto-saved before compaction" note |
+| `PreCompact` | `pre_compact.py` | 30s | Update context file timestamp and prepend a sanitized Pre-Compact Snapshot of the recent turns |
 | `Stop` | `stop.py` | 10s | If files were edited during the session, remind the user to run `/missioncache:save` |
 
 ### The bootstrap pattern
@@ -199,11 +199,16 @@ This is there because Claude Code (the harness) periodically injects system remi
 1. Find the active task via `find_task_for_cwd`. If no task, return.
 2. Find the context file under `~/.missioncache/<task.full_path>/<task.name>-context.md` (or the bare `context.md` fallback for subtask layouts).
 3. Update the "Last Updated" timestamp line.
-4. Add an `- Auto-saved before compaction (<timestamp>)` bullet. If a `## Recent Changes` section exists, add it there; otherwise append a new section at the end.
-5. Write the file back.
-6. Call `db.process_heartbeats()` to flush any accumulated heartbeats into the `sessions` table, so the dashboard time totals are current before compaction.
+4. Read the last few user prompts and assistant replies out of the JSONL transcript, truncate each to `MAX_TURN_CHARS`, and format them into a `**Pre-Compact Snapshot**` body.
+5. Sanitize that body (see below), then prepend it as a `### <timestamp>` subsection via `context_health.prepend_recent_changes` - the one shared owner of the prepend shape.
+6. Write the file back.
+7. Call `db.process_heartbeats()` to flush any accumulated heartbeats into the `sessions` table, so the dashboard time totals are current before compaction.
 
-The auto-save note is the signal: when you come back to the project later via `/missioncache:load`, you can see in the context file exactly when it was auto-saved and how many compactions have happened in the current work session. In practice you almost never look at the auto-save line - it is there for reconstructing "what happened" in pathological cases.
+The snapshot is the signal: when you come back to the project later via `/missioncache:load`, the context file shows exactly when it was auto-saved and what the session was doing at the time. In practice you rarely read it - it is there for reconstructing "what happened" in pathological cases.
+
+**The body must be sanitized, and this is not cosmetic.** The snapshot is raw conversation text, so an assistant reply routinely contains column-0 `## ` headings, and the truncation can cut inside a fenced code block and leave the fence open. Section boundaries are found by column-0 anchors, so a `## ` heading written verbatim into Recent Changes *ends the section at that line* and strands every entry below it - invisible to the 12-entry cap, to `get_context_digest`, and to the dashboard. Measured before the fix: 8 of 64 live snapshots carried such a heading, and the damage had reached 7 project files, one of them MissionCache's own. `context_health.sanitize_bullet` closes a dangling fence with the delimiter its opener used, demotes headings, pushes a leading fence or heading onto its own line, and indents every continuation line by two - so the text still renders as headings and code while no line can match a column-0 anchor. `missioncache-db repair` recovers files that were already damaged.
+
+The hook does not enforce the Recent Changes cap - that lives in `update_context_file` and re-runs on the next save - so a compaction can leave the section temporarily over cap. That is expected.
 
 **The 30-second timeout** is generous because `process_heartbeats` can touch a lot of rows on a busy session, and the compaction itself does not block on the hook - Claude Code fires the hook, waits up to 30s, then compacts regardless. The hook should finish in well under a second in practice, but the budget is there for outliers.
 

@@ -124,6 +124,16 @@ When an investigation DISPROVES a theory, record it so no future session rebuild
 
 Recent Changes keeps the newest 12 dated `### <timestamp>` subsections; older entries roll automatically into `<name>-journal.md` (oldest first) in the project dir. The journal is greppable history - never load it on resume, grep it when archaeology is needed. The pointer line at the section bottom says where the history went. The pre-compact hook may leave the section temporarily over cap; the next save re-trims.
 
+A Recent Changes entry is a short summary line. Never paste session output, a save report or a chat transcript into one. Section boundaries are column-0 anchors, so a `## ` heading inside an entry ends the section at that line and strands every entry below it, invisible to the cap, the digest and the dashboard. The tools sanitize what they are given, and `missioncache-db health` reports a file where this already happened, but the entry is also just unreadable at that length.
+
+### Removing and moving content
+
+Removing is a tool call, not a hand edit. `update_context_file` takes `sections_remove` (whole `## ` sections, exact heading text) and `bullets_remove` (`{"section", "match"}` for one Gotcha, decision or Key Files row). `update_tasks_file` takes `tasks_remove` (`{"match", "reason"}`), which strikes the task through under `## Removed` with the reason instead of leaving it to skew the progress counter - marking a superseded or moved task `[x]` claims work that never happened. `waiting_on_resolve` takes a `kind` of `resolved`, `moved` or `dropped`, so a row that moved is not written up as answered.
+
+When content belongs in another project, use `move_to_project` rather than a remove plus an add. It holds both projects' locks for the whole operation, so a split cannot half-apply, and it records the move in both files' Recent Changes and on both `**Related projects:**` header lines.
+
+The core sections and the DB-rendered ones refuse removal. If a section genuinely has to go and the tool refuses, that is the answer, not an invitation to edit the file.
+
 ### Cross-project events
 
 When another project's meeting/decision changes THIS project's reality, write a self-contained imported-event section ABOVE Waiting on:
@@ -140,7 +150,7 @@ Write it with `update_context_file`'s `imported_event` parameter, never with a d
 
 A project's context can change under a session that is running right now. When it does, tell that session - it is working from what it read at load time and has no other way to find out.
 
-Every MCP tool that rewrites or moves a project's files returns `live_sessions` when other live Claude Code sessions are bound to that project: `update_context_file`, `update_tasks_file`, the PM mutators (`add_action_item`, `update_action_item`, `set_stakeholder`, `set_ticket`, `set_project_due_date`), `rename_task` (under the NEW name - a live peer needs to reload its paths), and `complete_task` / `reopen_task` (the whole directory moves between active/ and completed/). `create_missioncache_files` is the deliberate exception: a project that did not exist a moment ago has no bound peers. Each entry carries `session_id`, `title` and `last_active`. It appears for cross-project writes and for a sibling session on your own project alike. Writes made through the dashboard or the `missioncache-db` CLI do NOT notify - there is no Claude reading those responses - so a dashboard edit reaches a live session only on its next `/missioncache:load` or digest read.
+Every MCP tool that rewrites or moves a project's files returns `live_sessions` when other live Claude Code sessions are bound to that project: `update_context_file`, `update_tasks_file`, `move_to_project` (merged across BOTH projects - both files changed), the PM mutators (`add_action_item`, `update_action_item`, `set_stakeholder`, `set_ticket`, `set_project_due_date`), `rename_task` (under the NEW name - a live peer needs to reload its paths), and `complete_task` / `reopen_task` (the whole directory moves between active/ and completed/). `create_missioncache_files` is the deliberate exception: a project that did not exist a moment ago has no bound peers. Each entry carries `session_id`, `title` and `last_active`. It appears for cross-project writes and for a sibling session on your own project alike. Writes made through the dashboard or the `missioncache-db` CLI do NOT notify - there is no Claude reading those responses - so a dashboard edit reaches a live session only on its next `/missioncache:load` or digest read.
 
 The `title` is the address: `SendMessage` reaches a peer by its session title, and the `session_title` hook names each bound session after its project (a second session on the same project takes `<project>-2`). The hook re-emits the title only when the computed address changes, so a stale suffix drops back to the plain name on that session's next prompt after the peer holding it dies, and a manual `/rename` survives the steady state.
 

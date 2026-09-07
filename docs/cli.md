@@ -108,7 +108,34 @@ missioncache-db health
 
 Scans every active project's context file and reports, per project: a stale `Last Updated` (older than 14 days), stale Waiting-on rows (`Since` older than 7 days), a context file over the 100KB size budget, missing core sections (`Description`, `Gotchas`, `Waiting on`, `Next Steps`, `Recent Changes`), and a Recent Changes section over its 12-entry cap (meaning a journal rollover is pending on the next save). A project directory without a context file is itself a finding. Projects with a DB row also get the PM checks: overdue open action items, a project due date within 7 days (or past), and items open more than 14 days with no due date.
 
+Three of the findings are structural rather than stale: an unbalanced code fence (naming the line the opener sits on), duplicate `## <name>` sections, and dated Recent Changes entries stranded outside the section. `repair` fixes the last two and only reports the fence.
+
 Report-only: exit code is always 0, warnings or not. The thresholds are constants in `missioncache_db/context_health.py`, not config keys. The same warnings surface per-project in the `/missioncache:load` digest, so `health` is mainly the fleet-wide sweep.
+
+## Repairing a damaged context file
+
+```bash
+missioncache-db repair                    # every active project, dry run
+missioncache-db repair --all              # active + completed, dry run
+missioncache-db repair aip-qa-guild       # one project (searches completed too)
+missioncache-db repair --all --apply      # actually write
+```
+
+Dry run by default - it prints what it would do and changes nothing until you pass `--apply`.
+
+What it fixes, all mechanical:
+
+- **Duplicate sections** are merged into the first one of their name, bodies concatenated in document order. Until they are merged, `update_context_file` refuses to write into that section at all, because picking one of five `## Key Files` is a guess.
+- **Stranded Recent Changes entries** are moved back under `## Recent Changes`, re-sorted newest-first, and the 12-entry cap then rolls the overflow into the journal the way it should have. Duplicate journal pointer lines collapse to the single one at the section bottom as part of this. Only writer-shaped `### YYYY-MM-DD HH:MM` headings are moved; a hand-written dated heading inside someone's prose is left alone (the health warning says so rather than pointing you here).
+
+It also runs the cap on its own, so a file whose only problem is an overdue rollover gets one even with no structural damage. That is the most common finding on a healthy fleet.
+
+What it deliberately does NOT do:
+
+- **Close an unbalanced fence.** It reports the line and stops. Closing one guesses where the code ended, and since the parsers now tolerate a dangling opener, it is a rendering problem rather than a data-loss one.
+- **Detect or delete a stray pasted-output section.** It neither reports these nor removes them - deciding a section is junk is your call. Recover the entries with `repair`, then find the leftover in `get_context_digest`'s `section_index` and drop it through the locked tool: `update_context_file(sections_remove=["Updated: my-project"])`.
+
+Writes go through the same sidecar lock, journal-first, atomic-replace path every other context writer uses, so a repair cannot interleave with a live session's save.
 
 ## Editor-extension snapshot
 
