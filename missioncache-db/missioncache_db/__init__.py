@@ -59,6 +59,7 @@ Cleanup:
 
 Diagnostics:
     python missioncache_db.py health                    # Report context-file health for all active projects
+    python missioncache_db.py repair [name...] [--all] [--apply]  # Fix context-file structure (dry-run by default)
     python missioncache_db.py encode-cwd [path]         # Claude Code's projects-dir key for a path (default: cwd)
 
 Cross-Machine Sharing:
@@ -6188,6 +6189,122 @@ def main():
             print(
                 f"\n{len(project_dirs)} active projects checked, "
                 f"{total_warnings} warnings"
+            )
+
+        elif command == "repair":
+            from missioncache_db import context_health, filelock
+            from missioncache_db.context_health import extract_section
+
+            apply = "--apply" in sys.argv
+            targets = [a for a in sys.argv[2:] if not a.startswith("--")]
+            include_completed = "--all" in sys.argv or bool(targets)
+
+            bases = ["active"] + (["completed"] if include_completed else [])
+            project_dirs = []
+            for base in bases:
+                base_dir = MISSIONCACHE_ROOT / base
+                if not base_dir.exists():
+                    continue
+                project_dirs += sorted(p for p in base_dir.iterdir() if p.is_dir())
+            if targets:
+                project_dirs = [p for p in project_dirs if p.name in targets]
+                missing = set(targets) - {p.name for p in project_dirs}
+                for name in sorted(missing):
+                    print(f"{name}: not found")
+
+            prefix = "" if apply else "DRY RUN: "
+            changed = 0
+            for project_dir in project_dirs:
+                name = project_dir.name
+                context_file = project_dir / f"{name}-context.md"
+                if not context_file.exists():
+                    context_file = project_dir / "context.md"
+                if not context_file.exists():
+                    continue
+                journal_path = context_health.derive_journal_path(context_file)
+                # Same lock + journal-first + atomic-replace shape every
+                # other context writer uses, so a repair cannot interleave
+                # with a live session's save.
+                with filelock.sidecar_lock(context_file):
+                    try:
+                        original = context_file.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as e:
+                        print(f"{name}: unreadable ({e.__class__.__name__})")
+                        continue
+                    new_content, journal_append, report = context_health.repair_content(
+                        original, journal_path.name
+                    )
+                    findings = []
+                    if report["merged_sections"]:
+                        findings.append(
+                            "merged duplicate sections: "
+                            + ", ".join(report["merged_sections"])
+                        )
+                    if report["reabsorbed_entries"]:
+                        findings.append(
+                            f"{report['reabsorbed_entries']} stranded Recent Changes "
+                            "entries moved back into the section"
+                        )
+                    if report["rolled_to_journal"]:
+                        findings.append(
+                            f"{report['rolled_to_journal']} entries rolled to "
+                            f"{journal_path.name}"
+                        )
+                    if report["unbalanced_fence_line"]:
+                        findings.append(
+                            "unbalanced code fence at line "
+                            f"{report['unbalanced_fence_line']} - NOT repaired "
+                            "(closing it would guess where the code ended); "
+                            "fix by hand"
+                        )
+                    if report.get("skipped_for_fence"):
+                        findings.append(
+                            "NOTHING was repaired: with the fence unclosed, "
+                            "which lines are code is a guess, and merging or "
+                            "moving on that guess can hoist text out of a code "
+                            "sample. Close the fence, then re-run"
+                        )
+                    if report["orphans_left"]:
+                        why = (
+                            "there is no '## Recent Changes' section to move them into"
+                            if extract_section(new_content, "Recent Changes") is None
+                            else "they are hand-written headings, not writer entries"
+                        )
+                        findings.append(
+                            f"{report['orphans_left']} stranded Recent Changes "
+                            f"entries could NOT be moved back: {why}; fix by hand"
+                        )
+                    if not findings:
+                        continue
+                    changed += 1
+                    print(f"{prefix}{name}:")
+                    for finding in findings:
+                        print(f"  - {finding}")
+                    if not apply or new_content == original:
+                        continue
+                    # Copy 3 of the journal-first write. See the ledger in
+                    # pm_items.py before changing the order here.
+                    if journal_append:
+                        if journal_path.exists():
+                            journal_content = (
+                                journal_path.read_text(encoding="utf-8").rstrip("\n")
+                                + "\n\n"
+                            )
+                        else:
+                            journal_content = (
+                                context_health.journal_header(name) + "\n"
+                            )
+                        journal_content += journal_append
+                        journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
+                        journal_tmp.write_text(journal_content, encoding="utf-8")
+                        replace_with_retry(journal_tmp, journal_path)
+                    tmp_path = context_file.with_name(context_file.name + ".tmp")
+                    tmp_path.write_text(new_content, encoding="utf-8")
+                    replace_with_retry(tmp_path, context_file)
+
+            print(
+                f"\n{len(project_dirs)} projects checked, {changed} with findings"
+                + ("" if apply else " (re-run with --apply to write)")
             )
 
         elif command == "config":

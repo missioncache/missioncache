@@ -9,6 +9,7 @@ implementation.
 """
 
 from datetime import date, datetime
+import re
 from pathlib import Path
 
 import pytest
@@ -740,3 +741,653 @@ class TestUpsertRelatedProjects:
             "Waiting on",
             "Next Steps",
         ]
+
+
+class TestUnclosedFenceDoesNotBlindTheParsers:
+    """The 2026-09-04 damage class: a truncated snapshot leaves a dangling fence.
+
+    Under the old CommonMark reading the dangling opener masked the rest of
+    the file, so `_section_span` returned None for sections that plainly
+    exist and every writer appended a duplicate at EOF instead.
+    """
+
+    CONTENT = (
+        "# P - Context\n\n"
+        "## Recent Changes\n\n"
+        "### 2026-08-14 22:43\n\n"
+        "- a snapshot that got cut mid-block:\n\n"
+        "```markdown\n"
+        "- Migration scripts. How we know which scr...\n\n"
+        "## Key Architectural Decisions\n\n"
+        "- a real decision\n\n"
+        "## Key Files\n\n"
+        "| File | Purpose |\n"
+        "|------|---------|\n"
+    )
+
+    def test_headings_below_a_dangling_fence_stay_visible(self):
+        names = [e["name"] for e in ch.section_index(self.CONTENT)]
+        assert names == [
+            "Recent Changes",
+            "Key Architectural Decisions",
+            "Key Files",
+        ]
+
+    def test_section_span_finds_a_section_below_the_dangling_fence(self):
+        assert ch.extract_section(self.CONTENT, "Key Files") is not None
+
+    def test_append_merges_instead_of_creating_a_duplicate(self):
+        out = ch.append_to_section_body(
+            self.CONTENT, "Key Files", "| `a.py` | does a |"
+        )
+        assert out.count("## Key Files") == 1
+
+    def test_a_balanced_fence_still_hides_its_contents(self):
+        content = "# P\n\n## Real\n\nx\n\n```\n## Not A Section\n```\n"
+        names = [e["name"] for e in ch.section_index(content)]
+        assert names == ["Real"]
+
+    def test_the_dangling_opener_is_reported(self):
+        assert ch.unbalanced_fence_line(self.CONTENT) == 9
+        assert ch.unbalanced_fence_line("# P\n\n```\nx\n```\n") is None
+
+
+class TestSanitizeBullet:
+    """No sanitized text may carry a column-0 structure anchor."""
+
+    POISON = (
+        "**Pre-Compact Snapshot** (auto-saved before compaction)\n\n"
+        "Recent assistant responses (oldest first):\n\n"
+        "## Updated: aip-qa-guild\n\n"
+        "**Session binding:** `abc`\n\n"
+        "## 2026-08-14 a heading that looks dated\n\n"
+        "```markdown\n"
+        "- truncated mid-fence...\n"
+    )
+
+    def test_no_column_zero_h2_survives(self):
+        out = ch.sanitize_bullet(self.POISON)
+        assert not re.search(r"^## ", out, re.MULTILINE)
+
+    def test_no_column_zero_dated_h3_survives(self):
+        # Demotion ALONE would turn "## 2026-08-14 x" into "### 2026-08-14 x",
+        # which is a perfectly good fake Recent Changes boundary. The indent
+        # is what actually closes this.
+        out = ch.sanitize_bullet(self.POISON)
+        assert not re.search(r"^### \d{4}", out, re.MULTILINE)
+
+    def test_the_dangling_fence_is_closed(self):
+        out = ch.sanitize_bullet(self.POISON)
+        assert ch.unbalanced_fence_line(out) is None
+
+    def test_headings_are_kept_as_headings_not_deleted(self):
+        out = ch.sanitize_bullet(self.POISON)
+        assert "**Session binding:** `abc`" in out
+        # One to three spaces: markdown stops treating a line as a heading at
+        # four, where it becomes an indented code block instead. Asserting
+        # only "### Updated" in out passes at any width.
+        assert re.search(r"^ {1,3}### Updated: aip-qa-guild$", out, re.MULTILINE)
+
+    def test_code_block_contents_keep_their_relative_indentation(self):
+        # Every continuation line is indented by two as list continuation,
+        # the fence included, so a fenced block inside a list item renders
+        # with its own spacing intact - the renderer strips the two relative
+        # to the marker. What must NOT change is the spacing WITHIN the block.
+        out = ch.sanitize_bullet("text\n\n```\n  exact = spacing\n```\n")
+        body = [l for l in out.split("\n") if "exact" in l][0]
+        assert body == "    exact = spacing"  # 2 (continuation) + 2 (original)
+        assert ch.dangling_fence(out) is None
+
+    def test_single_line_and_empty_are_untouched(self):
+        assert ch.sanitize_bullet("just a line") == "just a line"
+        assert ch.sanitize_bullet("") == ""
+
+    def test_a_poisoned_bullet_no_longer_truncates_recent_changes(self):
+        content = (
+            "# P\n\n## Recent Changes\n\n### 2026-01-01 00:00\n\n- old entry\n\n"
+            "## Gotchas\n\n- g\n"
+        )
+        out = ch.prepend_recent_changes(
+            content,
+            "2026-09-04 12:00",
+            "- " + ch.sanitize_bullet(self.POISON),
+        )
+        # Both the new and the pre-existing entry stay inside the section.
+        assert len(ch.parse_recent_changes_subsections(out)) == 2
+        assert ch.orphaned_recent_changes(out) == []
+
+
+class TestAmbiguousSectionGuard:
+    def test_writing_to_a_duplicated_section_is_refused(self):
+        content = "# P\n\n## Key Files\n\n| a | b |\n\n## Key Files\n\n| c | d |\n"
+        with pytest.raises(ch.AmbiguousSectionError):
+            ch.append_to_section_body(content, "Key Files", "| e | f |")
+        with pytest.raises(ch.AmbiguousSectionError):
+            ch.replace_section_body(content, "Key Files", "x")
+
+    def test_a_single_section_is_unaffected(self):
+        content = "# P\n\n## Key Files\n\n| a | b |\n"
+        assert "| e | f |" in ch.append_to_section_body(
+            content, "Key Files", "| e | f |"
+        )
+
+    def test_a_heading_inside_a_fence_does_not_count_as_a_duplicate(self):
+        content = "# P\n\n## Key Files\n\n```\n## Key Files\n```\n"
+        assert "x" in ch.append_to_section_body(content, "Key Files", "x")
+
+
+class TestSectionAndItemRemoval:
+    DOC = (
+        "# P - Context\n\n"
+        "## Gotchas\n\n"
+        "- keep me\n"
+        "- WRONG (falsified): a theory\n"
+        "  ### a demoted heading inside the item\n"
+        "  and its continuation\n"
+        "- keep me too\n\n"
+        "## Guild items (2026-08-16)\n\n"
+        "body\n\n"
+        "## Key Files\n\n"
+        "| File | Purpose |\n"
+        "|------|---------|\n"
+        "| `a.py` | does a |\n"
+    )
+
+    def test_remove_section_matches_the_full_heading_exactly(self):
+        out, body = ch.remove_section(self.DOC, "Guild items (2026-08-16)")
+        assert body is not None and "body" in body
+        assert "Guild items" not in out
+        assert "## Gotchas" in out and "## Key Files" in out
+
+    def test_a_heading_prefix_must_not_match(self):
+        # Without exact matching, removing "Key" would delete "## Key Files".
+        assert ch.remove_section(self.DOC, "Key")[1] is None
+        assert ch.remove_section(self.DOC, "Guild items")[1] is None
+
+    def test_remove_list_item_takes_the_continuation_lines_with_it(self):
+        out, item = ch.remove_list_item(self.DOC, "Gotchas", "falsified")
+        assert item is not None
+        assert "a demoted heading inside the item" in item
+        assert "and its continuation" not in out
+        assert "- keep me\n" in out and "- keep me too" in out
+
+    def test_a_table_header_row_is_never_removed(self):
+        assert ch.remove_list_item(self.DOC, "Key Files", "File")[1] is None
+
+    def test_a_table_data_row_is_removed(self):
+        out, item = ch.remove_list_item(self.DOC, "Key Files", "a.py")
+        assert item == "| `a.py` | does a |"
+        assert "| File | Purpose |" in out
+
+    def test_no_match_and_missing_section_return_none(self):
+        assert ch.remove_list_item(self.DOC, "Gotchas", "zzz")[1] is None
+        assert ch.remove_list_item(self.DOC, "Nope", "x")[1] is None
+
+
+class TestRepairContent:
+    DAMAGED = (
+        "# P - Context\n"
+        "**Last Updated:** 2026-09-01 10:00\n\n"
+        "## Recent Changes\n\n"
+        "### 2026-09-01 10:00\n\n"
+        "- newest\n\n"
+        "Older entries live in `p-journal.md` (oldest first).\n\n"
+        "## Updated: p\n\n"
+        "a pasted save report\n\n"
+        "### 2026-07-29 00:17\n\n"
+        "- stranded older entry\n\n"
+        "### 2026-07-28 10:13\n\n"
+        "- another stranded entry\n\n"
+        "Older entries live in `p-journal.md` (oldest first).\n\n"
+        "## Key Files\n\n"
+        "| File | Purpose |\n"
+        "|------|---------|\n"
+        "| `a.py` | does a |\n\n"
+        "## Key Files\n\n"
+        "| `b.py` | does b |\n"
+    )
+
+    def test_stranded_entries_come_back_into_the_section(self):
+        out, _, report = ch.repair_content(self.DAMAGED, "p-journal.md")
+        assert report["reabsorbed_entries"] == 2
+        assert ch.orphaned_recent_changes(out) == []
+        assert len(ch.parse_recent_changes_subsections(out)) == 3
+
+    def test_reabsorbed_entries_are_ordered_newest_first(self):
+        # DAMAGED's blocks are already descending, so "sorted == sorted" is
+        # satisfied whether the sort runs or not. Feed it OUT of order.
+        scrambled = (
+            "# P - Context\n**Last Updated:** 2026-09-01 10:00\n\n"
+            "## Recent Changes\n\n### 2026-07-01 10:00\n\n- oldest\n\n"
+            "## Stray\n\n"
+            "### 2026-08-01 10:00\n\n- middle\n\n"
+            "### 2026-09-05 10:00\n\n- newest\n"
+        )
+        out, _, _ = ch.repair_content(scrambled, "p-journal.md")
+        headings = [h for h, _ in ch.parse_recent_changes_subsections(out)]
+        assert headings == [
+            "### 2026-09-05 10:00",
+            "### 2026-08-01 10:00",
+            "### 2026-07-01 10:00",
+        ]
+
+    def test_duplicate_sections_merge_into_the_first(self):
+        out, _, report = ch.repair_content(self.DAMAGED, "p-journal.md")
+        assert report["merged_sections"] == ["Key Files (2 -> 1)"]
+        assert out.count("## Key Files") == 1
+        assert "| `a.py` | does a |" in out and "| `b.py` | does b |" in out
+
+    def test_the_stray_prose_section_is_left_for_the_user_to_remove(self):
+        # Repair fixes structure. Deciding a section is junk is the user's
+        # call, made through update_context_file(sections_remove=[...]).
+        out, _, _ = ch.repair_content(self.DAMAGED, "p-journal.md")
+        assert "## Updated: p" in out
+        assert "a pasted save report" in out
+
+    def test_an_unbalanced_fence_is_reported_and_not_edited(self):
+        content = "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n```\ncut...\n"
+        out, _, report = ch.repair_content(content, "p-journal.md")
+        assert report["unbalanced_fence_line"] == 9
+        assert out.count("```") == 1
+
+    def test_a_healthy_file_is_returned_unchanged(self):
+        content = (
+            "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- only entry\n"
+        )
+        out, journal, report = ch.repair_content(content, "p-journal.md")
+        assert out == content and journal is None
+        assert report["merged_sections"] == [] and report["reabsorbed_entries"] == 0
+
+    def test_the_cap_rolls_the_overflow_after_reabsorbing(self):
+        entries = "".join(
+            f"### 2026-08-{day:02d} 10:00\n\n- entry {day}\n\n" for day in range(1, 16)
+        )
+        content = f"# P\n\n## Recent Changes\n\n## Stray\n\n{entries}"
+        out, journal, report = ch.repair_content(content, "p-journal.md")
+        assert report["reabsorbed_entries"] == 15
+        assert report["rolled_to_journal"] == 3
+        assert journal is not None
+        kept = [h for h, _ in ch.parse_recent_changes_subsections(out)]
+        assert len(kept) == 12
+        # WHICH twelve, not just how many. Counts alone are identical when
+        # the newest-first sort is skipped, and the outcome is inverted: the
+        # cap then archives the three NEWEST entries and keeps the oldest
+        # twelve, which is the opposite of the section's purpose.
+        assert kept[0] == "### 2026-08-15 10:00"
+        assert kept[-1] == "### 2026-08-04 10:00"
+        rolled = [l for l in journal.splitlines() if l.startswith("### ")]
+        assert rolled == [
+            "### 2026-08-01 10:00",
+            "### 2026-08-02 10:00",
+            "### 2026-08-03 10:00",
+        ]
+
+
+class TestStructuralHealthWarnings:
+    def test_all_three_structural_findings_are_reported(self, tmp_path):
+        path = tmp_path / "p-context.md"
+        content = TestRepairContent.DAMAGED + "\n```\ncut...\n"
+        path.write_text(content)
+        warnings = ch.check_context_health(content, path)
+        joined = " | ".join(warnings)
+        assert "unbalanced code fence" in joined
+        assert "'## Key Files' sections" in joined
+        assert "outside the section" in joined
+
+    def test_a_healthy_file_reports_no_structural_findings(self, tmp_path):
+        path = tmp_path / "p-context.md"
+        content = "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n"
+        path.write_text(content)
+        joined = " | ".join(ch.check_context_health(content, path))
+        assert "unbalanced" not in joined and "outside the section" not in joined
+
+
+class TestLegacyRecentChangesSiblingsAreNotDuplicates:
+    """The pre-2026-07-11 shape must stay writable.
+
+    Files from before the conventions migration carry a run of legacy
+    `## Recent Changes (2026-04-19 07:53)` sibling headings with no bare
+    `## Recent Changes` among them - measured: 5 completed projects on this
+    machine, one with 35 of them. `_section_span` reads those by design
+    (prefix-tolerant), so if the ambiguity guard counted prefix matches it
+    would refuse every write to a file that is merely old, and `repair`
+    could not clear it because `duplicate_sections` keys on the full
+    heading text and correctly sees none.
+    """
+
+    LEGACY = (
+        "# P - Context\n\n"
+        "## Recent Changes (2026-04-19 07:53)\n\n- a\n\n"
+        "## Recent Changes (2026-04-19 08:56)\n\n- b\n\n"
+        "## Recent Changes (2026-04-20 01:03)\n\n- c\n"
+    )
+
+    def test_the_guard_and_repair_agree_that_there_are_no_duplicates(self):
+        assert ch.duplicate_sections(self.LEGACY) == {}
+        # No exception - the write is allowed through. And it must land IN
+        # the first sibling, not create a fourth section: replace_section_body
+        # falls back to appending at EOF when the span is None, which would
+        # satisfy a bare `"- new" in out` while producing the exact damage
+        # this class exists to prevent.
+        out = ch.replace_section_body(self.LEGACY, "Recent Changes", "- new")
+        assert out.count("## Recent Changes") == 3
+        body = ch.extract_section(out, "Recent Changes")
+        assert body is not None and "- new" in body
+
+    def test_a_genuine_repeat_of_the_same_heading_is_still_caught(self):
+        content = self.LEGACY + "\n## Recent Changes (2026-04-19 07:53)\n\n- dup\n"
+        assert ch.duplicate_sections(content) == {
+            "Recent Changes (2026-04-19 07:53)": 2
+        }
+        with pytest.raises(ch.AmbiguousSectionError):
+            ch.append_to_section_body(
+                content, "Recent Changes (2026-04-19 07:53)", "- x"
+            )
+
+
+class TestDanglingFenceUsesTheOpenersDelimiter:
+    """A closer must match the opener's character and length.
+
+    Three backticks close neither a `~~~` block nor a four-backtick block,
+    so a sanitizer that always appends ``` leaves the text still unbalanced -
+    and the whole point of closing it is that the following headings stop
+    being fence content.
+    """
+
+    @pytest.mark.parametrize(
+        "opener", ["```", "````", "`````", "~~~", "~~~~"]
+    )
+    def test_every_legal_fence_form_is_closed(self, opener):
+        text = f"prose\n\n{opener}markdown\n- cut mid block..."
+        out = ch.sanitize_bullet(text)
+        assert ch.dangling_fence(out) is None, f"{opener!r} left unbalanced"
+
+    @pytest.mark.parametrize("opener", ["~~~", "````"])
+    def test_headings_after_a_closed_fence_are_still_neutralized(self, opener):
+        # Until the fence closes, demote_headings treats what follows as code
+        # and skips it. Closing it first is what puts those headings back in
+        # scope, so a wrong closer silently leaves them at column 0.
+        text = f"{opener}\ncode\n{opener}\n\n## Real Heading\n\n{opener}\ncut..."
+        out = ch.sanitize_bullet(text)
+        assert not re.search(r"^## ", out, re.MULTILINE)
+        assert ch.dangling_fence(out) is None
+
+    def test_dangling_fence_reports_line_and_delimiter(self):
+        assert ch.dangling_fence("a\n\n~~~\nb\n") == (3, "~~~")
+        assert ch.dangling_fence("a\n\n```\nb\n```\n") is None
+
+    def test_a_shorter_inner_fence_does_not_close_a_longer_one(self):
+        # CommonMark: the closer must be at least as long as the opener.
+        assert ch.dangling_fence("````\n```\ninner\n") is not None
+
+
+class TestRepairDoesNotEatLegacySiblingSections:
+    """Repair must merge only what the detector counted.
+
+    A prefix-tolerant merge regex collapses `## Recent Changes` x2 AND the
+    legacy `## Recent Changes (2026-04-19 07:53)` siblings into one, deleting
+    three headings `duplicate_sections` never counted, while reporting
+    "2 -> 1". The two must use the same exact match.
+    """
+
+    MIXED = (
+        "# P - Context\n\n"
+        "## Recent Changes\n\n### 2026-09-01 10:00\n\n- newest\n\n"
+        "## Recent Changes\n\n### 2026-08-01 10:00\n\n- second bare\n\n"
+        "## Recent Changes (2026-04-19 07:53)\n\n- legacy A\n\n"
+        "## Recent Changes (2026-04-19 08:56)\n\n- legacy B\n"
+    )
+
+    def test_only_the_exact_duplicates_merge(self):
+        out, _, report = ch.repair_content(self.MIXED, "p-journal.md")
+        assert report["merged_sections"] == ["Recent Changes (2 -> 1)"]
+        headings = [l for l in out.splitlines() if l.startswith("## ")]
+        assert headings == [
+            "## Recent Changes",
+            "## Recent Changes (2026-04-19 07:53)",
+            "## Recent Changes (2026-04-19 08:56)",
+        ], "the legacy dated siblings must survive"
+
+    def test_the_report_count_matches_what_actually_merged(self):
+        before = self.MIXED.count("## Recent Changes")
+        out, _, report = ch.repair_content(self.MIXED, "p-journal.md")
+        after = out.count("## Recent Changes")
+        # "Recent Changes (2 -> 1)" claims one heading disappeared.
+        assert before - after == 1, f"report said 2 -> 1 but {before - after} vanished"
+
+
+class TestRemoveSectionReturnsTheBodyItCut:
+    DOC = (
+        "# P\n\n"
+        "## Notes (old)\n\nthe OLD body\n\n"
+        "## Notes\n\nthe CURRENT body\n\n"
+        "## Next Steps\n\n1. go\n"
+    )
+
+    def test_the_returned_body_belongs_to_the_removed_section(self):
+        # Reader and remover must resolve to the SAME section. They used to
+        # diverge: extract_section took the first prefix match (`## Notes
+        # (old)`) while remove_section cut the exact one, so a move carried
+        # the body of one section and deleted another. Both now prefer the
+        # exact heading, and remove_section returns what it actually cut.
+        assert "the CURRENT body" in (ch.extract_section(self.DOC, "Notes") or "")
+        out, body = ch.remove_section(self.DOC, "Notes")
+        assert "the CURRENT body" in body
+        assert "the OLD body" not in body
+        assert "## Notes (old)" in out and "the OLD body" in out
+
+    def test_a_miss_returns_none(self):
+        assert ch.remove_section(self.DOC, "Nope")[1] is None
+
+
+class TestOrphanWarningOnlyPromisesWhatRepairDoes:
+    def test_a_hand_written_dated_heading_is_not_promised_to_repair(self, tmp_path):
+        content = (
+            "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n"
+            "## Some Event\n\n### 2026-08-14 sync notes\n\nprose\n"
+        )
+        path = tmp_path / "p-context.md"
+        path.write_text(content)
+        warning = next(
+            w for w in ch.check_context_health(content, path) if "outside the section" in w
+        )
+        assert "repair` leaves them alone" in warning
+        # And repair genuinely does not move it.
+        out, _, report = ch.repair_content(content, "p-journal.md")
+        assert report["reabsorbed_entries"] == 0
+        assert "## Some Event" in out
+
+    def test_a_writer_shaped_orphan_is_promised_to_repair(self, tmp_path):
+        content = (
+            "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n"
+            "## Stray\n\n### 2026-08-14 10:00\n\n- stranded\n"
+        )
+        path = tmp_path / "p-context.md"
+        path.write_text(content)
+        warning = next(
+            w for w in ch.check_context_health(content, path) if "outside the section" in w
+        )
+        assert "run `missioncache-db repair`" in warning
+
+
+class TestClosingFenceCarriesNoInfoString:
+    """CommonMark: an info string is opener-only.
+
+    Without this, a truncated ```markdown block pairs with the NEXT block's
+    ```python OPENER, masking everything between them - which hid a whole
+    Recent Changes entry while every diagnostic stayed quiet.
+    """
+
+    def test_an_info_string_line_cannot_close_a_block(self):
+        doc = "# P\n\n```markdown\ncontent\n```python\nmore\n```\n"
+        # One block from ```markdown to the bare ```, not two.
+        assert ch.mask_fences(doc).count("content") == 0
+        assert ch.dangling_fence(doc) is None
+
+    def test_a_bare_closer_still_closes(self):
+        assert ch.dangling_fence("# P\n\n```py\nx\n```\n") is None
+
+    def test_trailing_whitespace_on_a_closer_is_allowed(self):
+        assert ch.dangling_fence("# P\n\n```\nx\n```   \n") is None
+
+
+class TestEntriesHiddenByFences:
+    """The residue of the truncated-snapshot damage.
+
+    A cut-off block is closed by a LATER block's closer, so the fences
+    balance and the content between is legitimately code. Nothing looks
+    wrong, and the entries in that span are invisible to every reader.
+    """
+
+    DAMAGED = (
+        "# P - Context\n\n## Recent Changes\n\n"
+        "### 2026-09-02 10:00\n\n- newest, cut off mid-block:\n\n"
+        "```markdown\n- cut...\n\n"
+        "### 2026-08-01 10:00\n\n- an older entry\n\n"
+        "```python\nprint('sample')\n```\n"
+    )
+
+    def test_the_swallowed_entry_is_reported_with_its_line(self):
+        assert ch.entries_hidden_by_fences(self.DAMAGED) == [12]
+
+    def test_the_parser_genuinely_cannot_see_it(self):
+        # The report exists because the loss is real and unrecoverable.
+        assert len(ch.parse_recent_changes_subsections(self.DAMAGED)) == 1
+
+    def test_the_health_check_names_the_loss(self, tmp_path):
+        path = tmp_path / "p-context.md"
+        path.write_text(self.DAMAGED)
+        joined = " | ".join(ch.check_context_health(self.DAMAGED, path))
+        assert "inside a code fence" in joined
+        assert "line 12" in joined
+
+    def test_a_healthy_code_sample_does_not_warn(self, tmp_path):
+        ok = "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n```python\n# note\n```\n"
+        path = tmp_path / "p-context.md"
+        path.write_text(ok)
+        assert ch.entries_hidden_by_fences(ok) == []
+        assert not [w for w in ch.check_context_health(ok, path) if "code fence" in w]
+
+
+class TestRepairRefusesWhenTheFenceIsUnknown:
+    """Restructuring on a guess can hoist text out of a code sample."""
+
+    FENCE_TRAP = (
+        "# P\n\n## Gotchas\n\n- WRONG: a real gotcha\n\n"
+        "## Key Files\n\n| File | Purpose |\n|------|---------|\n\nexample:\n\n"
+        "```markdown\n## Gotchas\n\n- WRONG: text from the code sample\n"
+    )
+
+    def test_nothing_is_restructured_behind_an_unclosed_fence(self):
+        out, journal, report = ch.repair_content(self.FENCE_TRAP, "p-journal.md")
+        assert report["skipped_for_fence"] is True
+        assert report["merged_sections"] == []
+        assert out == self.FENCE_TRAP
+        assert journal is None
+
+    def test_the_code_sample_text_is_not_hoisted_into_the_live_section(self):
+        out, _, _ = ch.repair_content(self.FENCE_TRAP, "p-journal.md")
+        gotchas = ch.extract_section(out, "Gotchas")
+        assert "text from the code sample" not in gotchas
+
+    def test_a_clean_file_is_still_repaired(self):
+        clean = (
+            "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n"
+            "## Key Files\n\n| a | b |\n\n## Key Files\n\n| c | d |\n"
+        )
+        _, _, report = ch.repair_content(clean, "p-journal.md")
+        assert report["skipped_for_fence"] is False
+        assert report["merged_sections"] == ["Key Files (2 -> 1)"]
+
+
+class TestRemoveListItemIsFenceAwareAndExact:
+    def test_a_line_inside_a_code_block_is_not_a_list_item(self):
+        doc = "# P\n\n## Gotchas\n\n- keep\n- run this:\n\n```\n- rm -rf /x\n```\n\n- also keep\n"
+        out, item = ch.remove_list_item(doc, "Gotchas", "rm -rf")
+        # The whole bullet that OWNS the code block goes, fence included -
+        # never the inner line alone, which left a dangling opener behind.
+        assert item is not None and item.startswith("- run this:")
+        assert ch.dangling_fence(out) is None
+        assert "- keep" in out and "- also keep" in out
+
+    def test_a_truncated_section_name_does_not_resolve(self):
+        # _section_span is prefix-tolerant, which walked straight past the
+        # caller's forbidden-section guard.
+        doc = "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- entry one\n"
+        assert ch.remove_list_item(doc, "Recent Change", "entry")[1] is None
+        assert ch.remove_list_item(doc, "Recent", "entry")[1] is None
+
+    def test_trailing_prose_is_not_swallowed_by_the_last_bullet(self):
+        doc = "# P\n\n## Gotchas\n\n- a\n- b\n\nNOTE: closing prose.\n"
+        out, item = ch.remove_list_item(doc, "Gotchas", "- b")
+        assert item == "- b"
+        assert "NOTE: closing prose." in out
+
+
+class TestExactHeadingWinsOverPrefix:
+    def test_a_legacy_sibling_does_not_shadow_the_real_section(self):
+        doc = (
+            "# P\n\n## Recent Changes (2026-04-19 07:53)\n\n- legacy\n\n"
+            "## Recent Changes\n\n- the real one\n"
+        )
+        assert "the real one" in (ch.extract_section(doc, "Recent Changes") or "")
+        assert "legacy" not in (ch.extract_section(doc, "Recent Changes") or "")
+
+    def test_prefix_tolerance_still_reads_a_legacy_only_file(self):
+        legacy = "# P\n\n## Recent Changes (2026-04-19 07:53)\n\n- legacy\n"
+        assert "legacy" in (ch.extract_section(legacy, "Recent Changes") or "")
+
+
+class TestSanitizedTextIsSafeAsABulletBody:
+    """Every caller writes `f"- {sanitize_bullet(x)}"`.
+
+    The `- ` prefix is not whitespace, so _FENCE_RE cannot see an opener on
+    the first line - while the closer appended by rule 1 lands at column 0
+    and becomes an opener. Measured: one such bullet produced a duplicate
+    `## Recent Changes` and made check_context_health report four core
+    sections "missing" that were plainly present, with dangling_fence and
+    duplicate_sections both silent.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "```\n## Recent Changes\nstuff",
+            "~~~\n## Gotchas\nx",
+            "````\n## Gotchas\nx",
+            "## Updated: p\n\nbody\n\n```\ncut...",
+            "before\n```python\ncode\n## H\n```\nafter",
+            "text\n\n```markdown\n- cut...",
+            "plain one-liner",
+        ],
+    )
+    def test_no_input_breaks_the_file_when_written_as_a_bullet(self, raw):
+        doc = (
+            "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n"
+            + "- " + ch.sanitize_bullet(raw)
+            + "\n\n## Gotchas\n\n- g\n\n## Next Steps\n\n1. go\n\n```\nlater\n```\n"
+        )
+        assert [e["name"] for e in ch.section_index(doc)] == [
+            "Recent Changes", "Gotchas", "Next Steps",
+        ]
+        assert ch.duplicate_sections(doc) == {}
+        assert ch.dangling_fence(doc) is None
+
+    def test_a_leading_fence_is_pushed_onto_its_own_line(self):
+        out = ch.sanitize_bullet("```\ncode\n```")
+        assert out.split("\n")[0] == ""
+
+    def test_the_text_survives(self):
+        out = ch.sanitize_bullet("```\n## Recent Changes\nstuff")
+        assert "## Recent Changes" in out and "stuff" in out
+
+
+class TestPmMirrorIsNotRefusedOnADamagedFile:
+    def test_strict_false_writes_into_the_first_of_two(self):
+        # The PM mirror runs after the DB row is committed and its caller
+        # swallows exceptions, so a refusal there loses the write silently.
+        doc = "# P\n\n## Action Items\n\nold\n\n## Action Items\n\nother\n"
+        with pytest.raises(ch.AmbiguousSectionError):
+            ch.replace_section_body(doc, "Action Items", "new")
+        out = ch.replace_section_body(doc, "Action Items", "new", strict=False)
+        assert "new" in out

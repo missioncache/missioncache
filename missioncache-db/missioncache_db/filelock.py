@@ -38,7 +38,7 @@ import errno
 import os
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 try:  # POSIX
     import fcntl
@@ -118,6 +118,27 @@ def sidecar_lock(path: Path) -> Iterator[None]:
     naming so the copies cannot drift on it.
     """
     with exclusive_lock(path.with_name(path.name + ".lock")):
+        yield
+
+
+@contextlib.contextmanager
+def sidecar_locks(paths: Iterable[Path]) -> Iterator[None]:
+    """Hold sidecar locks on several files at once, deadlock-free.
+
+    Deduplicates and sorts by path before acquiring, which is the whole
+    point: two callers locking the same pair in opposite orders deadlock,
+    and a sidecar lock blocks forever with no timeout and no error, so the
+    symptom is a hung process rather than a failure anyone can read. Sorting
+    gives every caller in every process the same global order.
+
+    NOT reentrant. POSIX ``flock`` blocks a second acquisition of the same
+    lockfile from the same process, so a function called inside this block
+    must not take any of these locks again - pass it the already-read
+    content, or split it into a lock-taking wrapper and an unlocked core.
+    """
+    with contextlib.ExitStack() as stack:
+        for path in sorted(set(paths)):
+            stack.enter_context(sidecar_lock(path))
         yield
 
 
