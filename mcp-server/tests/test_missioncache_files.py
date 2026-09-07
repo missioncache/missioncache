@@ -11,7 +11,10 @@ from missioncache_db import context_health as ch
 
 from mcp_missioncache.config import Settings
 from mcp_missioncache.errors import ErrorCode, MissionCacheError, MissionCacheFileNotFoundError
+from mcp_missioncache.tasks_parse import parse_tasks_md as _parse_tasks
 from mcp_missioncache.project_files import (
+    BULLETS_REMOVE_FORBIDDEN,
+    PROTECTED_SECTIONS,
     create_missioncache_files,
     get_missioncache_files,
     parse_task_progress,
@@ -1030,10 +1033,18 @@ class TestUpdateContextReturnContract:
             "waiting_on_unmatched",
             "journal_rolled_over",
             "imported_event_applied",
+            "sections_removed",
+            "sections_unmatched",
+            "bullets_removed",
+            "bullets_unmatched",
         }
         assert isinstance(result["content"], str)
         assert result["waiting_on_unmatched"] == []
         assert result["journal_rolled_over"] == 0
+        assert result["sections_removed"] == []
+        assert result["sections_unmatched"] == []
+        assert result["bullets_removed"] == []
+        assert result["bullets_unmatched"] == []
         # False when no event was passed at all, so the MCP layer can tell a
         # skipped duplicate from a section it actually wrote.
         assert result["imported_event_applied"] is False
@@ -1370,3 +1381,465 @@ class TestPlanContentNormalization:
 
         plan = Path(result.plan_file).read_text(encoding="utf-8")
         assert "3" in plan
+
+
+# ── removal params ───────────────────────────────────────────────────────
+
+REMOVABLE_CONTEXT = """# P - Context
+**Last Updated:** 2026-01-01 00:00
+
+## Description
+p
+
+## Gotchas
+
+- keep me
+- WRONG (falsified): a dead theory
+
+## Guild items handed to Lior (2026-08-16)
+
+The four items.
+
+## Waiting on
+
+| What | Who | Since | Gates |
+|------|-----|-------|-------|
+| the tagging decision | Sa'ar | 2026-08-01 | the map |
+
+## Next Steps
+
+1. go
+
+## Recent Changes
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `a.py` | does a |
+"""
+
+
+# The guard lists, stated as the CONTRACT rather than read from the code.
+# Parametrizing over the frozensets themselves is circular: deleting a name
+# from the set also deletes its test case, so the mutation survives. These
+# literals are what the docs promise; the tests below assert the code's sets
+# equal them, so a name added or dropped in either place fails loudly.
+EXPECTED_PROTECTED_SECTIONS = {
+    "Description", "Gotchas", "Waiting on", "Next Steps", "Recent Changes",
+    "Action Items", "Stakeholders", "Tickets",
+}
+EXPECTED_BULLETS_FORBIDDEN = {
+    "Recent Changes", "Waiting on", "Action Items", "Stakeholders", "Tickets",
+}
+
+
+def test_the_protected_section_list_matches_the_documented_contract():
+    assert set(PROTECTED_SECTIONS) == EXPECTED_PROTECTED_SECTIONS
+
+
+def test_the_forbidden_bullets_list_matches_the_documented_contract():
+    assert set(BULLETS_REMOVE_FORBIDDEN) == EXPECTED_BULLETS_FORBIDDEN
+
+
+class TestSectionsRemove:
+    def test_removes_a_section_and_reports_what_missed(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        result = update_context_file(
+            str(ctx),
+            sections_remove=["Guild items handed to Lior (2026-08-16)", "Nope"],
+        )
+        assert result["sections_removed"] == [
+            "Guild items handed to Lior (2026-08-16)"
+        ]
+        assert result["sections_unmatched"] == ["Nope"]
+        assert "Guild items" not in result["content"]
+        assert "## Gotchas" in result["content"]
+
+    @pytest.mark.parametrize("name", sorted(EXPECTED_PROTECTED_SECTIONS))
+    def test_protected_sections_are_refused(self, tmp_path, name):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(str(ctx), sections_remove=[name])
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+        # Refused before any write, so the file is untouched.
+        assert ctx.read_text() == REMOVABLE_CONTEXT
+
+    def test_a_bodyless_section_is_reported_as_removed(self, tmp_path):
+        # remove_section returns the body it cut, and an empty body is falsy.
+        # A truthiness check reports a removal that happened as unmatched.
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT + "\n## Dead Section\n")
+        result = update_context_file(str(ctx), sections_remove=["Dead Section"])
+        assert result["sections_removed"] == ["Dead Section"]
+        assert result["sections_unmatched"] == []
+        assert "## Dead Section" not in result["content"]
+
+    def test_a_heading_prefix_does_not_remove_a_longer_section(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        result = update_context_file(str(ctx), sections_remove=["Key"])
+        assert result["sections_unmatched"] == ["Key"]
+        assert "## Key Files" in result["content"]
+
+
+class TestBulletsRemove:
+    def test_removes_a_gotcha_and_a_table_row(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        result = update_context_file(
+            str(ctx),
+            bullets_remove=[
+                {"section": "Gotchas", "match": "falsified"},
+                {"section": "Key Files", "match": "a.py"},
+                {"section": "Gotchas", "match": "nothing here"},
+            ],
+        )
+        assert len(result["bullets_removed"]) == 2
+        assert result["bullets_unmatched"] == ["Gotchas: nothing here"]
+        assert "dead theory" not in result["content"]
+        assert "- keep me" in result["content"]
+        # The table survives its header.
+        assert "| File | Purpose |" in result["content"]
+
+    @pytest.mark.parametrize("section", sorted(EXPECTED_BULLETS_FORBIDDEN))
+    def test_forbidden_sections_are_refused(self, tmp_path, section):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(
+                str(ctx), bullets_remove=[{"section": section, "match": "x"}]
+            )
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+
+    def test_a_blank_section_or_match_is_refused(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        for entry in ({"section": "", "match": "x"}, {"section": "Gotchas", "match": ""}):
+            with pytest.raises(MissionCacheError):
+                update_context_file(str(ctx), bullets_remove=[entry])
+
+
+class TestWaitingOnKind:
+    @pytest.mark.parametrize(
+        "kind,expected",
+        [
+            (None, "Resolved (was waiting on"),
+            ("resolved", "Resolved (was waiting on"),
+            ("moved", "Moved out (was waiting on"),
+            ("dropped", "Dropped (was waiting on"),
+        ],
+    )
+    def test_kind_picks_the_recent_changes_wording(self, tmp_path, kind, expected):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        entry = {"match": "tagging decision", "outcome": "went elsewhere"}
+        if kind is not None:
+            entry["kind"] = kind
+        result = update_context_file(str(ctx), waiting_on_resolve=[entry])
+        assert expected in result["content"]
+
+    def test_an_unknown_kind_is_refused(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(
+                str(ctx),
+                waiting_on_resolve=[{"match": "tagging", "kind": "bogus"}],
+            )
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+
+
+class TestFreeFormTextIsSanitized:
+    """The PreCompact damage class, reproduced through the MCP write path."""
+
+    POISON = (
+        "a pasted save report:\n\n"
+        "## Updated: p\n\n"
+        "**Session binding:** abc\n\n"
+        "```markdown\n"
+        "- truncated mid-fence..."
+    )
+
+    def test_a_poisoned_recent_change_cannot_truncate_the_section(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        update_context_file(str(ctx), recent_changes=["an earlier entry"])
+        result = update_context_file(str(ctx), recent_changes=[self.POISON])
+        content = result["content"]
+        # Both entries stay inside Recent Changes, and no later section is
+        # stranded behind a forged heading or a dangling fence.
+        assert len(ch.parse_recent_changes_subsections(content)) == 2
+        assert ch.orphaned_recent_changes(content) == []
+        assert ch.unbalanced_fence_line(content) is None
+        assert ch.extract_section(content, "Key Files") is not None
+
+    @pytest.mark.parametrize("field", ["gotchas", "key_decisions"])
+    def test_a_poisoned_entry_changes_no_structure(self, tmp_path, field):
+        ctx = tmp_path / f"p-{field}-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        before = [e["name"] for e in ch.section_index(REMOVABLE_CONTEXT)]
+        result = update_context_file(str(ctx), **{field: [self.POISON]})
+        content = result["content"]
+        after = [e["name"] for e in ch.section_index(content)]
+        # The section INDEX is the contract. `extract_section("Key Files")
+        # is not None` passes on the broken code too, because mask_fences
+        # tolerates the dangling fence - while `## Updated: p` has become a
+        # real section and the target section's body is truncated at it.
+        #
+        # A write may legitimately CREATE its own section (key_decisions
+        # does, when the file has no Key Architectural Decisions yet), so
+        # the rule is: every pre-existing section survives in order, and
+        # nothing the poison carried becomes one.
+        assert [n for n in after if n in before] == before
+        assert "Updated: p" not in after
+        assert ch.unbalanced_fence_line(content) is None
+        assert "Updated: p" in content, "the text itself must survive"
+        # And the body it was written into is not cut short.
+        target = "Gotchas" if field == "gotchas" else "Key Architectural Decisions"
+        assert "a pasted save report" in (ch.extract_section(content, target) or "")
+
+
+# ── tasks_remove ─────────────────────────────────────────────────────────
+
+REMOVABLE_TASKS = """# P - Tasks
+**Last Updated:** 2026-01-01 00:00
+**Remaining:** stuff
+
+## Phase 1
+
+- [ ] 25. Superseded migration task
+- [ ] 26. Guild agenda item
+- [x] 27. Circulate the map
+- [ ] 28. Parent
+- [ ] 28.1. Child
+"""
+
+
+class TestTasksRemove:
+    def test_removes_the_line_and_records_it_with_the_reason(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(REMOVABLE_TASKS)
+        result = update_tasks_file(
+            str(tasks),
+            tasks_remove=[
+                {"match": "25", "reason": "superseded by the Flyway direction"},
+                {"match": "Guild agenda", "reason": "moved to automation-infra-lead"},
+                {"match": "999", "reason": "no such task"},
+            ],
+        )
+        assert result["removed_numbers"] == ["25", "26"]
+        assert result["remove_unmatched"] == ["999"]
+        content = tasks.read_text()
+        assert "- [ ] 25." not in content and "- [ ] 26." not in content
+        assert "~~25. Superseded migration task~~" in content
+        assert "superseded by the Flyway direction" in content
+        assert "moved to automation-infra-lead" in content
+
+    def test_a_removed_task_stops_counting_toward_progress(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(REMOVABLE_TASKS)
+        before = update_tasks_file(str(tasks))["progress"]["total_items"]
+        after = update_tasks_file(
+            str(tasks), tasks_remove=[{"match": "25", "reason": "dead"}]
+        )["progress"]["total_items"]
+        assert after == before - 1
+
+    def test_a_removed_number_is_never_reused(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text("# P\n**Last Updated:** x\n\n## Phase 1\n\n- [ ] 1. one\n- [ ] 2. two\n")
+        update_tasks_file(str(tasks), tasks_remove=[{"match": "2", "reason": "dead"}])
+        update_tasks_file(str(tasks), new_tasks=["fresh"])
+        assert "- [ ] 3. fresh" in tasks.read_text()
+
+    def test_removing_a_parent_with_children_is_refused(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(REMOVABLE_TASKS)
+        with pytest.raises(MissionCacheError) as exc:
+            update_tasks_file(str(tasks), tasks_remove=[{"match": "28", "reason": "x"}])
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+        assert "28.1" in str(exc.value)
+
+    def test_removing_a_parent_does_not_take_its_child(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(REMOVABLE_TASKS)
+        update_tasks_file(str(tasks), tasks_remove=[{"match": "28.1", "reason": "x"}])
+        update_tasks_file(str(tasks), tasks_remove=[{"match": "28", "reason": "x"}])
+        content = tasks.read_text()
+        assert "- [ ] 28." not in content
+        assert "~~28. Parent~~" in content and "~~28.1. Child~~" in content
+
+    def test_a_blank_reason_is_refused(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(REMOVABLE_TASKS)
+        for entry in ({"match": "25"}, {"match": "25", "reason": "  "}, {"reason": "x"}):
+            with pytest.raises(MissionCacheError):
+                update_tasks_file(str(tasks), tasks_remove=[entry])
+        assert tasks.read_text() == REMOVABLE_TASKS
+
+
+class TestImportedEventBodyIsSanitized:
+    """The body is another project's text - the same untrusted shape."""
+
+    def test_a_dated_heading_in_the_body_cannot_forge_a_boundary(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        update_context_file(str(ctx), recent_changes=["a real entry"])
+        result = update_context_file(
+            str(ctx),
+            imported_event={
+                "heading": "Peer sync",
+                "body": "## 2026-08-14 what they decided\n\ndetail\n\n```\ncut...",
+                "related_project": "other-project",
+            },
+        )
+        content = result["content"]
+        # Demotion alone would leave "### 2026-08-14 ..." at column 0, a fake
+        # Recent Changes boundary, and the fence would still be open.
+        assert ch.orphaned_recent_changes(content) == []
+        assert ch.dangling_fence(content) is None
+        assert len(ch.parse_recent_changes_subsections(content)) == 1
+        assert "what they decided" in content
+
+
+class TestSectionNamesCannotSpanLines:
+    """A multi-line "name" defeats every exact-membership guard.
+
+    The guards test `name.strip() in PROTECTED_SECTIONS`, but the consumer
+    builds its pattern with `re.escape(name)` under re.MULTILINE, and
+    re.escape renders a newline as a literal newline match. So a name
+    carrying the file's own text across lines passes the set test and still
+    matches - measured, it deleted both Waiting on AND Next Steps.
+    """
+
+    ATTACK = (
+        "Waiting on\n\n| What | Who | Since | Gates |\n"
+        "|------|-----|-------|-------|\n"
+        "| the tagging decision | Sa'ar | 2026-08-01 | the map |\n\n## Next Steps"
+    )
+
+    def test_a_multiline_section_name_is_refused(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(str(ctx), sections_remove=[self.ATTACK])
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+        assert ctx.read_text() == REMOVABLE_CONTEXT
+        assert "## Waiting on" in ctx.read_text()
+        assert "## Next Steps" in ctx.read_text()
+
+    def test_a_multiline_bullet_section_is_refused(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(
+                str(ctx),
+                bullets_remove=[
+                    {"section": "Recent Changes\n\n### 2026-09-04 10:00", "match": "x"}
+                ],
+            )
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+        assert ctx.read_text() == REMOVABLE_CONTEXT
+
+
+class TestRemovalReasonCannotForgeChecklistLines:
+    def test_a_multiline_reason_is_collapsed_to_one_line(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text("# P\n**Last Updated:** x\n\n## Phase 1\n\n- [ ] 1. real\n- [ ] 2. doomed\n")
+        before = update_tasks_file(str(tasks))["progress"]["total_items"]
+        result = update_tasks_file(
+            str(tasks),
+            tasks_remove=[{
+                "match": "2",
+                "reason": "superseded\n- [x] 3. fake completed\n- [ ] 4. fake open",
+            }],
+        )
+        # One task left, not three: the reason must not invent checklist items.
+        assert result["progress"]["total_items"] == before - 1
+        content = tasks.read_text()
+        # The contract is structural, not textual: nothing the reason carried
+        # may start a line as a checklist item. The words themselves are fine
+        # mid-line, and the record is one line by design.
+        assert not re.search(r"^\s*[-*]\s*\[[ xX]\]\s*[34]\.", content, re.MULTILINE)
+        assert [i.number for i in _parse_tasks(content)] == ["1"]
+        assert "fake completed" in content, "the reason text must survive"
+
+
+class TestAmbiguousSectionIsAStructuredError:
+    def test_a_duplicated_section_gives_a_coded_error(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT + "\n## Gotchas\n\n- a second one\n")
+        with pytest.raises(MissionCacheError) as exc:
+            update_context_file(str(ctx), gotchas=["another"])
+        # Not a bare ValueError: callers branch on the code, and the message
+        # has to name the remedy.
+        assert exc.value.code == ErrorCode.INVALID_STATE
+        assert "repair" in str(exc.value)
+        assert "p-context.md" in str(exc.value)
+
+
+class TestEveryFreeFormInputIsSanitized:
+    """The docstring says "every", so pin every one of them.
+
+    Four were sanitized in the first pass and three were missed: next_steps
+    goes through _update_section, so a column-0 `## ` in a step ends Next
+    Steps early; key_files values land in table cells; notes go to the tasks
+    file's Notes section.
+    """
+
+    POISON = "text\n\n## Waiting on\n\nforged section body"
+
+    def _base(self, tmp_path, name="p-context.md"):
+        ctx = tmp_path / name
+        ctx.write_text(REMOVABLE_CONTEXT)
+        return ctx
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"next_steps": ["POISON"]},
+            {"recent_changes": ["POISON"]},
+            {"key_decisions": ["POISON"]},
+            {"gotchas": ["POISON"]},
+            {"key_files": {"a.py": "POISON"}},
+        ],
+        ids=["next_steps", "recent_changes", "key_decisions", "gotchas", "key_files"],
+    )
+    def test_no_input_can_forge_a_second_waiting_on(self, tmp_path, kwargs):
+        ctx = self._base(tmp_path, f"p{abs(hash(str(kwargs)))}-context.md")
+        filled = {
+            k: ({kk: self.POISON for kk in v} if isinstance(v, dict)
+                else [self.POISON for _ in v])
+            for k, v in kwargs.items()
+        }
+        result = update_context_file(str(ctx), **filled)
+        names = [e["name"] for e in ch.section_index(result["content"])]
+        assert names.count("Waiting on") == 1, f"{kwargs} forged a section"
+        # And the real Waiting on still holds its row.
+        assert "the tagging decision" in (ch.extract_section(result["content"], "Waiting on") or "")
+
+    def test_a_key_files_path_with_a_pipe_cannot_split_the_row(self, tmp_path):
+        ctx = self._base(tmp_path, "pipes-context.md")
+        result = update_context_file(
+            str(ctx), key_files={"a.py | forged | cells": "desc"}
+        )
+        rows = [
+            l for l in (ch.extract_section(result["content"], "Key Files") or "").splitlines()
+            if l.strip().startswith("|")
+        ]
+        # header + separator + the one real row, no extra columns smuggled in.
+        assert len(rows) == 4
+        assert all(r.count("|") - r.count("\\|") == 3 for r in rows[2:])
+
+    def test_a_note_cannot_forge_a_tasks_section(self, tmp_path):
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text("# P\n**Last Updated:** x\n\n## Phase 1\n\n- [ ] 1. a\n")
+        update_tasks_file(str(tasks), notes=["ok\n\n## Phase 1\n\n- [ ] 9. forged"])
+        content = tasks.read_text()
+        # Structural, not substring: `### Phase 1` contains `## Phase 1`.
+        assert len(re.findall(r"^## Phase 1$", content, re.MULTILINE)) == 1
+        assert not re.search(r"^[-*]\s*\[[ xX]\]\s*9\.", content, re.MULTILINE)
+        assert [i.number for i in _parse_tasks(content)] == ["1"]
+        assert "forged" in content, "the note text itself must survive"

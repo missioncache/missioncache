@@ -383,11 +383,46 @@ async def update_context_file(
         Field(
             description=(
                 'Waiting-on rows to resolve, each {"match": <substring of the '
-                'What cell>, "outcome": <what happened>}. The first matching '
-                "row is removed and the resolution is recorded in today's "
-                "Recent Changes subsection. Entries matching no row are "
-                "returned in 'waiting_on_unmatched' - check it, never assume "
-                "a resolve landed."
+                'What cell>, "outcome": <what happened>, "kind": <how it '
+                'ended>}. The first matching row is removed and the outcome '
+                "is recorded in today's Recent Changes subsection. 'kind' is "
+                "'resolved' (default, the reply came), 'moved' (it belongs to "
+                "another project now) or 'dropped' (nobody is chasing it any "
+                "more) - pick the true one, since 'resolved' on a row that "
+                "moved records an answer that never arrived. Entries matching "
+                "no row are returned in 'waiting_on_unmatched' - check it, "
+                "never assume a resolve landed."
+            )
+        ),
+    ] = None,
+    sections_remove: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Whole '## ' sections to delete, by their EXACT heading text "
+                "as get_context_digest's section_index reports it (including "
+                "any date suffix). Use when a section's subject moved to "
+                "another project or is dead. The core sections (Description, "
+                "Gotchas, Waiting on, Next Steps, Recent Changes) and the "
+                "database-rendered ones (Action Items, Stakeholders, Tickets) "
+                "are refused. Names matching nothing come back in "
+                "'sections_unmatched'."
+            )
+        ),
+    ] = None,
+    bullets_remove: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                'Single items to delete, each {"section": <section name>, '
+                '"match": <substring of the item>}. Removes the first list '
+                "item or table row in that section containing 'match', with "
+                "its continuation lines - use it to drop one Gotcha, one Key "
+                "Architectural Decision or one Key Files row. Table header "
+                "rows are never matched. Recent Changes (prepend-only "
+                "history), Waiting on (use waiting_on_resolve) and the "
+                "database-rendered sections are refused. Entries matching "
+                "nothing come back in 'bullets_unmatched'."
             )
         ),
     ] = None,
@@ -412,9 +447,14 @@ async def update_context_file(
 
     Updates timestamp and specified sections. Much faster than multiple
     Read/Edit calls. Maintains the '## Waiting on' table via waiting_on_add /
-    waiting_on_resolve, writes cross-project events via imported_event, and
+    waiting_on_resolve, removes stale content via sections_remove /
+    bullets_remove, writes cross-project events via imported_event, and
     enforces the Recent Changes cap (overflow rolls into the per-project
     journal file automatically).
+
+    Removals run before additions, so one call can replace a section.
+    Every free-form string you pass is sanitized first: a pasted block
+    carrying its own '## ' headings cannot end a section early.
 
     When other live Claude Code sessions are bound to the project that owns
     this file, they are returned in 'live_sessions' - tell them what changed
@@ -434,6 +474,8 @@ async def update_context_file(
             waiting_on_add=waiting_on_add,
             waiting_on_resolve=waiting_on_resolve,
             imported_event=imported_event,
+            sections_remove=sections_remove,
+            bullets_remove=bullets_remove,
         )
 
         response = {
@@ -456,11 +498,19 @@ async def update_context_file(
                         "imported_event",
                         imported_event and result["imported_event_applied"],
                     ),
+                    # Only when something actually left the file - naming a
+                    # section that matched nothing is not a section written.
+                    ("sections_remove", result["sections_removed"]),
+                    ("bullets_remove", result["bullets_removed"]),
                 ]
                 if v
             ],
             "waiting_on_unmatched": result["waiting_on_unmatched"],
             "journal_rolled_over": result["journal_rolled_over"],
+            "sections_removed": result["sections_removed"],
+            "sections_unmatched": result["sections_unmatched"],
+            "bullets_removed": result["bullets_removed"],
+            "bullets_unmatched": result["bullets_unmatched"],
         }
         if imported_event and not result["imported_event_applied"]:
             response["imported_event_duplicate"] = True
@@ -736,12 +786,28 @@ async def update_tasks_file(
         str | None, Field(description="New Remaining summary (max 15 words)")
     ] = None,
     notes: Annotated[list[str] | None, Field(description="Notes to add")] = None,
+    tasks_remove: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                'Tasks to REMOVE, each {"match": <number or substring>, '
+                '"reason": <why>}. Use this for a task that is superseded or '
+                "that moved to another project - marking it [x] would claim "
+                "work that never happened, and leaving it lets it skew the "
+                "progress counter forever. The line leaves the checklist and "
+                "a struck-through record with the reason lands under "
+                "'## Removed', so the history survives. 'reason' is required. "
+                "A task with children is refused; remove them first. Entries "
+                "matching no item come back in 'remove_unmatched'."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """
     Update a tasks.md file.
 
-    Marks tasks as completed, adds new tasks, updates Remaining summary.
-    Returns progress info.
+    Marks tasks as completed, adds new tasks, removes superseded or moved
+    tasks, updates Remaining summary. Returns progress info.
     """
     try:
         _validate_path(tasks_file, "tasks_file", must_be_under=settings.root)
@@ -751,15 +817,21 @@ async def update_tasks_file(
             new_tasks=new_tasks,
             remaining_summary=remaining_summary,
             notes=notes,
+            tasks_remove=tasks_remove,
         )
 
         # Auto-clear active-task pointers for any items just transitioned
-        # to [x]. Without this, the statusline keeps rendering Task: <foo>
+        # to [x], and for any just REMOVED - a pointer at a task that no
+        # longer exists is worse than one at a finished task, since the
+        # statusline would render a Task: line nothing in the file backs.
+        # Without this, the statusline keeps rendering Task: <foo>
         # after the user (or Claude via update_tasks_file) finished it.
         # Project name is the prefix of <name>-tasks.md; legacy unprefixed
         # tasks.md files yield None and skip the sweep (the parent-dir-name
         # fallback would be unsafe for renamed projects).
-        completed_numbers = result.get("completed_numbers") or []
+        completed_numbers = (result.get("completed_numbers") or []) + (
+            result.get("removed_numbers") or []
+        )
         tasks_path_name = Path(tasks_file).name
         project_name = (
             tasks_path_name[: -len("-tasks.md")]
@@ -858,4 +930,111 @@ async def get_missioncache_progress(
         return e.to_dict()
     except Exception as e:
         logger.exception("Error getting progress")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def move_to_project(
+    source_project: Annotated[
+        str, Field(description="Project the content is moving OUT of")
+    ],
+    target_project: Annotated[
+        str, Field(description="Project the content is moving INTO")
+    ],
+    sections: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Whole '## ' sections to move, by their EXACT heading text as "
+                "get_context_digest's section_index reports it. Refused when "
+                "the target already has a section with that heading."
+            )
+        ),
+    ] = None,
+    bullets: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                'Single items to move, each {"section": <section name>, '
+                '"match": <substring of the item>}. The item is appended to '
+                "the same-named section on the target side."
+            )
+        ),
+    ] = None,
+    tasks: Annotated[
+        list[dict[str, str]] | None,
+        Field(
+            description=(
+                'Checklist items to move, each {"match": <number or '
+                'substring>}. The task keeps its text and its [ ]/[x] state '
+                "but takes a NEW number on the target side, because numbers "
+                "are per-file. The source keeps a struck-through record "
+                "naming where it went, so an old note citing the old number "
+                "still resolves to an explanation."
+            )
+        ),
+    ] = None,
+    waiting_on: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "Waiting-on rows to move, each a substring of the What cell. "
+                "The row moves with its Who/Since/Gates intact - use this "
+                "rather than waiting_on_resolve, which would record an "
+                "answer that never came."
+            )
+        ),
+    ] = None,
+    note: Annotated[
+        str | None,
+        Field(description="Optional why, appended to both Recent Changes lines"),
+    ] = None,
+) -> dict:
+    """
+    Move context sections, items, waiting-on rows and tasks between two projects.
+
+    Use this when splitting a project or moving a topic that belongs
+    somewhere else. Splitting is a MOVE: doing it as a remove call plus an
+    add call can half-fail and leave content in both files or neither. This
+    holds every affected file's lock for the whole operation and records the
+    move in both projects' Recent Changes.
+
+    Anything that matched nothing comes back in 'unmatched' - check it, a
+    move never silently drops part of its payload.
+
+    Live sessions on EITHER project are returned in 'live_sessions'; both
+    sides changed, so both sides' peers need telling.
+    """
+    try:
+        result = project_files.move_to_project(
+            source_project=source_project,
+            target_project=target_project,
+            sections=sections,
+            bullets=bullets,
+            tasks=tasks,
+            waiting_on=waiting_on,
+            note=note,
+        )
+        response = {"success": True, **result}
+
+        # Merge both projects' peers, deduped by session id: one session can
+        # legitimately be bound to only one of the two, and the caller has to
+        # notify every session whose file just changed under it.
+        peers: list[dict] = []
+        seen: set = set()
+        for project in (source_project, target_project):
+            for peer in live_peer_sessions_for_project(project):
+                key = peer.get("session_id")
+                if key in seen:
+                    continue
+                seen.add(key)
+                peers.append(peer)
+        if peers:
+            response["live_sessions"] = peers
+        return response
+
+    except MissionCacheError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error moving between projects")
         return {"error": True, "message": str(e)}

@@ -1,8 +1,9 @@
 """MissionCache file operations."""
 
+import contextlib
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from datetime import datetime
 from importlib import resources
@@ -15,7 +16,13 @@ from missioncache_db import replace_with_retry
 from missioncache_db import validate_task_name as _missioncache_db_validate_task_name
 
 from .config import settings
-from .errors import ErrorCode, MissionCacheError, MissionCacheFileNotFoundError, ValidationError
+from .errors import (
+    ErrorCode,
+    InvalidStateError,
+    MissionCacheError,
+    MissionCacheFileNotFoundError,
+    ValidationError,
+)
 from .models import MissionCacheFiles, TaskProgress
 from .tasks_parse import parse_tasks_md
 
@@ -32,6 +39,58 @@ def _file_lock(path: Path) -> "AbstractContextManager[None]":
     return filelock.sidecar_lock(path)
 
 
+# The lock-taking wrappers below each pair with an ``_unlocked_*`` core.
+# Every single-file caller uses the wrapper. ``move_to_project`` is the one
+# operation that spans two projects: it takes all the locks itself, in a
+# fixed order, and then calls the cores. It MUST NOT call the wrappers -
+# POSIX ``flock`` blocks a second acquisition of the same lockfile from the
+# same process, so a wrapper called under an outer lock deadlocks against
+# itself with no timeout and no error.
+
+
+def _unlocked_write_text(path: Path, new_content: str) -> None:
+    """tmp-write + atomic replace. Caller must already hold ``path``'s lock."""
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(new_content, encoding="utf-8")
+    replace_with_retry(tmp_path, path)
+
+
+def _unlocked_append_journal(
+    context_path: Path, journal_path: Path, journal_append: str
+) -> None:
+    """Append rolled-over entries to the journal. Caller holds the context lock."""
+    if journal_path.exists():
+        journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
+    else:
+        journal_content = context_health.journal_header(context_path.parent.name) + "\n"
+    journal_content += journal_append
+    journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
+    journal_tmp.write_text(journal_content, encoding="utf-8")
+    replace_with_retry(journal_tmp, journal_path)
+
+
+@contextlib.contextmanager
+def _structured_ambiguity_error(path: Path) -> "Iterator[None]":
+    """Translate context_health's AmbiguousSectionError into a coded error.
+
+    ``AmbiguousSectionError`` subclasses ``ValueError`` and lives in
+    missioncache-db, which cannot import ``MissionCacheError`` from up here
+    (mcp-server imports missioncache_db, never the reverse). Left alone it
+    escapes as a plain ValueError, so the MCP layer logs a stack trace and
+    returns ``{"error": True, "message": ...}`` with no ``code`` and no
+    ``field`` - nothing ``commands/save.md`` can branch on, even though the
+    remedy is a specific command.
+    """
+    try:
+        yield
+    except context_health.AmbiguousSectionError as e:
+        raise InvalidStateError(
+            f"{path.name}: {e}",
+            current_state="duplicate sections",
+            expected_state="one section per name",
+        ) from e
+
+
 def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
     """Atomically update a text file under exclusive lock.
 
@@ -44,9 +103,7 @@ def _atomic_update_text(path: Path, transform: Callable[[str], str]) -> str:
     with _file_lock(path):
         content = path.read_text(encoding="utf-8")
         new_content = transform(content)
-        tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(new_content, encoding="utf-8")
-        replace_with_retry(tmp_path, path)
+        _unlocked_write_text(path, new_content)
         return new_content
 
 
@@ -69,19 +126,8 @@ def _atomic_update_context_with_journal(
         content = context_path.read_text(encoding="utf-8")
         new_content, journal_append = transform(content)
         if journal_append:
-            if journal_path.exists():
-                journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
-            else:
-                journal_content = (
-                    context_health.journal_header(context_path.parent.name) + "\n"
-                )
-            journal_content += journal_append
-            journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
-            journal_tmp.write_text(journal_content, encoding="utf-8")
-            replace_with_retry(journal_tmp, journal_path)
-        tmp_path = context_path.with_name(context_path.name + ".tmp")
-        tmp_path.write_text(new_content, encoding="utf-8")
-        replace_with_retry(tmp_path, context_path)
+            _unlocked_append_journal(context_path, journal_path, journal_append)
+        _unlocked_write_text(context_path, new_content)
         return new_content
 
 
@@ -375,6 +421,54 @@ def create_missioncache_files(
     )
 
 
+# Recent Changes wording per waiting_on_resolve `kind`. The keys are the
+# validated enum; `resolved` is the default and the historical behavior.
+WAITING_ON_KINDS = {
+    "resolved": "Resolved",
+    "moved": "Moved out",
+    "dropped": "Dropped",
+}
+
+# Sections update_context_file refuses to delete. The core five are what
+# every reader (digest, health check, resume) depends on; the DB-managed
+# mirrors are rendered from SQLite by the PM layer, so removing the markdown
+# would only have it reappear on the next sync.
+PROTECTED_SECTIONS = frozenset(
+    context_health.CORE_SECTIONS
+    + ["Action Items", "Stakeholders", "Tickets"]
+)
+
+def _reject_multiline(value: str, field: str) -> None:
+    """Refuse a section name or match string that spans lines.
+
+    Every guard here is exact set-membership on the stripped name, while the
+    consumer builds its pattern with ``re.escape(name)`` under ``re.MULTILINE``
+    - and ``re.escape`` renders a newline as a literal newline match, so a
+    "name" carrying the file's own text across several lines passes the set
+    test and still matches. Measured: a ``sections_remove`` entry of
+    ``"Waiting on\\n\\n<the real table>\\n\\n## Next Steps"`` is not in
+    PROTECTED_SECTIONS, matches, and deletes BOTH protected sections.
+
+    Same control ``_validate_imported_event`` applies to its heading, for the
+    same reason: these strings are interpolated into markdown structure the
+    digest parses.
+    """
+    if "\n" in value or "\r" in value:
+        raise ValidationError(
+            f"{field} must be a single line - it is matched against markdown "
+            "structure, and a newline lets it span sections",
+            field=field,
+        )
+
+
+# Sections whose list items must not be removed by `bullets_remove`.
+# Recent Changes is prepend-only history, and Waiting on has its own
+# removal primitive that records the outcome.
+BULLETS_REMOVE_FORBIDDEN = frozenset(
+    ["Recent Changes", "Waiting on"] + ["Action Items", "Stakeholders", "Tickets"]
+)
+
+
 def _apply_waiting_on(
     content: str,
     timestamp: str,
@@ -384,9 +478,14 @@ def _apply_waiting_on(
     """Apply waiting-on resolves then adds; pure function.
 
     Returns ``(content, resolved_changes, unmatched)``. ``resolved_changes``
-    are the "Resolved (was waiting on ...)" bullets destined for today's
-    Recent Changes subsection; ``unmatched`` are resolve ``match`` values
-    that hit no row (surfaced to the caller, never dropped).
+    are the bullets destined for today's Recent Changes subsection;
+    ``unmatched`` are resolve ``match`` values that hit no row (surfaced to
+    the caller, never dropped).
+
+    A resolve carries a ``kind``: ``resolved`` (default), ``moved`` or
+    ``dropped``, which only picks the wording. Without it every removal was
+    written up as "Resolved", so a row that moved to another project left a
+    false record of an answer that never came.
     """
     resolved_changes: list[str] = []
     unmatched: list[str] = []
@@ -397,6 +496,7 @@ def _apply_waiting_on(
         for item in waiting_on_resolve:
             match_text = (item.get("match") or "").strip()
             outcome = (item.get("outcome") or "").strip()
+            kind = (item.get("kind") or "resolved").strip()
             found = next(
                 (r for r in remaining if match_text and match_text in r["what"]),
                 None,
@@ -405,7 +505,10 @@ def _apply_waiting_on(
                 unmatched.append(match_text)
                 continue
             remaining.remove(found)
-            note = f"Resolved (was waiting on {found['who']}): {found['what']}"
+            note = (
+                f"{WAITING_ON_KINDS[kind]} (was waiting on {found['who']}): "
+                f"{found['what']}"
+            )
             if outcome:
                 note += f" - {outcome}"
             resolved_changes.append(note)
@@ -467,9 +570,15 @@ def _apply_imported_event(
     if context_health.extract_section(content, heading) is not None:
         return content, False
 
+    # sanitize_bullet, not demote_headings alone. Demotion turns a pasted
+    # `## 2026-08-14 sync` into a column-0 `### 2026-08-14 sync`, which is a
+    # perfectly good fake Recent Changes boundary sitting inside this event's
+    # body, and it leaves a truncated code fence open. The body is
+    # caller-supplied text from another project, the same untrusted shape the
+    # PreCompact snapshot turned out to be.
     content = context_health.insert_section_before(
         content,
-        f"## {heading}\n\n{context_health.demote_headings(body)}",
+        f"## {heading}\n\n{context_health.sanitize_bullet(body)}",
         ("Waiting on", "Next Steps", "Recent Changes"),
     )
 
@@ -491,8 +600,16 @@ def update_context_file(
     waiting_on_add: list[dict[str, str]] | None = None,
     waiting_on_resolve: list[dict[str, str]] | None = None,
     imported_event: dict[str, str] | None = None,
+    sections_remove: list[str] | None = None,
+    bullets_remove: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Update sections in a context.md file atomically.
+
+    Every free-form string a caller supplies (``recent_changes``,
+    ``key_decisions``, ``gotchas``) goes through
+    ``context_health.sanitize_bullet`` first, so a pasted block carrying its
+    own ``## `` headings or a truncated code fence cannot end a section early
+    or forge a Recent Changes boundary.
 
     Args:
         context_file: Path to context.md
@@ -504,28 +621,74 @@ def update_context_file(
         waiting_on_add: Waiting-on rows to append, each
             ``{"what", "who", "since", "gates"}`` (``since`` defaults to
             today). Creates the section before Next Steps if missing.
-        waiting_on_resolve: Rows to resolve, each ``{"match", "outcome"}``.
-            Removes the first row whose What cell contains ``match`` and
-            records the resolution in today's Recent Changes subsection.
+        waiting_on_resolve: Rows to resolve, each
+            ``{"match", "outcome", "kind"}``. Removes the first row whose
+            What cell contains ``match`` and records it in today's Recent
+            Changes subsection. ``kind`` is ``resolved`` (default), ``moved``
+            or ``dropped`` and only selects the wording.
         imported_event: A cross-project event as
             ``{"heading", "body", "related_project", "related_note"}``. Writes
             ``## <heading>`` above Waiting on and records the link on the
             ``**Related projects:**`` header line. Ignored unless both
             ``heading`` and ``body`` are given.
+        sections_remove: Section headings to delete whole, matched EXACTLY
+            (``section_index`` gives the verbatim text). ``PROTECTED_SECTIONS``
+            are refused.
+        bullets_remove: Items to delete, each ``{"section", "match"}``. Removes
+            the first list item or table row in that section containing
+            ``match``, with its continuation lines. Table header rows are never
+            matched. ``BULLETS_REMOVE_FORBIDDEN`` sections are refused.
 
     Returns:
         Dict with ``content`` (updated file text), ``waiting_on_unmatched``
         (``match`` values that resolved to no row - never silently dropped,
-        mirroring ``update_tasks_file``'s ``unmatched`` contract), and
+        mirroring ``update_tasks_file``'s ``unmatched`` contract),
         ``journal_rolled_over`` (Recent Changes subsections moved to the
-        per-project journal by the cap).
+        per-project journal by the cap), and the removal results
+        ``sections_removed`` / ``sections_unmatched`` / ``bullets_removed`` /
+        ``bullets_unmatched``.
     """
     path = Path(context_file)
     if not path.exists():
         raise MissionCacheFileNotFoundError(str(path))
 
+    for name in sections_remove or []:
+        _reject_multiline(name, "sections_remove")
+        if name.strip() in PROTECTED_SECTIONS:
+            raise ValidationError(
+                f"'## {name.strip()}' is a protected section and cannot be removed",
+                field="sections_remove",
+            )
+    for item in bullets_remove or []:
+        section = (item.get("section") or "").strip()
+        _reject_multiline(item.get("section") or "", "bullets_remove.section")
+        if not section or not (item.get("match") or "").strip():
+            raise ValidationError(
+                "each bullets_remove entry needs a non-empty 'section' and 'match'",
+                field="bullets_remove",
+            )
+        if section in BULLETS_REMOVE_FORBIDDEN:
+            raise ValidationError(
+                f"items in '## {section}' cannot be removed this way "
+                "(Recent Changes is prepend-only history; Waiting on uses "
+                "waiting_on_resolve; the rest are rendered from the database)",
+                field="bullets_remove",
+            )
+    for item in waiting_on_resolve or []:
+        kind = (item.get("kind") or "resolved").strip()
+        if kind not in WAITING_ON_KINDS:
+            raise ValidationError(
+                f"unknown waiting_on_resolve kind '{kind}' "
+                f"(expected one of {', '.join(sorted(WAITING_ON_KINDS))})",
+                field="waiting_on_resolve",
+            )
+
     journal_path = context_health.derive_journal_path(path)
     waiting_on_unmatched: list[str] = []
+    sections_removed: list[str] = []
+    sections_unmatched: list[str] = []
+    bullets_removed: list[str] = []
+    bullets_unmatched: list[str] = []
     rolled_over = 0
     # Carries results out of the transform, which runs under the lock and may be
     # retried; a plain closure variable would be rebound per attempt.
@@ -544,12 +707,40 @@ def update_context_file(
             content,
         )
 
+        # Removals run FIRST, before anything is added. A caller splitting a
+        # project passes a removal and an addition in the same call, and
+        # doing it in this order means a section can be removed and a
+        # replacement written under the same name without the removal eating
+        # the new one. Results are collected per attempt so a miss surfaces
+        # instead of being silently dropped.
+        for name in sections_remove or []:
+            name = name.strip()
+            content, body = context_health.remove_section(content, name)
+            # `is None`, not truthiness: remove_section returns the body it
+            # cut, and a section with an empty body returns "". Treating that
+            # as a miss reports a removal that actually happened as unmatched,
+            # which is the never-silently-drop contract failing the other way
+            # round - the caller retries or tells the user it did not work.
+            (sections_unmatched if body is None else sections_removed).append(name)
+
+        for item in bullets_remove or []:
+            section = (item.get("section") or "").strip()
+            match_text = (item.get("match") or "").strip()
+            content, removed_item = context_health.remove_list_item(
+                content, section, match_text
+            )
+            if removed_item is None:
+                bullets_unmatched.append(f"{section}: {match_text}")
+            else:
+                bullets_removed.append(removed_item)
+
         # Update Next Steps section. (Replacement stops at the next `## `
         # heading, so a Waiting on section placed before Next Steps is
         # untouched by this.)
         if next_steps:
             next_steps_md = "\n".join(
-                f"{i + 1}. {step}" for i, step in enumerate(next_steps)
+                f"{i + 1}. {context_health.sanitize_bullet(step)}"
+                for i, step in enumerate(next_steps)
             )
             content = _update_section(content, "Next Steps", next_steps_md)
 
@@ -574,7 +765,10 @@ def update_context_file(
         # pre-compact hook; fence-aware and ^-anchored).
         combined_changes = resolved_changes + list(recent_changes or [])
         if combined_changes:
-            changes_md = "\n".join(f"- {change}" for change in combined_changes)
+            changes_md = "\n".join(
+                f"- {context_health.sanitize_bullet(change)}"
+                for change in combined_changes
+            )
             content = context_health.prepend_recent_changes(
                 content, timestamp, changes_md
             )
@@ -589,32 +783,47 @@ def update_context_file(
 
         # Update Key Decisions section
         if key_decisions:
-            decisions_md = "\n".join(f"- {d}" for d in key_decisions)
+            decisions_md = "\n".join(
+                f"- {context_health.sanitize_bullet(d)}" for d in key_decisions
+            )
             content = _append_to_section(
                 content, "Key Architectural Decisions", decisions_md
             )
 
         # Update Gotchas section
         if gotchas:
-            gotchas_md = "\n".join(f"- {g}" for g in gotchas)
+            gotchas_md = "\n".join(
+                f"- {context_health.sanitize_bullet(g)}" for g in gotchas
+            )
             content = _append_to_section(content, "Gotchas", gotchas_md)
 
         # Update Key Files section
         if key_files:
+            # Table cells, so collapse to one line rather than indent:
+            # a newline in either half breaks the row into forged markdown.
+            # _escape_cell also neutralises an unescaped pipe.
             files_md = "\n".join(
-                f"| `{filename}` | {desc} |"
+                f"| `{context_health.escape_cell(filename)}` "
+                f"| {context_health.escape_cell(desc)} |"
                 for filename, desc in key_files.items()
             )
             content = _append_to_section(content, "Key Files", files_md)
 
         return content, journal_append
 
-    new_content = _atomic_update_context_with_journal(path, journal_path, _transform)
+    with _structured_ambiguity_error(path):
+        new_content = _atomic_update_context_with_journal(
+            path, journal_path, _transform
+        )
     return {
         "content": new_content,
         "waiting_on_unmatched": waiting_on_unmatched,
         "journal_rolled_over": rolled_over,
         "imported_event_applied": nonlocal_state["imported_event_applied"],
+        "sections_removed": sections_removed,
+        "sections_unmatched": sections_unmatched,
+        "bullets_removed": bullets_removed,
+        "bullets_unmatched": bullets_unmatched,
     }
 
 
@@ -651,12 +860,41 @@ def _mark_task_checked_by_number(content: str, number: str) -> str:
     return pattern.sub(r"\1[x]\2", content)
 
 
+REMOVED_SECTION = "Removed"
+
+# A struck-through removal record: `- ~~54a. text~~ (removed ...)`. Carries
+# no checkbox on purpose, so parse_tasks_md skips it and the progress
+# counter stops counting work nobody will do. The number is still parsed
+# back out of here to stop `new_tasks` from reusing it.
+_REMOVED_RECORD_RE = re.compile(
+    r"^\s*[-*]\s*~~([0-9]+(?:\.[0-9]+)*[a-z]?)\.", re.MULTILINE
+)
+
+
+def _remove_task_line(content: str, number: str) -> tuple[str, str | None]:
+    """Cut the checklist line for ``number`` out. Returns ``(content, text)``.
+
+    ``text`` is the line verbatim, or None when no such line exists. Same
+    ``(?!\\d)`` guard as ``_mark_task_checked_by_number``: removing "1" must
+    not take "1.2" with it.
+    """
+    pattern = re.compile(
+        rf"^[ \t]*[-*][ \t]*\[[ xX]?\][ \t]*{re.escape(number)}\.(?!\d)[^\n]*\n?",
+        re.MULTILINE,
+    )
+    match = pattern.search(content)
+    if match is None:
+        return content, None
+    return content[: match.start()] + content[match.end() :], match.group(0).rstrip("\n")
+
+
 def update_tasks_file(
     tasks_file: str | Path,
     completed_tasks: list[str] | None = None,
     new_tasks: list[str] | None = None,
     remaining_summary: str | None = None,
     notes: list[str] | None = None,
+    tasks_remove: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Update a tasks.md file.
 
@@ -669,6 +907,13 @@ def update_tasks_file(
         new_tasks: List of new tasks to add
         remaining_summary: New summary for Remaining field
         notes: Notes to add
+        tasks_remove: Items to delete, each ``{"match", "reason"}``. ``match``
+            resolves number-first then by substring, exactly like
+            ``completed_tasks``. ``reason`` is required. The line leaves the
+            checklist and a struck-through record lands under ``## Removed``,
+            which keeps the history without letting a task nobody will do
+            skew the progress counter. Refused when the item still has
+            children.
 
     Returns:
         Dict with update summary including ``completed_numbers``: the
@@ -677,15 +922,31 @@ def update_tasks_file(
         to drive cross-cutting cleanup like clearing active-task pointers.
         Also includes ``unmatched``: ``completed_tasks`` entries that
         resolved to no checklist item, so callers can surface a dropped
-        completion instead of leaving a box silently unticked.
+        completion instead of leaving a box silently unticked, plus
+        ``removed_numbers`` and ``remove_unmatched`` for ``tasks_remove``.
     """
     path = Path(tasks_file)
     if not path.exists():
         raise MissionCacheFileNotFoundError(str(path))
 
+    for item in tasks_remove or []:
+        if not (item.get("match") or "").strip():
+            raise ValidationError(
+                "each tasks_remove entry needs a non-empty 'match'",
+                field="tasks_remove",
+            )
+        if not (item.get("reason") or "").strip():
+            raise ValidationError(
+                "each tasks_remove entry needs a non-empty 'reason' - the "
+                "record under '## Removed' is the only trace the task leaves",
+                field="tasks_remove",
+            )
+
     updates_made: list[str] = []
     completed_numbers_seen: list[str] = []
     unmatched: list[str] = []
+    removed_numbers: list[str] = []
+    remove_unmatched: list[str] = []
 
     def _transform(content: str) -> str:
         # Stamp inside the lock so serialized writers each get a fresh
@@ -734,6 +995,61 @@ def update_tasks_file(
                 else:
                     unmatched.append(task_desc)
 
+        # Remove tasks. Runs after completions so a call that both completes
+        # and removes behaves the same whatever order the caller listed them.
+        if tasks_remove:
+            for item in tasks_remove:
+                match_text = (item.get("match") or "").strip()
+                reason = (item.get("reason") or "").strip()
+                items = parse_tasks_md(content)
+                by_number = {i.number: i for i in items}
+                number = _leading_task_number(match_text)
+                target = by_number.get(number) if number else None
+                if target is None:
+                    target = next(
+                        (
+                            i
+                            for i in items
+                            if match_text.lower() in i.text.lower()
+                        ),
+                        None,
+                    )
+                if target is None:
+                    remove_unmatched.append(match_text)
+                    continue
+                # Removing a parent would orphan its children in the file
+                # and leave them counted under a number with no owner.
+                children = [
+                    i.number
+                    for i in items
+                    if i.number.startswith(target.number + ".")
+                ]
+                if children:
+                    raise ValidationError(
+                        f"task {target.number} still has children "
+                        f"({', '.join(children)}) - remove them first",
+                        field="tasks_remove",
+                    )
+                content, line = _remove_task_line(content, target.number)
+                if line is None:
+                    remove_unmatched.append(match_text)
+                    continue
+                today = timestamp.split(" ")[0]
+                # Collapse the reason to one line, the same normalization
+                # _apply_imported_event does on its heading. The record is a
+                # single list item, and a reason carrying newlines writes
+                # column-0 text into a checklist file: measured, a reason of
+                # "superseded\n- [x] 3. fake\n- [ ] 4. fake" invented two
+                # tasks that parse_tasks_md then counted, in the one file
+                # where the number is how every surface addresses an item.
+                record = (
+                    f"- ~~{target.number}. {target.text}~~ "
+                    f"(removed {today}: {' '.join(reason.split())})"
+                )
+                content = _append_to_section(content, REMOVED_SECTION, record)
+                removed_numbers.append(target.number)
+                updates_made.append(f"Removed: {target.number}. {target.text[:50]}")
+
         # Diff post-transform: any number that was [ ] before and is [x]
         # now is a real transition. This catches edits regardless of how
         # the caller phrased ``completed_tasks`` (description, fragment,
@@ -750,9 +1066,17 @@ def update_tasks_file(
             # collided with an existing number.
             # parse_tasks_md only yields numbers matching [0-9]+(\.[0-9]+)*[a-z]?,
             # so the leading integer is always there to take.
+            # Removed records count too. They carry no checkbox, so
+            # parse_tasks_md does not see them, and without this a task
+            # removed at the top of the range frees its number for the next
+            # addition - two different items sharing one id, in a file where
+            # the number is how every other surface addresses a task.
             tops = [
                 int(re.match(r"\d+", item.number).group())
                 for item in parse_tasks_md(content)
+            ] + [
+                int(re.match(r"\d+", number).group())
+                for number in _REMOVED_RECORD_RE.findall(content)
             ]
             next_num = max(tops, default=0) + 1
 
@@ -786,13 +1110,19 @@ def update_tasks_file(
 
         # Add notes
         if notes:
-            notes_md = "\n".join(f"- {n}" for n in notes)
+            # One line per note. sanitize_bullet neutralises headings, but a
+            # checklist line is what matters in a TASKS file and indenting
+            # one does not hide it (parse_tasks_md allows leading whitespace,
+            # since nested subtasks are indented). Collapsing is the only
+            # thing that stops a note inventing a task.
+            notes_md = "\n".join(f"- {' '.join(n.split())}" for n in notes)
             content = _append_to_section(content, "Notes", notes_md)
             updates_made.append(f"Added {len(notes)} notes")
 
         return content
 
-    new_content = _atomic_update_text(path, _transform)
+    with _structured_ambiguity_error(path):
+        new_content = _atomic_update_text(path, _transform)
 
     # Calculate progress from the just-written content
     progress = parse_task_progress(new_content)
@@ -803,6 +1133,8 @@ def update_tasks_file(
         "progress": progress.model_dump() if progress else None,
         "completed_numbers": completed_numbers_seen,
         "unmatched": unmatched,
+        "removed_numbers": removed_numbers,
+        "remove_unmatched": remove_unmatched,
     }
 
 
@@ -882,3 +1214,475 @@ def _append_to_section(content: str, section_name: str, new_content: str) -> str
     return context_health.append_to_section_body(
         content, section_name, new_content, drop_lines=("- TBD", "1. TBD")
     )
+
+
+# ── cross-project move ───────────────────────────────────────────────────
+
+
+def _plan_source_context(
+    content: str,
+    sections: list[str],
+    bullets: list[dict[str, str]],
+    waiting_on: list[str],
+) -> tuple[str, dict[str, Any]]:
+    """Cut the moved pieces out of the source context. Pure.
+
+    Returns ``(new_content, taken)`` where ``taken`` carries the verbatim
+    text of everything removed, which is what gets planted in the target.
+    Anything that matched nothing is reported rather than assumed moved -
+    a move that silently drops half its payload is worse than one that
+    refuses.
+    """
+    taken: dict[str, Any] = {
+        "sections": [],
+        "bullets": [],
+        "waiting_on": [],
+        "unmatched": [],
+    }
+
+    for heading in sections:
+        # One lookup, not two: remove_section returns the body of the section
+        # it actually cut. Reading with extract_section (prefix-tolerant) and
+        # deleting with remove_section (exact) could resolve to two different
+        # sections, moving the body of `## Notes (old)` while deleting
+        # `## Notes`.
+        content, body = context_health.remove_section(content, heading)
+        if body is None:
+            taken["unmatched"].append(f"section: {heading}")
+            continue
+        # Normalize the heading the same way _apply_imported_event does
+        # before it is interpolated into a `## ` line on the target. The
+        # caller's string reaches the target file, not the source file's own
+        # heading text, so anything structural in it is written verbatim.
+        taken["sections"].append(
+            {"heading": " ".join(heading.split()), "body": body.strip()}
+        )
+
+    for item in bullets:
+        section = (item.get("section") or "").strip()
+        match_text = (item.get("match") or "").strip()
+        content, removed = context_health.remove_list_item(
+            content, section, match_text
+        )
+        if removed is None:
+            taken["unmatched"].append(f"bullet: {section}: {match_text}")
+        else:
+            taken["bullets"].append({"section": section, "item": removed})
+
+    if waiting_on:
+        rows = context_health.parse_waiting_on(content)
+        remaining = list(rows)
+        for match_text in waiting_on:
+            found = next(
+                (r for r in remaining if match_text and match_text in r["what"]),
+                None,
+            )
+            if found is None:
+                taken["unmatched"].append(f"waiting_on: {match_text}")
+                continue
+            remaining.remove(found)
+            taken["waiting_on"].append(found)
+        if len(remaining) != len(rows):
+            content = context_health.replace_waiting_on_table(content, remaining)
+
+    return content, taken
+
+
+def _plan_target_context(content: str, taken: dict[str, Any]) -> str:
+    """Plant the moved pieces into the target context. Pure."""
+    for section in taken["sections"]:
+        # Above Waiting on, the same placement and anchor order the
+        # cross-project imported_event convention already uses.
+        content = context_health.insert_section_before(
+            content,
+            f"## {section['heading']}\n\n{section['body']}",
+            ("Waiting on", "Next Steps", "Recent Changes"),
+        )
+
+    for bullet in taken["bullets"]:
+        # Create the section in canonical position when the target lacks it.
+        # append_to_section_body's own fallback puts a new section at EOF,
+        # which on a normal file is BELOW Recent Changes and breaks the
+        # section order rules/missioncache.md defines - and Recent Changes is
+        # the one section that must stay last-ish for the cap to find its
+        # entries. The waiting-on branch below already self-heals this way.
+        if context_health.extract_section(content, bullet["section"]) is None:
+            content = context_health.insert_section_before(
+                content,
+                f"## {bullet['section']}\n",
+                ("Waiting on", "Next Steps", "Recent Changes"),
+            )
+        content = context_health.append_to_section_body(
+            content, bullet["section"], bullet["item"],
+            drop_lines=("- TBD", "1. TBD"),
+        )
+
+    if taken["waiting_on"]:
+        if context_health.extract_section(content, "Waiting on") is None:
+            content = context_health.insert_waiting_on_before_next_steps(
+                content, context_health.build_waiting_on_section([])
+            )
+        rows = context_health.parse_waiting_on(content) + taken["waiting_on"]
+        content = context_health.replace_waiting_on_table(content, rows)
+
+    return content
+
+
+def move_to_project(
+    source_project: str,
+    target_project: str,
+    sections: list[str] | None = None,
+    bullets: list[dict[str, str]] | None = None,
+    tasks: list[dict[str, str]] | None = None,
+    waiting_on: list[str] | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Move context sections, items, waiting-on rows and tasks between projects.
+
+    Splitting a project is a MOVE, not a delete plus an add. Done as two
+    calls it can half-fail and leave a section in both files or neither.
+    This holds every affected file's lock for the whole operation.
+
+    Locking: all four project files are locked in sorted path order. Two
+    sessions moving in opposite directions between the same pair would
+    otherwise take the same two locks in opposite orders and deadlock. This
+    is the only operation in the codebase that holds more than one project
+    lock, which is why it calls the ``_unlocked_*`` cores rather than the
+    lock-taking wrappers (see the note above those functions).
+
+    Write order: the target side is written fully, then the source side.
+    Up to six writes happen (two journals if either Recent Changes trips the
+    cap, plus the two contexts and two tasks files), and a crash partway
+    leaves the content in BOTH files rather than neither - the same
+    duplicate-rather-than-lose reasoning the journal write already uses.
+    Recovery is to remove the leftovers from the source with
+    ``sections_remove`` / ``bullets_remove`` / ``tasks_remove``.
+    """
+    # Both names are interpolated straight into a path under settings.root
+    # by get_missioncache_files, so a name like "../../x" would walk out of
+    # the data root. Same control rename_task applies, and the same reason
+    # the file-taking tools run _validate_path(must_be_under=settings.root).
+    validate_task_name(source_project)
+    validate_task_name(target_project)
+    if source_project == target_project:
+        raise ValidationError(
+            "source_project and target_project are the same",
+            field="target_project",
+        )
+    if not any([sections, bullets, tasks, waiting_on]):
+        raise ValidationError(
+            "nothing to move - pass at least one of sections, bullets, "
+            "tasks or waiting_on",
+            field="sections",
+        )
+    for item in tasks or []:
+        if not (item.get("match") or "").strip():
+            raise ValidationError(
+                "each tasks entry needs a non-empty 'match'", field="tasks"
+            )
+    # Same guard update_context_file applies to bullets_remove, and it matters
+    # more here. remove_list_item does a substring test, so a blank match is
+    # contained in EVERY item: it would silently take the first item of the
+    # named section and move it to the other project, reported as a success.
+    for item in bullets or []:
+        section = (item.get("section") or "").strip()
+        _reject_multiline(item.get("section") or "", "bullets.section")
+        if not section or not (item.get("match") or "").strip():
+            raise ValidationError(
+                "each bullets entry needs a non-empty 'section' and 'match' "
+                "(a blank match would move the section's first item)",
+                field="bullets",
+            )
+        # Moving out of these is removing from them, so the same refusals
+        # update_context_file applies have to hold here. Without this,
+        # bullets=[{"section": "Recent Changes", ...}] takes an entry out of
+        # prepend-only history through the move instead of the remove.
+        if section in BULLETS_REMOVE_FORBIDDEN:
+            raise ValidationError(
+                f"items in '## {section}' cannot be moved "
+                "(Recent Changes is prepend-only history; Waiting on moves via "
+                "the waiting_on parameter; the rest are rendered from the database)",
+                field="bullets",
+            )
+    for heading in sections or []:
+        _reject_multiline(heading, "sections")
+        if not heading.strip():
+            raise ValidationError(
+                "sections entries must be non-empty heading text",
+                field="sections",
+            )
+        if heading.strip() in PROTECTED_SECTIONS:
+            raise ValidationError(
+                f"'## {heading.strip()}' is a protected section and cannot be moved",
+                field="sections",
+            )
+
+    src_files = get_missioncache_files(source_project)
+    dst_files = get_missioncache_files(target_project)
+    if not src_files.context_file:
+        raise MissionCacheFileNotFoundError(
+            f"source project '{source_project}' has no context file"
+        )
+    if not dst_files.context_file:
+        raise MissionCacheFileNotFoundError(
+            f"target project '{target_project}' has no context file"
+        )
+
+    src_ctx = Path(src_files.context_file)
+    dst_ctx = Path(dst_files.context_file)
+    src_tasks = Path(src_files.tasks_file) if src_files.tasks_file else None
+    dst_tasks = Path(dst_files.tasks_file) if dst_files.tasks_file else None
+    if tasks and (src_tasks is None or dst_tasks is None):
+        raise MissionCacheFileNotFoundError(
+            "moving tasks needs a tasks file on both sides"
+        )
+
+    src_journal = context_health.derive_journal_path(src_ctx)
+    dst_journal = context_health.derive_journal_path(dst_ctx)
+    lock_paths = [p for p in (src_ctx, dst_ctx, src_tasks, dst_tasks) if p is not None]
+
+    # The dedup-and-sort ordering rule lives in filelock, next to the lock it
+    # protects: it is a locking primitive, not a move-specific one, and the
+    # next multi-lock caller must not have to re-derive it (getting it wrong
+    # hangs with no timeout and no error).
+    with filelock.sidecar_locks(lock_paths):
+        timestamp = get_timestamp()
+        today = timestamp.split(" ")[0]
+        src_content = src_ctx.read_text(encoding="utf-8")
+        dst_content = dst_ctx.read_text(encoding="utf-8")
+
+        # A section name already present in the target makes the result
+        # ambiguous for every reader, the same rule imported_event applies.
+        # Checked INSIDE the lock against the content just read: done before
+        # acquiring it, another writer could add the same section in the gap,
+        # and this would then insert a second copy and delete the source's -
+        # exactly the state that makes every later write to that section fail.
+        conflicts = [
+            heading
+            for heading in (sections or [])
+            if context_health.extract_section(dst_content, heading) is not None
+        ]
+        if conflicts:
+            raise ValidationError(
+                f"target '{target_project}' already has these sections: "
+                f"{', '.join(conflicts)}",
+                field="sections",
+            )
+
+        src_content, taken = _plan_source_context(
+            src_content,
+            list(sections or []),
+            list(bullets or []),
+            list(waiting_on or []),
+        )
+        # The target may itself be damaged; surface that as a coded error
+        # naming the target rather than a bare ValueError.
+        with _structured_ambiguity_error(dst_ctx):
+            dst_content = _plan_target_context(dst_content, taken)
+
+        moved_tasks: list[dict[str, str]] = []
+        src_tasks_content = dst_tasks_content = None
+        if tasks and src_tasks is not None and dst_tasks is not None:
+            src_tasks_content = src_tasks.read_text(encoding="utf-8")
+            dst_tasks_content = dst_tasks.read_text(encoding="utf-8")
+            src_tasks_content, dst_tasks_content, moved_tasks, unmatched = (
+                _plan_task_move(
+                    src_tasks_content,
+                    dst_tasks_content,
+                    list(tasks),
+                    source_project,
+                    target_project,
+                    today,
+                )
+            )
+            taken["unmatched"].extend(unmatched)
+
+        if not (
+            taken["sections"] or taken["bullets"] or taken["waiting_on"] or moved_tasks
+        ):
+            # Nothing matched, so nothing moved: writing anyway stamped both
+            # files with a "Moved to <x>: nothing matched" entry and a
+            # permanent **Related projects:** link between two projects that
+            # never exchanged anything.
+            return {
+                "source_project": source_project,
+                "target_project": target_project,
+                "sections_moved": [],
+                "bullets_moved": [],
+                "waiting_on_moved": [],
+                "tasks_moved": [],
+                "unmatched": taken["unmatched"],
+                "summary": "nothing matched - no files were written",
+            }
+
+        summary = _describe_move(taken, moved_tasks)
+        if note:
+            summary = f"{summary} - {note}"
+        src_content, src_journal_append = _record_move(
+            src_content,
+            timestamp,
+            f"Moved to {target_project}: {summary}",
+            src_journal.name,
+        )
+        dst_content, dst_journal_append = _record_move(
+            dst_content,
+            timestamp,
+            f"Moved in from {source_project}: {summary}",
+            dst_journal.name,
+        )
+        src_content = context_health.upsert_related_projects(
+            src_content, target_project, "received part of this project"
+        )
+        dst_content = context_health.upsert_related_projects(
+            dst_content, source_project, "moved content here"
+        )
+
+        # Target side first, source side last (see the docstring).
+        if dst_journal_append:
+            _unlocked_append_journal(dst_ctx, dst_journal, dst_journal_append)
+        _unlocked_write_text(dst_ctx, dst_content)
+        if dst_tasks is not None and dst_tasks_content is not None:
+            _unlocked_write_text(dst_tasks, dst_tasks_content)
+        if src_journal_append:
+            _unlocked_append_journal(src_ctx, src_journal, src_journal_append)
+        _unlocked_write_text(src_ctx, src_content)
+        if src_tasks is not None and src_tasks_content is not None:
+            _unlocked_write_text(src_tasks, src_tasks_content)
+
+    return {
+        "source_project": source_project,
+        "target_project": target_project,
+        "sections_moved": [s["heading"] for s in taken["sections"]],
+        "bullets_moved": [b["item"] for b in taken["bullets"]],
+        "waiting_on_moved": [r["what"] for r in taken["waiting_on"]],
+        "tasks_moved": moved_tasks,
+        "unmatched": taken["unmatched"],
+        "summary": summary,
+    }
+
+
+def _describe_move(taken: dict[str, Any], moved_tasks: list[dict[str, str]]) -> str:
+    """One-line description of what moved, for both Recent Changes entries."""
+    parts = []
+    if taken["sections"]:
+        parts.append(
+            ", ".join(f"'{s['heading']}'" for s in taken["sections"])
+        )
+    if taken["bullets"]:
+        parts.append(f"{len(taken['bullets'])} items")
+    if taken["waiting_on"]:
+        parts.append(
+            "waiting on "
+            + ", ".join(f"'{r['what']}'" for r in taken["waiting_on"])
+        )
+    if moved_tasks:
+        parts.append(
+            "tasks "
+            + ", ".join(f"{t['from']} -> {t['to']}" for t in moved_tasks)
+        )
+    return "; ".join(parts) if parts else "nothing matched"
+
+
+def _record_move(
+    content: str, timestamp: str, line: str, journal_name: str
+) -> tuple[str, str | None]:
+    """Prepend the move to Recent Changes and re-enforce the cap.
+
+    Returns ``(content, journal_append_or_None)`` so the caller writes the
+    journal under the lock it already holds, exactly like the single-file
+    ``update_context_file`` path.
+    """
+    # Same anchored, count=1 stamp update_context_file does: both files
+    # genuinely changed, and a stale Last Updated makes the health check
+    # call an actively-edited project stale.
+    content = re.sub(
+        r"^\*\*Last Updated:\*\* .+",
+        f"**Last Updated:** {timestamp}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    content = context_health.prepend_recent_changes(
+        content, timestamp, f"- {context_health.sanitize_bullet(line)}"
+    )
+    content, journal_append, _ = context_health.split_recent_changes_for_cap(
+        content, journal_name
+    )
+    return content, journal_append
+
+
+def _plan_task_move(
+    src_content: str,
+    dst_content: str,
+    tasks: list[dict[str, str]],
+    source_project: str,
+    target_project: str,
+    today: str,
+) -> tuple[str, str, list[dict[str, str]], list[str]]:
+    """Move checklist items between two tasks files. Pure.
+
+    The task keeps its text but takes a NEW number on the target side, since
+    numbers are per-file. The source keeps a struck-through record naming
+    where it went, so a number referenced in an old note still resolves to
+    an explanation rather than to nothing.
+    """
+    moved: list[dict[str, str]] = []
+    unmatched: list[str] = []
+
+    for entry in tasks:
+        match_text = (entry.get("match") or "").strip()
+        items = parse_tasks_md(src_content)
+        by_number = {i.number: i for i in items}
+        number = _leading_task_number(match_text)
+        target = by_number.get(number) if number else None
+        if target is None:
+            target = next(
+                (i for i in items if match_text.lower() in i.text.lower()), None
+            )
+        if target is None:
+            unmatched.append(f"task: {match_text}")
+            continue
+        children = [
+            i.number for i in items if i.number.startswith(target.number + ".")
+        ]
+        if children:
+            raise ValidationError(
+                f"task {target.number} still has children "
+                f"({', '.join(children)}) - move them first",
+                field="tasks",
+            )
+
+        src_content, line = _remove_task_line(src_content, target.number)
+        if line is None:
+            unmatched.append(f"task: {match_text}")
+            continue
+
+        new_number = _next_task_number(dst_content)
+        checkbox = "x" if target.checked else " "
+        dst_content = _append_to_section(
+            dst_content,
+            f"Additions ({today})",
+            f"- [{checkbox}] {new_number}. {target.text} "
+            f"(moved from {source_project} task {target.number})",
+        )
+        src_content = _append_to_section(
+            src_content,
+            REMOVED_SECTION,
+            f"- ~~{target.number}. {target.text}~~ "
+            f"(removed {today}: moved to {target_project} as {new_number})",
+        )
+        moved.append({"from": target.number, "to": str(new_number)})
+
+    return src_content, dst_content, moved, unmatched
+
+
+def _next_task_number(content: str) -> int:
+    """Next free top-level checklist number, counting removed records too."""
+    tops = [
+        int(re.match(r"\d+", item.number).group())
+        for item in parse_tasks_md(content)
+    ] + [
+        int(re.match(r"\d+", number).group())
+        for number in _REMOVED_RECORD_RE.findall(content)
+    ]
+    return max(tops, default=0) + 1
