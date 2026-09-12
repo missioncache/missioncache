@@ -527,5 +527,22 @@
       "referrer": "pypi.org",
       "uniques": 1
     }
+  ],
+  "2026-09-12": [
+    {
+      "count": 3,
+      "referrer": "missioncache.dev",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "referrer": "github.com",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "referrer": "pypi.org",
+      "uniques": 1
+    }
   ]
 }
