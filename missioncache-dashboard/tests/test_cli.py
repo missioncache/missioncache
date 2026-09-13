@@ -2,11 +2,10 @@
 
 import socket
 import subprocess
+import sys
 
 import pytest
-
 from missioncache_dashboard import cli
-
 
 # --- Template rendering -------------------------------------------------------
 
@@ -520,3 +519,59 @@ class TestCmdServePortPrecedence:
     def test_explicit_port_zero_is_honored(self, monkeypatch):
         """--port 0 (ask OS for a free port) must not be dropped back to env."""
         assert self._run_and_capture_port(monkeypatch, ["serve", "--port", "0"], env="9004") == 0
+
+
+class TestRedirectOutputToLog:
+    """serve --hidden must leave stdout/stderr usable, not just re-fd'd.
+
+    The Windows autostart (HKCU Run key) hands the process a REAL console, so
+    sys.stdout is a _WindowsConsoleIO that writes with WriteConsoleW. dup2
+    alone moves fd 1 to the log file and leaves that object in place, and
+    WriteConsoleW on a file handle fails with WinError 6 - killing the first
+    print() in the uvicorn lifespan and sending every message about it to the
+    same dead stream, so the dashboard died at every login with an empty log.
+
+    Run in a SUBPROCESS: the function dup2s fds 1 and 2 of whatever process
+    calls it, which in-process are pytest's own capture fds. And note which
+    assertion is the regression guard - on POSIX sys.stdout is a FileIO on
+    fd 1, so "the marker reached the log" passes against the unfixed code
+    too. `sys.stdout is not sys.__stdout__` is the one that fails without the
+    rebind, on every platform.
+    """
+
+    CHILD = """
+import sys, pathlib
+sys.platform = "win32"
+from missioncache_dashboard import cli
+log = pathlib.Path(sys.argv[1])
+cli.windows_log_path = lambda: log
+cli.log_dir = lambda: log.parent
+cli._redirect_output_to_log()
+print("MARKER-IN-LOG")
+assert sys.stdout is not sys.__stdout__, "stdout was not rebound onto the new fd"
+assert sys.stderr is not sys.__stderr__, "stderr was not rebound onto the new fd"
+"""
+
+    def _run_child(self, tmp_path):
+        log = tmp_path / "dash.log"
+        return log, subprocess.run(
+            [sys.executable, "-c", self.CHILD, str(log)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_streams_are_rebound_onto_the_redirected_fds(self, tmp_path):
+        _, proc = self._run_child(tmp_path)
+        assert proc.returncode == 0, proc.stderr
+
+    def test_output_reaches_the_log_and_not_the_console(self, tmp_path):
+        log, proc = self._run_child(tmp_path)
+        assert "MARKER-IN-LOG" in log.read_text(encoding="utf-8")
+        assert "MARKER-IN-LOG" not in proc.stdout
+
+    def test_non_win32_is_a_no_op(self, tmp_path):
+        """The redirect must not touch stdout on the platforms where --hidden does nothing."""
+        before = sys.stdout
+        cli._redirect_output_to_log()
+        assert sys.stdout is before
