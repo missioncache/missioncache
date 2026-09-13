@@ -22,6 +22,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 LAUNCHD_LABEL = "com.missioncache.dashboard"
@@ -608,12 +609,29 @@ def _redirect_output_to_log() -> None:
         return
     try:
         log_dir().mkdir(parents=True, exist_ok=True)
+        # Flush first: after the dup2 below, whatever is still sitting in the
+        # console buffers can no longer reach the handle it was filled for.
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:
+                stream.flush()
         fd = os.open(str(windows_log_path()), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         os.dup2(fd, 1)
         os.dup2(fd, 2)
         os.close(fd)
-    except OSError:
-        pass
+        # dup2 moves the OS handle, not the Python object. From the Run key the
+        # process has a real console, so sys.stdout is a _WindowsConsoleIO whose
+        # WriteConsoleW fails with WinError 6 once fd 1 is a file handle, which
+        # killed startup in the lifespan and left the log empty. No context
+        # manager and closefd=False: these ARE the process streams.
+        sys.stdout = open(1, "w", buffering=1, encoding="utf-8", errors="backslashreplace", closefd=False)  # noqa: SIM115
+        sys.stderr = open(2, "w", buffering=1, encoding="utf-8", errors="backslashreplace", closefd=False)  # noqa: SIM115
+    except OSError as exc:
+        # Never silent: the streams may be unusable, so go straight to the file.
+        try:
+            with open(windows_log_path(), "a", encoding="utf-8") as fh:
+                fh.write(f"[{datetime.now().astimezone():%Y-%m-%d %H:%M:%S}] output redirect failed: {exc!r}\n")
+        except OSError:
+            pass
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
