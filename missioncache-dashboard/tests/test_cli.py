@@ -570,8 +570,14 @@ assert sys.stderr is not sys.__stderr__, "stderr was not rebound onto the new fd
         assert "MARKER-IN-LOG" in log.read_text(encoding="utf-8")
         assert "MARKER-IN-LOG" not in proc.stdout
 
-    def test_non_win32_is_a_no_op(self, tmp_path):
-        """The redirect must not touch stdout on the platforms where --hidden does nothing."""
+    def test_non_win32_is_a_no_op(self, monkeypatch):
+        """The redirect must not touch stdout where --hidden is a documented no-op.
+
+        Force the platform rather than relying on the host being non-Windows:
+        this runs in-process, so on a real Windows runner the unforced version
+        redirects pytest's OWN fds into the log file.
+        """
+        monkeypatch.setattr(sys, "platform", "linux")
         before = sys.stdout
         cli._redirect_output_to_log()
         assert sys.stdout is before
