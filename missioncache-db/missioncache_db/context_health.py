@@ -900,6 +900,48 @@ def upsert_related_projects(content: str, project_name: str, note: str = "") -> 
     return content[:pos].rstrip("\n") + f"\n{header_line}\n\n" + content[pos:]
 
 
+_HUB_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def upsert_hub(content: str, hub_name: str) -> str:
+    """Set the ``Hub: [[name]]`` header line, replacing any existing one.
+
+    The resume flow reads this line (``build_digest`` exposes it as ``hub``) to
+    find the project's vault hub, so the name is held to the same no-slash /
+    leading-alphanumeric shape as a fork parent before it becomes a wikilink.
+    Placement follows the canonical header order from rules/missioncache.md:
+    right after ``**Fork of:**`` when present, else after ``**Due:**``, else
+    after ``**Last Updated:**``, else at the end of the header region. A second
+    call with the same name is a no-op; a different name replaces the line,
+    because a project has one hub.
+    """
+    hub_name = hub_name.strip()
+    if not _HUB_NAME_RE.fullmatch(hub_name):
+        raise ValueError(
+            "hub must be a bare note name (letters, digits, dot, underscore, "
+            "hyphen; no slashes, brackets or newlines)"
+        )
+    new_line = f"Hub: [[{hub_name}]]"
+    existing = _header_line(content, "Hub:")
+    if existing is not None:
+        if existing == new_line:
+            return content
+        return content.replace(existing, new_line, 1)
+
+    first_h2 = _H2_LINE_RE.search(mask_fences(content))
+    header_end = first_h2.start() if first_h2 else len(content)
+    header, rest = content[:header_end], content[header_end:]
+    lines = header.split("\n")
+    for prefix in ("**Fork of:**", "**Due:**", "**Last Updated:**"):
+        for i, line in enumerate(lines):
+            if line.strip().startswith(prefix):
+                lines.insert(i + 1, new_line)
+                return "\n".join(lines) + rest
+    if first_h2 is None:
+        return content.rstrip("\n") + f"\n{new_line}\n"
+    return header.rstrip("\n") + f"\n{new_line}\n\n" + rest
+
+
 def parse_last_updated(content: str) -> Optional[datetime]:
     """Parse the ``**Last Updated:**`` header; None when absent/malformed."""
     match = _LAST_UPDATED_RE.search(mask_fences(content))

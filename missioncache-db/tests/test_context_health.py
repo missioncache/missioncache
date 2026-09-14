@@ -743,6 +743,54 @@ class TestUpsertRelatedProjects:
         ]
 
 
+class TestUpsertHub:
+    """The ``Hub: [[name]]`` header line, the pointer /missioncache:load follows
+    to the project's vault hub. One hub per project, written in the canonical
+    header position, and the name is held to the fork-parent shape because a
+    planted header line decides which file the resume flow reads.
+    """
+
+    def test_creates_the_line_after_last_updated(self):
+        out = ch.upsert_hub(_WITH_WAITING, "demo-hub")
+        lines = out.split("\n")
+        idx = lines.index("**Last Updated:** 2026-08-01 10:00")
+        assert lines[idx + 1] == "Hub: [[demo-hub]]"
+        assert ch.build_digest(out, Path("x.md"))["hub"] == "Hub: [[demo-hub]]"
+
+    def test_goes_after_fork_of_when_present(self):
+        forked = _WITH_WAITING.replace(
+            "**Last Updated:** 2026-08-01 10:00\n",
+            "**Last Updated:** 2026-08-01 10:00\n**Fork of:** parent-proj\n",
+        )
+        out = ch.upsert_hub(forked, "demo-hub")
+        lines = out.split("\n")
+        assert lines[lines.index("**Fork of:** parent-proj") + 1] == "Hub: [[demo-hub]]"
+        assert ch.parse_fork_parent(out) == "parent-proj"
+
+    def test_replaces_an_existing_hub_instead_of_stacking(self):
+        once = ch.upsert_hub(_WITH_WAITING, "old-hub")
+        twice = ch.upsert_hub(once, "new-hub")
+        assert twice.count("Hub:") == 1
+        assert ch.build_digest(twice, Path("x.md"))["hub"] == "Hub: [[new-hub]]"
+
+    def test_same_name_is_a_no_op(self):
+        once = ch.upsert_hub(_WITH_WAITING, "demo-hub")
+        assert ch.upsert_hub(once, "demo-hub") == once
+
+    def test_rejects_a_name_that_is_not_a_bare_note(self):
+        for bad in ("../etc", "a/b", "[[x]]", "x\ny", "", " "):
+            with pytest.raises(ValueError):
+                ch.upsert_hub(_WITH_WAITING, bad)
+
+    def test_does_not_disturb_the_sections(self):
+        out = ch.upsert_hub(_WITH_WAITING, "demo-hub")
+        assert [s["name"] for s in ch.section_index(out)] == [
+            "Description",
+            "Waiting on",
+            "Next Steps",
+        ]
+
+
 class TestUnclosedFenceDoesNotBlindTheParsers:
     """The 2026-09-04 damage class: a truncated snapshot leaves a dangling fence.
 

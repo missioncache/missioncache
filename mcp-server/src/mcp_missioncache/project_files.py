@@ -602,6 +602,7 @@ def update_context_file(
     imported_event: dict[str, str] | None = None,
     sections_remove: list[str] | None = None,
     bullets_remove: list[dict[str, str]] | None = None,
+    hub: str | None = None,
 ) -> dict[str, Any]:
     """Update sections in a context.md file atomically.
 
@@ -634,6 +635,10 @@ def update_context_file(
         sections_remove: Section headings to delete whole, matched EXACTLY
             (``section_index`` gives the verbatim text). ``PROTECTED_SECTIONS``
             are refused.
+        hub: Vault hub note name; writes or replaces the ``Hub: [[name]]``
+            header line that /missioncache:load follows to the Obsidian hub.
+            Validated to a bare note name (no slashes) by the MCP layer and
+            again in ``context_health.upsert_hub``.
         bullets_remove: Items to delete, each ``{"section", "match"}``. Removes
             the first list item or table row in that section containing
             ``match``, with its continuation lines. Table header rows are never
@@ -750,6 +755,11 @@ def update_context_file(
             content, timestamp, waiting_on_add, waiting_on_resolve
         )
         waiting_on_unmatched.extend(unmatched)
+
+        # The Hub header line lives in the header region, untouched by the
+        # section writers below, so its placement does not depend on them.
+        if hub:
+            content = context_health.upsert_hub(content, hub)
 
         # Imported cross-project event, after waiting-on maintenance so the
         # `## Waiting on` anchor exists even when this call self-healed it.

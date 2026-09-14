@@ -441,6 +441,19 @@ async def update_context_file(
             )
         ),
     ] = None,
+    hub: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Vault hub note name (bare, e.g. 'aip-release-validation'). "
+                "Writes or replaces the 'Hub: [[name]]' header line that "
+                "/missioncache:load follows to the Obsidian hub, in the "
+                "canonical header position (after Fork of / Due / Last "
+                "Updated). One hub per project: a different name replaces "
+                "the line. Rejected when it carries slashes or brackets."
+            )
+        ),
+    ] = None,
 ) -> dict:
     """
     Update a context.md file atomically.
@@ -464,6 +477,12 @@ async def update_context_file(
         _validate_path(context_file, "context_file", must_be_under=settings.root)
         if imported_event:
             _validate_imported_event(imported_event)
+        if hub is not None and not _RELATED_PROJECT_RE.fullmatch(hub.strip()):
+            raise ValidationError(
+                "hub must be a bare note name (letters, digits, dot, underscore, "
+                "hyphen; no slashes, brackets or newlines)",
+                field="hub",
+            )
         result = project_files.update_context_file(
             context_file=context_file,
             next_steps=next_steps,
@@ -476,6 +495,7 @@ async def update_context_file(
             imported_event=imported_event,
             sections_remove=sections_remove,
             bullets_remove=bullets_remove,
+            hub=hub,
         )
 
         response = {
@@ -490,6 +510,7 @@ async def update_context_file(
                     ("key_decisions", key_decisions),
                     ("gotchas", gotchas),
                     ("key_files", key_files),
+                    ("hub", hub),
                     ("waiting_on", waiting_on_add or waiting_on_resolve),
                     # Only when it actually landed - a repeated event is a
                     # no-op, and claiming it here would report a section this

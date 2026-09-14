@@ -1152,6 +1152,43 @@ class TestFencedHeadingNotCorrupted:
         assert "### 2026-04-01 09:00" in content
 
 
+# ── hub (the locked writer for the Hub: header line) ──
+
+
+class TestHubHeader:
+    """``hub`` writes the ``Hub: [[name]]`` header line through the sidecar
+    lock. Before this parameter the only way to add the line the second-brain
+    rule asks for was a direct Edit of the context file.
+    """
+
+    CONTEXT = (
+        "# demo - Context\n"
+        "**Last Updated:** 2026-08-01 10:00\n"
+        "\n## Description\nBody.\n"
+        "\n## Next Steps\n\n1. Thing\n"
+        "\n## Recent Changes\n"
+    )
+
+    def test_writes_the_line_and_the_digest_reads_it(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(self.CONTEXT)
+        update_context_file(ctx, hub="demo-hub")
+        out = ctx.read_text()
+        assert "Hub: [[demo-hub]]" in out
+        assert out.index("Hub: [[demo-hub]]") < out.index("## Description")
+        assert ch.build_digest(out, ctx)["hub"] == "Hub: [[demo-hub]]"
+
+    def test_second_call_replaces_rather_than_stacks(self, tmp_path):
+        ctx = tmp_path / "demo-context.md"
+        ctx.write_text(self.CONTEXT)
+        update_context_file(ctx, hub="old-hub")
+        update_context_file(ctx, hub="new-hub", recent_changes=["moved the hub"])
+        out = ctx.read_text()
+        assert out.count("Hub:") == 1
+        assert "Hub: [[new-hub]]" in out
+        assert "moved the hub" in out
+
+
 # ── imported_event (the locked writer for the cross-project convention) ──
 
 
