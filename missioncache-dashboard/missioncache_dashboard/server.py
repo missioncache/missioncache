@@ -35,7 +35,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from starlette.background import BackgroundTask
 
 from . import __version__, update_check
@@ -71,6 +71,7 @@ from missioncache_db import (
     TaskDB,
     init_hooks_state_db_schema,
 )
+from missioncache_db import portfolio
 from missioncache_db.portability import (
     export_project,
     format_report_lines,
@@ -2549,6 +2550,55 @@ class StatuslineAddonsPayload(BaseModel):
     addons: list[Addon]
 
 
+class CalendarSource(BaseModel):
+    name: str
+    kind: Literal["ics", "command"] = "ics"
+    location: str | None = None
+    command: list[str] | None = None
+    timeout_seconds: int = 10
+    enabled: bool = True
+
+    @field_validator("command")
+    @classmethod
+    def _check_command(cls, v: list[str] | None) -> list[str] | None:
+        # Same guardrail as Addon: this is config-file content the dashboard
+        # process executes, so command[0] must be an existing absolute path.
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("command must not be empty")
+        exe = v[0]
+        if not os.path.isabs(exe) or not os.path.exists(exe):
+            raise ValueError("command[0] must be an existing absolute path")
+        return v
+
+    @model_validator(mode="after")
+    def _kind_has_its_field(self):
+        if self.kind == "ics" and not (self.location or "").strip():
+            raise ValueError("an ics source needs a location")
+        if self.kind == "command" and not self.command:
+            raise ValueError("a command source needs a command")
+        return self
+
+
+class CalendarPayload(BaseModel):
+    sources: list[CalendarSource]
+    cache_ttl_seconds: int = 900
+    timezone: str | None = None
+
+
+@app.put("/api/settings/calendar")
+async def update_calendar_settings(payload: CalendarPayload):
+    """Replace the calendar sources the agenda reads.
+
+    Its own top-level config key, like statusline addons, so it never touches
+    the other sections. Validation mirrors Addon: a command source runs without
+    a shell and its first element must be an existing absolute path.
+    """
+    config.set_calendar_config(payload.model_dump())
+    return {"ok": True, "calendar": config.get_calendar_config()}
+
+
 @app.get("/api/settings")
 async def get_settings():
     """Return all Tier 1 settings in one payload.
@@ -2564,6 +2614,7 @@ async def get_settings():
         "statusline": config.get_statusline_config(),
         "statusline_addons": config.get_statusline_addons(),
         "statusline_addon_colors": sorted(ADDON_COLOR_ALLOW),
+        "calendar": config.get_calendar_config(),
     }
 
 
@@ -3600,55 +3651,15 @@ async def set_due_date(task_id: int, payload: DueDatePayload):
     return {"success": True, "task_id": task_id, "due_date": value}
 
 
-# Names in a Waiting-on `who` cell that mean the reader themselves. Such a row
-# is work they owe, so it belongs on their side of the split even though it
-# lives in the same markdown table as everyone else's.
-#
-# This decides `mine`, which drives on_me vs on_others, open_count,
-# overdue_count, at_risk and the whole My work gadget - so a wrong answer here
-# does not just misword a greeting, it files the reader's own work under
-# "waiting on other people" and undercounts what they owe. It used to be a
-# literal frozenset containing "tomer", which is right for one person and wrong
-# for every other installer; the greeting was the cosmetic half of that bug and
-# this is the half that moves the numbers.
-_WHO_SELF_BASE = frozenset({"me", "myself"})
-
-
 def _who_self() -> frozenset[str]:
     """The names that mean "the person reading this dashboard".
 
-    Built from the same source as the greeting, so the two cannot disagree.
-    `_who_names` lowercases and takes first names, so the first token of git's
-    user.name is the right thing to compare against.
+    A wrapper kept here because it is called directly, and because
+    `_display_name()` must be looked up by module-global name at call time so
+    a test can monkeypatch it. The body lives in `missioncache_db.portfolio`
+    so the MCP server and the dashboard cannot disagree on whose row is whose.
     """
-    name = _display_name()
-    return (_WHO_SELF_BASE | {name.lower()}) if name else _WHO_SELF_BASE
-
-
-def _who_names(raw: str | None) -> list[str]:
-    """Owner first-names in a hand-typed `who` cell, lowercased, in order.
-
-    The cell is prose, so it needs normalizing before it can group at all:
-    drop parentheticals ("Ilya (on vacation til Wed)" -> ilya), drop a trailing
-    note after " - " ("Itai Sela (IT) - I said I would handle it" -> itai), then
-    split a multi-owner cell on / + and comma.
-
-    Measured over the 63 live rows this exists to group: 47 distinct exact
-    strings collapse to 34 owners, and the top one holds 12 of them. Counting
-    exact strings says the field cannot group, which is the wrong measurement -
-    it measures string equality, not owners.
-
-    Returns [] when nothing parses, so callers fall back to the raw string
-    rather than inventing an owner.
-    """
-    text = re.sub(r"\([^)]*\)", " ", raw or "")
-    text = text.split(" - ")[0]
-    names = []
-    for part in re.split(r"[/+,]", text):
-        words = part.split()
-        if words:
-            names.append(words[0].lower())
-    return names
+    return portfolio.self_names(_display_name())
 
 
 _DISPLAY_NAME_CACHE: str | None = None
@@ -3664,102 +3675,28 @@ def _display_name() -> str | None:
     """The reader's first name, for the greeting, or None if we cannot tell.
 
     Git's global user.name is the one place a developer has already written
-    their own name down, so it needs no new setting and no onboarding step. The
-    greeting was shipping a hardcoded "Tomer", which is correct for exactly one
-    person and wrong for everyone who installs this.
-
+    their own name down, so it needs no new setting and no onboarding step.
     None is a supported answer, not a failure: the greeting has nameless
-    wording for it. That contract is why this catches broadly - it must never be
-    the reason the board fails to load.
+    wording for it. That contract is why this catches broadly - it must never
+    be the reason the board fails to load.
 
-    Only a successful lookup is cached. lru_cache pinned None too, so a single
-    transient timeout left every later render nameless until the process
-    restarted, which is a long punishment for a hiccup.
+    The fork itself is `portfolio.git_display_name()`, shared with the MCP
+    server. The tri-state cache stays HERE: a settled "no such key" answer is
+    cached, a transient failure (missing binary, timeout) is left uncached so
+    the next request asks again. lru_cache pinned None too, so a single
+    timeout left every later render nameless until the process restarted.
     """
     global _DISPLAY_NAME_CACHE, _DISPLAY_NAME_RESOLVED
     if _DISPLAY_NAME_RESOLVED:
         return _DISPLAY_NAME_CACHE
     try:
-        out = subprocess.run(
-            ["git", "config", "--global", "user.name"],
-            capture_output=True, text=True, timeout=2,
-            # A name with non-ASCII characters on a machine whose preferred
-            # encoding is not UTF-8 (LC_ALL=C on POSIX, cp1252 on Windows)
-            # makes text=True raise UnicodeDecodeError while decoding. That is
-            # a ValueError, so it is not a SubprocessError and was not caught:
-            # it escaped this helper and 500'd the whole /api/today endpoint,
-            # blanking the board over a greeting. Decoding as UTF-8 with
-            # undecodable bytes replaced keeps a mangled name, which is a far
-            # better outcome than no dashboard.
-            encoding="utf-8",
-            errors="replace",
-        )
+        name = portfolio.git_display_name()
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
-        # Left uncached on purpose: a missing binary or a timeout can be
-        # transient, and the next request should ask again.
+        # Left uncached on purpose: can be transient.
         return None
-    if out.returncode != 0:
-        # git ran and reported no such key. That is a settled answer, not a
-        # hiccup, so it caches like a successful one.
-        _DISPLAY_NAME_RESOLVED = True
-        return None
-    first = out.stdout.strip().split()
-    # First token only. "Tomer Brami" greets as "Tomer"; a full name in a
-    # greeting reads like a form letter.
-    _DISPLAY_NAME_CACHE = first[0] if first else None
+    _DISPLAY_NAME_CACHE = name
     _DISPLAY_NAME_RESOLVED = True
-    return _DISPLAY_NAME_CACHE
-
-
-# Below this a bullet orients nobody - "- done", "- wip" - and filling the row's
-# one line with it is worse than leaving it empty. The one tunable number in
-# _left_off, so it gets a name rather than sitting inline as a bare literal.
-_LEFT_OFF_MIN_CHARS = 12
-
-
-def _left_off(content: str | None) -> str | None:
-    """The newest Recent Changes bullet: what was last actually done here.
-
-    The view needs one line of orientation before it proposes what to do next,
-    and "last worked 2 days ago" does not supply it. Recent Changes is already
-    the per-session journal, its newest subsection is the last session, and its
-    first real bullet is that session's headline.
-
-    Bullets are written by hand and by the save flow, so the leading noise comes
-    in several shapes and all of it is stripped: a markdown heading nested inside
-    the bullet (`- ### 2026-07-24 - ...`, which is real in the live files and is
-    why the hashes go before the dates), then a date with or without a time, then
-    a bare time. The 12-character floor drops fragments like "- done" that orient
-    nobody.
-    """
-    # Local import purely to match get_today's shape below. It is not load
-    # bearing: server.py already imports missioncache_db at module scope, so
-    # deferring this submodule saves nothing. An earlier comment here claimed a
-    # CLI path that does not hard-import missioncache_db, which is not true of
-    # this module.
-    from missioncache_db import context_health
-
-    if not content:
-        return None
-    subs = context_health.parse_recent_changes_subsections(content)
-    if not subs:
-        return None
-    _heading, body = subs[0]
-    for line in body.splitlines():
-        line = line.strip()
-        if not line.startswith(("- ", "* ")):
-            continue
-        text = line[2:].strip()
-        text = re.sub(r"^#{1,6}\s*", "", text)
-        text = re.sub(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2})?\s*[-:]?\s*", "", text)
-        text = re.sub(r"^\d{2}:\d{2}:?\s*", "", text)
-        # The card renders escaped plain text, so bold markers would show as
-        # literal asterisks. Only the paired forms go: a lone `*` can be a real
-        # character in these bullets, `**` and `__` never are.
-        text = text.replace("**", "").replace("__", "")
-        if len(text) > _LEFT_OFF_MIN_CHARS:
-            return text
-    return None
+    return name
 
 
 @app.get("/api/today")
@@ -3795,392 +3732,73 @@ async def get_today():
     Per-project attention blocks carry typed counts and a DERIVED at_risk
     flag - never a manually set status.
     """
+    # The rollup itself lives in missioncache_db.portfolio so the MCP server
+    # computes the identical ranking and counts. Only the two dashboard-side
+    # inputs are supplied here: the cached display name and the JIRA URL map.
+    return portfolio.build_portfolio(
+        get_sqlite_db(), user_name=_display_name(), ticket_url=get_jira_url
+    )
 
-    # Resolved once per request, not per row: it shells out to git behind a
-    # cache, and the answer cannot change mid-response.
-    who_self = _who_self()
+
+@app.get("/api/sessions/live")
+def get_live_sessions():
+    """Projects with a Claude Code session whose process is still running.
+
+    Thin wrapper over ``missioncache_db.live_sessions_all()`` plus the
+    designated lead. NOT folded into ``/api/today``: the pid scan measured
+    68-89ms over 26 ``project_state`` rows against ``/api/today``'s 26-44ms,
+    so it is fetched after the board paints, the way the stats strip is.
+
+    Sync ``def`` on purpose: the scan forks ``ps`` per live pid, and an
+    ``async def`` doing that would stall the event loop (the documented
+    ``/api/stats/today`` failure). FastAPI runs a sync handler in its threadpool.
+
+    ``method: "pid"`` is the honesty field. This endpoint cannot see what
+    Claude Code's ``ListAgents`` sees: one ``claude`` process hosts many
+    sessions, so a session closed while its process lived on is still
+    reported here until it is pruned. The UI words it accordingly.
+    """
+    now = datetime.now()
+    sessions = []
+    for row in missioncache_db.live_sessions_all():
+        age = None
+        try:
+            age = int((now - datetime.fromisoformat(row["last_active"])).total_seconds())
+        except (TypeError, ValueError):
+            pass
+        sessions.append({**row, "age_seconds": age})
+    lead = missioncache_db.live_lead_session()
+    return {
+        "generated_at": now.isoformat(),
+        "method": "pid",
+        "sessions": sessions,
+        "bound_count": len(sessions),
+        "lead_session": (
+            {"title": lead["title"], "since": lead["since"]} if lead else None
+        ),
+    }
+
+
+@app.get("/api/agenda")
+def get_agenda(date: str | None = None):
+    """Today's calendar, or ``date`` (YYYY-MM-DD). Never 500s.
+
+    Returns ``missioncache_db.agenda.agenda_for()``'s shape verbatim,
+    including ``configured``, which is False when no source is set up. The
+    client renders nothing at all in that case - different from an error.
+    Sync ``def`` because an ICS fetch is network I/O.
+    """
     from datetime import date as _date
 
-    from missioncache_db import context_health, pm_items
+    from missioncache_db import agenda
 
-    sqlite_db = get_sqlite_db()
-    today = _date.today()
-    horizon = 7
-
-    def _age_days(iso: str | None) -> int | None:
-        if not iso:
-            return None
+    target = None
+    if date:
         try:
-            return (today - _date.fromisoformat(iso[:10])).days
+            target = _date.fromisoformat(date)
         except ValueError:
-            return None
-
-    mine_overdue: list[dict] = []
-    mine_due_soon: list[dict] = []
-    mine_other: list[dict] = []
-    on_others: list[dict] = []
-    per_task: dict[int, dict] = {}
-
-    # The project block mirrors the two lists: open/overdue count the on_me
-    # list, on_others/stale_on_others count the on_others list (an overdue
-    # commitment and a stale blocker are both "past the line").
-    def _stats_for(task_id: int) -> dict:
-        return per_task.setdefault(
-            task_id,
-            {"open_count": 0, "overdue_count": 0, "on_others_count": 0,
-             "stale_on_others_count": 0},
-        )
-
-    for item in pm_items.list_action_items(sqlite_db, status="open"):
-        stats = _stats_for(item.task_id)
-        overdue = item.is_overdue(today)
-        if item.assignee.strip().lower() == "me":
-            stats["open_count"] += 1
-            if overdue:
-                stats["overdue_count"] += 1
-            # `kind` on this side too. on_others already publishes it on both
-            # of its shapes, and without it here the merged My-work list had no
-            # uniform discriminator - so the client inferred "which endpoint
-            # does Done post to" from `id != null`, which is a structural
-            # accident standing in for a declared fact.
-            entry = {**asdict(item), "label": item.label, "overdue": overdue,
-                     "mine": True, "kind": "commitment"}
-            due_in = None
-            if item.due_date:
-                age = _age_days(item.due_date)
-                due_in = None if age is None else -age
-            if overdue:
-                mine_overdue.append(entry)
-            elif due_in is not None and due_in <= horizon:
-                mine_due_soon.append(entry)
-            else:
-                mine_other.append(entry)
-        else:
-            stats["on_others_count"] += 1
-            if overdue:
-                stats["stale_on_others_count"] += 1
-            on_others.append({
-                "kind": "commitment",
-                "what": item.what,
-                "who": item.assignee,
-                # Reaching this branch means assignee is not "me", so a
-                # commitment here is never his. Both keys must be present on
-                # EVERY row in this list: the group aggregation and the
-                # by-person rollup read them unconditionally.
-                "who_primary": (_who_names(item.assignee) or [item.assignee or ""])[0].title(),
-                "mine": False,
-                "why": item.source or item.requested_by or "",
-                "project_name": item.project_name,
-                "task_id": item.task_id,
-                "days_past_line": _age_days(item.due_date) if overdue else None,
-                "age_days": _age_days(item.created_at),
-                "id": item.id,
-                "label": item.label,
-                "due_date": item.due_date,
-                "since": None,
-                "row_index": None,
-            })
-
-    projects = []
-    # One query, not one per project: the progress parse below needs each task's
-    # repo path to find its files.
-    repos_by_id = {repo.id: repo for repo in sqlite_db.get_repos()}
-    # Two task rows can point at ONE project: a fork and its parent, or a stale
-    # row left by a rename whose full_path no longer resolves, so it falls back
-    # to the name and reads its twin's context file. Both then parse the same
-    # Waiting-on table and every row is counted twice - measured live at 66 rows
-    # for 63 real asks. The client used to paper over this by deduping rows and
-    # projects after the fact, which left `counts` (computed here, pre-dedup)
-    # disagreeing with the numbers on screen by exactly the duplicate count.
-    #
-    # Fixing it at the source instead: iterate freshest-first and skip a task
-    # whose context file another task already consumed. That kills the duplicate
-    # rows, the duplicate project entries and the counts mismatch together, and
-    # the freshest-first order means the surviving twin is the one worked most
-    # recently rather than whichever the DB happened to return first.
-    seen_context: dict[str, str] = {}
-    active_tasks = sorted(
-        sqlite_db.get_active_tasks(),
-        key=lambda t: (t.last_worked_on or "", t.id),
-        reverse=True,
-    )
-    for task in active_tasks:
-        stats = _stats_for(task.id)
-        due_date = task.due_date
-        days_to_due = None
-        if due_date:
-            age = _age_days(due_date)
-            days_to_due = None if age is None else -age
-
-        # Waiting-on rows are file-side truth; read the context file once
-        # and take both the display rows and the staleness count from it.
-        content = None
-        is_duplicate = False
-        for candidate in (
-            _mc_root() / "active" / task.name,
-            _mc_root() / task.full_path,
-        ):
-            ctx = candidate / f"{task.name}-context.md"
-            if ctx.exists():
-                key = str(ctx.resolve())
-                if key in seen_context:
-                    # A twin already read this file. Its rows belong to that
-                    # task; parsing them again would double every ask, and
-                    # emitting a second projects[] entry would put the same
-                    # project on the board twice under one name.
-                    is_duplicate = True
-                    break
-                seen_context[key] = task.name
-                try:
-                    content = ctx.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    content = None
-                break
-        if content:
-            for row_index, row in enumerate(context_health.parse_waiting_on(content)):
-                # A row with no What has no identity: it cannot be resolved
-                # (the resolve verifies that cell) and it cannot be read. A
-                # blank row in the hand-edited table would otherwise parse as
-                # a blocker aged from an empty Since, fabricating a permanent
-                # at-risk flag and sorting to the top of its project group.
-                if not row["what"].strip():
-                    continue
-                since = context_health.parse_since_date(row["since"])
-                age = (today - since).days if since is not None else None
-                stale = age is not None and age > horizon
-                # A row whose `who` names HIM is work he owes, so it counts on
-                # his side. Before this, every row in the table counted against
-                # "on other people" regardless of the cell, which under-reported
-                # his own plate roughly 4x and filed his own asks under someone
-                # else's label. It stays in this list because the resolve path
-                # addresses it by task_id + row_index either way.
-                names = _who_names(row["who"])
-                mine = any(n in who_self for n in names)
-                if mine:
-                    stats["open_count"] += 1
-                    # A row that names HIM and has crossed its line is late, and
-                    # it has to count as such. Before this it incremented
-                    # open_count only, so nothing on the page could report it:
-                    # overdue_count skipped it here and counts.overdue is built
-                    # from the action items alone, which are the only rows that
-                    # carry a due_date. The result was a header asserting
-                    # "0 overdue" on a day he was the blocker - measured live on
-                    # a row 2 days past its line with a named colleague waiting.
-                    #
-                    # "Late" spans both kinds by this endpoint's own contract:
-                    # a commitment's line is its due date, a blocker's line is
-                    # the 7-day threshold, and days_past_line is the one scale
-                    # over both. The kinds stay distinguishable downstream via
-                    # `kind`, so the UI can still word them differently.
-                    if stale:
-                        stats["overdue_count"] += 1
-                else:
-                    stats["on_others_count"] += 1
-                    if stale:
-                        stats["stale_on_others_count"] += 1
-                on_others.append({
-                    "kind": "blocker",
-                    "what": row["what"],
-                    "who": row["who"],
-                    # Grouping key for the by-person rollup. Falls back to the
-                    # raw cell so an unparseable owner is still shown, never
-                    # silently dropped or merged into someone else.
-                    "who_primary": names[0].title() if names else (row["who"] or ""),
-                    "mine": mine,
-                    "why": row["gates"],
-                    "project_name": task.name,
-                    "task_id": task.id,
-                    "days_past_line": (age - horizon) if stale else None,
-                    "age_days": age,
-                    "id": None,
-                    "label": None,
-                    "due_date": None,
-                    "since": row["since"],
-                    # Identity handle for the resolve endpoint: the table has
-                    # no per-row id, so position is verified against `what`.
-                    "row_index": row_index,
-                })
-
-        at_risk = bool(
-            stats["overdue_count"]
-            or stats["stale_on_others_count"]
-            or (days_to_due is not None and days_to_due <= horizon)
-        )
-        if not is_duplicate and (stats["open_count"] or stats["on_others_count"] or due_date):
-            # Where the project stands and what comes next - the two things the
-            # view showed nothing about, so a row said who owes what but not
-            # whether the work was nearly done or barely started.
-            #
-            # `task_modes` is deliberately NOT forwarded. It is the full parsed
-            # checklist (481 items across the active projects) and the row needs
-            # exactly one line out of it, so the pick happens here rather than
-            # shipping the list for the client to search.
-            repo = repos_by_id.get(task.repo_id)
-            progress = parse_missioncache_progress(
-                repo.path if repo else "", task.full_path or ""
-            )
-            next_up = next(
-                (
-                    item.get("title", "").strip()
-                    for item in progress["task_modes"]
-                    if not item.get("completed") and item.get("title", "").strip()
-                ),
-                None,
-            )
-            # First ticket only. A row has space for one reference, and tickets
-            # are ordered by insertion so the first is the project's primary one.
-            tickets = pm_items.list_tickets(sqlite_db, task.id)
-            ticket = tickets[0] if tickets else None
-            projects.append({
-                "task_id": task.id,
-                "name": task.name,
-                "due_date": due_date,
-                "days_to_due": days_to_due,
-                "open_count": stats["open_count"],
-                "overdue_count": stats["overdue_count"],
-                "on_others_count": stats["on_others_count"],
-                "stale_on_others_count": stats["stale_on_others_count"],
-                "at_risk": at_risk,
-                "completed_count": progress["completed_count"],
-                "total_count": progress["total_count"],
-                "completion_pct": progress["completion_pct"],
-                "next_up": next_up,
-                # The view groups and marks projects by kind; the column already
-                # exists and was simply never forwarded.
-                "category": task.category,
-                # Derived from the context file already read above for the
-                # Waiting-on rows, so it costs no extra I/O. Pairs with next_up:
-                # one line of where you left off, one line of what is next.
-                "left_off": _left_off(content),
-                # The tickets table is the current home; task.jira_key is the
-                # legacy column, still readable, that migrates into a row on the
-                # project's first PM mutation. Prefer the row, fall back.
-                "ticket_label": ticket.label if ticket else task.jira_key,
-                "ticket_url": (
-                    ticket.url if ticket else get_jira_url(task.jira_key)
-                ),
-                # Recency, so the view can tell a project whose asks are rotting
-                # while he works in it (chase them) from one whose asks are
-                # rotting because the project stopped (close them). Tracked time
-                # cannot answer this: only 33 minutes of a 5h48m day attributes
-                # to a project at all, and the most-owed project reads 0m on a
-                # day he worked in it. None when the project was never worked.
-                "last_worked_on": task.last_worked_on,
-                "days_since_worked": _age_days(task.last_worked_on),
-            })
-
-    # Grouped by project, because a flat cross-project list of everything
-    # anyone owes runs to dozens of rows and stops being readable.
-    #
-    # GROUPS sort by how much has gone stale, most first. Sorting by newest
-    # activity instead put the freshest project on top, which is the opposite
-    # of urgent: it buried a project whose every ask had gone stale below one
-    # with nothing stale at all. WITHIN a group, most-past-the-line first, so
-    # each project's most urgent row is the one you see at its top.
-    groups: dict[int, dict] = {}
-    for row in on_others:
-        groups.setdefault(row["task_id"], {
-            "task_id": row["task_id"],
-            "project_name": row["project_name"],
-            "rows": [],
-        })["rows"].append(row)
-
-    on_others_groups = []
-    for group in groups.values():
-        group["rows"].sort(key=lambda r: (
-            r["days_past_line"] is None,
-            -(r["days_past_line"] or 0),
-            -(r["age_days"] or 0),
-        ))
-        # The counts describe the OTHER-PEOPLE side only, because that is what
-        # the meter means. His own rows stay in `rows` so the expanded panel can
-        # show them first, but they must not inflate a bar that reads as
-        # "someone else is slow".
-        theirs = [r for r in group["rows"] if not r["mine"]]
-        ages = [r["age_days"] for r in theirs if r["age_days"] is not None]
-        group["count"] = len(theirs)
-        group["mine_count"] = len(group["rows"]) - len(theirs)
-        group["stale_count"] = sum(
-            1 for r in theirs if r["days_past_line"] is not None
-        )
-        group["newest_age_days"] = min(ages) if ages else None
-        on_others_groups.append(group)
-    # Freshest reply first, projects nobody has answered at all last. The two
-    # tiebreaks after that exist for the same reason the projects sort below
-    # names one: on the current data two projects tie at 3 days and two more tie
-    # at 12, and with the age alone as the key their relative order fell out of
-    # dict insertion order. That is deterministic for one process but it shifts
-    # whenever the underlying rows are re-ordered, so the same day's list could
-    # come back differently after a rename or a new task. Volume breaks the tie
-    # first because a project holding more quiet asks is the more useful one to
-    # look at, then name so the result is total.
-    on_others_groups.sort(key=lambda g: (
-        g["newest_age_days"] is None,
-        g["newest_age_days"] or 0,
-        -g["stale_count"],
-        -g["count"],
-        g["project_name"] or "",
-    ))
-
-    # This list, not on_others_groups, is what the per-project view renders,
-    # because a project can have items on YOU and nothing on anyone else - and
-    # rendering the groups meant such a project appeared nowhere at all.
-    #
-    # Urgency order: your own lateness first (the only thing that earns red),
-    # then an imminent project deadline, then how much has gone idle with
-    # someone else, then volume. Name last so the order is stable across
-    # requests when everything else ties.
-    #
-    # This is the ENDPOINT's contract, pinned by
-    # TestTodayEndpoint::test_at_risk_projects_sort_first, and it is not the
-    # same question the board's Projects gadget answers - that one says "most
-    # recently worked first" on its face and sorts accordingly on the client.
-    # Two orderings for two questions: an API consumer asking "what is most
-    # urgent" and a reader asking "what was I just doing". Urgency still reaches
-    # the screen through the red dot and the on-you / no-reply columns.
-    projects.sort(key=lambda p: (
-        -p["overdue_count"],
-        p["days_to_due"] is None,
-        p["days_to_due"] if p["days_to_due"] is not None else 0,
-        -p["stale_on_others_count"],
-        -p["on_others_count"],
-        -p["open_count"],
-        p["name"],
-    ))
-
-    return {
-        "generated_at": datetime.now().isoformat(),
-        # For the greeting. None when git has no global user.name configured,
-        # which the view renders as its nameless wording rather than a blank.
-        "user_name": _display_name(),
-        "on_me": {
-            "overdue": mine_overdue,
-            "due_soon": mine_due_soon,
-            "other_open": mine_other,
-        },
-        "on_others": on_others_groups,
-        "counts": {
-            # on_me counts his action items PLUS the waiting-on rows whose `who`
-            # names him; on_others and stale exclude those, so the two sides add
-            # up and neither claims the same row.
-            "on_me": (len(mine_overdue) + len(mine_due_soon) + len(mine_other)
-                      + sum(1 for r in on_others if r["mine"])),
-            # Same shape as on_me above, and for the same reason: his own late
-            # work lives in TWO lists. mine_overdue holds the action items whose
-            # due_date has passed; the waiting-on rows that name him sit in
-            # on_others (they stay there because the resolve path addresses them
-            # by task_id + row_index), so they have to be added back here or a
-            # row of his that is past the 7-day line reports as not late.
-            "overdue": (len(mine_overdue)
-                        + sum(1 for r in on_others
-                              if r["mine"] and r["days_past_line"] is not None)),
-            "on_others": sum(1 for r in on_others if not r["mine"]),
-            "on_others_projects": len(on_others_groups),
-            "stale": sum(1 for r in on_others
-                         if not r["mine"] and r["days_past_line"] is not None),
-        },
-        "projects": projects,
-    }
+            raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD")
+    return agenda.agenda_for(target)
 
 
 @app.post("/api/sync")
@@ -4203,15 +3821,67 @@ async def sync_databases():
 
 
 async def event_generator():
-    """Generate Server-Sent Events with updated data."""
+    """Generate Server-Sent Events with updated data.
+
+    Two events. The unnamed one is the legacy productivity payload. The named
+    ``portfolio`` event carries the Attention view's counts, the live-session
+    set and an agenda summary, and is emitted ONLY when
+    ``portfolio.portfolio_watermark`` moved since the last tick - an idle
+    minute produces no portfolio events at all. That gate is what keeps a
+    30-second stream from paying the pid scan and the rollup for nothing.
+    The blocking work runs in a thread so it cannot stall the loop.
+    """
+    last_mark = None
     while True:
-        db = get_db()
-        data = {
-            "productivity": db.get_today_stats(),
-            "timestamp": datetime.now().isoformat(),
-        }
-        yield f"data: {json.dumps(data)}\n\n"
+        # The legacy half reads DuckDB, which is single-writer: a second
+        # dashboard process (or a sync in flight) makes that raise, and an
+        # unguarded raise here used to end the whole generator - taking the
+        # portfolio event, which needs only SQLite, down with it.
+        try:
+            db = get_db()
+            data = {
+                "productivity": db.get_today_stats(),
+                "timestamp": datetime.now().isoformat(),
+            }
+            yield f"data: {json.dumps(data)}\n\n"
+        except Exception as exc:  # noqa: BLE001 - a stream must keep streaming
+            logger.warning("productivity stream tick failed: %s", exc)
+
+        try:
+            mark = await asyncio.to_thread(portfolio.portfolio_watermark, get_sqlite_db())
+            if mark != last_mark:
+                last_mark = mark
+                payload = await asyncio.to_thread(_portfolio_event_payload, mark)
+                yield f"event: portfolio\ndata: {json.dumps(payload)}\n\n"
+        except Exception as exc:  # noqa: BLE001 - a stream must keep streaming
+            logger.warning("portfolio stream tick failed: %s", exc)
+
         await asyncio.sleep(REFRESH_INTERVAL)
+
+
+def _portfolio_event_payload(mark: str) -> dict:
+    """What a changed watermark sends down the stream: enough to redraw the
+    strip and the live badges, not the whole board (the client refetches
+    ``/api/today`` for that)."""
+    from missioncache_db import agenda
+
+    today = portfolio.build_portfolio(
+        get_sqlite_db(), user_name=_display_name(), ticket_url=get_jira_url
+    )
+    live = get_live_sessions()
+    events = agenda.agenda_for()
+    return {
+        "watermark": mark,
+        "generated_at": today["generated_at"],
+        "counts": today["counts"],
+        "at_risk": [p["name"] for p in today["projects"] if p["at_risk"]],
+        "live": live,
+        "agenda": {
+            "configured": events["configured"],
+            "events": events["events"][:5],
+            "sources": events["sources"],
+        },
+    }
 
 
 @app.get("/api/stream")

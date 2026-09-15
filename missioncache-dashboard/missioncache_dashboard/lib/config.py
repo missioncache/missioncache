@@ -57,6 +57,9 @@ DEFAULTS: dict[str, Any] = {
     # clean statusline; a distinct top-level key from `statusline` so the
     # statusline-settings save (which fully replaces that section) never wipes it.
     "statusline_addons": [],
+    # Calendar sources for the agenda. The schema is owned by
+    # missioncache_db.agenda (the reader); this is the writer's default.
+    "calendar": {"sources": [], "cache_ttl_seconds": 900, "timezone": None},
 }
 
 
@@ -197,3 +200,23 @@ def set_statusline_addons(addons: list[dict[str, Any]]) -> None:
     `statusline` section (and vice versa).
     """
     _update("statusline_addons", list(addons))
+
+
+def get_calendar_config() -> dict[str, Any]:
+    """Return the calendar section, normalized.
+
+    Delegates to ``missioncache_db.agenda.read_calendar_config`` so the schema
+    has exactly one owner: the reader that consumes it.
+    """
+    from missioncache_db import agenda
+
+    return agenda.read_calendar_config()
+
+
+def set_calendar_config(cfg: dict[str, Any]) -> None:
+    """Replace the calendar section and persist to disk.
+
+    Its own top-level key via _update, so it never touches `statusline` or
+    `statusline_addons` and they never touch it.
+    """
+    _update("calendar", dict(cfg))
