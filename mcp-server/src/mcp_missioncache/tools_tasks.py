@@ -24,6 +24,7 @@ from .errors import (
     ValidationError,
 )
 from .helpers import (
+    attach_lead_session,
     SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
     _notify_dashboard_task_created,
@@ -583,7 +584,7 @@ async def complete_task(
         peers = live_peer_sessions_for_project(task.name)
         if peers:
             result["live_sessions"] = peers
-        return result
+        return attach_lead_session(result)
 
     except MissionCacheError as e:
         return e.to_dict()
@@ -642,7 +643,7 @@ async def reopen_task(
         peers = live_peer_sessions_for_project(task.name)
         if peers:
             result["live_sessions"] = peers
-        return result
+        return attach_lead_session(result)
 
     except MissionCacheError as e:
         return e.to_dict()
@@ -743,7 +744,7 @@ async def rename_task(
                     merged.setdefault(peer["session_id"], peer)
             if merged:
                 response["live_sessions"] = list(merged.values())
-        return response
+        return attach_lead_session(response)
 
     except MissionCacheError as e:
         return e.to_dict()

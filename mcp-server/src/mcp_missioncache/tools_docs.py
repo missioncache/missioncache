@@ -22,6 +22,7 @@ from .errors import (
     ValidationError,
 )
 from .helpers import (
+    attach_lead_session,
     SESSION_ID_RESOLVE_HINT,
     _bind_session_to_project,
     _get_bound_project,
@@ -539,7 +540,7 @@ async def update_context_file(
         peers = live_peer_sessions_for_context_file(context_file)
         if peers:
             response["live_sessions"] = peers
-        return response
+        return attach_lead_session(response)
 
     except MissionCacheError as e:
         return e.to_dict()
@@ -880,7 +881,7 @@ async def update_tasks_file(
             peers = live_peer_sessions_for_project(project_name)
             if peers:
                 response["live_sessions"] = peers
-        return response
+        return attach_lead_session(response)
 
     except MissionCacheError as e:
         return e.to_dict()
@@ -1052,7 +1053,7 @@ async def move_to_project(
                 peers.append(peer)
         if peers:
             response["live_sessions"] = peers
-        return response
+        return attach_lead_session(response)
 
     except MissionCacheError as e:
         return e.to_dict()

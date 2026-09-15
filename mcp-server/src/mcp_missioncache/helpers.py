@@ -201,6 +201,25 @@ def live_peer_sessions_for_project(project_name: str) -> list[dict]:
         return []
 
 
+def attach_lead_session(response: dict) -> dict:
+    """Add ``lead_session`` to a write response when a live lead exists.
+
+    The project-manager half of the notification contract. A session
+    designated with /missioncache:lead wants to hear about EVERY project's
+    writes, not only those of a project it is bound to, so this rides beside
+    ``live_sessions`` on every mutating tool and is project-independent. The
+    caller is excluded for the same reason peers are: a lead saving its own
+    notes has nobody to tell. Best-effort, never fails a successful write.
+    """
+    try:
+        lead = missioncache_db.live_lead_session()
+        if lead and lead["session_id"] != _resolve_session_id(None):
+            response["lead_session"] = {"title": lead["title"], "since": lead["since"]}
+    except Exception:
+        logger.exception("Error resolving lead session")
+    return response
+
+
 def live_peer_sessions_for_context_file(context_file: str | Path) -> list[dict]:
     """``live_peer_sessions_for_project`` with the project taken from the filename.
 

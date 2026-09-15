@@ -326,3 +326,106 @@ class TestPmWritersNotifyPeers:
         )
         assert result["success"] is True
         assert "live_sessions" not in result
+
+
+class TestGetPortfolio:
+    """Spec: the cross-project brief's data source. Same ranking and counts as
+    the dashboard's /api/today (both come from missioncache_db.portfolio),
+    clipped to a chat-sized payload, scoped to what is live or recent, and
+    never binding the calling session to a project."""
+
+    def _two_projects(self, isolated_orbit):
+        import missioncache_db
+        from missioncache_db import pm_items
+
+        _, root_dir, _ = isolated_orbit
+        db = db_module.get_db()
+        made = {}
+        for name, worked in (("fresh-proj", "2099-01-01 10:00:00"), ("stale-proj", "2020-01-01 10:00:00")):
+            task = db.create_task(name, task_type="coding", repo_id=None)
+            d = root_dir / "active" / name
+            d.mkdir(parents=True)
+            (d / f"{name}-context.md").write_text(CONTEXT.replace("Pm Proj", name))
+            pm_items.add_action_item(db, task.id, f"late thing in {name}",
+                                     due_date="2000-01-01")
+            with db.connection() as conn:
+                conn.execute("UPDATE tasks SET last_worked_on = ? WHERE id = ?", (worked, task.id))
+                conn.commit()
+            made[name] = task
+        return made
+
+    def test_focus_scope_keeps_recent_and_drops_stale(self, isolated_orbit):
+        self._two_projects(isolated_orbit)
+        result = asyncio.run(tools_pm.get_portfolio(scope="focus", recent_days=7))
+        assert result["success"] is True
+        assert [p["name"] for p in result["projects"]] == ["fresh-proj"]
+        # counts re-derive from what survived, so the dropped project's overdue
+        # item must not leak into the header numbers.
+        assert result["counts"]["overdue"] == 1
+
+    def test_all_scope_keeps_everything(self, isolated_orbit):
+        self._two_projects(isolated_orbit)
+        result = asyncio.run(tools_pm.get_portfolio(scope="all"))
+        assert sorted(p["name"] for p in result["projects"]) == ["fresh-proj", "stale-proj"]
+        assert result["counts"]["overdue"] == 2
+
+    def test_bad_scope_is_a_structured_error(self, isolated_orbit):
+        result = asyncio.run(tools_pm.get_portfolio(scope="everything"))
+        assert result["error"] is True
+
+    def test_payload_is_clipped_and_counts_are_not(self, isolated_orbit):
+        from missioncache_db import pm_items
+
+        made = self._two_projects(isolated_orbit)
+        db = db_module.get_db()
+        long_text = "x" * 500
+        for _ in range(8):
+            pm_items.add_action_item(db, made["fresh-proj"].id, long_text, due_date="2000-01-01")
+        result = asyncio.run(tools_pm.get_portfolio(scope="all"))
+        overdue_rows = result["on_me"]["overdue"]
+        assert len(overdue_rows) == 5, "on_me buckets are capped per bucket"
+        assert all(len(r["what"]) <= 120 for r in overdue_rows)
+        # 9 overdue on fresh + 1 on stale: the cap trims the LIST, never the count.
+        assert result["counts"]["overdue"] == 10
+
+    def test_never_binds_the_calling_session(self, isolated_orbit, monkeypatch):
+        """A project-manager session is not a project. get_task binds as a side
+        effect; this tool must not, or the lead would take a project_state row
+        and a live badge on whichever project it read last."""
+        import missioncache_db
+        import sqlite3
+
+        self._two_projects(isolated_orbit)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "lead-sid")
+        asyncio.run(tools_pm.get_portfolio())
+        state_db = missioncache_db.HOOKS_STATE_DB_PATH
+        if not state_db.exists():
+            return  # nothing was written at all, which is the point
+        conn = sqlite3.connect(state_db)
+        try:
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM project_state WHERE session_id = ?", ("lead-sid",)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert rows == 0
+
+    def test_reports_the_live_lead_session(self, isolated_orbit, monkeypatch):
+        import os
+        import missioncache_db
+
+        self._two_projects(isolated_orbit)
+        # A lead whose pid is this test process: proven alive.
+        pid_path = missioncache_db.session_pid_path("lead-sid")
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(
+            '{"sessionId": "lead-sid", "pid": %d, "startTime": null}' % os.getpid()
+        )
+        missioncache_db.set_lead_session("lead-sid")
+        result = asyncio.run(tools_pm.get_portfolio())
+        assert result["lead_session"]["title"] == missioncache_db.LEAD_SESSION_TITLE
+
+    def test_no_lead_is_none_not_missing(self, isolated_orbit):
+        self._two_projects(isolated_orbit)
+        result = asyncio.run(tools_pm.get_portfolio())
+        assert "lead_session" in result and result["lead_session"] is None
