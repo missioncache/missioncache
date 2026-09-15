@@ -64,17 +64,46 @@ def resolve_title(session_id: str) -> tuple[str, str] | None:
     while a clobbered rename costs one repeated ``/rename``.
     """
     from missioncache_db import (  # type: ignore[import-not-found]
+        LEAD_SESSION_TITLE,
         bound_project_for_session,
         choose_session_title,
+        lead_session_id,
         read_session_title,
     )
 
+    # The lead session (/missioncache:lead) outranks any project binding: its
+    # fixed title is the address every working session sends change notices
+    # to, so it must never be replaced by a project name. The recorded
+    # "project" is the title itself, which keeps the steady-state comparison
+    # below meaningful for the lead too.
+    applied = read_session_title(session_id) or {}
+    if lead_session_id() == session_id:
+        if applied.get("title") == LEAD_SESSION_TITLE:
+            return None
+        return LEAD_SESSION_TITLE, LEAD_SESSION_TITLE
+
     project_name = bound_project_for_session(session_id)
+
+    # Demotion. `missioncache-lead` is a reserved address, not a name this
+    # session gets to keep: every working session sends its change notices
+    # there, and `attach_lead_session` hands out the bare constant. A session
+    # that still displays it after `lead stop` or after another session took
+    # the role would keep receiving those notices while the real lead, whose
+    # emitted title now collides, is renamed by the harness and cannot be
+    # reached at all. So the title has to be surrendered here. An unbound
+    # former lead has no project name to fall back on, hence the session-id
+    # form: unique, obviously not a project, and never the reserved constant.
+    if applied.get("title") == LEAD_SESSION_TITLE:
+        released = project_name or f"session-{session_id[:6]}"
+        return (
+            choose_session_title(project_name, session_id) if project_name else released,
+            project_name or released,
+        )
+
     if not project_name:
         return None
 
     computed = choose_session_title(project_name, session_id)
-    applied = read_session_title(session_id) or {}
     if (
         applied.get("projectName") == project_name
         and applied.get("title") == computed

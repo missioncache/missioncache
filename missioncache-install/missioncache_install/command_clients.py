@@ -66,8 +66,18 @@ if TYPE_CHECKING:
 
 
 # Canonical MissionCache commands. Order matches the existing Claude plugin layout.
+#
+# `lead` is deliberately ABSENT, and it is the only command that is. The role
+# is built out of four Claude-Code-only mechanisms: the session-title hook that
+# gives it its address, SendMessage for the notices, the loop machinery for its
+# tick, and the pid record its own liveness check reads. Outside Claude Code a
+# designated lead has no address, no loop and no pid row, so `lead show` cannot
+# even see it. Rendering it for the other clients also produced a document that
+# contradicted itself, because the region resolving the session id is stripped
+# and the step below it still referred to the value that region computed.
+# `brief` ships: every one of its steps carries a stated fallback.
 CANONICAL_COMMANDS: tuple[str, ...] = (
-    "load", "save", "new", "done", "prompts", "mode", "fork", "rename",
+    "load", "save", "new", "done", "prompts", "mode", "fork", "rename", "brief",
 )
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
@@ -84,7 +94,7 @@ CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 # installer-tooling changes. Codex caches the plugin by this version, so any
 # change to the rendered command content MUST bump it or updated installs
 # keep serving the old cached copy.
-CODEX_PLUGIN_VERSION = "1.3.0"
+CODEX_PLUGIN_VERSION = "1.4.0"
 
 # Substitution regex for the MCP tool prefix. Anchored at a word boundary so
 # the rewrite only matches the full `mcp__plugin_missioncache_pm__` literal and not
