@@ -68,12 +68,12 @@ missioncache-db cleanup [--dry-run]
 
 `prune` archives completed projects older than the retention period (default 30 days, or pass a number explicitly). Archived projects drop out of the completed lists but stay in the database.
 
-`prune-sessions` deletes the per-session state left behind by sessions that are gone: the pid record (`~/.claude/hooks/state/session-pids/<id>.json`), the project pointer (`projects/<id>.json`), and the `project_state` binding row. Nothing removes these on session exit, so they accumulate one set per session for the life of the install - an install a few months old can hold a couple of thousand pid records. Run `--dry-run` first; it prints the same counts without deleting.
+`prune-sessions` deletes the per-session state left behind by sessions that are gone: the pid record (`~/.claude/hooks/state/session-pids/<id>.json`), the project pointer (`projects/<id>.json`), the `project_state` binding row, and the `lead_session` row when the designated lead is gone. Nothing removes these on session exit, so they accumulate one set per session for the life of the install - an install a few months old can hold a couple of thousand pid records. Run `--dry-run` first; it prints the same counts without deleting.
 
 Three things have to line up before a record goes:
 
 - **Its session is not proven alive.** A session whose pid still resolves is never touched, however long ago it started.
-- **The record is older than `--days`** (default 7, minimum 1).
+- **The record is older than `--days`** (default 7, minimum 1). The `lead_session` row is the exception: it is meaningful only while its session runs, so it takes no age cutoff and the pid verdict alone decides.
 - **For pid records only, the session's transcript is also idle.** Parallel-session detection reads a dead session's pid record to tell "closed a moment ago" from "still running", and it decides on transcript mtime. Deleting the record turns "proven dead" into "unknown", and unknown is kept, so the session would come back as a phantom parallel session in the next session's startup banner. Record age cannot prevent that on its own, because the pid record is only rewritten on a session start, resume or compact: a session that runs for two days and then exits leaves a two-day-old record the moment it dies. So the pid sweep skips any session whose transcript was touched in the last 30 minutes. Pointers and binding rows have no such reader and are not gated.
 
 One case to know about, because it is the only way a running session can lose state here: liveness is a three-way answer, and "unknown" is swept the same as "dead". Unknown is not only ancient records - it also covers live sessions whose pid never resolved, which today means Claude Desktop and any startup where the hook could not import `missioncache_db`. If one of those gets swept it loses its statusline binding, and a `/missioncache:load` puts it back.
@@ -99,6 +99,34 @@ missioncache-db due-date <task> <YYYY-MM-DD|none>
 ```
 
 SQLite is the source of truth; every mutation also re-renders the read-only `## Action Items` / `## Stakeholders` / `## Tickets` sections (and the `**Due:**` header line) in the project's context file, plus a Recent Changes line. The same write path serves the MCP tools and the dashboard, so all three surfaces stay consistent. `action-item list` without a task spans every active/paused project (each item carries its project name). Ticket references are system-agnostic: `label` + `--url` is the whole contract; when `--url` is omitted a JIRA-style label gets its URL from the dashboard's prefix map if one matches. An `owner` of `me` means your own commitment; any other name is a follow-up you are tracking on someone else.
+
+## Lead session (the project-manager role)
+
+```bash
+missioncache-db lead set "$CLAUDE_CODE_SESSION_ID"   # designate this session
+missioncache-db lead show [--json]                   # who the lead is, and whether it still runs
+missioncache-db lead stop                            # end the role
+```
+
+One session at a time can be the lead: the project manager that `/missioncache:lead` turns a session into. `set` replaces any previous lead, and the replaced session finds out on its next brief tick. The lead carries the fixed session title `missioncache-lead`, applied by the title hook, so every working session that saves context or a PM item can address it without a lookup (the write tools return a `lead_session` field saying whom to notify). `show` distinguishes a running lead from a designated row whose process is gone; the latter is dropped by `prune-sessions`. The role lives in `~/.claude/hooks-state.db`, so it survives compaction.
+
+## Calendar agenda
+
+```bash
+missioncache-db agenda                          # today, human-readable
+missioncache-db agenda --date tomorrow --json   # machine-readable
+missioncache-db agenda --source Work --no-cache # one source, skip the cache
+```
+
+Reads the `calendar` key of `~/.claude/missioncache-dashboard-config.json` and prints the events for one day. Two source kinds: `ics` (a URL, a file path, or a glob) and `command` (an argv list that prints JSON events on stdout, which is how you wire a tool MissionCache must not depend on). A `{date}` placeholder in any command argument is replaced with the ISO date being asked for. The command runs without a shell and its first element must be an absolute path that exists, the same rule the statusline addons follow.
+
+With nothing configured it says so and exits 0. That is deliberately different from an error: callers render no calendar block at all rather than an empty one.
+
+Nothing here raises. A dead URL, a timeout, unparseable ICS or a command that exits non-zero becomes that source's `status` and a short reason on the trailing `sources:` line, and every other source still renders. Check that line first when a calendar looks wrong, because a hand-typed ICS URL is the most likely thing to be broken.
+
+Recurring events are answered with a single-day hit test rather than a full expansion. `FREQ=DAILY|WEEKLY|MONTHLY` with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (weekly), `BYMONTHDAY` (monthly) and `EXDATE` are supported, and a `RECURRENCE-ID` override replaces its instance instead of duplicating it. Anything else, including `FREQ=YEARLY` and ordinal weekdays like `BYDAY=2TU`, is counted on the `sources:` line as rules not understood rather than dropped in silence.
+
+On Windows, stdlib `zoneinfo` has no system database to read, so each `TZID` falls back to the local zone and the source says which name it could not resolve. The dashboard package carries `tzdata` for its own process; if you drive this CLI directly there, `pip install tzdata` in that environment.
 
 ## Health / diagnostics
 

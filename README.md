@@ -406,6 +406,8 @@ The MCP server plus `missioncache-db` is the minimum viable install (and the onl
 | `/missioncache:rename` | Rename the current project |
 | `/missioncache:prompts` | Regenerate optimized prompts for subtasks |
 | `/missioncache:mode` | Assign workflow mode (interactive or autonomous) to tasks |
+| `/missioncache:brief` | Cross-project brief: what is urgent, what is waiting, which sessions are live, and a schedule for today |
+| `/missioncache:lead` | Designate this session as the project-manager lead that keeps the brief live, or `stop` the role |
 
 ## Documentation
 
