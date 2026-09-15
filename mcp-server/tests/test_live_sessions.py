@@ -252,3 +252,60 @@ def test_update_tasks_file_legacy_unprefixed_skips_lookup(tmp_path, monkeypatch)
     )
     assert result["success"] is True
     assert "live_sessions" not in result
+
+
+# ---------------------------------------------------------------------------
+# attach_lead_session: the project-manager half of the notification contract
+# ---------------------------------------------------------------------------
+
+
+def _lead(monkeypatch, session_id):
+    monkeypatch.setattr(
+        missioncache_db, "live_lead_session",
+        lambda: ({"session_id": session_id, "title": "missioncache-lead", "since": "t"}
+                 if session_id else None),
+    )
+
+
+def test_lead_is_attached_when_alive_and_not_the_caller(monkeypatch):
+    _resolve_to(monkeypatch, "sid-mine")
+    _lead(monkeypatch, "sid-lead")
+    out = helpers.attach_lead_session({"success": True})
+    assert out["lead_session"] == {"title": "missioncache-lead", "since": "t"}
+
+
+def test_lead_that_is_the_caller_is_not_attached(monkeypatch):
+    """A lead saving its own notes has nobody to tell."""
+    _resolve_to(monkeypatch, "sid-lead")
+    _lead(monkeypatch, "sid-lead")
+    assert "lead_session" not in helpers.attach_lead_session({"success": True})
+
+
+def test_no_lead_means_no_key(monkeypatch):
+    _resolve_to(monkeypatch, "sid-mine")
+    _lead(monkeypatch, None)
+    assert "lead_session" not in helpers.attach_lead_session({"success": True})
+
+
+def test_a_lookup_failure_never_fails_the_write(monkeypatch):
+    _resolve_to(monkeypatch, "sid-mine")
+    monkeypatch.setattr(missioncache_db, "live_lead_session",
+                        lambda: (_ for _ in ()).throw(RuntimeError("db gone")))
+    out = helpers.attach_lead_session({"success": True})
+    assert out == {"success": True}
+
+
+def test_update_context_file_carries_the_lead(monkeypatch, isolated_orbit, sample_context_md):
+    """End to end through a real write tool, not only the helper."""
+    _, root_dir, _ = isolated_orbit
+    project_dir = root_dir / "active" / "demo"
+    project_dir.mkdir(parents=True)
+    ctx = project_dir / "demo-context.md"
+    ctx.write_text(sample_context_md)
+    _resolve_to(monkeypatch, "sid-mine")
+    _lead(monkeypatch, "sid-lead")
+    monkeypatch.setattr(missioncache_db, "live_sessions_for_project", lambda *a, **k: [])
+    result = asyncio.run(tools_docs.update_context_file(
+        context_file=str(ctx), next_steps=["1. keep going"],
+    ))
+    assert result.get("lead_session", {}).get("title") == "missioncache-lead"
