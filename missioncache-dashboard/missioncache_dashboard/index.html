@@ -2315,6 +2315,9 @@
 
         /* Must out-specify the .settings-row input[type="text"] flex:1 rule,
            which appears later in the sheet. */
+        .settings-row input[type="number"] { flex: 0 0 120px; }
+        .settings-row select.cal-kind { flex: 0 0 150px; }
+        .settings-row input.cal-name { flex: 0 0 180px; }
         .settings-row input[type="text"].settings-emoji-input {
             flex: 0 0 70px;
             text-align: center;
@@ -4384,7 +4387,9 @@
 
         .settings-row input[type="text"],
         .settings-row input[type="email"],
-        .settings-row input[type="url"] {
+        .settings-row input[type="url"],
+        .settings-row input[type="number"],
+        .settings-row select {
             flex: 1;
             background: var(--bg-secondary);
             border: 1px solid var(--border);
@@ -4397,7 +4402,9 @@
 
         .settings-row input[type="text"]:focus,
         .settings-row input[type="email"]:focus,
-        .settings-row input[type="url"]:focus {
+        .settings-row input[type="url"]:focus,
+        .settings-row input[type="number"]:focus,
+        .settings-row select:focus {
             outline: none;
             border-color: var(--accent-purple);
         }
@@ -6078,6 +6085,20 @@
 }
 .bd-hello .when { font-size: 12px; color: var(--ink-3); margin-left: auto; }
 .bd-hello em { font-style: normal; color: var(--accent); }
+/* The agenda line under the greeting. Absent entirely when no calendar is
+   configured - 'no calendar' and 'no meetings' are different statements. */
+.bd-hello .bd-agenda { flex-basis: 100%; font-size: 12px; color: var(--ink-3); display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+/* [hidden] restated: the `display: flex` above outranks the UA rule, and the
+   hidden line would still take a wrap row plus the parent's 10px gap. Same
+   trap the update banner documents. */
+.bd-hello .bd-agenda[hidden] { display: none; }
+.bd-hello .bd-agenda b { color: var(--ink); font-weight: 500; }
+.bd-agenda-warn { color: var(--amber, #d9a400); cursor: help; }
+/* A session process is alive for this project. Dimmed past two hours idle:
+   the pid filter over-reports (one claude process hosts many sessions), and
+   an old badge must not look like one active twelve minutes ago. */
+.bd-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.bd-live.is-cold { opacity: .35; box-shadow: none; }
 /* sits on the text baseline rather than the cap line, and never scales with the
    heading weight, so it reads as punctuation rather than as an icon */
 .bd-emoji { font-size: 16px; margin-left: 2px; vertical-align: -1px; }
@@ -6085,7 +6106,7 @@
 /* ---------- stat strip ---------- */
 .bd-strip {
   flex: 0 0 auto;
-  display: grid; grid-template-columns: repeat(7, minmax(0,1fr)) 1.5fr; gap: 10px;
+  display: grid; grid-template-columns: repeat(8, minmax(0,1fr)) 1.5fr; gap: 10px;
 }
 .bd-stat {
   background: var(--tile);
@@ -6868,6 +6889,9 @@
                             <button class="tab-btn" role="tab" id="settingsTabBtn-projects"
                                     aria-controls="settingsPanel-projects" aria-selected="false"
                                     data-tab="projects" onclick="switchSettingsTab('projects')">Projects</button>
+                            <button class="tab-btn" role="tab" id="settingsTabBtn-calendar"
+                                    aria-controls="settingsPanel-calendar" aria-selected="false"
+                                    data-tab="calendar" onclick="switchSettingsTab('calendar')">Calendar</button>
                         </div>
 
                         <!-- Statusline tab -->
@@ -6945,6 +6969,33 @@
                                     <button class="settings-btn-secondary" onclick="addJiraRow()">+ Add mapping</button>
                                     <button class="settings-btn-primary" onclick="saveJiraSettings()">Save JIRA mappings</button>
                                     <span id="jiraSaveStatus" class="settings-save-status"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Calendar tab -->
+                        <div class="settings-tab-panel" id="settingsPanel-calendar" hidden
+                             role="tabpanel" aria-labelledby="settingsTabBtn-calendar">
+
+                            <div class="settings-section">
+                                <h3>Calendar sources</h3>
+                                <p class="settings-hint">Feeds the Attention view's calendar line and <code>/missioncache:brief</code>. An <b>ICS</b> source is a URL, a file path, or a glob (Google, Outlook and iCloud all export ICS). A <b>command</b> is any program that prints JSON events on stdout - the way to wire a tool MissionCache must not depend on. The command runs without a shell, its first word must be an absolute path that exists, and <code>{date}</code> in any argument becomes the day being asked for. Separate arguments with spaces.</p>
+                                <div id="calendarRowsContainer" class="settings-rows"></div>
+                                <div class="settings-row-actions">
+                                    <button class="settings-btn-secondary" onclick="addCalendarRow()">+ Add source</button>
+                                    <button class="settings-btn-primary" onclick="saveCalendarSettings()">Save calendar</button>
+                                    <button class="settings-btn-secondary" onclick="testCalendar()">Test</button>
+                                    <span id="calendarSaveStatus" class="settings-save-status"></span>
+                                </div>
+                                <pre id="calendarTestReport" class="mono settings-hint" hidden></pre>
+                            </div>
+
+                            <div class="settings-section">
+                                <h3>Calendar options</h3>
+                                <p class="settings-hint">Fetched ICS bodies and command output are cached for the TTL, so the dashboard's refresh never hammers a calendar host. Time zone is an IANA name such as <code>Asia/Jerusalem</code>; blank means this machine's local zone.</p>
+                                <div class="settings-rows">
+                                    <div class="settings-row"><label>Cache TTL (seconds) <input type="number" id="calendarTtl" min="0" value="900"></label></div>
+                                    <div class="settings-row"><label>Time zone <input type="text" id="calendarTz" placeholder="local"></label></div>
                                 </div>
                             </div>
                         </div>
@@ -7679,6 +7730,10 @@
                     // Only after the view has painted: this request blocks the
                     // server for ~2s (see loadAttnStrip).
                     loadAttnStrip();
+                    // Same reason, smaller cost: the pid scan and an ICS fetch.
+                    loadAttnLive();
+                    loadAttnAgenda();
+                    bdOpenStream();
                 });
             }
             if (viewId === 'projects' && !dataLoaded.projects) {
@@ -7752,6 +7807,99 @@
             }
         }
 
+        // Which projects have a session process alive, and the designated lead.
+        // Pid-based; the strip labels it "live (process)" and the tooltip says
+        // why. Redraws the strip and the project rows, where the badges live.
+        async function loadAttnLive() {
+            try {
+                const res = await fetch(API_BASE + '/api/sessions/live');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                bdLive = await res.json();
+                bdLiveState = 'ok';
+            } catch (e) {
+                console.warn('Live sessions unavailable:', e);
+                bdLive = null;
+                bdLiveState = 'failed';
+            }
+            const el = document.getElementById('bdStripEl');
+            if (el) el.innerHTML = bdStrip();
+            bdRefreshProjects();
+        }
+
+        function bdLiveBadge(name) {
+            if (bdLiveState !== 'ok' || !bdLive) return '';
+            const s = (bdLive.sessions || []).find(x => x.project_name === name);
+            if (!s) return '';
+            const age = s.age_seconds;
+            const cold = age != null && age > 7200;
+            const ago = age == null ? 'unknown'
+                : age < 3600 ? Math.max(1, Math.round(age / 60)) + 'm ago'
+                : Math.round(age / 3600) + 'h ago';
+            return `<span class="bd-live${cold ? ' is-cold' : ''}" title="Session process alive, last active ${ago}"></span>`;
+        }
+
+        // Today's calendar. Hidden outright when nothing is configured, which is
+        // a different statement from "no meetings today" and must not look
+        // like an error.
+        async function loadAttnAgenda() {
+            try {
+                const res = await fetch(API_BASE + '/api/agenda');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                bdAgenda = await res.json();
+            } catch (e) {
+                console.warn('Agenda unavailable:', e);
+                bdAgenda = null;
+            }
+            bdRenderAgenda();
+        }
+
+        function bdRenderAgenda() {
+            const el = document.getElementById('bdAgendaLine');
+            if (!el) return;
+            if (!bdAgenda || !bdAgenda.configured) { el.hidden = true; el.innerHTML = ''; return; }
+            const ev = bdAgenda.events || [];
+            const when = e => e.all_day ? 'all day' : String(e.start).slice(11, 16);
+            const parts = ev.slice(0, 3).map(e =>
+                `<span><span class="mono">${escapeHtml(when(e))}</span> ${escapeHtml(e.title || '')}</span>`);
+            if (ev.length > 3) parts.push(`<span>+${ev.length - 3} more</span>`);
+            if (!ev.length) parts.push('<span>no meetings today</span>');
+            // `error` as well as `status`: a source can be 'stale' or carry a
+            // time-zone warning while still returning events, and a reader
+            // whose meetings are an hour off needs to be told.
+            const bad = (bdAgenda.sources || []).filter(x => x.status !== 'ok' || x.error);
+            const warn = bad.length
+                ? `<span class="bd-agenda-warn" title="${escapeHtml(bad.map(x => x.name + ': ' + (x.error || x.status)).join('; '))}">&#9888; ${bad.length} source${bad.length > 1 ? 's' : ''} unavailable</span>`
+                : '';
+            el.innerHTML = `<b>Calendar</b> ${parts.join(' &middot; ')} ${warn}`;
+            el.hidden = false;
+        }
+
+        // The push channel. /api/stream emits a named `portfolio` event only
+        // when the server-side watermark moved, so an idle hour costs nothing
+        // and a change in another session reaches this screen within a tick.
+        // The 15-minute interval above stays as the fallback: push makes it
+        // fast, polling makes it correct.
+        function bdOpenStream() {
+            if (bdStream || !window.EventSource) return;
+            try {
+                bdStream = new EventSource(API_BASE + '/api/stream');
+                bdStream.addEventListener('portfolio', () => {
+                    const view = getCurrentView();
+                    if (view !== 'attention' && view !== '') return;
+                    loadTodayData().then(ok => ok ? updateLastRefresh() : markRefreshStale());
+                    loadAttnLive();
+                    loadAttnAgenda();
+                });
+                bdStream.onerror = () => {
+                    try { bdStream.close(); } catch (_) { /* already closed */ }
+                    bdStream = null;
+                    setTimeout(bdOpenStream, 30000);
+                };
+            } catch (_) {
+                bdStream = null;
+            }
+        }
+
         async function loadTodayData() {
             let pmData;
             try {
@@ -7812,6 +7960,7 @@
             todayProjectsById = {};
             (data.projects || []).forEach(p => { todayProjectsById[p.task_id] = p; });
             renderAttention(data);
+            bdRenderAgenda();   // the rebuild wiped #bdAgendaLine; repaint from cache
         }
 
 
@@ -7983,6 +8132,12 @@ let bdState = {
 // coming. Vocabulary: · means still loading, ? means we asked and do not know.
 let bdTodayStats = null;
 let bdStatsState = 'pending';   // 'pending' | 'failed' | 'ok'
+// Live sessions and the agenda arrive after paint too, each with its own
+// unknown-vs-failed state for the same reason as the stats above.
+let bdLive = null;
+let bdLiveState = 'pending';
+let bdAgenda = null;
+let bdStream = null;
 
 // Which person rows are open, keyed by the stable uid rather than by array
 // position. Held across renders: a mutation refetches and rebuilds the whole
@@ -8077,7 +8232,7 @@ function bdProjRowHtml(p) {
     <div class="bd-what bd-pcell">
       ${bdCatIcon(p.category)}
       <span class="copyable-name"><a class="bd-pname" href="${projectHref(p.name, p.task_id)}">${escapeHtml(p.name)}</a><span class="copy-icon" data-copy-name="${escapeHtml(p.name)}" title="Copy project name">${COPY_ICON_SVG}</span><span class="copy-tooltip">Copied!</span></span>
-      ${p.overdue_count ? '<span class="bd-dot" title="You are late on this project"></span>' : ''}
+      ${p.overdue_count ? '<span class="bd-dot" title="You are late on this project"></span>' : ''}${bdLiveBadge(p.name)}
     </div>
     <div class="bd-next" title="${escapeHtml(next)}">
       <span class="bd-next-l">${next ? (p.next_up ? 'next' : 'last did') : ''}</span>${escapeHtml(bdCut(next, 150))}</div>
@@ -8212,6 +8367,12 @@ function bdStrip() {
     stat(counts.overdue ?? 0, 'late', 'Of the "on you" items: an action item past its due date, or an ask of yours with no movement for more than 7 days.', counts.overdue ? 'is-late' : ''),
     stat(counts.on_others ?? 0, 'out', `Asks sitting with other people - ${people.length} of them. Their latency, not yours.`),
     stat(counts.stale ?? 0, 'no reply over 7d', 'Asks out with someone that have had no reply for more than 7 days. These are the ones worth chasing.', counts.stale ? 'is-warn' : ''),
+    // pid-based, and labelled so: the dashboard cannot check reachability the
+    // way Claude Code's ListAgents can, and must not claim a session is open.
+    stat(bdLiveState === 'ok' ? (bdLive.bound_count ?? 0) : (bdLiveState === 'failed' ? '?' : '·'), 'live (process)',
+         'Projects with a Claude Code session whose process is still running. One claude process hosts many sessions, so a session closed while its process kept running still counts here until it is pruned. Run /missioncache:brief for the verified list.'
+         + (bdLive && bdLive.lead_session ? ' A lead session is open.' : ''),
+         bdLive && bdLive.lead_session ? 'is-warn' : ''),
     // The floor applies to real activity only, so a small hour stays visible
     // while an empty one stays empty. Flooring every bar drew a solid row of
     // stubs across a day that was mostly idle.
@@ -8471,6 +8632,7 @@ function renderAttention(data) {
     <h1>${greeting}</h1>
     <span class="when mono">${escapeHtml(new Date(data.generated_at || Date.now())
       .toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
+    <span class="bd-agenda" id="bdAgendaLine" hidden></span>
   </div>
   <div class="bd-strip" id="bdStripEl">${bdStrip()}</div>
   <div class="bd-grid">
@@ -9178,6 +9340,7 @@ function renderAttention(data) {
                     ADDON_COLORS = settings.statusline_addon_colors;
                 }
                 renderAddonList(settings.statusline_addons || []);
+                renderCalendarRows(settings.calendar || {});
                 await fetchCustomCategories();
                 renderCustomCategorySettings();
             } catch (err) {
@@ -9895,6 +10058,84 @@ function renderAttention(data) {
                 }
             }
             await saveSettingsSection('/api/settings/repos', { repos: overrides }, 'repoSaveStatus');
+        }
+
+        // ---- Calendar settings ----
+        function calendarRowHtml(src) {
+            const kind = src.kind === 'command' ? 'command' : 'ics';
+            const value = kind === 'command' ? (src.command || []).join(' ') : (src.location || '');
+            return `<div class="settings-row calendar-row">
+                <input type="text" class="cal-name" placeholder="Name" value="${escapeHtml(src.name || '')}">
+                <select class="cal-kind" onchange="this.nextElementSibling.placeholder = this.value === 'command' ? '/abs/path/to/tool --json {date}' : 'https://.../calendar.ics or ~/cal.ics'">
+                    <option value="ics"${kind === 'ics' ? ' selected' : ''}>ICS URL or file</option>
+                    <option value="command"${kind === 'command' ? ' selected' : ''}>Command</option>
+                </select>
+                <input type="text" class="cal-value" placeholder="${kind === 'command' ? '/abs/path/to/tool --json {date}' : 'https://.../calendar.ics or ~/cal.ics'}" value="${escapeHtml(value)}">
+                <label><input type="checkbox" class="cal-enabled"${src.enabled === false ? '' : ' checked'}> on</label>
+                <button class="settings-btn-secondary" type="button" onclick="this.closest('.calendar-row').remove()">Remove</button>
+            </div>`;
+        }
+
+        function renderCalendarRows(cal) {
+            const box = document.getElementById('calendarRowsContainer');
+            if (!box) return;
+            box.innerHTML = (cal.sources || []).map(calendarRowHtml).join('');
+            const ttl = document.getElementById('calendarTtl');
+            const tz = document.getElementById('calendarTz');
+            if (ttl) ttl.value = cal.cache_ttl_seconds ?? 900;
+            if (tz) tz.value = cal.timezone || '';
+        }
+
+        function addCalendarRow() {
+            const box = document.getElementById('calendarRowsContainer');
+            if (box) box.insertAdjacentHTML('beforeend', calendarRowHtml({ name: '', kind: 'ics', location: '' }));
+        }
+
+        function collectCalendarPayload() {
+            const sources = [];
+            document.querySelectorAll('#calendarRowsContainer .calendar-row').forEach(row => {
+                const kind = row.querySelector('.cal-kind').value;
+                const value = row.querySelector('.cal-value').value.trim();
+                const src = {
+                    name: row.querySelector('.cal-name').value.trim() || 'calendar',
+                    kind,
+                    enabled: row.querySelector('.cal-enabled').checked,
+                };
+                if (kind === 'command') src.command = value.split(/\s+/).filter(Boolean);
+                else src.location = value;
+                sources.push(src);
+            });
+            const ttl = parseInt(document.getElementById('calendarTtl').value, 10);
+            const tz = document.getElementById('calendarTz').value.trim();
+            return { sources, cache_ttl_seconds: Number.isFinite(ttl) ? ttl : 900, timezone: tz || null };
+        }
+
+        async function saveCalendarSettings() {
+            await saveSettingsSection('/api/settings/calendar', collectCalendarPayload(), 'calendarSaveStatus', 'Saved');
+            loadAttnAgenda();
+        }
+
+        // A hand-typed ICS URL is the most likely thing here to be wrong, and
+        // without this the failure shows up as a calendar line that is just
+        // missing. Prints each source's status from a live fetch.
+        async function testCalendar() {
+            const report = document.getElementById('calendarTestReport');
+            const status = document.getElementById('calendarSaveStatus');
+            status.textContent = 'Testing saved sources...';
+            status.className = 'settings-save-status';
+            try {
+                const res = await fetch(`${API_BASE}/api/agenda`);
+                const data = await res.json();
+                const lines = data.configured
+                    ? (data.sources || []).map(x => `${x.name}: ${x.status} (${x.count} today${x.cached ? ', cached' : ''}${x.skipped_rules ? ', ' + x.skipped_rules + ' rules not understood' : ''})${x.error ? ' - ' + x.error : ''}`)
+                    : ['No sources saved yet. Save first, then test.'];
+                report.textContent = lines.join('\n');
+                report.hidden = false;
+                status.textContent = '';
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                status.className = 'settings-save-status error';
+            }
         }
 
         async function saveSettingsSection(endpoint, body, statusElId,
@@ -12789,6 +13030,8 @@ function renderAttention(data) {
                         // current, which is the stale-not-unknown case the
                         // pending/failed vocabulary was added to prevent.
                         loadAttnStrip();
+                        loadAttnLive();
+                        loadAttnAgenda();
                     } else if (view === 'projects') {
                         // Categories too: another tab/machine/CLI may have
                         // added one since load - without this, its tasks

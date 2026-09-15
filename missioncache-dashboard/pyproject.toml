@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-dashboard"
-version = "1.0.21"
+version = "1.0.22"
 description = "MissionCache Dashboard - Task analytics and autonomous execution monitoring for Claude Code MissionCache projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,7 +28,7 @@ dependencies = [
     # with no release on our side (how mcp 2.0.0 broke the MCP server in
     # every fresh env on 2026-07-28). Raise a cap only after testing on the
     # new major.
-    "missioncache-db>=1.0.22",
+    "missioncache-db>=1.0.27",
     "fastapi>=0.115.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "duckdb>=1.1.0,<2",
@@ -38,6 +38,13 @@ dependencies = [
     # in transitively, and without it the server cannot even import on a clean
     # install (caught by the CI installer smoke test).
     "python-multipart>=0.0.9,<1",
+    # Windows ships no IANA time zone database, so stdlib zoneinfo raises for
+    # every TZID there and the agenda would silently collapse every calendar
+    # event to a fixed local offset. missioncache-db cannot carry this itself:
+    # its pyproject holds a no-runtime-dependencies INVARIANT because the
+    # plugin hooks import it under `uv run --no-project`, which installs
+    # nothing. So the dependency lives with the process that renders calendars.
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.scripts]
