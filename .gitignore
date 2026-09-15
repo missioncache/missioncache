@@ -18,3 +18,5 @@ CLAUDE.local.md
 .playwright-mcp/
 missioncache-install/missioncache_install/bundled/
 uv.lock
+.coverage
+.coverage.*

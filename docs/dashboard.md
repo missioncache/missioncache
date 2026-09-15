@@ -185,7 +185,10 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/tasks/active` | Active tasks with task progress, effective time, and subtasks. Filters out orphans. |
 | GET | `/api/tasks/completed` | Completed tasks plus orphans. Accepts `days` query param (default 30). |
 | GET | `/api/task/{id}/files` | Parsed markdown content of `-plan.md`, `-context.md`, `-tasks.md`. |
-| GET | `/api/today` | Cross-project attention, split by who owes the work: `on_me` (bucketed overdue / due-soon / other), `on_others` (commitments + Waiting-on rows, grouped by project, each row carrying `mine` and a normalized `who_primary`), counts, and per-project blocks with a derived at-risk flag, `last_worked_on` / `days_since_worked`, checklist progress (`completed_count` / `total_count` / `completion_pct` / `next_up`), `left_off` (the newest Recent Changes bullet, shown when a project has no next step), `category`, and a ticket reference. Also `user_name`, the first token of git's global `user.name`, for the greeting; `null` when git has no identity configured, which the view renders as its nameless wording. |
+| GET | `/api/today` | Cross-project attention, split by who owes the work: `on_me` (bucketed overdue / due-soon / other), `on_others` (commitments + Waiting-on rows, grouped by project, each row carrying `mine` and a normalized `who_primary`), counts, and per-project blocks with a derived at-risk flag, `last_worked_on` / `days_since_worked`, checklist progress (`completed_count` / `total_count` / `completion_pct` / `next_up`), `left_off` (the newest Recent Changes bullet, shown when a project has no next step), `category`, and a ticket reference. Also `user_name`, the first token of git's global `user.name`, for the greeting; `null` when git has no identity configured, which the view renders as its nameless wording. The rollup itself is `missioncache_db.portfolio.build_portfolio`, shared with the MCP server's `get_portfolio`, so the chat brief and this view cannot disagree. |
+| GET | `/api/sessions/live` | Projects with a Claude Code session whose process is still running, plus the designated lead session. Pid-based and labelled so (`method: "pid"`): one `claude` process hosts many sessions, so a closed session can stay listed until pruned. Fetched after the board paints, not folded into `/api/today` (measured 68-89ms against 26-44ms). |
+| GET | `/api/agenda?date=` | Today's calendar from the configured sources, `missioncache_db.agenda.agenda_for()`'s shape verbatim. `configured: false` means no source is set up and the view renders nothing, which is different from an error. Never 500s. |
+| PUT | `/api/settings/calendar` | Replace the calendar sources (`sources[]`, `cache_ttl_seconds`, `timezone`). A command source must start with an existing absolute path, the same rule as statusline addons, because the dashboard executes it. |
 | POST | `/api/tasks/{id}/waiting-on/resolve` | Resolve one Waiting-on row from the UI. Body `{row_index, what, outcome}`; 409 when the table shifted since the view loaded. |
 | GET | `/api/tasks/{id}/pm` | One-call PM bundle: due date, action items (with overdue flags), stakeholders, tickets. |
 | POST | `/api/tasks/{id}/action-items` | Create an action item (what, requested_by, assignee, due_date, source, notes). |
@@ -337,9 +340,9 @@ The fallback flow for writing project state is instructive: `/missioncache:load`
 |--------|------|---------|
 | GET | `/health` | Health check. Returns the running dashboard version, the DuckDB path, and whether it exists. |
 | POST | `/api/sync` | Trigger SQLite → DuckDB sync and return result counts. |
-| GET | `/api/stream` | SSE stream of today's stats, updated every 30 seconds. |
+| GET | `/api/stream` | SSE stream. The unnamed event is today's stats every 30 seconds. A named `portfolio` event carries the Attention counts, the at-risk set, the live sessions and an agenda summary, and is emitted only when `portfolio_watermark` moved since the last tick, so an idle hour produces none. The Attention view subscribes to it and keeps its 15-minute poll as the fallback. |
 
-The SSE stream is not heavily used by the frontend - the UI uses lazy per-view fetches and manual refresh buttons - but it is useful for third-party integrations that want a "what is happening now" feed without polling.
+The Attention view subscribes to the stream's `portfolio` event so a change made in another session reaches the screen within a tick, while the rest of the UI uses lazy per-view fetches and manual refresh buttons. The unnamed stats event is also useful for third-party integrations that want a "what is happening now" feed without polling.
 
 ## The dual-database sync
 

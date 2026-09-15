@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 43 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 44 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -60,9 +60,9 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 | `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 7 | Parallel agent execution plans |
 | `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
-| `tools_pm.py` | 6 | Project management: action items, stakeholders, tickets, project due date |
+| `tools_pm.py` | 7 | Project management: action items, stakeholders, tickets, project due date, cross-project portfolio |
 
-**Total: 43 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
+**Total: 44 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
@@ -280,6 +280,8 @@ Removals run **before** additions within the same call, so one call can replace 
 The underlying writer (`project_files.update_context_file`) updates the "Last Updated" timestamp atomically on every call, regardless of which sections you touched. Cap overflow and the context rewrite happen under one sidecar lock, journal written first (a crash duplicates entries into the journal rather than losing them). `imported_event` runs inside that same lock, which is the whole reason it exists as a parameter: the "Cross-project events" convention used to require a hand-written `##` section, and a direct Edit on a file another session may be writing is exactly what the parallel-session discipline forbids.
 
 **`live_sessions`** is the notification hook, and it is not unique to this tool: every MCP tool that rewrites or moves a project's files carries it - `update_context_file`, `update_tasks_file`, `move_to_project`, the five PM mutators, `rename_task`, and `complete_task` / `reopen_task` (see each tool's section). Here it lists other live Claude Code sessions bound to the project that owns `context_file` - derived from the filename, so it covers writes into *another* project's context as well as your own - each as `{session_id, title, last_active}`. The key is omitted when the list is empty, when the context filename carries no project name (the subtask layout writes a bare `context.md`), and when this session's own id cannot be resolved (without it the caller cannot exclude itself, and since `ListAgents` never lists the calling session, its own row would always fail to match). Dashboard and CLI writes do not notify: the notification is acted on by Claude reading the tool response, and those writers have no Claude on the response side.
+
+**`lead_session`** rides the same set of tools, alongside `live_sessions` and under the same conditions, whenever a session has been designated project manager with `/missioncache:lead` and it is not the caller. It is a single `{session_id, title, since}` object rather than a list, since there is one lead by construction, and its `title` is always the constant `missioncache-lead`. It is project-independent: the lead is bound to no project, so it appears on every write to every project, including ones with no live peers at all. The writing session tells it about the change the same way it tells project peers, per the "Telling the lead" procedure in `rules/missioncache.md`. The key is omitted when there is no lead, when the designated session is not running, and when the caller is the lead.
 
 The caller identifies itself through `CLAUDE_CODE_SESSION_ID` in the MCP subprocess's own environment. Do not try to derive this from the process tree: a single `claude` process hosts many sessions at once (measured: twelve sessions under one pid), so pid to session is one-to-many and cannot identify the caller. The env var is imperfect - during a resume a subprocess was once observed carrying an id the conversation did not use - but a wrong exclusion only costs one spurious ask-the-user, never a wrong write.
 
@@ -647,6 +649,16 @@ Because every mutation rewrites the context file, each mutating tool here return
 **When to use:** Committed work got a target date (never fabricate one onto uncommitted backlog - the estimation discipline applies). Renders a `**Due:**` header line; health flags it within 7 days of the date. Pass `"none"` (or omit) to clear.
 
 **Parameters:** `project_name: str`, `due_date: str | None = None` (YYYY-MM-DD).
+
+### `get_portfolio`
+
+The cross-project read: what is urgent, what is waiting on you, what is waiting on others, which projects have a live session, and which session is the designated lead. It is the data source for `/missioncache:brief` and for the lead session's delta loop, and it produces the SAME ranking and counts as the dashboard's Attention view because both call `missioncache_db.portfolio.build_portfolio`.
+
+Parameters: `scope` (`"focus"` default - projects with a live session or worked in the last `recent_days`; `"all"` - every project with something outstanding), `recent_days` (7), `max_projects` (12), `max_rows_per_project` (3).
+
+Returns `counts` (never clipped), `on_me` (three buckets, capped per bucket), `on_others` (grouped by project, rows capped), `projects` (sorted by urgency, display strings shortened), `live_sessions` (pid-alive sessions bound to a project, by `title`; the chat side cross-checks against `ListAgents`), `lead_session` (`{title, since}` or null), `scope`, and `watermark` (a change token; equal watermarks mean nothing worth recomputing changed).
+
+Read-only and session-neutral: unlike `get_task`, it never binds the calling session to a project. A project-manager session is not a project.
 
 ## Error handling
 
