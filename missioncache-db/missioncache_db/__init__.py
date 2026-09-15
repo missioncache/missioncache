@@ -62,6 +62,14 @@ Diagnostics:
     python missioncache_db.py repair [name...] [--all] [--apply]  # Fix context-file structure (dry-run by default)
     python missioncache_db.py encode-cwd [path]         # Claude Code's projects-dir key for a path (default: cwd)
 
+Lead session (the project-manager role):
+    python missioncache_db.py lead set [<session_id>]   # Designate a session as the lead (replaces any previous)
+    python missioncache_db.py lead stop [<session_id>]  # End the lead role
+    python missioncache_db.py lead show [--json]        # Who the lead is, and whether it is still running
+
+Calendar / agenda:
+    python missioncache_db.py agenda [--date today|tomorrow|YYYY-MM-DD] [--json] [--no-cache] [--source NAME]  # Today's calendar from the configured sources
+
 Cross-Machine Sharing:
     python missioncache_db.py export <name> [--out <path>] [--no-time] [--json]  # Build a portable bundle (markdown + missioncache.json manifest)
     python missioncache_db.py import <bundle> [--repo <path>] [--force] [--rewrite-paths] [--dry-run] [--json]  # Import a bundle, reconcile refs, print a 3-bucket alignment report
@@ -478,6 +486,49 @@ def read_session_title(session_id: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def _live_session_row(session_id: str, last_active: str) -> Optional[Dict[str, Any]]:
+    """The pid gate plus title merge for one ``project_state`` row.
+
+    Returns ``{session_id, title, last_active}`` for a session PROVEN alive,
+    else None. One place for the rule that both the per-project lookup and the
+    cross-project one apply, so they cannot drift on what "live" means.
+    """
+    if not _is_valid_session_id(session_id):
+        return None
+    if session_is_alive(session_id) is not True:
+        return None
+    record = read_session_title(session_id) or {}
+    return {
+        "session_id": session_id,
+        "title": record.get("title"),
+        "last_active": last_active,
+    }
+
+
+def _project_state_rows(where: str = "", params: tuple = ()) -> List[tuple]:
+    """``(session_id, project_name, updated_at)`` rows, newest activity first.
+
+    Best-effort: a missing DB or any sqlite error yields ``[]``. Every caller
+    feeds a notification or a brief, never a correctness decision.
+    """
+    if not HOOKS_STATE_DB_PATH.exists():
+        return []
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            return conn.execute(
+                "SELECT session_id, project_name, updated_at FROM project_state "
+                + where
+                + " ORDER BY updated_at DESC",
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("project_state read failed: %s", e)
+        return []
+
+
 def live_sessions_for_project(
     project_name: str, exclude_session_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
@@ -512,43 +563,154 @@ def live_sessions_for_project(
     never a correctness decision, so failing quiet beats raising into a caller
     that has already written the file it was going to announce.
     """
-    if not HOOKS_STATE_DB_PATH.exists():
-        return []
+    live: List[Dict[str, Any]] = []
+    for session_id, _project, last_active in _project_state_rows(
+        "WHERE project_name = ?", (project_name,)
+    ):
+        if session_id == exclude_session_id:
+            continue
+        row = _live_session_row(session_id, last_active)
+        if row is not None:
+            live.append(row)
+    return live
+
+
+def live_sessions_all(exclude_session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Every proven-live session bound to ANY project, most recently active first.
+
+    Same gate as ``live_sessions_for_project`` plus a ``project_name`` key.
+    Cost scales with the number of LIVE sessions, not with history: a dead or
+    unknown row costs one small file read and an ``os.kill(pid, 0)``, and only
+    a proven-live pid forks ``ps`` for the start token. ``session_id`` is the
+    primary key, so one scan sees each id once and there is nothing to memoize.
+
+    This is the backend half of a cross-project brief. The chat side still
+    cross-checks against ``ListAgents``, which is the reachability authority:
+    one ``claude`` process hosts many sessions, so a closed session can stay
+    pid-alive here until pruned.
+    """
+    live: List[Dict[str, Any]] = []
+    for session_id, project_name, last_active in _project_state_rows():
+        if session_id == exclude_session_id:
+            continue
+        row = _live_session_row(session_id, last_active)
+        if row is not None:
+            live.append({**row, "project_name": project_name})
+    return live
+
+
+# The title the lead session carries so working sessions can SendMessage it.
+# A constant on purpose: it is the whole push mechanism, and a working session
+# that just saved context must know the address without looking anything up.
+LEAD_SESSION_TITLE = "missioncache-lead"
+
+
+def set_lead_session(session_id: str) -> bool:
+    """Designate ``session_id`` as THE lead session, replacing any previous one.
+
+    One lead at a time by construction: every other row is deleted first. The
+    previous lead, if still running, discovers this on its next tick when it
+    finds the row is no longer its own. Returns False on a bad id or DB error.
+    """
+    if not _is_valid_session_id(session_id):
+        return False
     try:
         conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
         try:
+            init_hooks_state_db_schema(conn)
+            conn.execute("DELETE FROM lead_session WHERE session_id != ?", (session_id,))
+            conn.execute(
+                "INSERT INTO lead_session (session_id, title) VALUES (?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET title = excluded.title",
+                (session_id, LEAD_SESSION_TITLE),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("set_lead_session: hooks-state.db write failed: %s", e)
+        return False
+    return True
+
+
+def clear_lead_session(session_id: Optional[str] = None) -> bool:
+    """End the lead role. With a session id, only that session's row goes.
+
+    Returns True when a row was removed. Missing DB or table reads as "nothing
+    to clear", not as an error.
+    """
+    if session_id is not None and not _is_valid_session_id(session_id):
+        return False
+    if not HOOKS_STATE_DB_PATH.exists():
+        return False
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            init_hooks_state_db_schema(conn)
+            if session_id is None:
+                cur = conn.execute("DELETE FROM lead_session")
+            else:
+                cur = conn.execute(
+                    "DELETE FROM lead_session WHERE session_id = ?", (session_id,)
+                )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("clear_lead_session: hooks-state.db write failed: %s", e)
+        return False
+
+
+def lead_session_id() -> Optional[str]:
+    """The raw designated lead session id, with NO liveness gate.
+
+    For a session asking about ITSELF (the title hook, the start hook): the
+    asker is running, so a pid check would only add a fork. Everyone else
+    asking "who do I notify" must use ``live_lead_session``.
+    """
+    if not HOOKS_STATE_DB_PATH.exists():
+        return None
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            init_hooks_state_db_schema(conn)
+            row = conn.execute(
+                "SELECT session_id FROM lead_session ORDER BY since DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    return row[0] if row and _is_valid_session_id(row[0]) else None
+
+
+def live_lead_session() -> Optional[Dict[str, Any]]:
+    """The designated lead session, only while its process is proven alive.
+
+    Returns ``{session_id, title, since}`` or None. A lead row whose session is
+    dead or unknown is ignored here and dropped by ``prune_session_state``, so
+    a session closed without ``/missioncache:lead stop`` stops being notified
+    the moment its pid is gone.
+    """
+    if not HOOKS_STATE_DB_PATH.exists():
+        return None
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            init_hooks_state_db_schema(conn)
             rows = conn.execute(
-                "SELECT session_id, updated_at FROM project_state "
-                "WHERE project_name = ? ORDER BY updated_at DESC",
-                (project_name,),
+                "SELECT session_id, title, since FROM lead_session ORDER BY since DESC"
             ).fetchall()
         finally:
             conn.close()
     except sqlite3.Error as e:
-        logger.warning(
-            "live_sessions_for_project(%s): hooks-state.db read failed: %s",
-            project_name,
-            e,
-        )
-        return []
-
-    live: List[Dict[str, Any]] = []
-    for session_id, last_active in rows:
-        if session_id == exclude_session_id:
-            continue
-        if not _is_valid_session_id(session_id):
-            continue
-        if session_is_alive(session_id) is not True:
-            continue
-        record = read_session_title(session_id) or {}
-        live.append(
-            {
-                "session_id": session_id,
-                "title": record.get("title"),
-                "last_active": last_active,
-            }
-        )
-    return live
+        logger.warning("live_lead_session: hooks-state.db read failed: %s", e)
+        return None
+    for session_id, title, since in rows:
+        if _is_valid_session_id(session_id) and session_is_alive(session_id) is True:
+            return {"session_id": session_id, "title": title, "since": since}
+    return None
 
 
 #: How recently a session's transcript must have been touched for its pid
@@ -642,6 +804,7 @@ def prune_session_state(
         "session_pids": 0,
         "project_pointers": 0,
         "project_state_rows": 0,
+        "lead_session_rows": 0,
         "max_age_days": max_age_days,
     }
 
@@ -714,6 +877,9 @@ def prune_session_state(
     try:
         conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
         try:
+            # A DB from before lead_session existed must not make the sweep
+            # raise on its SELECT below; the schema call is idempotent.
+            init_hooks_state_db_schema(conn)
             rows = conn.execute(
                 "SELECT session_id FROM project_state WHERE updated_at < ?",
                 (cutoff_local,),
@@ -730,6 +896,22 @@ def prune_session_state(
                 )
                 conn.commit()
             counts["project_state_rows"] = len(doomed)
+
+            # A lead row is meaningful only while its session runs, so it takes
+            # no age cutoff: the pid verdict alone decides.
+            lead_rows = conn.execute("SELECT session_id FROM lead_session").fetchall()
+            dead_leads = [
+                sid
+                for (sid,) in lead_rows
+                if not _is_valid_session_id(sid) or not _proven_alive(sid)
+            ]
+            if dead_leads and not dry_run:
+                conn.executemany(
+                    "DELETE FROM lead_session WHERE session_id = ?",
+                    [(sid,) for sid in dead_leads],
+                )
+                conn.commit()
+            counts["lead_session_rows"] = len(dead_leads)
         finally:
             conn.close()
     except sqlite3.Error as e:
@@ -820,6 +1002,11 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
             session_id TEXT PRIMARY KEY,
             project_name TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS lead_session (
+            session_id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            since TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
         CREATE TABLE IF NOT EXISTS term_sessions (
             term_session_id TEXT PRIMARY KEY,
@@ -5354,6 +5541,54 @@ def _pm_command(db: "TaskDB", command: str) -> None:
 
 
 
+def _print_agenda(result: dict, target) -> None:
+    """Human-readable agenda for the CLI.
+
+    The trailing ``sources:`` line is not decoration. A hand-typed ICS URL is
+    the single most likely thing in this feature to be wrong, and this is how
+    someone finds that out without reading JSON.
+    """
+    if not result.get("configured"):
+        print(
+            "No calendar configured.\n"
+            '  Add entries under the "calendar" key of '
+            "~/.claude/missioncache-dashboard-config.json,\n"
+            "  or use the dashboard's Calendar settings tab."
+        )
+        return
+
+    print(f"{target.strftime('%A %Y-%m-%d')}  ({result.get('timezone')})")
+
+    events = result.get("events") or []
+    if not events:
+        print("  nothing scheduled")
+    for event in events:
+        if event.get("all_day"):
+            when = "all day".ljust(13)
+        else:
+            start = str(event.get("start", ""))[11:16]
+            end = str(event.get("end", ""))[11:16]
+            when = (f"{start}-{end}" if end else start).ljust(13)
+        title = str(event.get("title", ""))[:40].ljust(40)
+        location = str(event.get("location", ""))[:18].ljust(18)
+        print(f"  {when}{title}{location}[{event.get('calendar')}]".rstrip())
+
+    parts = []
+    for source in result.get("sources") or []:
+        detail = f"{source.get('count', 0)}"
+        if source.get("cached"):
+            detail += ", cached"
+        if source.get("skipped_rules"):
+            count = source["skipped_rules"]
+            detail += f", {count} rule{'s' if count != 1 else ''} not understood"
+        summary = f"{source.get('name')} {source.get('status')} ({detail})"
+        if source.get("error"):
+            summary += f": {source['error']}"
+        parts.append(summary)
+    if parts:
+        print("\nsources: " + ", ".join(parts))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -5501,7 +5736,8 @@ def main():
             print(
                 f"{prefix}{counts['session_pids']} pid records, "
                 f"{counts['project_pointers']} project pointers, "
-                f"{counts['project_state_rows']} binding rows "
+                f"{counts['project_state_rows']} binding rows, "
+                f"{counts['lead_session_rows']} lead rows "
                 f"(sessions not proven alive, older than "
                 f"{counts['max_age_days']}d)"
             )
@@ -6306,6 +6542,83 @@ def main():
                 f"\n{len(project_dirs)} projects checked, {changed} with findings"
                 + ("" if apply else " (re-run with --apply to write)")
             )
+
+        elif command == "lead":
+            sub = sys.argv[2] if len(sys.argv) > 2 else "show"
+            if sub == "set":
+                sid = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+                if not sid:
+                    print("Usage: missioncache-db lead set <session_id>  (or set CLAUDE_CODE_SESSION_ID)")
+                    sys.exit(1)
+                if set_lead_session(sid):
+                    print(f"lead session: {sid} (title {LEAD_SESSION_TITLE})")
+                else:
+                    print(f"could not designate {sid!r} as lead")
+                    sys.exit(1)
+            elif sub == "stop":
+                sid = sys.argv[3] if len(sys.argv) > 3 else None
+                removed = clear_lead_session(sid)
+                print("lead role ended" if removed else "no lead session to stop")
+            elif sub == "show":
+                live = live_lead_session()
+                raw = lead_session_id()
+                if "--json" in sys.argv:
+                    print(json.dumps({"lead": live, "designated": raw}))
+                elif live:
+                    print(f"lead session: {live['session_id']} since {live['since']}")
+                elif raw:
+                    print(f"designated lead {raw} is not running (row will be pruned)")
+                else:
+                    print("no lead session")
+            else:
+                print("Usage: missioncache-db lead <set [sid]|stop [sid]|show [--json]>")
+                sys.exit(1)
+
+        elif command == "agenda":
+            from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
+
+            from missioncache_db import agenda as agenda_mod
+
+            def _value_of(flag, default=None):
+                """`--flag VALUE` the way extension-state and export read them."""
+                if flag not in sys.argv:
+                    return default
+                idx = sys.argv.index(flag)
+                if idx + 1 >= len(sys.argv):
+                    print(f"Usage: missioncache-db agenda [--date today|tomorrow|YYYY-MM-DD] "
+                          f"[--json] [--no-cache] [--source NAME]  ({flag} needs a value)")
+                    sys.exit(1)
+                return sys.argv[idx + 1]
+
+            raw_day = _value_of("--date", "today")
+            if raw_day == "today":
+                target = _date.today()
+            elif raw_day == "tomorrow":
+                target = _date.today() + _timedelta(days=1)
+            else:
+                try:
+                    target = _datetime.strptime(raw_day, "%Y-%m-%d").date()
+                except ValueError:
+                    print(f"Bad --date {raw_day!r}: use today, tomorrow, or YYYY-MM-DD")
+                    sys.exit(1)
+
+            config = agenda_mod.read_calendar_config()
+            only = _value_of("--source")
+            if only:
+                config = dict(config)
+                config["sources"] = [
+                    src for src in config["sources"]
+                    if str(src.get("name", "")).lower() == only.lower()
+                ]
+
+            result = agenda_mod.agenda_for(
+                target, config=config, use_cache="--no-cache" not in sys.argv
+            )
+
+            if "--json" in sys.argv:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                _print_agenda(result, target)
 
         elif command == "config":
             from missioncache_db import machine_map

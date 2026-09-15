@@ -445,6 +445,7 @@ class TestPruneSessionState:
             "session_pids": 0,
             "project_pointers": 0,
             "project_state_rows": 0,
+            "lead_session_rows": 0,
         }
         assert m.session_pid_path("live-sid").exists()
         assert m.session_binding_path("live-sid").exists()
@@ -464,6 +465,7 @@ class TestPruneSessionState:
             "session_pids": 1,
             "project_pointers": 1,
             "project_state_rows": 1,
+            "lead_session_rows": 0,
         }
         assert not m.session_pid_path("dead-sid").exists()
         assert not m.session_binding_path("dead-sid").exists()
@@ -526,6 +528,7 @@ class TestPruneSessionState:
             "session_pids": 1,
             "project_pointers": 1,
             "project_state_rows": 1,
+            "lead_session_rows": 0,
         }
         assert m.session_pid_path("dead-sid").exists()
         assert m.session_binding_path("dead-sid").exists()
@@ -637,5 +640,112 @@ class TestPruneSessionState:
             "session_pids": 0,
             "project_pointers": 0,
             "project_state_rows": 0,
+            "lead_session_rows": 0,
         }
         assert _state_rows(home) == {"just-died"}
+
+
+class TestLiveSessionsAll:
+    """Spec: a cross-project brief needs every live bound session in one call,
+    with the same liveness rule as the per-project lookup - proven alive, never
+    merely unproven-dead - plus the project each one is bound to."""
+
+    def test_lists_live_sessions_across_projects_with_their_project(self, home):
+        _bind_live(home, [("sid-a", "proj-x"), ("sid-b", "proj-y")])
+        found = m.live_sessions_all()
+        assert {(s["session_id"], s["project_name"]) for s in found} == {
+            ("sid-a", "proj-x"), ("sid-b", "proj-y")
+        }
+
+    def test_carries_the_applied_title_and_none_when_the_hook_never_ran(self, home):
+        _bind_live(home, [("sid-a", "proj-x"), ("sid-b", "proj-y")])
+        m.write_session_title("sid-a", "proj-x-2", "proj-x")
+        by_id = {s["session_id"]: s for s in m.live_sessions_all()}
+        assert by_id["sid-a"]["title"] == "proj-x-2"
+        assert by_id["sid-b"]["title"] is None
+
+    def test_drops_proven_dead_and_unknown(self, home):
+        _bind_live(home, [("sid-a", "proj-x")])
+        _bind(home, [("sid-dead", "proj-y"), ("sid-ancient", "proj-z")])
+        _seed_pid(home, "sid-dead", _dead_pid())
+        assert [s["session_id"] for s in m.live_sessions_all()] == ["sid-a"]
+
+    def test_excludes_the_caller(self, home):
+        _bind_live(home, [("sid-a", "proj-x"), ("sid-b", "proj-y")])
+        found = m.live_sessions_all(exclude_session_id="sid-a")
+        assert [s["session_id"] for s in found] == ["sid-b"]
+
+    def test_empty_when_no_state_db_exists(self, home, monkeypatch):
+        monkeypatch.setattr(m, "HOOKS_STATE_DB_PATH", home / "nope.db")
+        assert m.live_sessions_all() == []
+
+    def test_per_project_lookup_still_agrees_with_it(self, home):
+        """The two lookups share one row builder; a refactor that split them
+        would let them disagree on what live means."""
+        _bind_live(home, [("sid-a", "proj-x"), ("sid-b", "proj-x"), ("sid-c", "proj-y")])
+        _bind(home, [("sid-ghost", "proj-x")])
+        wide = {s["session_id"] for s in m.live_sessions_all() if s["project_name"] == "proj-x"}
+        narrow = {s["session_id"] for s in m.live_sessions_for_project("proj-x")}
+        assert wide == narrow == {"sid-a", "sid-b"}
+
+
+class TestLeadSession:
+    """Spec: the user designates ONE session as the project manager, it keeps
+    the role until stopped, working sessions find it by a fixed title, and a
+    lead that died without stopping is not a notification target."""
+
+    def test_designation_is_visible_while_the_session_is_alive(self, home):
+        _seed_pid(home, "sid-lead", os.getpid())
+        assert m.set_lead_session("sid-lead") is True
+        lead = m.live_lead_session()
+        assert lead["session_id"] == "sid-lead"
+        assert lead["title"] == m.LEAD_SESSION_TITLE
+
+    def test_a_new_designation_replaces_the_old_one(self, home):
+        _seed_pid(home, "sid-first", os.getpid())
+        _seed_pid(home, "sid-second", os.getpid())
+        m.set_lead_session("sid-first")
+        m.set_lead_session("sid-second")
+        assert m.live_lead_session()["session_id"] == "sid-second"
+        # The old one is gone from the table, not merely shadowed.
+        assert m.clear_lead_session("sid-first") is False
+
+    def test_a_dead_lead_is_not_reported(self, home):
+        _seed_pid(home, "sid-lead", _dead_pid())
+        m.set_lead_session("sid-lead")
+        assert m.live_lead_session() is None
+
+    def test_an_unknown_lead_is_not_reported(self, home):
+        """No pid record reads as unknown, and unknown is not proven alive."""
+        m.set_lead_session("sid-lead")
+        assert m.live_lead_session() is None
+
+    def test_stop_clears_only_that_session(self, home):
+        _seed_pid(home, "sid-lead", os.getpid())
+        m.set_lead_session("sid-lead")
+        assert m.clear_lead_session("sid-other") is False
+        assert m.live_lead_session() is not None
+        assert m.clear_lead_session("sid-lead") is True
+        assert m.live_lead_session() is None
+
+    def test_none_when_no_state_db_exists(self, home, monkeypatch):
+        monkeypatch.setattr(m, "HOOKS_STATE_DB_PATH", home / "nope.db")
+        assert m.live_lead_session() is None
+        assert m.clear_lead_session() is False
+
+    def test_rejects_a_path_traversing_id(self, home):
+        assert m.set_lead_session("../escape") is False
+        assert m.live_lead_session() is None
+
+    def test_prune_drops_a_dead_lead_and_keeps_a_live_one(self, home):
+        _seed_pid(home, "sid-live", os.getpid())
+        m.set_lead_session("sid-live")
+        # Plant a second, dead row directly: set_lead_session would evict it.
+        conn = sqlite3.connect(home / ".claude" / "hooks-state.db")
+        conn.execute("INSERT INTO lead_session (session_id, title) VALUES (?, ?)",
+                     ("sid-dead", m.LEAD_SESSION_TITLE))
+        conn.commit(); conn.close()
+        _seed_pid(home, "sid-dead", _dead_pid())
+        counts = m.prune_session_state()
+        assert counts["lead_session_rows"] == 1
+        assert m.live_lead_session()["session_id"] == "sid-live"

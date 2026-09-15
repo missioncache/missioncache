@@ -6,9 +6,10 @@ prepend shape used by every writer), the cap/rollover split into a
 per-project journal file, the load-time digest, and per-project health
 checks. Consumed by the missioncache-db CLI (``health``), the MCP server
 (``get_context_digest``, ``update_context_file``), the pre-compact hook,
-and the one-time migration script. The dashboard keeps its own independent
-parser copy by design (missioncache-dashboard/.../server.py) - when section
-semantics change here, check whether that mirror needs to track.
+and the one-time migration script. The dashboard's Attention view reads through
+``portfolio.build_portfolio`` and so through these parsers; its remaining private
+copies serve the project page and progress parsing only - when section semantics
+change here, check whether those mirrors need to track.
 
 Stdlib-only on purpose (mirrors ``machine_map.py``): the MCP server imports
 from missioncache_db, never the reverse, and nothing here may drag heavy
