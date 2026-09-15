@@ -3151,3 +3151,195 @@ class TestMirrorDrift:
             if child and child.poll() is None:
                 child.kill()
                 child.wait(timeout=30)
+
+
+# ── lead session: title hook and start hook ──────────────────────────────
+
+
+class TestLeadSessionTitle:
+    """Spec: the lead session (/missioncache:lead) carries the fixed title
+    `missioncache-lead` so working sessions can address it without a lookup.
+    That title outranks any project binding and, like a project title, is
+    emitted once and stays silent in the steady state."""
+
+    @staticmethod
+    def _redirect(monkeypatch, home: Path):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
+        return db_path
+
+    @staticmethod
+    def _bind(db_path: Path, session_id: str, project_name: str):
+        import sqlite3 as _sqlite3
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        conn = _sqlite3.connect(db_path)
+        try:
+            init_hooks_state_db_schema(conn)
+            conn.execute(
+                "INSERT OR REPLACE INTO project_state (session_id, project_name) VALUES (?, ?)",
+                (session_id, project_name),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _run(self, monkeypatch, capsys, payload: dict):
+        import importlib
+
+        import hooks.session_title as mod
+
+        importlib.reload(mod)
+        monkeypatch.setattr(sys, "stdin", StringIO(json.dumps(payload)))
+        mod.main()
+        out = capsys.readouterr().out.strip()
+        return json.loads(out) if out else None
+
+    def test_lead_outranks_a_project_binding(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        db_path = self._redirect(monkeypatch, tmp_path)
+        self._bind(db_path, "sid-lead", "some-project")
+        missioncache_db.set_lead_session("sid-lead")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-lead"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == missioncache_db.LEAD_SESSION_TITLE
+
+    def test_lead_title_is_emitted_once(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        self._redirect(monkeypatch, tmp_path)
+        missioncache_db.set_lead_session("sid-lead")
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-lead"}) is not None
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-lead"}) is None
+
+    def test_a_non_lead_session_is_unaffected(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        db_path = self._redirect(monkeypatch, tmp_path)
+        missioncache_db.set_lead_session("sid-lead")
+        self._bind(db_path, "sid-worker", "some-project")
+        # A worker with no pid record and no peers takes the plain project name.
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-worker"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "some-project"
+
+    def test_a_stopped_lead_gives_the_title_back(self, tmp_path, monkeypatch, capsys):
+        """`missioncache-lead` is an ADDRESS, not a name to keep.
+
+        Every working session sends its change notices there and
+        `attach_lead_session` hands out the bare constant, so a session still
+        displaying it after `lead stop` keeps receiving mail meant for whoever
+        holds the role now. The lead is unbound by design, so nothing else in
+        `resolve_title` would ever speak for it.
+        """
+        import missioncache_db  # type: ignore[import-not-found]
+
+        self._redirect(monkeypatch, tmp_path)
+        missioncache_db.set_lead_session("sid-lead")
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-lead"}) is not None
+
+        missioncache_db.clear_lead_session("sid-lead")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-lead"})
+        assert out is not None, "a demoted lead must be re-titled, not left silent"
+        title = out["hookSpecificOutput"]["sessionTitle"]
+        assert title != missioncache_db.LEAD_SESSION_TITLE
+        assert title == "session-sid-le"
+
+    def test_a_replaced_lead_gives_the_title_back(self, tmp_path, monkeypatch, capsys):
+        """Replacement, not just stop. The NEW lead must be the only session
+        emitting the constant, or the harness renames it on collision and the
+        address in every write-tool response reaches the wrong window."""
+        import missioncache_db  # type: ignore[import-not-found]
+
+        self._redirect(monkeypatch, tmp_path)
+        missioncache_db.set_lead_session("sid-old")
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-old"}) is not None
+
+        missioncache_db.set_lead_session("sid-new")
+        old_out = self._run(monkeypatch, capsys, {"session_id": "sid-old"})
+        assert old_out["hookSpecificOutput"]["sessionTitle"] != missioncache_db.LEAD_SESSION_TITLE
+        new_out = self._run(monkeypatch, capsys, {"session_id": "sid-new"})
+        assert new_out["hookSpecificOutput"]["sessionTitle"] == missioncache_db.LEAD_SESSION_TITLE
+
+    def test_a_demoted_lead_that_is_bound_falls_back_to_its_project(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """A lead that had also run /missioncache:load has somewhere to land."""
+        import missioncache_db  # type: ignore[import-not-found]
+
+        db_path = self._redirect(monkeypatch, tmp_path)
+        self._bind(db_path, "sid-lead", "some-project")
+        missioncache_db.set_lead_session("sid-lead")
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-lead"}) is not None
+
+        missioncache_db.clear_lead_session("sid-lead")
+        out = self._run(monkeypatch, capsys, {"session_id": "sid-lead"})
+        assert out["hookSpecificOutput"]["sessionTitle"] == "some-project"
+
+
+class TestLeadSessionStartReminder:
+    """Spec: the lead role lives in the DB, so after a compaction or resume the
+    session-start hook must remind the session it is the lead. A fresh startup
+    and a non-lead session get nothing."""
+
+    def _run(self, monkeypatch, capsys, tmp_path, session_id, source):
+        import importlib
+
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        db_path = tmp_path / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir(exist_ok=True)
+        monkeypatch.chdir(cwd)
+        monkeypatch.setattr("os.getcwd", lambda: str(cwd))
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        # A real pipe, not StringIO: get_session_context peeks stdin with
+        # select.select, which needs a file descriptor.
+        _patch_stdin_payload(monkeypatch, {"session_id": session_id, "source": source})
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        mock_db.get_repos.return_value = []
+        mock_db.get_active_tasks.return_value = []
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
+
+        import hooks.session_start as mod
+
+        importlib.reload(mod)
+        mod.main()
+        return capsys.readouterr().out
+
+    def test_compact_reminds_the_lead(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", tmp_path / ".claude" / "hooks-state.db")
+        (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
+        missioncache_db.set_lead_session("sid-lead")
+        out = self._run(monkeypatch, capsys, tmp_path, "sid-lead", "compact")
+        assert "## Lead session" in out
+        assert "/missioncache:brief --delta" in out
+
+    def test_resume_reminds_the_lead(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", tmp_path / ".claude" / "hooks-state.db")
+        (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
+        missioncache_db.set_lead_session("sid-lead")
+        assert "## Lead session" in self._run(monkeypatch, capsys, tmp_path, "sid-lead", "resume")
+
+    def test_startup_and_non_lead_stay_silent(self, tmp_path, monkeypatch, capsys):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", tmp_path / ".claude" / "hooks-state.db")
+        (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
+        missioncache_db.set_lead_session("sid-lead")
+        assert "## Lead session" not in self._run(monkeypatch, capsys, tmp_path, "sid-lead", "startup")
+        assert "## Lead session" not in self._run(monkeypatch, capsys, tmp_path, "sid-other", "compact")

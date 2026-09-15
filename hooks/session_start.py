@@ -669,6 +669,25 @@ def main():
                     file=sys.stderr,
                 )
 
+        # The lead role lives in the DB, not in conversation context, so a
+        # compaction or resume would otherwise leave the manager session with
+        # no memory of being one. One line is enough: the command file carries
+        # the rest.
+        if source in ("resume", "compact"):
+            try:
+                from missioncache_db import lead_session_id  # type: ignore[import-not-found]
+
+                if lead_session_id() == session_id:
+                    print(
+                        "\n## Lead session\n\n"
+                        "This session is the designated MissionCache lead "
+                        "(`/missioncache:lead`). Continue the 15-minute delta "
+                        "brief loop: run `/missioncache:brief --delta` now, then "
+                        "keep it scheduled. `/missioncache:lead stop` ends the role.\n"
+                    )
+            except Exception:
+                pass
+
     # Always attempt to refresh rule files, even if missioncache_db is unavailable.
     install_bundled_rules()
 
