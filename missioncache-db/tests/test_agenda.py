@@ -12,7 +12,7 @@ names its day explicitly.
 
 import json
 import os
-import stat
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -429,21 +429,29 @@ class TestAgendaFor:
 
 
 class TestCommandSource:
-    def _script(self, tmp_path, body: str) -> str:
-        path = tmp_path / "cal.sh"
-        path.write_text("#!/bin/sh\n" + body)
-        path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        return str(path)
+    def _script(self, tmp_path, body: str) -> list:
+        """An argv that runs ``body`` as Python. Returns the whole argv, not a path.
+
+        These used to be `/bin/sh` scripts, which Windows cannot execute at
+        all: CreateProcess needs a real executable, so every test here died
+        with WinError 193 instead of exercising the command source. Running
+        the current interpreter against a script file behaves the same on
+        every platform, and ``sys.executable`` is absolute, which is what the
+        source itself demands of argv[0].
+        """
+        path = tmp_path / "cal.py"
+        path.write_text(body)
+        return [sys.executable, str(path)]
 
     def test_json_output_becomes_events(self, rooted, tmp_path):
         payload = json.dumps([
             {"start": "2026-09-08T09:30:00+03:00", "end": "2026-09-08T10:00:00+03:00",
              "title": "From command", "location": "Webex"}
         ])
-        script = self._script(tmp_path, f"cat <<'EOF'\n{payload}\nEOF\n")
+        script = self._script(tmp_path, f"print({payload!r})")
         result = agenda.agenda_for(
             DAY, config={"sources": [{"name": "Team", "kind": "command",
-                                      "command": [script]}]}
+                                      "command": script}]}
         )
         assert result["sources"][0]["status"] == "ok"
         assert result["events"][0]["title"] == "From command"
@@ -452,21 +460,22 @@ class TestCommandSource:
         payload = json.dumps({"events": [
             {"start": "2026-09-08", "title": "Wrapped", "all_day": True}
         ]})
-        script = self._script(tmp_path, f"cat <<'EOF'\n{payload}\nEOF\n")
+        script = self._script(tmp_path, f"print({payload!r})")
         result = agenda.agenda_for(
             DAY, config={"sources": [{"name": "Team", "kind": "command",
-                                      "command": [script]}]}
+                                      "command": script}]}
         )
         assert result["events"][0]["title"] == "Wrapped"
 
     def test_date_placeholder_is_substituted(self, rooted, tmp_path):
         script = self._script(
             tmp_path,
-            'printf \'[{"start":"%s","title":"echoed"}]\' "$1"\n',
+            'import sys, json\n'
+            'print(json.dumps([{"start": sys.argv[1], "title": "echoed"}]))\n',
         )
         result = agenda.agenda_for(
             DAY, config={"sources": [{"name": "Team", "kind": "command",
-                                      "command": [script, "{date}"]}]}
+                                      "command": script + ["{date}"]}]}
         )
         assert result["events"][0]["start"] == "2026-09-08"
 
@@ -479,20 +488,23 @@ class TestCommandSource:
         assert "absolute path" in result["sources"][0]["error"]
 
     def test_non_zero_exit_is_reported_not_raised(self, rooted, tmp_path):
-        script = self._script(tmp_path, "echo 'auth token expired' >&2\nexit 2\n")
+        script = self._script(
+            tmp_path,
+            'import sys\nprint("auth token expired", file=sys.stderr)\nsys.exit(2)\n',
+        )
         result = agenda.agenda_for(
             DAY, config={"sources": [{"name": "Team", "kind": "command",
-                                      "command": [script]}]}
+                                      "command": script}]}
         )
         assert result["sources"][0]["status"] == "error"
         assert "exit 2" in result["sources"][0]["error"]
         assert "auth token expired" in result["sources"][0]["error"]
 
     def test_non_json_output_is_reported(self, rooted, tmp_path):
-        script = self._script(tmp_path, "echo not json\n")
+        script = self._script(tmp_path, 'print("not json")\n')
         result = agenda.agenda_for(
             DAY, config={"sources": [{"name": "Team", "kind": "command",
-                                      "command": [script]}]}
+                                      "command": script}]}
         )
         assert result["sources"][0]["status"] == "error"
         assert "JSON" in result["sources"][0]["error"]
