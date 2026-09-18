@@ -1,0 +1,128 @@
+name: Publish extension
+
+# Its own tag namespace on purpose. Release tags are vYYYY.MM.DD and are cut for
+# every PyPI release, so a broader glob here would republish the extension on each.
+on:
+  push:
+    tags:
+      - 'extension-v*'
+  workflow_dispatch: {}
+
+# Queue rather than cancel. Cancelling between the two publish jobs would leave
+# the registries on different versions.
+concurrency:
+  group: publish-extension
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Holds no secrets, so repo and npm code never runs in a job that has a token.
+  build:
+    runs-on: ubuntu-latest
+    # Tag only. A dispatch from a branch would otherwise publish that branch's
+    # version to two registries that never allow a version to be replaced.
+    if: github.ref_type == 'tag'
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: missioncache-extension
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Nothing pushes from this checkout; don't leave a token in it.
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          # setup-node looks for the lockfile at the repo root by default, and
+          # there is none: the only one is the extension's.
+          cache-dependency-path: missioncache-extension/package-lock.json
+
+      # Before npm ci: this needs node and package.json, not node_modules, so a
+      # bad tag fails in seconds instead of after a full install.
+      - name: Tag must match package.json version
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME#extension-v}"
+          PKG=$(node -p "require('./package.json').version || ''")
+          echo "tag=$TAG package.json=$PKG"
+          [ -n "$PKG" ] || { echo "::error::package.json has no version"; exit 1; }
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json $PKG"; exit 1; }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build:prod
+
+      - name: Package
+        run: npm run package
+
+      # Uploaded before either publish runs, so a half-publish always leaves the
+      # exact bytes that shipped available for inspection.
+      - name: Upload the vsix
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: missioncache-vsix
+          path: missioncache-extension/*.vsix
+          retention-days: 30
+          if-no-files-found: error
+
+  # Both publishes take the SAME artifact, so the registries cannot diverge, and
+  # neither packages anything: packaging inside a token-holding step would run
+  # package.json's vscode:prepublish as a child that inherits the token.
+  # They are independent jobs so that "Re-run failed jobs" retries only the one
+  # that failed. That is what recovers a half-publish, which is why skipDuplicate
+  # is off: a version that already exists now fails loudly instead of going green
+  # and shipping nothing, which is what a moved tag used to do.
+  publish-open-vsx:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: missioncache-vsix
+          path: vsix
+
+      - name: Resolve the vsix path
+        id: vsix
+        run: echo "path=$(ls vsix/*.vsix)" >> "$GITHUB_OUTPUT"
+
+      # Pinned to a commit, not the moving v2 tag: this third-party action
+      # receives a publish token, and a retagged v2 would run new code with it.
+      - uses: HaaLeo/publish-vscode-extension@ca5561daa085dee804bf9f37fe0165785a9b14db # v2.0.0
+        with:
+          pat: ${{ secrets.OPEN_VSX_TOKEN }}
+          extensionFile: ${{ steps.vsix.outputs.path }}
+          dependencies: false
+          skipDuplicate: false
+
+  publish-marketplace:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: missioncache-vsix
+          path: vsix
+
+      - name: Resolve the vsix path
+        id: vsix
+        run: echo "path=$(ls vsix/*.vsix)" >> "$GITHUB_OUTPUT"
+
+      - uses: HaaLeo/publish-vscode-extension@ca5561daa085dee804bf9f37fe0165785a9b14db # v2.0.0
+        with:
+          pat: ${{ secrets.VSCE_PAT }}
+          registryUrl: https://marketplace.visualstudio.com
+          extensionFile: ${{ steps.vsix.outputs.path }}
+          dependencies: false
+          skipDuplicate: false
