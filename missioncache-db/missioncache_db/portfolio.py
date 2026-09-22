@@ -584,7 +584,7 @@ def scope_portfolio(result: dict[str, Any], project_names: set[str]) -> dict[str
 def portfolio_watermark(db) -> str:
     """A short token that changes whenever the portfolio could have changed.
 
-    The thing that makes every live mechanism cheap: a 15-minute brief loop
+    The thing that makes every live mechanism cheap: an opt-in brief loop
     and a 30-second dashboard stream both compare this before recomputing,
     and an unchanged token means the 200ms-plus rollup and pid scan are
     skipped entirely. It is a change DETECTOR, not a content hash: newest

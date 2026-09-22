@@ -681,9 +681,13 @@ def main():
                     print(
                         "\n## Lead session\n\n"
                         "This session is the designated MissionCache lead "
-                        "(`/missioncache:lead`). Continue the 15-minute delta "
-                        "brief loop: run `/missioncache:brief --delta` now, then "
-                        "keep it scheduled. `/missioncache:lead stop` ends the role.\n"
+                        "(`/missioncache:lead`). Any delta-brief loop ended with "
+                        "the compaction. Tell the user the role is still active "
+                        "and offer to restart it, asking again how often to "
+                        "check and for how long. Do not schedule it, do not "
+                        "assume the previous pace or window, and do not run a "
+                        "brief unasked. `/missioncache:lead stop` ends the "
+                        "role.\n"
                     )
             except Exception:
                 pass

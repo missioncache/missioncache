@@ -3323,7 +3323,13 @@ class TestLeadSessionStartReminder:
         missioncache_db.set_lead_session("sid-lead")
         out = self._run(monkeypatch, capsys, tmp_path, "sid-lead", "compact")
         assert "## Lead session" in out
-        assert "/missioncache:brief --delta" in out
+        # The delta loop is opt-in (Tomer, 2026-09-22). The reminder tells the
+        # lead its role survived and offers to restart the loop; it must never
+        # instruct a restart, or a role asked for once resumes waking the
+        # session on a timer nobody agreed to.
+        assert "offer to restart" in out.lower()
+        assert "do not schedule it" in out.lower()
+        assert "/missioncache:brief --delta" not in out
 
     def test_resume_reminds_the_lead(self, tmp_path, monkeypatch, capsys):
         import missioncache_db  # type: ignore[import-not-found]
