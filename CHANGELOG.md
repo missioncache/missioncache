@@ -1,129 +1,120 @@
 # Changelog
 
-All notable changes to MissionCache are documented in this file. Dates are ISO 8601; sections are grouped by behavioral concern, not by sub-package version. Entries dated before the 2026-06 rebrand reference the project's former name (orbit) and its old package names (orbit-db, mcp-orbit, etc.); those are left as-is as accurate historical records.
+All notable changes to MissionCache, newest first. Entries dated before the 2026-06 rebrand name the project as it was then (orbit, orbit-db, mcp-orbit).
 
-**Updating:** `uvx --refresh missioncache-install@latest --update` brings everything you have installed current (PyPI packages and the Claude Code plugin). Your data in `~/.missioncache/` is never touched by an update.
+**Updating:** `uvx --refresh missioncache-install@latest --update` brings everything you have installed current. Your data in `~/.missioncache/` is never touched by an update.
+
+**Writing an entry:** one line per change, 25 words or fewer, saying what changed for the person reading. Mechanism, measurements, and why it was hard belong in the commit message, not here. Affected packages in parentheses at the end.
 
 ## Unreleased
+
+- `/missioncache:lead` no longer loops on its own. It asks how often to check and for how long, stopping after 7 hours by default. (plugin, hooks, docs)
+- `/missioncache:brief` takes `--until <ISO>`, which ends the lead loop at that time. (plugin)
 
 ## 2026-09-16
 
 Published package versions: missioncache-db 1.0.27, mcp-missioncache 1.0.33, missioncache-dashboard 1.0.22, missioncache-install 1.0.17. Claude Code plugin 1.0.26. missioncache-auto is unchanged.
 
-- `update_context_file` takes `hub`, a bare vault note name, and writes or replaces the `Hub: [[name]]` header line in the canonical position (after Fork of, Due or Last Updated). The second-brain rule asks every context file to point at its Obsidian hub through that line, and `get_context_digest` already read it, but there was no locked writer for it, so adding it meant a direct Edit of the context file that skips the sidecar lock. One hub per project: a different name replaces the line. The name is held to the fork-parent shape (no slashes, brackets or newlines) at the MCP layer and again in `context_health.upsert_hub`, because a planted header line decides which file the resume flow reads. (mcp-missioncache, missioncache-db)
-- New `/missioncache:brief` and `/missioncache:lead` commands turn one session into a project manager over every project worked in parallel. `brief` is a one-shot cross-project report from any session: what is urgent, what is waiting on you, what is waiting on others (with the owner and how long), which projects have a live Claude Code session, today's calendar, and a suggested order built by fitting the ranked work into the free windows between meetings. `lead` designates the current session as THE lead: it runs a full brief, then keeps the picture live with a 15-minute delta loop that stays silent when nothing changed, and every working session that saves context or a PM item now sees a `lead_session` field telling it whom to notify. One lead at a time; a new designation replaces the old one, the role survives compaction (the session-start hook reminds the session), and a lead closed without `stop` is dropped by the pid gate and pruned. The lead carries the fixed session title `missioncache-lead` so it is addressable without lookup. Behind both sits one implementation: the dashboard's `/api/today` rollup moved into `missioncache_db.portfolio.build_portfolio` (a behavior-preserving extraction, byte-identical output on real data, 48 dashboard tests unchanged), so the chat brief and the Attention view can never disagree on what is urgent. New MCP tool `get_portfolio` returns that rollup clipped to a chat-sized payload plus `live_sessions` and `lead_session`; new `live_sessions_all()` enumerates proven-live sessions across all projects; new `portfolio_watermark()` is the cheap change token every live mechanism gates on. Calendar: new `missioncache_db.agenda` reads ICS (URL, file, glob) or runs a configured command that prints JSON, with a single-day RRULE hit test, `RECURRENCE-ID` overrides, exclusive all-day `DTEND` handled, unknown rules and time zones reported rather than dropped, a raw-body cache under the data root, and a `missioncache-db agenda` CLI; configured under the `calendar` key of the dashboard config. `missioncache-db lead set|stop|show` manages the role. The receiving-side rules for a brief status request and for a lead change notice are in `rules/missioncache.md`. (missioncache-db, mcp-missioncache, missioncache-dashboard, missioncache-install, hooks, plugin, docs) `/missioncache:lead` is Claude Code only: the role is built from a session title, cross-session messaging, a loop and a pid record, none of which exist in the other clients. `brief` ships to all four.
-- The PreCompact snapshot no longer corrupts the context file it is saving. The hook writes recent conversation turns verbatim into Recent Changes, and an assistant reply routinely carries column-0 `## ` headings while the per-turn truncation can cut inside a code fence and leave it open. Section boundaries are found by column-0 anchors, so a written-through heading ended the section at that line and stranded every entry below it - invisible to the 12-entry cap, to `get_context_digest` and to the dashboard - while a dangling fence hid every heading after it, which made each `key_files` save append a fresh duplicate `## Key Files` instead of merging. Measured across the live projects before the fix: 8 of 64 snapshots carried such a heading, 3 left an open fence, and 7 project files were damaged by it, one of them MissionCache's own. (Two further files show the same symptom from an older, unrelated shape that predates the 2026-07-11 conventions migration; `repair` handles both.) Snapshot bodies and every free-form string reaching a context or tasks file now go through `context_health.sanitize_bullet` (`recent_changes`, `key_decisions`, `gotchas`, `next_steps`, the `imported_event` body; `key_files` cells and tasks-file `notes` and removal reasons collapse to one line instead, since a checklist line cannot be hidden by indentation). It closes a dangling fence with the delimiter its opener used, demotes headings, pushes a leading fence or heading onto its own line - without which the caller's `- ` prefix hides an opener and turns the appended closer into one - and indents every continuation line by two. (hooks, missioncache-db, mcp-missioncache, plugin, docs)
-
-- `mask_fences` treats an unclosed fence as ordinary text rather than as a fence running to end of file. This diverges from CommonMark deliberately: a dangling opener read as content costs at most one visible stray heading, while reading it as a fence silently swallows the rest of the document from every parser. Writers additionally refuse a section name that appears more than once, instead of guessing which of five same-named sections to append to, and that refusal reaches callers as a coded `INVALID_STATE` error rather than a bare `ValueError`. (missioncache-db, mcp-missioncache)
-
-- Context and task files can have content removed through the tools. `update_context_file` takes `sections_remove` (whole sections, exact heading match) and `bullets_remove` (one Gotcha, decision or Key Files row, with its continuation lines); `update_tasks_file` takes `tasks_remove`, which strikes the task through under `## Removed` with a required reason so it stops counting toward progress without losing the history, and never lets its number be reused. `waiting_on_resolve` takes a `kind` of `resolved`, `moved` or `dropped`, so a row that moved to another project is no longer recorded as an answer that never came. Core and database-rendered sections refuse removal. Until now the only removal primitive was `waiting_on_resolve`, so reorganizing a project between two contexts could only be done by hand-editing the files, which skips the sidecar lock the parallel-session discipline depends on. (mcp-missioncache, missioncache-db, plugin, docs)
-
-- New `move_to_project` MCP tool moves sections, items, waiting-on rows and tasks between two projects in one locked operation. Splitting a project is a move, not a delete plus an add, and as two calls it can half-fail and leave content in both files or neither. It holds all four project files' sidecar locks in sorted path order (so two sessions moving in opposite directions cannot deadlock), writes the target side fully before the source side so a crash duplicates rather than loses, records the move in both projects' Recent Changes, and returns `live_sessions` merged across both. A moved task keeps its text and state but takes a new number on the target, with a record on the source naming where it went. (mcp-missioncache, missioncache-db, plugin, docs)
-
-- New `missioncache-db repair` command fixes context files damaged by the above. Dry run by default: it merges duplicate sections, moves stranded Recent Changes entries back into the section and re-sorts them newest-first so the cap can roll the overflow to the journal, and runs the cap on its own. It reports an unbalanced fence rather than closing it, since that would guess where the code ended, and it neither detects nor deletes a stray pasted-output section - deciding a section is junk stays the user's call, made through `sections_remove`. `missioncache-db health` and the resume digest surface the three structural findings, and the stranded-entry warning distinguishes what repair will move from what needs a hand. (missioncache-db, docs)
-- The Windows dashboard survives login again. `serve --hidden` (the HKCU Run-key autostart) redirected file descriptors 1 and 2 to the log file but left `sys.stdout` and `sys.stderr` as the objects they started as. The Run key hands the process a real console, so those are `_WindowsConsoleIO` writing through `WriteConsoleW`, which fails with WinError 6 once fd 1 is a file handle: the first print in the uvicorn lifespan aborted startup, and every message about that went to the same dead stream, so the process died at every login and left an empty log. The redirect now flushes first, rebinds both Python-level streams onto the redirected fds, and writes a timestamped line to the log when it fails instead of swallowing the error. Measured on the affected machine: six logon starts, exit code 120 each time, and no log write for over a week. The regression test asserts stream identity rather than log content, because on POSIX the output reaches the log even unfixed, which is also why the installer smoke test's redirected `Start-Process` never caught it. (missioncache-dashboard)
+- New `/missioncache:brief` reports across all your projects at once: what is urgent, who you are waiting on, and a suggested order around today's calendar. (missioncache-db, mcp-missioncache, missioncache-dashboard, missioncache-install, plugin, docs)
+- New `/missioncache:lead` makes one session the manager, and every other session that saves reports its changes to it. Claude Code only. (missioncache-db, plugin, docs)
+- New `get_portfolio` tool returns the cross-project rollup the dashboard's Attention view already used, so the two cannot disagree. (mcp-missioncache, missioncache-db)
+- New `missioncache-db agenda` reads your calendar from ICS or a command, so the brief can schedule around meetings. (missioncache-db)
+- `update_context_file` takes `hub`, which writes the `Hub: [[name]]` line pointing a project at its Obsidian note. (mcp-missioncache, missioncache-db)
+- The PreCompact snapshot no longer corrupts the context file it saves. Headings and open code fences in the snapshot could end a section early. (hooks, missioncache-db, mcp-missioncache, plugin, docs)
+- An unclosed code fence no longer hides the rest of a context file from every parser. (missioncache-db, mcp-missioncache)
+- A section name that appears twice is refused rather than guessed at. (missioncache-db, mcp-missioncache)
+- `update_context_file` takes `sections_remove` and `bullets_remove`, and `update_tasks_file` takes `tasks_remove`, which strikes a task through with a reason instead of faking completion. (mcp-missioncache, missioncache-db, plugin, docs)
+- `waiting_on_resolve` takes a `kind` of `resolved`, `moved` or `dropped`, so a row that moved is not recorded as answered. (mcp-missioncache)
+- New `move_to_project` moves sections, rows and tasks between two projects in one locked operation, so a split cannot half-apply. (mcp-missioncache, missioncache-db, plugin, docs)
+- New `missioncache-db repair` fixes context files with duplicate or stranded sections. Dry run by default. (missioncache-db, docs)
+- The Windows dashboard survives login again. The hidden-console autostart died on its first print and left an empty log. (missioncache-dashboard)
 
 ## 2026-08-25
 
 Published package versions: missioncache-install 1.0.16, mcp-missioncache 1.0.30. Claude Code plugin 1.0.24. missioncache-db, missioncache-auto and missioncache-dashboard are unchanged.
 
-
-- `create_missioncache_files` accepts lists and nested dicts in the plan sections instead of crashing. Agents routinely pass `{"goals": ["a", "b"]}`-shaped plans despite the declared string-only dict, and the template renderer died on `TypeError: replace() argument 2 must be str, not list`. Lists render as bullet lines, dicts as key-value bullets, strings pass through, and empty values fall back to the section defaults. Found by the task-86 multi-tool verification. (mcp-server)
-
-- Updating on Windows no longer risks breaking the dashboard install. Windows refuses to delete a directory that holds a running executable, the dashboard server runs out of its own tool directory (uv or pipx layout alike), and uv removes site-packages before it fails - so an update against a live dashboard could leave a half-dead venv: statusline broken, zombie server answering from memory. The installer now stops every process running from the dashboard's tool roots before upgrading (found by executable path via a PowerShell probe that passes the paths through the environment, never interpolated into the script), verifies they are actually gone, and refuses the upgrade when they are not - an intact old venv beats a half-deleted one. A probe that cannot run is treated as "could not check", with matching wording, never as "no blockers". Failures name the processes holding the files, state that the install is incomplete, and keep the per-component isolation intact so the rest of the update still lands. The Windows CI smoke now re-runs the update against a live dashboard and asserts the server and the statusline both survive - the gate that would have caught the original bug. (missioncache-install)
+- `create_missioncache_files` accepts lists and nested dicts in the plan sections instead of crashing. (mcp-missioncache)
+- Updating on Windows no longer risks a half-deleted dashboard install. Running processes are stopped first, and the upgrade is refused if they survive. (missioncache-install)
 
 ## 2026-08-24
 
 Published package versions: missioncache-dashboard 1.0.21. Claude Code plugin 1.0.23. Everything else is unchanged since 2026-08-23.
 
-- The per-model usage counter (the Fable weekly cap row) renders on Windows and Linux. The statusline's usage-API fetch is gated on the Claude Code OAuth token, and off macOS the token reader only looked at the CLAUDE_OAUTH_TOKEN env var - never at ~/.claude/.credentials.json, where Claude Code actually stores credentials on those platforms - so the fetch silently never ran and every API-driven usage row was macOS-only by construction. The reader now falls back to the credentials file, with the env var kept as an explicit override. Confirmed live on a Windows machine: credentials file present with the token key, env var unset, and the usage cache never written. (missioncache-dashboard)
+- The per-model usage counter renders on Windows and Linux. The token reader only checked an env var, never the credentials file. (missioncache-dashboard)
 
 ## 2026-08-23
 
 Published package versions: missioncache-db 1.0.24, missioncache-dashboard 1.0.20. Claude Code plugin 1.0.22. mcp-missioncache, missioncache-auto and missioncache-install are unchanged.
 
-- Windows renders the statusline instead of a blank block. Claude Code spawns the statusline with a piped stdout, and on Windows a piped Python stdout defaults to cp1252 - which cannot encode the emoji every rendered line carries, so every render died on UnicodeEncodeError and the crash guard drew empty lines. The entry point now reconfigures stdout to UTF-8 when the platform default is anything else (the terminal itself already speaks UTF-8 - only the pipe default was wrong). Same guard added to the task-tracking reminder hook, the one other entry point that prints a character cp1252 cannot encode. Found and diagnosed live on a Windows machine; the PYTHONIOENCODING=utf-8 workaround in settings.json is no longer needed once this ships. (missioncache-dashboard, plugin)
-- New `missioncache-db extension-state [--dir PATH]` command: a one-call JSON snapshot of every active project (progress, resolved file paths, context-save time, fork parent, a dir-match flag for the given directory's git root, update availability). It is the data layer for the MissionCache editor extension, whose v0.1 source now lives in the repo under missioncache-extension/ - status bar + quick pick for VSCode and the Open VSX fork family, marketplace publication to follow. (missioncache-db)
+- Windows renders the statusline instead of a blank block. A piped stdout defaulted to cp1252, which cannot encode the emoji every line carries. (missioncache-dashboard, plugin)
+- New `missioncache-db extension-state` returns a JSON snapshot of every active project. It is the data layer for the editor extension now in the repo. (missioncache-db)
 
 ## 2026-08-19.7
 
 Published package versions: missioncache-install 1.0.15. Claude Code plugin 1.0.21. Everything else is unchanged since 2026-08-19.6.
 
-- Codex gets all eight MissionCache workflows as native skills, invoked as `$missioncache-<name>`, replacing the commands/ delivery that Codex could not load. Codex has no plugin slash commands (hardcoded command enum); it migrates a plugin's commands/*.md into skills at install time, but only files under 4,000 bytes (`MAX_MIGRATED_COMMAND_SKILL_BYTES`, codex-rs/core-plugins/src/command_migration/plugin.rs) - which covered exactly one of the eight (done, 3,607 bytes; the rest run 5,231-13,620). The installer now writes `skills/missioncache-<name>/SKILL.md` with proper name/description frontmatter into the local marketplace, drops the commands/ tree so the migrator cannot create a duplicate `done` skill, and bumps the Codex plugin to 1.3.0 so the plugin cache refreshes. Native skills have no content cap (verified in codex-rs skill parser: only the name is capped, at 64 chars). (missioncache-install)
+- Codex gets all eight workflows as native skills, invoked as `$missioncache-<name>`, replacing the commands Codex could not load. (missioncache-install)
 
 ## 2026-08-19.6
 
 Published package versions: missioncache-db 1.0.23, mcp-missioncache 1.0.29. Claude Code plugin 1.0.20. missioncache-auto, missioncache-dashboard and missioncache-install are unchanged.
 
-- The seven planning tools (`create_plan`, `register_agent_execution`, `update_agent_status`, `get_plan_status`, `get_ready_agents`, `spawn_parallel_agents`, `complete_plan`) work for the first time. Every one of them crashed on first call with `'TaskDB' object has no attribute ...`: the tool layer was written against a DB interface that existed only on the dashboard's DuckDB analytics class, and even that class had different method signatures than the ones the tools call, so no wiring could have saved it - the feature had never run once. The plan, agent-execution and agent-dependency tables now live in SQLite next to everything else (source of truth for writes, per the documented contract), TaskDB implements the nine methods the tools actually call, and existing databases pick the tables up automatically on next open. Covered by 22 DB-layer tests and 23 tool-layer tests including the full three-agents-one-dependency workflow. (missioncache-db, mcp-server)
+- The seven planning tools work for the first time. Every one crashed on first call: they were written against a database interface that lived on another class. (missioncache-db, mcp-missioncache)
 
 ## 2026-08-19.5
 
 Published package versions: missioncache-install 1.0.14. Everything else is unchanged since 2026-08-19.4.
 
-- `--update` upgrades the MCP server for the non-Claude tools instead of skipping it. `_ensure_mcp_missioncache_on_path` returned early whenever `mcp-missioncache` was already on PATH, so the binary Codex, OpenCode and VSCode run stayed pinned at whatever version was current when it was first installed, for the life of the install. Claude Code was unaffected because it runs the server out of the plugin cache rather than from PATH, which is exactly why this stayed invisible: the tool that gets the most use is the one that does not depend on this path, and the three that do are the ones the multi-tool story rests on. Update runs refresh it now, once per run rather than once per client. Found immediately after the release that fixed the mirror-image problem on the plugin side, where the plugin was missing a version bump; between them a fix could reach either half of the user base and not the other. (missioncache-install)
+- `--update` upgrades the MCP server for Codex, OpenCode and VSCode instead of skipping it whenever it was already on PATH. (missioncache-install)
 
 ## 2026-08-19.4
 
 Published package versions: mcp-missioncache 1.0.28, missioncache-dashboard 1.0.19. Claude Code plugin 1.0.19, which is what carries the 1.0.27 MCP fixes to Claude Code for the first time. missioncache-db 1.0.22, missioncache-auto 1.0.5 and missioncache-install 1.0.13 are unchanged.
 
-- Claude Code was missing the previous release's MCP fixes, and the release procedure is why. The plugin cache is a copy of the whole repo and `plugin.json`'s `mcpServers` entry runs `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server --with ${CLAUDE_PLUGIN_ROOT}/missioncache-db`, so a Claude Code session runs the MCP server from the plugin, never from PyPI. Release 2026-08-19.2 published `mcp-missioncache` 1.0.27 without bumping `plugin.json`, on the reasoning that no plugin assets had changed. Codex, OpenCode and VSCode got the fix (they run the bare `mcp-missioncache` on PATH); Claude Code stayed on 1.0.26. It surfaced the way these things do: a task added through the MCP tool landed at the old mid-file anchor instead of the dated Additions section that release was supposed to have fixed. The plugin is bumped here, and the maintainer procedure now states that `mcp-server/` and `missioncache-db/` need a plugin bump exactly as much as `hooks/`, `commands/`, `rules/` and `templates/` do. (plugin, docs)
-
-- Every MCP client gets the behavioural rules now, not just Claude Code. Claude Code reads 16,301 characters of guidance from `rules/missioncache.md`, installed to `~/.claude/rules/` and reaching no other client; every other tool got 471 characters, all of it about CLI-only operations. So a Codex or OpenCode session had nothing telling it when to save, that context-file section names are load-bearing, or that Recent Changes is prepend-only. One item in that gap is correctness rather than style: only the MCP write path takes the per-file lock, a client with shell access can edit a context file directly, and more than one session can be live on a project. That is not hypothetical, it is how all 55 completion narratives in this project's own tasks file were written. The server instructions field is the only surface reaching all four clients and it loads once per session, so it now carries the invariants, with both spellings of the save command named because the flat form is what exists outside Claude Code. The DB-managed sections were deliberately left alone: they already carry their own in-file warning, which is the right place because it is tool-agnostic. The old test asserted the constant against itself and passed on any content; the new ones assert the load-bearing phrases and were each confirmed to fail against the previous string. (mcp-missioncache)
-
-- The Structure panel no longer disagrees with its own header. Two owners for the counts inside one function: the header line counts every checkbox with a raw regex, the table comes from a parser that requires a leading task number, and on a file carrying unnumbered items the panel rendered 108 rows under a header reading 112 with nothing said about the difference. The gap is reported now. Unnumbered items stay out of the table and the graph on purpose, because without a number there is no identity to hang a dependency on and inventing one would be worse than saying the rows are not shown. The first attempt at this was wrong in an instructive way: the count landed in the function where both counts are computed, which is the right place, but the endpoint builds its response from a named whitelist and dropped it. The edit looked correct and the endpoint returned nothing. (missioncache-dashboard)
+- Claude Code gets the previous release's MCP fixes. It runs the server from the plugin, so a plugin bump is required even when only packages changed. (plugin, docs)
+- Every MCP client now receives the behavioural rules, not only Claude Code, through the server instructions field. (mcp-missioncache)
+- The Structure panel reports the gap when its header count and its table disagree, instead of quietly rendering fewer rows. (missioncache-dashboard)
 
 ## 2026-08-19.3
 
 Published package versions: missioncache-install 1.0.13. Everything else is unchanged since 2026-08-19.2.
 
-- `uvx missioncache-install --update` now installs the update. `uv tool install --force` reinstalls but resolves from uv's cached index metadata, so a run shortly after a release reinstalled the version the user already had and reported every component green. It bit the 2026-08-19.2 release on the machine it was published from: the run finished clean and left `missioncache-dashboard` at 1.0.17 and `missioncache-auto` at 1.0.4. The uv path passes `--refresh` now. Worth recording how the diagnosis went, because the first answer was wrong: an A/B test suggested `--force` alone was fine, but it was contaminated - an earlier cache-clean loop had cleared `mcp-missioncache` before stalling on a lock held by live MCP server processes, so that one package alone resolved fresh and looked like proof. Rerun against the two untouched packages in the same minute, `--force` alone kept 1.0.17 and 1.0.4 while `--force --refresh` took 1.0.18 and 1.0.5. The pipx branches are unchanged: whether pip's cache behaves the same way was not tested, and putting a guess in the code is worse than leaving the branch alone. (missioncache-install)
+- `uvx missioncache-install --update` installs the update. It resolved from a cached index and reinstalled the version you already had, reporting every component green. (missioncache-install)
 
 ## 2026-08-19.2
 
 Published package versions: mcp-missioncache 1.0.27, missioncache-dashboard 1.0.18, missioncache-auto 1.0.5. Claude Code plugin 1.0.18, missioncache-db 1.0.22 and missioncache-install 1.0.12 are unchanged.
 
-- Completing a task in missioncache-auto no longer ticks its own subtasks. A task number is a prefix of its children's, so `mark_task_completed("1")` ran an unguarded pattern and flipped `1.2` and `1.3` along with it: three lines checked where one was asked for, reporting work as done that nobody did. Reproduced before the fix and confirmed to fail again with the guard removed. The MCP writer has carried the same guard and a comment explaining exactly this failure for a while; this copy never got it, which is what a duplicated regex across two packages buys you. The number is escaped now too, since task numbers carry dots. (missioncache-auto)
-
-- The project page's Tasks tab is readable. A completed item carries its shipping narrative inline in a trailing `*(complete <date>: ...)*`, and those are 66% of all checklist text on the project this was built against: 51,829 of 78,433 characters across 58 of 112 items, the largest 4,044 characters on its own. The tab dumped the whole file through marked, so one item could fill a screen. The narrative now collapses behind a dated disclosure, and the split happens on the SOURCE rather than the rendered DOM. That is not a stylistic choice: in the DOM the narrative is not one element, because an asterisk inside it (a glob like `commands/*.md`) re-opens emphasis and marked hands back fragments, so the longest item's trailing `<em>` covered barely half of it. In the source the boundary is exact and appears once per line. A long DESCRIPTION is the opposite problem and gets the opposite treatment, since it says what the work IS: clamped in place with a toggle rather than hidden, on the 28 of 112 that actually overflow. The clamp is applied before it is measured, because an unconstrained box reports no overflow however long its text is. Two rendering defects were caught only by checking the browser rather than the code: a property-level assertion passed while the layout was broken, and in a loose list the HTML parser closes the open `<p>` the moment a `<details>` starts, so the disclosure escaped its wrapper and became a third flex child sitting beside the text. The second is fixed by normalising the DOM rather than by flex-wrap, which was tried and reverted for making long items break to a new line instead of shrink. (missioncache-dashboard)
-
-- The Tasks tab states its totals, and a template Plan says so. The file's physical order does not follow its numbering, so a reader who scrolls to the bottom lands on a mid-range number and concludes the list is truncated; a stat strip now gives done/total, open, percent and last-worked from data the page already loads. The Plan tab renders an honest empty state instead of a page reading "Success Criteria: TBD" as though it were a plan, naming the file and the creation date and offering the template behind a toggle. The fingerprint (Success Criteria and Files to Modify both empty or TBD) was run against all 24 active projects on the machine: it matched 22 and let through exactly the two that were ever written. Tab order is now Overview, Plan, Tasks, Structure, Context, Action Items, Updates, which puts what the project IS before where it stands. Switching is keyed on a data attribute and no CSS is positional, so the reorder is safe. (missioncache-dashboard)
-
-- Adding a task no longer corrupts the file it is added to. `update_tasks_file` ran an unanchored `re.sub` with the default `count=0` against `## Phase 2`, `## Validation` and `## Notes`, so every occurrence got an insertion, including one inside an existing task's description: that line was split in half and the new task written twice. It also landed at whichever anchor came first, usually near the top of the file, which is how physical order drifted away from numbering (on the project this was found in, tasks 85 to 89 sit at line 54 while 83 and 84 sit at line 232). New tasks now go into a dated `## Additions (YYYY-MM-DD)` section through the same fence-aware helper the context path uses, created once per day and appended to thereafter. The section lands at the end of the file, so numbering and file order agree from here on; the cost is that `## Notes` is no longer last. Numbering also comes from the canonical parser rather than a local regex which matched `[x\s]` and a bare `\d+`, so a hand-edited `[X]` and a letter-suffixed `54a` were both invisible to it and the next number could collide with an item already in the file. Forward-only: existing files keep their layout, the divergence just stops growing. (mcp-missioncache)
+- Completing a task in missioncache-auto no longer ticks its subtasks along with it. (missioncache-auto)
+- The project page's Tasks tab is readable. A completed item's shipping narrative collapses behind a dated disclosure. (missioncache-dashboard)
+- The Tasks tab states done, open and percent, and the Plan tab says plainly when a project never wrote one. (missioncache-dashboard)
+- Adding a task no longer corrupts the file it is added to. New tasks go into a dated `## Additions` section at the end. (mcp-missioncache)
 
 ## 2026-08-19.1
 
 Published package versions: missioncache-install 1.0.12. Claude Code plugin 1.0.18 and the other four packages are unchanged since 2026-08-19.
 
-- The missioncache-install test suite no longer rewrites the developer's own install state. `isolated_home` redirects `Path.home()` and the module-level state paths at a pytest tmp dir, but it was opt-in and 31 tests in `test_cli.py` never asked for it; those that reach `main()` hit `state.set_mode` against the real `~/.claude/missioncache-install.state.json`, and the mode resolved to `local` because pytest runs with the repo root as cwd, where the plugin marker lives. So a full suite run silently converted a PyPI install's record to a maintainer one, and the next `uvx missioncache-install --update` from anywhere but the clone died with `RuntimeError: Internal error: local-mode installer called without repo_root set`. That reached a real machine on 2026-08-19 and cost a failed update. The fixture is autouse now, since one that has to be remembered gets forgotten, and a test that deliberately requests no fixture asserts `STATE_FILE` never resolves under the real home (comparing against `os.path.expanduser`, because the fixture patches `Path.home` and the obvious comparison compares the sandbox with itself). The second half is independent: `update_all` deliberately adopts the RECORDED mode so an update cannot flip a pypi install to an editable one, but adopting `local` needs a clone and nothing checked, so the mismatch surfaced as an internal error partway through rather than a message. It now fails through `ui.fail` before any component runs, and says to re-run from the clone or reinstall to switch to PyPI mode; state records the mode but never where the clone was, so there is nothing to recover the path from. The reverse pairing (recorded `pypi`, run from a clone, `repo_root` set) needs no guard: all seven `_require_repo` call sites sit behind `ctx.mode == "local"`. Each of the three new tests was confirmed to fail with its fix removed. (missioncache-install)
+- The missioncache-install test suite no longer rewrites your own install state, which broke the next update from outside the clone. (missioncache-install)
 
 ## 2026-08-19
 
 Published package versions: missioncache-dashboard 1.0.17, missioncache-install 1.0.11. Claude Code plugin 1.0.18. (missioncache-db 1.0.22, mcp-missioncache 1.0.26 and missioncache-auto 1.0.4 are unchanged this cycle and keep their versions.)
 
-- `/missioncache-fork` and `/missioncache-rename` now ship to Codex, OpenCode and VSCode. They were absent from `CANONICAL_COMMANDS` and, because nothing enumerated the gap, neither file carried a single per-tool marker: adding the two names alone would have shipped commands telling Codex to resolve a Claude session id and write `~/.claude/hooks/state/`. fork needed only its session steps marked, since the create call works without a session. rename needed a different path rather than a smaller one, because it identifies its target from the session binding and the other tools have none. That was verified at the runtime rather than read off the code: `find_task_for_directory` on a repo root returns `found: false` without a `session_id` and resolves the project with one, and the only two writers of a binding are a Claude plugin hook and an MCP helper that takes a session id. So the other tools try the directory first, then list the active projects and ask which one, and never guess, since a wrong rename moves a directory and rewrites files. Carrying a per-tool path needed an inverse marker, and its body sits inside the HTML comment rather than between two markers because Claude ships these files unrendered and would otherwise display it. The user-facing command lists are now derived from `CANONICAL_COMMANDS` instead of hardcoded, which is what let both commands go missing without anything failing, and the guard tests render the real command sources rather than fixtures, so the next command added to the tuple without markup fails the suite. (missioncache-install, plugin)
-
-- Checkboxes in the Tasks tab rendered on their own line, above their task text and behind a stray bullet. Two independent causes, both read off the live DOM rather than inferred. A single blank line anywhere in a markdown list makes the whole list loose, at which point marked wraps every item's content in a `<p>` and the checkbox stops being a direct child of the `<li>`, so the rule keyed on `li:has(> input[type="checkbox"])` never matched and the item kept its bullet and never became flex. Separately, the project's own numbering convention puts `1. ` at the start of the item text, and once GFM has consumed the `[ ] ` marker that content begins an ordered list, which is a block, so the text landed under the checkbox instead of beside it. The selector now covers the loose shape and gives the wrapping paragraph `display: contents` so its children become the flex items, and the number is escaped before parsing so it stays literal text. One suggested hardening was reverted after a screenshot: `flex-wrap: wrap` made long items break to a new line entirely rather than shrink, and the property-level assertion passed while the layout was broken, so the check is now geometric and asserts every checkbox shares a row with its own text. (missioncache-dashboard)
-
-- The Task Numbering Format block moved out of the Tasks tab's reading flow and into a `?` affordance in the panel's corner. It explains the file format to whoever edits `tasks.md` and is reference material rather than task content, so it sat above the first phase in every project. The content is lifted from the file at render time rather than copied into the dashboard, so there is still one source of truth, and the rule that closed the section stays with the body so removing the section does not leave two rules stacked on each other. It is a real button rather than a `title` attribute for the same reason the briefing view's info affordance is one: the native tooltip has a delay of about a second and no keyboard path. (missioncache-dashboard)
-
-- The cross-session send rule stops reading an absent `ListAgents` row as proof a peer is gone. Claude Code 2.1.234 made the tools say when your account's session list was too long to check completely rather than letting unseen sessions look absent, so the rule's step 3 now splits the two causes and asks for different words in each: a peer that could not be checked is not a peer that is unreachable, and the difference matters because the second phrasing tells the user a notification failed when nothing failed. The same qualification lands on the standing claim that a session absent from `ListAgents` is unreachable whatever the pid says, which is this repo's own absence-claim rule turned on the listing itself. Step 2 gains the second trigger for the ref path: `SendMessage`'s own guidance asks for the ` [ref]` when two rows share a name **or** when a session list could not be checked, so a unique name is not always enough. Written against the condition the tools report rather than any literal message text, because the wording of a truncated listing has not been observed here, only the changelog line and the tool description. (rules, plugin)
-
-- The landing page gained a fourth feature card, for parallel sessions. The capability shipped across 2026-08-13 and 2026-08-17 and had nowhere to live on the page: writes to a project serialize on its own sidecar lock and land atomically, and every MCP tool that rewrites a project reports which other sessions are live on it. The card leads on the gap rather than on the mechanism, because running two agents at once is already an ordinary thing to do and the part nobody notices is that the two sessions share nothing but the files. A matching FAQ entry states the boundary the copy must not cross: MissionCache never merges two conversations, and no session rewrites another one's memory in place. The card's media slot is an inline SVG rather than a screenshot, because the claim is a topology (two sessions, one locked file) and a screenshot cannot show a topology. It costs 6KB on a page already at 1.4MB from inlined screenshots, it scales to any width, and it is drawn from the `--con-*` console tokens the stylesheet deliberately keeps dark in both themes, so it needs no light-mode variant the way a raster illustration would. Also dropped the word "lanes" from the fork card and its terminal mock, which was vocabulary carried over from `forks.md` rather than anything a first-time reader would parse. (site)
-
-- The landing page carried two claims that had stopped being true, and had not been rebuilt since 2026-07-26 so both were three weeks stale on the public page. Its Windows FAQ said the lifecycle hooks do not run there and that a port was on the roadmap, which the native port made wrong on 2026-08-17; it now describes what ships, with the Claude Code 2.1.139 floor, the Task Scheduler registration and its Run-key fallback, the real-hardware CI job, the two pieces still macOS or Linux only (VSCode client registration and exporting a cross-machine bundle), and the WSL2 trap that native and WSL are separate installs with separate home directories that never see each other's projects. The MCP tool count read 36 in six places against 42 today. That number comes from a live stdio `tools/list` handshake rather than from grepping for the decorator, which answers 43: one of the matches is a comment in `server.py` mentioning `@mcp.tool()`, which is a text-shaped check answering a structure-shaped question. (site)
-
-- Corrected a claim about Windows that was wrong in the README, in `installation.md` and in the 2026-08-17 entry itself: all three said native Windows was covered only by platform-mocked unit tests with a real-hardware CI job still to come. That job (`smoke-windows`) landed on 2026-08-15, two days before the release that repeated the claim, and it does considerably more than compile - all six test suites on Windows, `missioncache-install --all --yes` run the way a user runs it, the dashboard proved to be serving rather than merely registered, the Task Scheduler task body actually run with its Run-key fallback checked, stdin JSON reaching a hook through `uv run`, the native drive-letter `encode-cwd` form, and an MCP server spawned through uvx answering `initialize`. Understating this made Windows look less finished than it is, and the real gaps are the specific ones already listed (VSCode client registration, export from Windows) rather than general immaturity. (docs)
+- `/missioncache-fork` and `/missioncache-rename` ship to Codex, OpenCode and VSCode, with the Claude-only session steps stripped rather than shipped. (missioncache-install, plugin)
+- Checkboxes in the Tasks tab sit beside their task text instead of above it behind a stray bullet. (missioncache-dashboard)
+- The task-numbering reference moved out of the Tasks tab's reading flow into a `?` button in the corner. (missioncache-dashboard)
+- An absent `ListAgents` row is no longer read as proof a peer is gone, since the list can be too long to check. (rules, plugin)
+- The landing page gained a feature card for parallel sessions. (site)
+- The landing page's Windows FAQ and MCP tool count had been stale for three weeks. (site)
+- Corrected a claim in three places that native Windows had no real-hardware CI. That job landed on 2026-08-15. (docs)
 
 ## 2026-08-17.1
 
 Published package versions: missioncache-db 1.0.22, mcp-missioncache 1.0.26, missioncache-auto 1.0.4, missioncache-dashboard 1.0.16. Claude Code plugin 1.0.16. (missioncache-install is unchanged since 2026-08-17 and stays at 1.0.10.)
 
-- A relative `MISSIONCACHE_ROOT` is now refused rather than resolved, with a warning. An adversarial review pass caught this right after the change below shipped, and it is the same split-brain one level up: the consumers do not share a working directory, so a relative value names a different physical directory in each process. Measured on a real install, the launchd-started dashboard runs from `/` (its plist pins no `WorkingDirectory`) while the MCP server runs from the user's repo, so `MISSIONCACHE_ROOT=data` would have put project files in one place and the SQLite DB, the DuckDB mirror and the caches in another, off a single env value. `.` was the worst spelling of it, since it reads as harmless and silently makes the data root wherever the process started. The check lives at the owner, and `machine_map.py` copies it along with the resolution it already copies, so the two cannot disagree about a relative value. A test runs the same override from two different working directories and asserts they agree, which is the shape that actually bites. (missioncache-db)
-
-- `MISSIONCACHE_ROOT` now moves everything or nothing. It is the internal override that points MissionCache at a different data dir, used by tests and by importing a bundle into a fresh root, and it was honored by `missioncache_db` and quietly ignored by most of its consumers. The sharp end was inside one process: `mcp-server`'s `Settings` kept `root` and `db_path` as independent fields, each with its own `Path.home() / ".missioncache"` literal, and `env_prefix` wired the variable onto only the first. Measured before the fix, `MISSIONCACHE_ROOT=/tmp/x` gave `root=/tmp/x` with `db_path=~/.missioncache/tasks.db`, so the MCP server wrote project files under the override and DB rows into the real home, with no error either way. A second case was worse: `MISSIONCACHE_ROOT=""` resolved `root` to `Path(".")`, the server's working directory, which is exactly what the `or` idiom in `missioncache_db`'s own resolution exists to prevent. Both are closed by a `model_validator` that lets `db_path` follow `root` unless it was set explicitly, plus `env_ignore_empty` on the settings class. Review found the empty case was wider than first thought and a per-field guard would have left most of it open: `MISSIONCACHE_DB_PATH=""` resolved the DB to a directory, and `MISSIONCACHE_ACTIVE_DIR_NAME=""` collapsed `root/active/<name>` to `root/<name>`. One setting covers the class. What it does not cover is a non-empty relative value, so `MISSIONCACHE_ROOT=.` still resolves against the working directory; hardening that belongs at the owner's own resolution, or the MCP server and the dashboard would read one env value two different ways, and the comment says so rather than implying the hole is closed. A side effect worth naming: four `Settings(root=tmp_path)` sites in the mcp-server tests were pointing at the developer's real `tasks.db` while believing they were sandboxed, and now follow to tmp. The dashboard was inconsistent with itself in the same file: `server.py` held its own root constant, two functions rebuilt `tasks.db` from scratch, and `get_today` lazily imported the real constant, so `/api/today` honored the variable while the endpoints beside it did not. Those now resolve through `missioncache_db` at call time via a small `_mc_root()` accessor, `analytics_db` and `update_check` derive their own artifact paths from it, and `hooks/task_tracker.py` stops hand-rolling the root. The ownership rule is written down at the definition site in two cases: a second copy of the root or of `tasks.db` is never a local constant, and a path that extends the root into an artifact one module owns may be, provided it derives. Two guard tests keep it that way, one asserting `server` never re-binds the name and one probing every dashboard-owned path in a subprocess. `statusline.py` is a documented exception, because it mirrors rather than imports so it survives as a bare script. (mcp-missioncache, missioncache-dashboard, plugin, missioncache-db)
-
-- `installation.md` now covers Windows properly, in a section of its own for native Windows and WSL2. It had one prerequisites line, while the fuller note lived in the README, which is backwards for the doc that calls itself the comprehensive reference. The lead is the part a reader needs before installing rather than after: the two are separate installs, WSL has its own home directory, so `~/.missioncache/` and `~/.claude/` differ and neither install sees the other's projects, task DB or time tracking. Install where Claude Code runs. Native Windows then gets a table of the real differences (hook exec form and the 2.1.139 floor, `uv`-resolved Python and the installer's pre-warm, the Task Scheduler task with its Run-key fallback, the quoted forward-slash statusline path, the executing `python3`/`python` probe, the symlink-to-copy fallback on WinError 1314, VSCode registration still being macOS-only, and import-yes/export-no for cross-machine bundles), plus a plain statement that the platform is covered by mocked unit tests rather than a run on real hardware. WSL2 gets the systemd-less default and the profile-autostart fallback it lands on, and the note that enabling systemd in `/etc/wsl.conf` and re-running `install-service` takes the normal Linux path, since the check reads `/run/systemd/system` at call time. (docs)
+- A relative `MISSIONCACHE_ROOT` is refused rather than resolved. The consumers do not share a working directory, so it names a different place in each. (missioncache-db)
+- `MISSIONCACHE_ROOT` moves every data path, not only some. An empty value no longer falls back to the working directory. (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
+- `installation.md` covers native Windows and WSL2 in a section of its own, starting with the fact that the two are separate installs. (docs)
 
 ## 2026-08-17
 
@@ -131,29 +122,24 @@ Published package versions: missioncache-db 1.0.20, mcp-missioncache 1.0.25, mis
 
 ### Native Windows
 
-Ported, and exercised on real Windows hardware by the `windows-latest` CI job that landed on 2026-08-15 (this line first shipped saying the job was still a later phase, which was already wrong when it was published). **Requires Claude Code 2.1.139 or newer**, where hook `args` (exec form) was added: an older client silently drops `args` and runs bare `uv`, which exits non-zero. plugin.json has no field to express this, so it is stated here and in the README.
+**Requires Claude Code 2.1.139 or newer**, where hook `args` (exec form) was added. An older client drops `args` and runs bare `uv`, which exits non-zero.
 
-- Plugin hooks run on native Windows (no WSL). hooks.json moved from a `python3 <script>` shell string to the documented exec form - `uv` spawned directly with an argument list - so the launcher works the same under Git Bash and PowerShell, cannot break on a plugin-cache path containing spaces (exec form passes arguments verbatim, no shell tokenization), and no longer depends on a `python3` name most Windows Python installs lack: `uv run --no-project --python ">=3.11" python` resolves a modern interpreter everywhere. Each hook makes the bundled `missioncache-db/` importable itself - five insert it into `sys.path`, `activity_tracker` passes it as `PYTHONPATH` to the subprocess it spawns - so the interpreter needs nothing pip-installed. `missioncache-install` pre-warms the interpreter resolution at plugin-install time so a first-use Python download never races the UserPromptSubmit hooks' 5-second timeout; a marketplace-only install skips that warm, and the new hooks.md troubleshooting entry covers the one-time `uv python install` it may need. (plugin, missioncache-install, docs)
-- The slash commands' bash blocks no longer assume `python3` or the slash-only cwd encoding. Each block probe-runs `python3` then `python` (executing, not just resolving - the Windows Store stub resolves on PATH but does not run) and captures `sys.executable`, a single quotable path that survives zsh (which does not word-split unquoted variables) and Windows paths with spaces alike, with `uv python find` as the last fallback. `CWD_KEY` comes from the new `missioncache-db encode-cwd` (the documented every-non-alphanumeric encoding), with a sed approximation as the CLI-less fallback - POSIX-correct only, since MSYS `pwd` prints `/c/Users/...`. (plugin)
-- The dashboard registers for autostart on Windows: a Task Scheduler ONLOGON task, falling back to an HKCU Run-key entry when schtasks refuses from a non-elevated prompt (stock Windows denies ONLOGON triggers without elevation; the Run key never needs it). Both mechanisms run `serve --hidden`, plus `--port N` when the port is not the default: `--hidden` hides the console window (either mechanism otherwise parks a visible console on the desktop for the whole session) and redirects serve's own output to a Windows log file, and `--port` rides on the command line because neither mechanism can set per-task environment variables. `status` and `uninstall-service` (which also stops the running server, matching every other platform) grew matching Windows branches. (missioncache-dashboard)
-- missioncache-auto runs Claude portably: the executable resolves via `shutil.which` (npm installs `claude` as a `.cmd` shim, which a list-form spawn cannot start by bare name), the process-group spawn splits by platform (`start_new_session` has no Windows meaning; `CREATE_NEW_PROCESS_GROUP` there), and teardown reaps the claude subtree with `taskkill /T /F` where `killpg` does not exist. `Worker` round-trips through pickle, the spawn start method's requirement (Windows's only one). (missioncache-auto)
-- Bare-name executable resolution is centralized and hardened. `subprocess_utils` resolves a bare `cmd[0]` through `shutil.which` on Windows so `.cmd` shims (claude, codex, and any future CLI) spawn from a list-form command in one place; a missing binary folds into the normal `CommandFailed` handling instead of raising `FileNotFoundError`. Every such resolution refuses a result whose directory is the current working directory: `shutil.which` searches the cwd before PATH on Windows, so an installer run from a directory holding a planted shim would otherwise bake that path into the dashboard's logon persistence, or hand the missioncache-auto Claude child the full environment. (missioncache-install, missioncache-dashboard, missioncache-auto)
-- The installer works with Windows tool shims and privileges: `--local` mode falls back from symlinks to copies when Windows refuses without Developer Mode (WinError 1314, with a note pointing at the setting and a widened ignore list so secrets/local DBs never land under `~/.claude/plugins/`), and the statusline command is written as the absolute forward-slash path to the exe on Windows, quoted when it contains a space (Git Bash eats backslashes and word-splits on spaces; the scripts dir is not guaranteed on the statusline's PATH). The statusline itself now carries its crash guard in `main()` - the installed entry point bypassed the old `__main__`-only guard, rendering blank on any unhandled exception - and recognizes `USERNAME` alongside `USER`. (missioncache-install, missioncache-dashboard)
-- Cross-machine sharing now supports native Windows as an import target: a bundle exported on macOS/Linux lands with Windows-shaped local paths (`config set-path` accepts `C:/...` or `C:\...`, token expansion builds paths through pathlib, `--rewrite-paths` writes the native form). Export FROM Windows stays out of scope - the embedded-path scanner recognizes only `/`-rooted absolutes - and the sharing plan doc states the asymmetry. (missioncache-db, docs)
+- Plugin hooks run on native Windows, with no WSL. hooks.json moved to the exec form, and each hook makes the bundled database importable itself. (plugin, missioncache-install, docs)
+- The slash commands stop assuming `python3` exists, probe-running each candidate instead of trusting PATH. (plugin)
+- The dashboard registers for autostart: a Task Scheduler task, falling back to a Run-key entry when schtasks refuses without elevation. (missioncache-dashboard)
+- missioncache-auto runs Claude portably. `.cmd` shims resolve, and the process tree is reaped with `taskkill`. (missioncache-auto)
+- Bare-name executable resolution is centralised, and refuses a result found in the current directory. (missioncache-install, missioncache-dashboard, missioncache-auto)
+- The installer copies where Windows refuses symlinks, and writes the statusline path quoted. (missioncache-install, missioncache-dashboard)
+- A bundle exported on macOS or Linux imports on native Windows. Export from Windows stays out of scope. (missioncache-db, docs)
 
 ### Cross-session notifications
 
-- Every MCP tool that rewrites a project's files now returns `live_sessions`, not just `update_context_file`: the five PM mutators (`add_action_item`, `update_action_item`, `set_stakeholder`, `set_ticket`, `set_project_due_date` - each rewrites the context-file mirror sections), `update_tasks_file` (the tasks file is project state a live peer works from), `rename_task` (under the NEW name; a rename moves the context file out from under a live peer), and `complete_task` / `reopen_task` (the whole project directory moves between active/ and completed/). The rule and docs now also state the boundary explicitly: dashboard and CLI writes do not notify, because the notification is acted on by Claude reading the tool response and those writers have no Claude on the response side. (mcp-missioncache, rules)
-
-- The cross-session send rule now tries the bare `ListAgents` name first and falls back to the ref the rejection error itself prints. Claude Code 2.1.232 delivers a bare name matching one live session directly, but a long-lived session keeps the code it launched with regardless of what `claude --version` reports (it follows the install symlink, not the running process - confirmed with lsof on a session still executing the 2.1.231 binary hours after 2.1.232 was installed), so rejections continue after an upgrade until sessions restart and the ref fallback stays load-bearing. The two-rows-one-title ask stays, narrowed to unmanaged background sessions now that the harness auto-uniquifies interactive names with a `name-word-word` variant - which the rule also documents as a new way the recorded address can silently diverge from the displayed one (the entry then falls into the skip path, never a misdelivery). (rules)
-
-- Session titles self-heal instead of being set once per binding. The `session_title` hook recomputes the address every prompt and re-emits only on a difference, so a session left holding `<project>-2` after the plain-name holder dies drops back to the plain name, and two sessions that raced their first prompt into the same name split apart on the next prompt. Set-once let suffixes only accumulate: a real machine reached `-3` with zero live peers, making two of six live projects unaddressable by their recorded titles. The narrow cost is that a manual `/rename` can be overwritten when the peer set changes, not only on rebind. (plugin)
-
-- The SessionStart hook takes its session identity from stdin, not from the environment. `get_session_context` preferred the `CLAUDE_SESSION_ID` env var and fell back to the stdin `session_id`; the order is now reversed, with env filling in only when stdin carries no session ID. stdin names the session the event belongs to, an env var is ambient and a parent hands it down, and every state file the hook writes (`projects/<sid>.json`, `session-pids/<sid>.json`, the `term_sessions` row) is keyed by that ID - so the wrong one binds another session's project and attributes its time. No live behavior changes today, because Claude Code does not inject `CLAUDE_SESSION_ID` at all; the name it injects is `CLAUDE_CODE_SESSION_ID`. That mismatch is now documented as deliberate rather than left looking like a typo: the injected name IS inherited by child sessions, so keying the fallback on it would hand a parent's identity to a child in exactly the no-stdin case the fallback exists for. An invalid stdin session ID still wins the precedence check and is then dropped by the validation gate, so the hook fails closed instead of falling through to whatever the environment happens to hold. (plugin, docs)
-
-- New `missioncache-db prune-sessions [--days N] [--dry-run]` deletes the per-session state of sessions that are gone. Nothing removed `session-pids/<id>.json`, `projects/<id>.json` or the `project_state` row on session exit, so all three grew one entry per session for the life of the install: the machine this was written on held 2,318 pid records at 9 MB and 308 binding rows, of which 16 had been touched in the preceding week. Three gates decide what goes. Liveness protects work in progress: only a session whose pid does not prove it is still running is swept, so a session open for weeks is never touched. Age keeps the sweep off anything recent, defaulting to 7 days with a hard floor of 1. The third gate is the one that took a review round to get right. Parallel-session detection reads a *dead* session's pid record to tell "closed a moment ago" from "still running", and it selects candidates by transcript mtime, so deleting a fresh corpse's record flips proven-dead to unknown, which that path keeps, and the session returns as a phantom parallel session. Record age looked like it covered this and does not: `write_session_pid` runs only on a SessionStart, so the mtime is time since the last start, resume or compact, and sessions were measured still running on 10.6-hour-old records. A session that outlives the floor and then exits leaves a record that is old and a fresh corpse at once. Pid records are therefore also held back for any session whose transcript is newer than `PRUNE_TRANSCRIPT_WINDOW_SECONDS` (30 minutes), the same clock that path filters on, with the two constants held in order by a test since they live in different packages. Pointers and binding rows have no such reader and skip the gate. Age is judged per record rather than per session, so a pointer that outlived its row is still swept, and unknown liveness is swept like dead - which includes live sessions whose pid never resolved (Claude Desktop), at the cost of a statusline binding until the next `/missioncache:load`, as `cli.md` now says outright. `live_sessions_for_project`'s docstring no longer claims `project_state` rows are never deleted. (missioncache-db, docs)
-
-- The send protocol treats `ListAgents` as the reachability authority. A notify target with no matching row is skipped with a one-line note instead of blocking on a question - the pid filter cannot catch a session closed while its shared `claude` process lives on, and a live session's stale title now heals itself. Two rows matching one title (unmanaged background sessions inherit a project's name without being bound) stays the one case that asks. This retires the shared-pid liveness concern at the protocol level: a stale target costs a skipped send, never a misdirected one. (rules)
+- Every MCP tool that rewrites a project's files returns `live_sessions`, not only `update_context_file`. (mcp-missioncache, rules)
+- The send protocol tries the bare `ListAgents` name first and falls back to the ref the rejection itself prints. (rules)
+- Session titles recompute on every prompt, so a session left holding a `-2` suffix drops back to the plain name. (plugin)
+- The SessionStart hook takes its session identity from stdin rather than the environment, which a child session inherits. (plugin, docs)
+- New `missioncache-db prune-sessions` deletes the per-session state of sessions that are gone. One machine held 2,318 pid records. (missioncache-db, docs)
+- A notify target with no `ListAgents` row is skipped with a one-line note instead of blocking on a question. (rules)
 
 ## 2026-08-13
 
@@ -161,503 +147,199 @@ Published package versions: missioncache-db 1.0.19, mcp-missioncache 1.0.24, mis
 
 ### Cross-session notifications
 
-- A session that writes into another project's context now tells that project's live sessions about it, instead of leaving them working from what they read at load time. `update_context_file` returns `live_sessions` (other live Claude Code sessions bound to the project owning the file), and the new "Cross-session notifications" rule tells Claude to reach each one with Claude Code's cross-session `SendMessage` (2.1.224+, macOS and Linux) and what the receiving session should do with the message. (mcp-missioncache, rules)
-- New `session_title` UserPromptSubmit hook names each session after the MissionCache project it is bound to. `SendMessage` addresses a peer by its session title, and Claude Code otherwise derives that title from the session's first prompt - so nothing could reliably reach the session that owns a given project. The title is set once per binding, so a manual `/rename` sticks, and a second live session on one project takes a `-2` suffix. (plugin)
-- New `missioncache_db` helpers: `live_sessions_for_project` (the project → live sessions lookup, which did not exist in any form), `bound_project_for_session`, `session_is_alive`, and the `session_pid_path` / `session_title_path` state-file owners. `session_is_alive` is lifted out of `hooks/session_start.py` so the hook and the lookup cannot drift on what "still running" means. (missioncache-db)
-- `update_context_file` excludes the calling session from `live_sessions` using `CLAUDE_CODE_SESSION_ID` from the MCP subprocess's own environment. Deriving it from the process tree was tried and abandoned: one `claude` process hosts many sessions at once (measured: twelve under a single pid), so pid to session is one-to-many and the walk matched an unrelated two-month-old session that shared the pid. The process-tree walk is still lifted out of `hooks/session_start.py` and shared, but only for recording a session's pid. (missioncache-db, mcp-missioncache)
-- `live_sessions_for_project` lists a session only when its pid proves it is running, rather than when it is merely not proven dead. `project_state` is never cleaned on session exit, so it holds every session that ever loaded a project - a real project here had 34 such rows spanning two months against zero live sessions, and the looser rule would have announced every context write to all 34. (missioncache-db)
-
-- The send protocol documents that a send is not a delivery: a receiver running with bypassed permissions and `crossSessionInbound: "hold"` parks the message for manual approval and drops it after `dialogExpiry`, while `SendMessage` still returns success to the sender. Setting `crossSessionInbound` to `accept` delivers without the prompt and applies to already-running sessions. (rules)
-- The send protocol addresses a peer by its `ListAgents` name **and** the row's `[ref]`. A cross-session peer is not an agent in the calling conversation, so the bare name is rejected outright rather than only when two rows collide, and refs are per-listing so a remembered one does not resolve. (rules)
+- A session writing into another project's context now tells that project's live sessions, instead of leaving them on what they read at load time. (mcp-missioncache, rules)
+- New `session_title` hook names each session after its project, so a peer can be addressed at all. (plugin)
+- New helpers `live_sessions_for_project`, `bound_project_for_session` and `session_is_alive`. (missioncache-db)
+- `update_context_file` excludes the calling session from `live_sessions`. One `claude` process hosts many sessions at once. (missioncache-db, mcp-missioncache)
+- A session is listed as live only when its pid proves it, not merely when it is not proven dead. (missioncache-db)
+- The send protocol documents that a send is not a delivery: a held message still returns success to the sender. (rules)
+- A cross-session peer is addressed by its `ListAgents` name and the row's `[ref]`, which is per-listing. (rules)
 
 ### Statusline
 
-- The usage line shows a per-model weekly counter after Weekly, reading the `weekly_scoped` entry from the usage response's `limits` array. That array is the only place the number appears: the top-level `seven_day_opus` / `seven_day_sonnet` buckets are null on plans that report the cap this way, even while it sits at 71% used. The label comes from `scope.model.display_name` rather than being hardcoded, so whichever model the plan scopes is what renders, and unlike the Opus counter it does not hide at 0% because a freshly reset week reading zero is real information. (missioncache-dashboard)
+- The usage line shows a per-model weekly counter, read from the `limits` array where the number actually appears. (missioncache-dashboard)
 
 ### Context files
 
-- `imported_event` constrains what reaches the file. `heading` must be a single line and `related_project` must be a bare project name, because both are interpolated into markdown the digest parses: a newline in the heading forged a second `## Waiting on` above the real one (hiding the project's blockers table from the digest and sending every later waiting-on write to the decoy), and a newline in `related_project` forged a `**Fork of:**` or `Hub:` header line, which decides which file the resume flow loads. `body` stays free-form but has its headings demoted, so a pasted meeting summary containing `## Next Steps` becomes a subsection of the event instead of shadowing the project's real one - that last case needed no crafted input at all. (mcp-missioncache)
-- Repeating an `imported_event` whose heading already exists is now a no-op reported as `imported_event_duplicate`, instead of stacking a duplicate section on every retry. The heading's date suffix is only skipped when the heading already ends in a parenthesized date, so an id like `ABCD-1234-56-7890` is no longer mistaken for one. (mcp-missioncache)
-- `live_sessions_for_project` and `bound_project_for_session` log a warning when the hooks-state DB read fails, instead of returning "no peers" / "not bound" indistinguishably from success. Under lock contention the silent version failed exactly when a concurrent session existed, which is the case the feature is for. (missioncache-db)
-- The `session_title` hook no longer raises across the hook boundary when stdin carries valid JSON that is not an object. (plugin)
-- `live_sessions_for_project` returns `last_active` rather than `bound_at`: the underlying `project_state.updated_at` is refreshed by the dashboard's action hook, so it tracks activity, not binding time. (missioncache-db)
-
-- `update_context_file` gained an `imported_event` parameter that writes the "Cross-project events" section (`## <event> (<date>)` above Waiting on) and the `**Related projects:**` header line. The convention was documented but had no writer, so following it meant a direct Edit - which skips the sidecar lock the parallel-session discipline requires for exactly this write. (mcp-missioncache)
+- `imported_event` constrains its `heading` and `related_project`, both of which are interpolated into markdown the digest parses. (mcp-missioncache)
+- Repeating an `imported_event` whose heading exists is a no-op instead of stacking a duplicate section. (mcp-missioncache)
+- A failed hooks-state read logs a warning instead of returning "no peers" indistinguishably from success. (missioncache-db)
+- The `session_title` hook no longer raises on stdin carrying valid JSON that is not an object. (plugin)
+- `live_sessions_for_project` returns `last_active` rather than `bound_at`. (missioncache-db)
+- `update_context_file` gained `imported_event`, which writes the cross-project event section under the lock. (mcp-missioncache)
 
 ## 2026-07-30
 
 Published package versions: mcp-missioncache 1.0.20, missioncache-dashboard 1.0.13, missioncache-install 1.0.8. Claude Code plugin 1.0.9.
 
-### Changed - every third-party dependency now caps its major version (mcp-missioncache, missioncache-dashboard, missioncache-install)
-
-- The mcp 2.0.0 incident generalized: the MCP server resolves fresh via uvx and the installer via `uvx missioncache-install@latest`, so an upstream breaking major reaches users with no release on our side; pipx re-resolves the dashboard's deps on every `--update` the same way. All floors now carry a major cap (`pydantic<3`, `fastapi<1`, `duckdb<2`, `rich<16`, and the rest), each verified above the currently resolving version. Raising a cap is a deliberate, tested change from now on.
-
-### Changed - MCP server migrated to mcp SDK 2.0 (mcp-missioncache)
-
-- `FastMCP` from `mcp.server.fastmcp` became `MCPServer` from `mcp.server.mcpserver` per the SDK's v2 migration guide; the decorator API and stdio transport are unchanged, and the temporary `<2` hotfix pin from 2026-07-29.1 is replaced by `mcp>=2.0.0,<3`. Verified with a live stdio handshake: initialize carries the server instructions and tools/list returns all 42 tools on mcp 2.0.0.
-
-### Fixed - deleted projects no longer linger as ghosts in the dashboard (missioncache-dashboard)
-
-- The SQLite -> DuckDB sync was upsert-only, and the mirror-side delete ran only from the dashboard's own delete endpoint - so a project deleted via the missioncache-db CLI, the MCP server, or hand SQL stayed in the dashboard's read path forever and rendered as a duplicate-looking row in the projects table (two such ghosts were live on the maintainer machine). The sync now reconciles: mirror rows whose task no longer exists in SQLite are pruned, children first, on every periodic sync - including the edge where the source has no tasks left at all, which previously short-circuited before any reconciliation.
-
-### Fixed - the demo seeder mirrors action items into the context files (missioncache-dashboard)
-
-- Seeded action items reached the database but not the managed `## Action Items` section of each project's context file, so the demo's project detail view differed from a real project. The seeder now runs the same locked mirror write path the live PM layer uses, after the context files exist.
-
-## 2026-07-29.1
-
-- Random characters after a monitor/terminal resize were root-caused to Claude Code itself: it does not re-run the statusline on resize (anthropics/claude-code#76988) and its renderer leaves stale cells to the right of the new render (anthropics/claude-code#81135, open on 2.1.220). Ctrl+L or the next render clears them. What WAS ours to fix, verified against the decompiled 2.1.220 statusline executor: Claude Code trims every output line and drops lines that trim to empty, so the full-width right-padding on every row never erased anything - it only fattened the cached lines that get re-clipped on resize, and wrapped narrow terminals on pre-COLUMNS versions. Rows now end at their content.
-- Column padding was also emitted after a row's LAST cell, where it aligns nothing; it sat before the row's closing color reset (out of reach of Claude Code's trim), counted toward the row's width, and could push a fitting row over COLUMNS into a spurious ellipsis.
-- Addon (custom statusline cell) sanitization stripped C0 control characters but not C1 (U+0080-U+009F): U+009B is a one-character CSI that starts an escape sequence in many terminals, so a stray C1 in a command's output could corrupt the line. Both ranges are stripped now.
-- The error-fallback path emitted space-only lines, which Claude Code's trim collapses to nothing - so any statusline crash silently removed the whole statusline area instead of holding its height. Fallback lines now carry a bare color reset, which is invisible but survives the trim.
-
-### Changed - the projects table's action-items badge explains itself (missioncache-dashboard)
-
-- The open-action-items badge drew its icon as the bare U+2610 BALLOT BOX character, which renders as an anonymous little square indistinguishable from a broken font. It is now a check-square icon in the app's icon style, inheriting the badge color.
-- Its tooltip said "2 open, 1 overdue" without ever saying open WHAT; it now reads "2 open action items, 1 overdue", with a matching aria-label and a help cursor so the hover affordance is discoverable. The at-risk dot's tooltip grew from "At risk" to naming its actual triggers: something overdue, an ask to someone gone stale, or a close due date.
+- Every third-party dependency caps its major version, after an upstream 2.0.0 reached users with no release on our side. (mcp-missioncache, missioncache-dashboard, missioncache-install)
+- The MCP server migrated to mcp SDK 2.0. (mcp-missioncache)
+- A project deleted outside the dashboard no longer lingers as a ghost row. The mirror sync reconciles deletions now. (missioncache-dashboard)
+- The demo seeder mirrors action items into the context files, so the demo matches a real project. (missioncache-dashboard)
 
 ## 2026-07-29.1
 
 Published package versions: mcp-missioncache 1.0.19. Claude Code plugin 1.0.8.
 
-### Fixed - MCP server crashed on startup in freshly resolved environments (mcp-missioncache, plugin)
-
-- The `mcp` SDK released a breaking 2.0.0 on 2026-07-28 that removed `mcp.server.fastmcp`, and our dependency spec (`mcp>=1.0.0`) had no upper bound - so any environment resolved from that moment on (a brand-new install, or an existing one whose uv cache re-resolved, e.g. after `uvx --refresh`) picked 2.0.0 and the server died on import with `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. Environments already cached kept working, which made the breakage look machine-specific. The dependency is now pinned to `mcp>=1.0.0,<2`; raising the bound is coupled to the FastMCP import migration.
+- The MCP server crashed on startup in freshly resolved environments. `mcp` 2.0.0 removed the module we imported, and our spec had no upper bound. (mcp-missioncache, plugin)
+- Random characters after a terminal resize were root-caused to Claude Code itself. What was ours: rows no longer pad to full width. (missioncache-dashboard)
+- Column padding is no longer emitted after a row's last cell, where it aligned nothing and could force a spurious ellipsis. (missioncache-dashboard)
+- Statusline addon output is stripped of C1 control characters as well as C0. (missioncache-dashboard)
+- A statusline crash holds its height instead of silently removing the whole statusline area. (missioncache-dashboard)
+- The action-items badge is a real icon, and its tooltip says open action items rather than just a number. (missioncache-dashboard)
 
 ## 2026-07-29
 
 Published package versions: missioncache-install 1.0.7, missioncache-dashboard 1.0.12.
 
-### Fixed - the update-available nag survives the update it recommends (missioncache-install, missioncache-dashboard)
-
-- `--update` finished successfully and the statusline kept saying "MissionCache update available" for up to 6 hours: nothing invalidated the shared cache at `~/.missioncache/update-check.json`, so the statusline and dashboard served the pre-update answer until its TTL expired. Every install, update, and uninstall run now drops the cache, so the next render recomputes against what was actually just installed.
-- An editable (`pip install -e`) package nagged forever: its metadata version is frozen at install time, so the check compared a stale number against PyPI and the recommended command could never clear it (a clone updates via git, not pipx). The check now reads each distribution's `direct_url.json` (PEP 610), labels editable installs in the payload, and excludes them from the `update_available` verdict. Per-package: a genuinely outdated regular install next to an editable one still nags.
-
-### Fixed - `--update` was not the full update it claims to be (missioncache-install)
-
-- The Claude Code plugin (hooks, commands, templates) never refreshed on `--update`: `marketplace add` does not re-fetch an already-registered marketplace, and `plugins install` no-ops on an installed plugin, so users stayed on the plugin version they first installed. The update path now runs `claude plugins marketplace update` followed by `claude plugins update`, falling back to plain install when the plugin was never registered. A failed marketplace refresh counts as a component failure (recorded and retried next update) instead of proceeding to a `plugins update` that would no-op against stale metadata and report a false success.
-- A component that failed during install could never be repaired by the printed advice ("re-run `--update`"): failures were never recorded in the state file, and `--update` only operates on what state tracks. Failed components are now recorded (`failed_components` in the state file), retried on every `--update`, and promoted to tracked once they succeed.
-- `--update` on a machine with a reset or bypassed state file said "Nothing to update" while components were plainly installed. Read-only probes (PATH binaries, the statusLine command, enabled plugins) now detect installed-but-untracked components and report them with the re-adopt command. Report-only by design: acting on them could pipx-install over a maintainer's editable setup or re-acquire config the user manages elsewhere.
-- During `--update`, a `statusLine` the user has since pointed at something else is now skipped silently instead of prompting to replace it (and, with `--yes`, instead of replacing it). An update refreshes what MissionCache owns; it does not win back config the user rewired.
-
-### Fixed - a second install run destroyed the user's `.bak` and ignored the managed marker (missioncache-install)
-
-- The bundled-file copy (rules, user commands) unconditionally renamed any existing file to `.bak` - so run one backed up the user's original, and run two (any update) silently replaced that backup with MissionCache's own previous version. Backups are now written once and never overwritten, and identical content is skipped entirely.
-- The managed-marker contract that `uninstall` already honored now holds on install too: a rules file carrying the line-1 marker refreshes in place, and a file without it is user-owned and is never touched (the installer says how to re-adopt it). The same test applies through symlinks: a link whose target lacks the marker (e.g. wired into a dotfiles repo) keeps its wiring, while a link to marker-carrying content (a local-mode leftover) is converted to a real copy. User commands, whose YAML frontmatter cannot carry a line-1 marker, keep filename-based ownership with the first-backup-preserved behavior.
+- The update-available notice clears after the update that fixes it. Nothing invalidated the shared cache, so it persisted for hours. (missioncache-install, missioncache-dashboard)
+- An editable install no longer nags forever. Its metadata version is frozen at install time and is excluded from the verdict. (missioncache-install, missioncache-dashboard)
+- `--update` refreshes the Claude Code plugin, which it never did, so users stayed on the plugin version they first installed. (missioncache-install)
+- A component that failed during install is recorded and retried on every `--update`. (missioncache-install)
+- `--update` on a machine with a reset state file reports installed-but-untracked components instead of saying there is nothing to do. (missioncache-install)
+- A `statusLine` you have since pointed elsewhere is left alone during an update. (missioncache-install)
+- A second install run no longer replaces the backup the first run made. (missioncache-install)
+- A rules file without the managed marker is yours and is never touched on install. (missioncache-install)
 
 ## 2026-07-28
 
 Published package versions: missioncache-db 1.0.15, mcp-missioncache 1.0.18, missioncache-dashboard 1.0.11. Claude Code plugin 1.0.7.
 
-### Added - project-management layer: action items, stakeholders, tickets, due dates (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin commands)
-
-- New `action_items`, `stakeholders`, and `tickets` tables plus a `tasks.due_date` column (idempotent ALTER migration; existing DBs pick everything up on first open). SQLite is the source of truth; every mutation re-renders read-only `## Action Items` / `## Stakeholders` / `## Tickets` sections and a `**Due:**` header line into the project's context file under the existing sidecar lock, with a Recent Changes line per mutation. Sections self-heal into canonical positions on first data and are never created empty; done/dropped items stay visible in the mirror for 7 days, forever in the DB. All writes converge on one module (`missioncache_db/pm_items.py`) shared by the CLI, the MCP tools, and the dashboard.
-- CLI: new `action-item add|list|done|update`, `stakeholder add|remove|list`, `ticket add|remove|list`, and `due-date` command groups; `<task>` accepts an id or a project name. `missioncache-db health` now also flags overdue action items, a project due date within 7 days, and items open more than 14 days with no due date.
-- MCP: six new tools (`add_action_item`, `update_action_item`, `list_action_items` with a cross-project scope, `set_stakeholder`, `set_ticket`, `set_project_due_date`). `get_context_digest` now carries `due_date` and `action_items_open` (with per-item overdue flags) and merges the PM health warnings - best-effort, so a resume never fails on a missing DB.
-- Commands: `/missioncache:load` renders an Action items block (with overdue marks) above Waiting on plus a Due line; `/missioncache:save` gains propose-then-apply duties - mark items the session completed as done, capture new commitments (yours or a colleague's, e.g. from meeting transcripts) with requester/assignee/due date/source.
-- Dashboard: new REST endpoints (`/api/tasks/{id}/pm`, action-item/stakeholder/ticket/due-date CRUD, and `/api/today`). PM tables are read/written via SQLite directly (not mirrored into DuckDB). New default **Attention** view (`#attention`, replacing `#today`, which redirects), a full project detail page (`#project/<name>`) with Overview and Action Items tabs, and projects-list upgrades (Due column, open/overdue badge, at-risk dot).
-- The dashboard opens on a new **Attention** view, which answers "what needs me today" rather than "what have I got". A greeting, a stats strip, and three gadgets sized to one viewport - each scrolls inside itself, so the whole picture stays on one screen instead of running off the bottom. **My work** joins the two places your own work is recorded: open action items, plus Waiting-on rows whose `who` cell names you. Those rows previously counted against "on other people" whatever the cell said, which under-reported your own plate roughly 4x while showing your asks under someone else's name. **Waiting on people** groups asks by age band (under 7d, 7-13d, 14-29d, 30d+) and, inside a band, by person with the most asks first. Someone holding asks in several bands appears in each one showing only that band's asks, with a `+N elsewhere` badge, because bucketing a person by their oldest ask hid the fact that they also owed you something from this week. Filters, a search across person, project and ask text, and a band-order toggle. **Projects** carries every project with something outstanding - an open item on you, an ask out with someone, or a due date - showing what is next - or, when a project has no next step, what you last did, taken from the newest Recent Changes bullet - plus checklist progress, items on you, asks out over seven days, and when it was last worked, filterable by category and searchable.
-- Colour on the Attention view carries one meaning each: red is "you are late" and nothing else, so a day with nothing overdue renders no red at all, and amber is someone else's latency. The view has a real type scale (it was 95% one size, which is why everything on it looked equally important), a single raised surface so there is a focal plane, `prefers-reduced-motion` honoured, and visible focus rings on every control, since the whole view is buttons and links and the custom backgrounds were painting over the browser's own ring.
-### Fixed - the Attention view reported "0 overdue" on days you were the blocker (missioncache-dashboard)
-
-- `counts.overdue` was built from the action items alone, and a Waiting-on row whose `who` cell names you incremented `open_count` only. So your own work could be a week past its line, with a named colleague blocked on it, and both `counts.overdue` and the project's `overdue_count` reported zero. Measured on live data the moment the fix landed: the count went 0 to 1, and the row it had been hiding was 10 days old with a Gates cell reading "OLDEST open item, from the 06/07 kickoff - do not let it drift". The dashboard was asserting no lateness about the one item flagged as most likely to drift.
-- "Late" now follows the scale the endpoint already documented for sorting: a commitment's line is its due date, a Waiting-on row's line is the 7-day threshold, and anything of yours past its line counts as overdue whichever table it came from. Both counts reach across the two lists (action items in `on_me`, your Waiting-on rows in `on_others`, where they stay because the resolve path addresses them by task_id + row_index) without double-counting. A colleague sitting on an ask is still THEIR latency and counts into `stale`, never into overdue.
-- Knock-on repair: `at_risk` derives from `overdue_count`, so a project where you are the blocker no longer reads as healthy. Five new tests pin the contract in both directions; three of them fail against the old code, and the two that pass in both states are the negative guards that stop `overdue` from decaying into "anything of mine".
-- The UI side of the same gap: the row that IS overdue now carries the red rail an overdue action item already got, and its age renders red rather than amber. Amber on this view means "someone else is slow", which is the wrong claim on your own row. Before this the count was correct but pointed at nothing, so you learned that something was late but not which of four items it was. This is the first time the overdue path has ever rendered, because the count had never been non-zero.
-
-- The project groups in `on_others` now sort on a total order. The key was the freshest ask's age alone, so two projects sharing that age fell back on dict insertion order: deterministic inside one process, but free to change whenever a rename or a new task re-ordered the rows underneath, which meant the same day's list could come back differently. Ties now break on how much has gone quiet, then volume, then name, matching the convention the sibling `projects` sort already documented. Four tests pin it; two fail against the old key.
-- `/api/today` splits by **who owes the work**, not by which record stored it. "On me" is your own open items bucketed overdue / due-soon / other. "On other people" is one list merging action items assigned to colleagues (`kind: commitment`) with Waiting-on rows (`kind: blocker`) - the two stay separate at rest (one DB-canonical with a stable id, one file-canonical maintained by the save flow) and are joined only for reading, on a shared "days past the line" scale: a commitment's line is its due date, a blocker's is the 7-day staleness threshold, and rows that have not crossed a line sort below, oldest first. Both kinds resolve from the UI by different mechanisms: a commitment has a stable id so it completes via `PUT /api/action-items/{id}`, while a Waiting-on row has none (it is hand-editable markdown) so `POST /api/tasks/{id}/waiting-on/resolve` identifies it positionally and verifies its what/who/since before removing it, answering 409 rather than resolving the wrong row when the table has shifted. Each project's attention block carries typed counts (`open_count`, `overdue_count`, `on_others_count`, `stale_on_others_count`) instead of a warning-string list.
-- Tickets are system-agnostic by contract: `label` + `url` is the whole interface, `system` is a display hint never branched on, `status` is a free-text cache MissionCache never fetches. A legacy `tasks.jira_key` migrates into a tickets row on the project's first PM mutation (idempotent, non-destructive, URL derived from the dashboard's JIRA prefix map when one matches); the column stays readable.
-- Export/import: bundles carry the PM layer additively (`pm` manifest block + `project.due_date`; ids dropped as machine-local). Import restores it idempotently (stakeholders/tickets upsert on natural keys, action items dedupe on what+created_at) and hostile values degrade with warnings, never failures. Old bundles without the block import unchanged.
-
-### Changed - the Attention view now looks like the rest of the dashboard (missioncache-dashboard)
-
-- The view had been built on its own design tokens - a teal and slate palette, opaque tiles, an 8px radius, heavy drop shadows, and three background washes of its own painted over an opaque fill. Next to Projects and Activity it read as a different product: its surface sat lighter than the page, and the app's ambient gradient stopped dead at its edge. Its tokens now map onto the app's own variables, so the tiles are the same translucent `--bg-card` over the same page gradient, with the same 1px border, the same 16px radius that `.glass-card` and `.stat-card` already use, and the same `backdrop-filter` blur. Mapped rather than copied, so a later change to `--bg-card` or `--border` reaches this view too.
-- Semantic colour moves to the `--pm-*` set that was built for this project-management layer and is contrast-checked in both themes. One deliberate exception: the muted text token fails AA in both themes, and the labels it would have covered here carry real content (stat labels, ask counts, the last-worked column), so those use `--pm-nil` instead. The age-band ramp is untouched - it encodes data rather than chrome, and its contrast was already settled.
-- Checklist progress bars follow the same level-encoded ramp the Projects table uses, so one percentage is not two different colours on two screens.
-
-### Fixed - page headings were nearly invisible in light mode (missioncache-dashboard)
-
-- Every page heading (Projects, Activity, MissionCache Auto, Settings) painted a mint-to-cyan gradient built for the dark surface as clipped text. Against the light background it measured 1.44:1 to 1.68:1, roughly half of what WCAG asks even under the large-text allowance, so the title read as a pale wash rather than as text. Light mode now uses darkened endpoints that hold 4.88:1 at the ramp's weakest point while keeping the green-to-teal direction. Dark mode is unchanged. Only the heading changed: the same gradient also fills a card rail and two progress bars, where the contrast that matters is against their own track rather than the page.
-
-### Fixed - the demo seeder could not produce the Attention screenshot (missioncache-dashboard)
-
-- `seed_demo_data.py` seeded repositories, tasks, heartbeats and context files, but nothing the Attention view reads, so a freshly seeded install rendered it empty. It now seeds the project-management layer (action items and Waiting-on rows, dated relative to the seed so the demo never drifts), real git history per repo so the commit and lines-of-code tiles are not zero, and a built-in category per project so the filter chips have something to filter.
-- Re-seeding produced silently wrong numbers. The documented reset removed the data directory but not the git repositories, so the second run re-created identical files, every commit came out empty, and the lines-of-code tiles read zero while the seeder still reported nine commits. Seeding now starts each repository from scratch and the reset instruction covers the whole demo home.
-- The sandbox git identity is written by the seeder rather than left to a manual step. It decides both the greeting and whether a Waiting-on row counts as yours, so skipping it filed the demo's own row under a colleague and greeted nobody, with no error either way.
-- Also: the run instructions pointed at `python3.11 missioncache-dashboard/server.py`, which fails on its relative imports now that `server.py` lives inside the package; a git failure surfaced as a bare exit code with git's own message discarded; and the Waiting-on section is built by the library that owns that format, so it escapes pipes and self-heals when a project has no Next Steps heading instead of dropping the section without a word.
+- New project-management layer: action items, stakeholders, tickets and due dates, mirrored into read-only context-file sections. (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
+- New `action-item`, `stakeholder`, `ticket` and `due-date` CLI groups, and `health` flags overdue items and near due dates. (missioncache-db)
+- Six new PM tools, and `get_context_digest` carries the due date and open action items. (mcp-missioncache)
+- `/missioncache:load` renders action items above Waiting on, and `/missioncache:save` proposes completions and captures new commitments. (plugin)
+- The dashboard opens on a new Attention view: what needs you today, who you are waiting on, and which projects are outstanding. (missioncache-dashboard)
+- Colour on the Attention view carries one meaning each. Red is you are late, amber is someone else's latency. (missioncache-dashboard)
+- The Attention view reported zero overdue on days you were the blocker. A Waiting-on row naming you counts now. (missioncache-dashboard)
+- Project groups sort on a total order, so the same day's list cannot come back in a different order. (missioncache-dashboard)
+- `/api/today` splits by who owes the work rather than by which table stored it. (missioncache-dashboard)
+- Tickets are system-agnostic: a label and a URL is the whole interface. A legacy `jira_key` migrates on the first PM write. (missioncache-db)
+- Bundles carry the PM layer, and older bundles without it import unchanged. (missioncache-db)
+- The Attention view uses the app's own design tokens instead of a palette of its own. (missioncache-dashboard)
+- Page headings are readable in light mode. The gradient built for the dark surface measured 1.44:1 against white. (missioncache-dashboard)
+- The demo seeder produces the Attention view: PM data, real git history per repo, and a category per project. (missioncache-dashboard)
+- Re-seeding starts each repository from scratch, so the second run no longer reports commits that are empty. (missioncache-dashboard)
 
 ## 2026-07-21
 
 Plugin-only release: no PyPI packages changed. Claude Code plugin 1.0.6.
 
-### Fixed - statusline task counter no longer sits stale between explicit saves (plugin hooks)
-
-- The statusline's `[X/Y]` progress counter is parsed from the tasks file's checkboxes, but the only thing that flipped checkboxes in practice was Step 3 of `/missioncache:save` - the automatic save paths (the PreCompact snapshot hook) only write to the context file, so real progress left the counter frozen until the next explicit save. The `task_tracker` divergence hook was built to close exactly this gap by reminding Claude to check off completed items, but its trigger required `### Task N` headings in the context file - a convention no current project uses (0 of 23 active projects have one), so it never fired.
-- `task_tracker` now carries a second signal: when the context file's `**Last Updated:**` is newer than the tasks file's (every managed write path stamps that header, including the PreCompact snapshot) while unchecked items remain, it injects a "tasks file may be stale" reminder listing the pending items, so Claude reconciles the checkboxes at the next prompt. Deduped per context save (mtime identity, so two saves in the same minute each get their chance) - an intentional "nothing completed yet" save is nagged at most once. Same-minute header ties are broken on file mtime, the precise `### Task N` signal still takes priority when present (without starving the staleness signal when its reminder is ignored), both signals now understand hierarchical task numbers (`1.2.`), and the old list-shaped per-session dedup file is still read.
+- The statusline's task counter no longer sits stale between explicit saves. Its reminder now fires on a signal real projects use. (plugin)
 
 ## 2026-07-19.3
 
 Published package versions: missioncache-dashboard 1.0.10.
 
-### Fixed - updating no longer stops to ask about its own port (missioncache-dashboard)
-
-- `install-service` treated ANY occupant of the dashboard port as a conflict and prompted interactively - including the machine's own running dashboard, which is the normal state during every update on a working install (hit on WSL via `wsl-update.sh`). The port probe now recognizes its own dashboard (`/api/version` answers) and continues; a foreign occupant still prompts. The running instance keeps serving until its next restart picks up the new version. missioncache-dashboard bumped to 1.0.10.
+- Updating no longer stops to ask about its own port. The probe recognises the machine's own dashboard and continues. (missioncache-dashboard)
 
 ## 2026-07-19.2
 
 Published package versions: missioncache-db 1.0.14, mcp-missioncache 1.0.17, missioncache-dashboard 1.0.9.
 
-### Added - complete and reopen a project from the dashboard (missioncache-db, mcp-missioncache, missioncache-dashboard)
-
-- The project detail modal gains a Complete action with a confirmation step: the project moves to the completed list, its files move to `completed/`, time history is kept, and a fork parent's shared context stays readable for its children (the fork warning is surfaced after completion). Each row in the completed table gains a Reopen button - the undo, moving the project and its files back to active.
-- The completion composition (status flip, file move, fork advisory) moved down into missioncache-db as `complete_project` / `reopen_project`, and BOTH the MCP tools (complete_task / reopen_task, unchanged behavior) and the new dashboard endpoints (`POST /api/tasks/{id}/complete`, `/reopen`) delegate to it - one source, two surfaces, no drift. The file-move source resolution also got more robust: the canonical `active/<name>` location is tried before the stored `full_path` (which can carry legacy shapes). missioncache-db bumped to 1.0.14, mcp-missioncache to 1.0.17 with a matching dependency floor, and the dashboard's floor raised to match.
-- Dashboard-complete is the administrative complete, same as the MCP tool: it does not run `/missioncache:done`'s final context save - files move as-is. Sessions still bound to a completed project resolve by task id, find nothing active, and drop it from the statusline.
-
-### Changed - statusline Saved cell gets its own color and position (missioncache-dashboard)
-
-- The Saved cell now renders in its own blue instead of sharing Last Action's gray (the two sat side by side and looked identical), and the Project row order is now Project, Saved, Fork of, Last Action.
-
-### Fixed - the dashboard actually starts on a clean machine (missioncache-dashboard)
-
-- Three fresh-install bugs, all invisible on machines that already ran Claude Code or had a populated Python environment, all found by the new CI installer smoke test: (1) `python-multipart` was never declared as a dependency, and FastAPI refuses to even import the app's Form/File upload routes without it - on a clean pipx venv the server could not start at all; (2) server startup connected to `~/.claude/hooks-state.db` without creating the directory, and sqlite cannot create a database file inside a missing directory, so a host with no `~/.claude` yet crash-looped; (3) the statusline's stderr suppression ran at module import rather than in its own main(), so the dashboard server (which imports the statusline module) lost every startup traceback - which is why the two crashes above were SILENT. missioncache-dashboard bumped to 1.0.9.
-- The smoke test itself: installs MissionCache from the tree on a clean runner and asserts the dashboard actually serves, on both Linux service paths (systemd unit on the runner, profile-autostart fallback in a genuinely systemd-less container), then asserts the install shape and a clean `--update` re-run, with per-path failure diagnostics.
+- Complete and reopen a project from the dashboard, with the same file moves the MCP tool performs. (missioncache-db, mcp-missioncache, missioncache-dashboard)
+- The statusline's Saved cell has its own colour and sits next to Project, instead of looking identical to Last Action. (missioncache-dashboard)
+- The dashboard starts on a clean machine. A missing dependency, a missing directory, and a swallowed traceback that hid both. (missioncache-dashboard)
+- New CI smoke test installs from the tree on a clean runner and asserts the dashboard actually serves. (missioncache-install)
 
 ## 2026-07-19.1
 
 Published package versions: missioncache-dashboard 1.0.8.
 
-### Added - users now learn when a new MissionCache release is out, in three places (missioncache-dashboard, plugin commands)
-
-- MissionCache had no update discovery at all: nothing watched PyPI, so the only way to learn a release existed was reading the repo. Now a small stdlib-only checker compares the installed sentinel packages (missioncache-db, missioncache-dashboard, missioncache-auto - every release to date bumped at least one) against PyPI, cached 6 hours in `~/.missioncache/update-check.json`. A newer LOCAL version (the maintainer machine) does not count as an update, and a fetch failure keeps the previous answer while stamping the check time so offline machines do not re-fetch on every render.
-- Three surfaces consume the one cache: the dashboard shows a dismissible banner with the outdated packages and a copyable `uvx --refresh missioncache-install@latest --update` command (dismissal is keyed to the exact newer versions, so the banner returns for the next release; `/api/update-check` serves it); the statusline adds an upgrade cell to the Vitals line linking to the changelog, with zero footprint when current; and `/missioncache:load` adds a one-line Update field to the resume summary, reading the cache only - dashboard-less installs just never see it.
-
-- The Project row gains a "Saved" cell: the last time the project's own context file changed - a `/missioncache:save`, an MCP context update, a pre-compact snapshot, or a manual edit. It always shows the date, never a bare clock time, so a project resumed days after its last save does not read as saved today. The stamp links to the project's Context tab in the dashboard modal, and Last Action moved one cell right to make room. Forks show their own Saved stamp next to the existing "parent updated" signal - one is "my layer", the other is "the shared layer moved under me". missioncache-dashboard bumped to 1.0.8.
+- You now learn when a release is out, in the dashboard, the statusline and `/missioncache:load`. Nothing watched PyPI before. (missioncache-dashboard, plugin)
+- The Project row gained a Saved cell: when the project's own context file last changed, always with a date. (missioncache-dashboard)
 
 ## 2026-07-19
 
 Published package versions: missioncache-db 1.0.13, mcp-missioncache 1.0.16, missioncache-install 1.0.6, missioncache-dashboard 1.0.7.
 
-### Fixed - the dashboard service install no longer crashes on systemd-less Linux, and actually runs there (missioncache-dashboard)
-
-- On a machine where systemd is not PID 1 - the WSL default unless enabled in /etc/wsl.conf - `missioncache-dashboard install-service` crashed with a raw traceback ("Failed to connect to bus") because it ran systemctl unconditionally, and it left an orphan unit file behind since the unit was written before the first systemctl call. Found on a fresh WSL Ubuntu install.
-- Linux service registration now checks for systemd first and, when absent (or when systemctl fails despite systemd being present), falls back to a profile autostart: a managed marker block in `~/.bash_profile`/`~/.profile` that starts the dashboard on login if it is not already running, plus an immediate background start so the dashboard works the moment the install finishes. Uninstall removes the block and stops the process; the fallback also cleans up an orphan unit left by the pre-fix version. missioncache-dashboard bumped to 1.0.7.
-
-### Fixed - the Codex install actually works end to end, and non-Claude commands can no longer touch Claude's session state (missioncache-install, plugin commands)
-
-- Codex rejected the generated marketplace manifest outright - `"authentication": "OFF"` is not a valid policy value on codex 0.144.1 (expected ON_INSTALL or ON_USE) - so the slash-command install failed at registration on every machine. The key is simply omitted now (no auth is the default), verified live.
-- Activation goes through `codex plugin add missioncache@missioncache` instead of hand-appending a bare config stanza. The bare stanza never populated Codex's plugin cache, so even when registration succeeded the plugin listed as "not installed" and the commands never loaded. The uninstall path gained the matching `codex plugin remove` (legacy stanza cleanup kept for old installs).
-- The Codex MCP registration now sets `default_tools_approval_mode = "approve"` on the missioncache server (inserted into the existing section too, not just fresh installs). Without it every tool call needed per-call approval, which `codex exec` auto-cancels - so every slash command died on its first MCP call. An existing user-chosen value is never overwritten.
-- The non-Claude command render strips Claude-session machinery instead of shipping it: `<!-- claude-code-only -->` regions in the command sources (session-id resolution bash, statusline/binding registration steps) are dropped whole, and a runtime notice is inserted telling the executing model to skip session machinery and omit session_id arguments. This is not just dead-weight removal - the leaked resolver's transcript-mtime fallback picks whatever LIVE Claude session touched the cwd last and writes its binding: a Codex run hijacked a real Claude session's project binding this way. Verified live after the fix: a Codex /missioncache-load leaves every binding file untouched.
-- A failed Codex commands install now raises instead of warn-and-return, so it lands in the failed list and the end-of-install summary stops rendering a green checkmark for a component that never installed. The same honesty now applies across the installer: a registration failure in any of the three MCP integrations (failed prereq install, failed codex mcp add, unparseable or comment-bearing config the installer refuses to rewrite) fails the component and the exit code, instead of warning into a green checkmark - and a commands component whose MCP parent failed in the same run fails alongside it rather than "skipping" into a checkmark of its own. Skips for genuinely absent tools stay skips.
-- Review hardening on the same change: rendering fails loudly on unbalanced claude-code-only markers (an unpaired marker previously leaked the session bash silently - the regex just stopped matching), and a sweep test renders all six real command sources and rejects any surviving Claude-state access; it immediately caught two more leaks (save.md's fork restamp bash, load.md's shared-seen marker read) plus mode.md's unmarked resolver instruction, all now wrapped. The Codex plugin version went to 1.1.0 (Codex caches the plugin by version, so command-shape changes must bump it or updated installs keep serving the old cache) and a same-version "already installed" now refreshes via remove and re-add. The config-toml approval edit survives a header with no trailing newline, validates its result with tomllib before writing (refusing edits that would produce unparseable TOML), treats a commented-out approval key as the user's choice, and warns instead of aborting the install when the write itself fails.
-
-### Fixed - a session's explicit project binding is no longer vetoed by cwd, and now carries a durable task identity (missioncache-db, mcp-missioncache, plugin hooks)
-
-- `find_task_for_cwd` required the session's cwd to sit inside the bound project's registered repo before honoring the binding, so any project worked from outside that repo - normal for cross-repo work, and the default for forks, which inherit the parent's repo_id - silently lost pre-compact snapshots, heartbeat time tracking, and session-start detection. The binding is explicit (the user named the project via /missioncache:load), so cwd carries no signal there and no longer vetoes resolution. Found live on a fork worked from outside its inherited repo; the failing session resolves correctly after the fix.
-- The binding file now records the task id, not just the name, and resolution prefers it - so the binding survives project renames and can never route a session's snapshots into an unrelated project that happens to reuse a completed project's name (a dead id resolves to nothing rather than falling back to the name). Name-only bindings from before this change still resolve by name as legacy, guarded: an ambiguous name (two active projects sharing it) refuses to guess and leaves a stderr breadcrumb at the one chokepoint every consumer inherits - heartbeats, stop, session-start included - instead of time tracking silently vanishing.
-- The binding file's path and format have a single owner now: `missioncache_db.session_binding_path` / `write_session_binding` / `read_session_binding`. The session-start hook, the MCP server's binding, and the pre-compact check all go through them (the load command's bash fallback matches the format and now carries the task id too, so it no longer clobbers the server's richer binding with a name-only one).
-- The PreCompact hook's first bail now distinguishes three cases instead of one silent exit: no binding on file (benign, stays silent), a binding whose resolution came back empty (stale id, project completed elsewhere, duplicate name - writes the sticky error that /missioncache:load surfaces on next resume), and a binding file that exists but cannot be read (also a sticky error - a corrupt binding must alarm, not masquerade as "not on a project"). missioncache-db bumped to 1.0.13 and mcp-missioncache to 1.0.16 with a matching dependency floor, since the MCP server reaches the same resolution in find_task_for_directory and heartbeat recording.
-
-### Fixed - the PreCompact snapshot never fired: it looked for the project files in the wrong place (plugin hooks)
-
-- The PreCompact hook resolved the project directory as repo path + active/name - path math from before the data-dir migration to ~/.missioncache. The directory never existed, the hook bailed at its existence check, and no Pre-Compact Snapshot has ever landed since the hook's redesign (which shipped the same day as the migration). Manual and auto compaction were equally affected, silently. It now resolves through MISSIONCACHE_ROOT like every other component, and the needless get_repo call (the join's only consumer, and a lock-contention failure source) is gone.
-- The session-start context message had the same wrong join, so its "MissionCache files:" tip line never rendered. Fixed the same way.
-- The hook tests passed throughout because the fixture placed the task directory under the mock repo path - replicating the bug's world instead of the real layout. The fixtures for both hooks now build the real ~/.missioncache layout with the repo deliberately elsewhere, and both halves of the fix were mutation-tested: re-introducing the wrong join in either hook turns the suite red.
-- Because this class of failure was silent for months, the hook now leaves a breadcrumb: when an active project's directory or context file is missing at snapshot time, it writes the sticky error that /missioncache:load surfaces on the next resume, instead of bailing quietly.
-
-### Changed - the docs stop overpromising Windows support (docs, site)
-
-- The FAQ, README, and hooks doc now say plainly that the lifecycle hooks - including the pre-compaction snapshot and session tracking - do not run on Windows yet (they are registered as `python3` commands, a name most Windows setups lack, and the snapshot hook takes a Unix-only fcntl lock). Previously only the dashboard service registration was flagged. A Windows port is tracked as follow-up work.
-
-### Changed - the fork staleness indicator says who, when, and clears on read (missioncache-dashboard, mcp-missioncache)
-
-- The statusline's fork note was an orange "shared updated" that borrowed the compact-now alarm color, named no time, and only cleared on the next /missioncache:load. It is now a cyan "parent updated HH:MM" (the fork-family accent used by the dashboard tree, not an alarm), showing the parent change's local wall-clock time - absolute on purpose, since the statusline only re-renders on conversation events and a relative "25m ago" would sit frozen while idle. Changes not from today render in the Last Action cell's month-name form (Jul 14 14:32), which stays unambiguous internationally.
-- Reading the parent now clears the note immediately: get_context_digest restamps the calling session's shared-seen marker when that session's bound project is a fork of the digested project, so "re-read the shared context" is enough - no /missioncache:load round-trip. The digest response carries a shared_seen_stamped flag, and the stamped mtime is coupled to the exact bytes read. The tool also takes an explicit session_id (like its sibling binding tools) so older and non-Claude clients can stamp, the stamp skips its DB and file probes when the digested project is itself a fork (forks are never parents), and /missioncache:load defers to the server's stamp when it fired instead of overwriting it with an older value from an earlier response. mcp-missioncache bumped to 1.0.15 for the uvx cache.
-
-### Changed - the landing page leads with the problem, not the machinery (site)
-
-- The hero headline is now "Your AI agent forgets everything. Your projects remember." instead of the mission-control metaphor, and the kit chip row moved below the headline and subtitle so the promise reads before the parts list. The meta description and social-card description carry the same problem-first line. The GitHub star button is no longer the loudest button in the hero - the install command is the primary action.
-- The fork feature block opens with the situation it solves ("Building several things on the same base?") instead of defining a fork by what it is not. The headline is "Related projects, one shared memory." The FAQ keeps the term definition.
-- The compare matrix was corrected against the competitors' current docs: claude-mem works across 7+ agents (was shown as a miss), and Agent Teams' task list does persist locally (was shown as a miss, now a partial with a note). The "use X instead" list dropped from six rows to four.
-- Trimmed for density: the stats-counter section and the works-everywhere table are gone (the per-tool support line moved into the compare caption, and the FAQ already covers it), the statusline section went from six cards to three, and the /whats-new blurb is one sentence.
-- Accuracy fixes: "Five commands" is now "Five steps" (only three of the five are commands), and the install time claim now matches the measurement - about three minutes to first value, with machine time under 30 seconds.
-- The statusline section's screenshot was replaced by a text rendering of the line - same layout, same palette, demo data only - now showing the fork cell with the cyan "parent updated" note on the ios-tests/data-pipeline demo family, plus the full field set: elapsed, K8s context, version watch, effort, split token counts, Claude and Codex limit lines with reset times, and the installed-tool indicators. The old statusline.jpg and its build mapping were removed.
-- The hero dashboard screenshot was retaken with the demo data and now shows a fork family: a data-pipeline parent with ios-tests and android-tests forks under it, rail, fork pills, and the "via fork" note included. The demo seeder gained the fork family (parent_id wiring plus plans, contexts with the Fork of header, and task lists) so the shot is reproducible.
-- The hero is now a two-column layout: headline and copy on the left, the install terminal with the GitHub and how-it-works buttons on the right, so the whole story sits in one viewport instead of one long list. The headline wraps with balanced lines at every width, the columns top-align, the uvx note sits right under the terminal, and the secondary buttons wear a gradient ring with a hover lift. The terminal itself holds only the install command; the wizard description moved below it as a three-line mono checklist with green checkmarks and white-bold key phrases. Star on GitHub is a white filled button, See how it works is green with a nudging arrow, and the portability chips carry white brand silhouettes above the tool names (from the CC0 simple-icons set, plus OpenCode's own favicon mark).
-- Cross-tool portability was promoted to a first-class differentiator, framed as what moves rather than how many tools. Its hero band grew into the page's signature: a "Your project. Every tool." gradient headline over the four tool chips seated on a gradient track, with a glowing project dot that travels from Claude Code to the other tools (CSS only, hidden on small screens and under reduced motion). The hero's third sub was replaced by this rail, with a caption carrying both the promise and the honest boundary. The Why section gained a two-frame handoff proof - the same auth-refactor project saved in a Claude Code frame and loaded in a Codex frame, echoing the amnesia replay's project and next step. The compare row "Works beyond one agent" (a tool-count contest MissionCache loses) became "Whole project moves between tools" (plan + tasks + progress vs tasks-only and memory-only, with the competitors' wider tool counts kept in the notes). The FAQ gained an "Isn't this just cross-agent memory like claude-mem?" entry drawing the shared-state vs recalled-memory line, and the meta description now carries the start-in-one-tool story.
-
-### Added - fork families render as a tree in the dashboard projects table (missioncache-dashboard)
-
-- A project with forks now keeps its own row, and its forks render directly beneath it, joined by a cyan rail that starts at the parent's name line and ends at the last fork. Only the fork rows carry the cyan tint - the parent stays a default row, marked by a forks count pill on its name line. The light theme's fork accent was deepened (and the via-fork note's opacity fade removed) so the 10px badges clear WCAG AA contrast on white.
-- The whole family sorts as one unit: saving context on the parent or any fork lifts the group together, and when a fork caused the bump the parent's Updated cell says "via fork". The parent's Time cell shows the family total, with its own share in the tooltip.
-- Before this, the table dropped a parent's own row entirely and showed only its children with a small tree glyph.
-
-### Changed - the website describes forks as project forks with shared memory (site, docs)
-
-- "Fork" alone reads like a Claude conversation fork or a git fork, which this is not. The landing page's fork feature block, hover panel, FAQ, and compare row, and the forks doc opener, now say it plainly: a MissionCache fork is a real second project that shares the parent's memory (its context file) and keeps its own tasks.
-
-### Added - website and changelog links plus the running version in the dashboard sidebar (missioncache-dashboard)
-
-- The dashboard sidebar footer now links out to missioncache.dev and to the changelog, next to the theme toggle. These are the dashboard's first outbound links.
-- The sidebar shows the running dashboard version. It is read from the installed package metadata through a new `GET /api/version` endpoint, so there is no second copy of the number to fall out of step with the package. `/health` returns the version too, so one curl answers what is running. Note that under an editable install the metadata is a snapshot from the last `pip install -e`, so a maintainer working in the source tree can see an older number than `pyproject.toml` says. Published wheels carry accurate metadata, so this only affects maintainers.
-
-### Fixed - the dashboard reported a stale version in its OpenAPI metadata (missioncache-dashboard)
-
-- The FastAPI app was built with a hardcoded `version="2.0.0"` that had drifted away from the real package version and surfaced stale in `/docs` and `/openapi.json`. It now reads the package version, so the app no longer keeps its own copy of the number.
-
-### Added - a documentation page for project forks (docs)
-
-- New `docs/forks.md` covers what a fork is, when to fork instead of starting a new project or adding a subtask, how the shared context layer works, how parallel sessions stay fresh, and what happens when the parent completes. The "when to fork" section is the part that was missing: it says plainly that two separate projects is the right answer more often than a fork.
-- The landing page now carries forks as a first-class feature, with a worked example of two lanes over one shared context.
-- Gaps filled around the feature: the bundled rules file and the README command table were both missing `/missioncache:rename`, the rules file was also missing `/missioncache:fork`, the hooks doc did not list the shared-seen state file, and the architecture doc did not explain that `tasks.parent_id` is the fork linkage or that the `**Fork of:**` header regex is mirrored by hand in two files and must stay byte-identical.
-
-### Changed - dark theme is the landing page default, plus a hero tagline and a friendlier uvx note (site)
-
-- The landing page now opens in dark theme for first-time visitors instead of following the OS setting. A saved theme choice still wins, and the toggle works as before.
-- A short tagline sits under the hero logo: "Plan, execute, track, and resume - without losing state."
-- The install section explains how to get uvx for people who do not have it: it comes with uv, with a copyable `pip install uv` command and the curl installer for machines without Python. The hero carries a one-line pointer to the same answer.
-
-### Fixed - links on the landing page were hard to see (site)
-
-- Text links carried no underline and two of them had no hover state at all, so they read as plain text. Body links are now underlined at rest and strengthen on hover, nav and footer links grow a gradient underline on hover, and every link has a focus ring for keyboard users.
-- The hero's kit chips signalled that they open a panel with a faint dotted underline, which was easy to miss. They are now pills with a `+` affordance, each carrying its own icon, and an open chip is filled so you can tell which one you are reading.
-- The kit panel used to open fixed at the center of the page. It now opens directly under the chip you are on, with a caret pointing at it, and glides between chips as you move along the row. The panel header repeats the chip's icon so the connection reads at a glance.
+- The dashboard service installs on systemd-less Linux, falling back to a profile autostart instead of crashing. (missioncache-dashboard)
+- The Codex install works end to end: a rejected manifest key, a stanza that never populated the cache, and per-call approvals. (missioncache-install, plugin)
+- Non-Claude commands can no longer touch Claude's session state. A Codex run had hijacked a live Claude session's binding. (missioncache-install, plugin)
+- A session's explicit project binding is no longer vetoed by cwd, which silently broke forks and cross-repo work. (missioncache-db, mcp-missioncache, plugin)
+- The binding file records the task id, so it survives a rename and cannot route into a reused project name. (missioncache-db)
+- The PreCompact snapshot never fired: it looked for the project files in the wrong place. No snapshot had landed since the redesign. (plugin)
+- The PreCompact hook leaves a breadcrumb when it cannot find the project, instead of bailing quietly. (plugin)
+- The docs stop overpromising Windows support. (docs, site)
+- The fork staleness indicator says who and when, and clears as soon as you read the parent. (missioncache-dashboard, mcp-missioncache)
+- The landing page leads with the problem rather than the machinery. (site)
+- Fork families render as a tree in the projects table, with the parent keeping its own row. (missioncache-dashboard)
+- The website describes forks as project forks with shared memory, not conversation forks or git forks. (site, docs)
+- The dashboard sidebar links to the website and the changelog, and shows the running version. (missioncache-dashboard)
+- The dashboard's OpenAPI metadata reports the real package version instead of a hardcoded one. (missioncache-dashboard)
+- New `docs/forks.md`, including the part that was missing: when two separate projects is the better answer. (docs)
+- The landing page opens in dark theme and explains how to get uvx. (site)
+- Links on the landing page are underlined at rest and have focus rings. (site)
 
 ## 2026-07-14
 
 Published package versions: missioncache-db 1.0.12, mcp-missioncache 1.0.14, missioncache-dashboard 1.0.6.
 
-### Added - project forks: a shared context layer under a parent project (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
-
-- A project can now be created as a fork of an existing parent (`/missioncache:fork`, or `create_missioncache_files(fork_of=...)`). The child carries a `**Fork of:** <parent>` line in its context header, and the parent's context file becomes the shared knowledge layer every child reads. Only context is shared: the parent keeps its own tasks, and each child gets its own new task list.
-- The header is the durable source of truth: the repo scan links it into the task hierarchy, re-heals a lost link, and clears the link when the header is removed. Resolution refuses ambiguous name matches and cyclic links rather than guessing.
-- Parallel-session freshness: each session keeps a shared-seen marker, `get_context_digest` on a fork returns a `parent_digest` block with `changed_since_seen`, `/missioncache:load` banners when a sibling session updated the shared layer, and the statusline marks the fork ("Fork of <parent>", linked to both projects) with a dot when the shared context is newer than the session's last sync.
-- Completing a parent with active forks is allowed and warns; the parent's context stays readable and shared from `completed/`, and its children now surface top-level in the dashboard instead of disappearing with it.
-
-### Added - page headers on every dashboard screen and a Structure-to-Auto link (missioncache-dashboard)
-
-- All four dashboard screens (Projects, Activity, Auto, Settings) now open with the same title-plus-description header, so every view explains itself the way the Auto page already did. The Auto description now names its dual role: the task dependency graph for every active project, and live execution tracking when one runs with missioncache-auto.
-- The task modal's Structure tab gained an "Open in Auto" link that jumps to the Auto page with that project's graph pre-selected, via the new `#auto?project=<name>` deep link.
-
-### Added - place statusline addon rows below the Claude status line (missioncache-dashboard)
-
-- New `addons_after_status` statusline setting, with a toggle in the dashboard Settings panel. Off by default, so Claude status stays the footer and existing statuslines are unchanged. Turn it on when your addon rows carry what you scan for first and the status line is the afterthought.
-- Previously the row order was fixed: addon rows always rendered above the health line, and no combination of `mode`, `group`, or `order` could move them below it, since `order` only sorts row groups relative to each other.
+- A project can be created as a fork of a parent, sharing the parent's context while keeping its own tasks. (missioncache-db, mcp-missioncache, missioncache-dashboard, plugin)
+- The `**Fork of:**` header is the source of truth. The scan re-heals a lost link and refuses ambiguous matches. (missioncache-db)
+- Parallel sessions on a fork see when a sibling updated the shared layer. (mcp-missioncache, missioncache-dashboard)
+- Completing a parent with active forks warns, and its context stays readable from `completed/`. (missioncache-db)
+- Every dashboard screen opens with the same title-and-description header. (missioncache-dashboard)
+- The Structure tab links into the Auto page with that project's graph already selected. (missioncache-dashboard)
+- New `addons_after_status` setting places statusline addon rows below the Claude status line. (missioncache-dashboard)
 
 ## 2026-07-13
 
 Published package versions: missioncache-db 1.0.11, missioncache-dashboard 1.0.5.
 
-### Added - user-configurable statusline addons (missioncache-dashboard)
-
-- The statusline can now carry your own cells. An addon names a command to run, and its output renders as a cell; addons are declared in a `statusline_addons` list in the dashboard config and managed from a Settings panel. They are off by default, so the statusline is unchanged unless you add one.
-- Each addon either takes its own row (addons sharing a row become columns) or appends to a named existing row. The rendered line count comes from the config rather than from command results, so the statusline keeps a fixed height.
-- Addons fail closed: a command that breaks, times out, or is slow renders a blank cell instead of taking down the statusline. Commands run without a shell, must be an existing absolute path, are subject to a per-run timeout plus a TTL cache, and their output is stripped of control characters.
-
-### Added - delete, export, and import projects from the dashboard (missioncache-dashboard, missioncache-db)
-
-- Projects can now be deleted, exported, and imported from the dashboard instead of only from the CLI.
-- Delete removes the database record, with heartbeats, sessions, updates, and auto-run logs cascading with it. The on-disk project directory is kept unless you explicitly ask for the files too. Deleting is refused when the project has subtasks (they would be orphaned) or while a missioncache-auto run is in progress.
-- Export streams a `.tgz` bundle holding the markdown tree and a manifest; the database itself never travels. Import accepts that bundle and reports whether any repo or vault paths still need mapping to the local machine.
-- `TaskDB.delete_task` is new in missioncache-db. The dashboard now requires missioncache-db 1.0.11 or later.
-
-### Changed - dashboard Settings and project assets (missioncache-dashboard)
-
-- The Settings screen was reorganized, and the Projects view gained the delete, export, and import controls.
-- The dashboard ships a favicon and a web app manifest with icons, so it can be installed as a standalone app rather than only used in a browser tab.
-- Bundled logos and repository screenshots were re-compressed. Smaller download, no visual change.
+- The statusline can carry your own cells. An addon names a command, and its output renders as a cell. (missioncache-dashboard)
+- Addons fail closed. A command that breaks, times out or is slow renders a blank cell instead of taking down the statusline. (missioncache-dashboard)
+- Delete, export and import projects from the dashboard instead of only from the CLI. (missioncache-dashboard, missioncache-db)
+- Export streams a bundle of the markdown tree. The database itself never travels. (missioncache-db)
+- The dashboard ships a favicon and a web app manifest, so it installs as a standalone app. (missioncache-dashboard)
 
 ## 2026-07-11.1
 
 Published package versions: missioncache-dashboard 1.0.4, missioncache-install 1.0.5.
 
-### Security - pinned the markdown renderer with Subresource Integrity (missioncache-dashboard)
-
-- The dashboard now loads `marked` at a pinned version (15.0.12) with an SRI hash, matching how DOMPurify is loaded, so a compromised CDN cannot swap the markdown renderer. Behavior is unchanged from the previously floating latest.
-
-### Fixed - missioncache-install ships a rebuildable sdist (missioncache-install)
-
-- The bundled `rules/`, `user-commands/`, and `commands/` dirs now flow through the sdist via a build hook, so `uv build` produces a working wheel and sdist (previously the two-stage build failed and only a direct wheel could be built).
+- The dashboard pins its markdown renderer with an integrity hash, so a compromised CDN cannot swap it. (missioncache-dashboard)
+- missioncache-install ships a rebuildable sdist. (missioncache-install)
 
 ## 2026-07-11
 
 Published package versions: missioncache-db 1.0.10, mcp-missioncache 1.0.13, missioncache-auto 1.0.2, missioncache-dashboard 1.0.3, missioncache-install 1.0.4.
 
-### Added - missioncache-auto worktree-by-default and refusal guards (missioncache-auto)
-
-- Parallel runs on a git repo now give each worker its own git worktree and branch by default; `--no-worktree` opts back into the shared checkout, and sequential mode is unaffected. Non-git directories warn and fall back to the shared checkout.
-- Three pre-run refusals (exit code 3) prevent lost or discarded work: `--no-worktree` + auto-commit + more than one worker, worktrees + `--no-commit`, and worktrees + dirty tracked changes in the main checkout (untracked-only changes are a warning, the run proceeds).
-
-### Changed - dirty worktrees kept on cleanup (missioncache-auto)
-
-- A dirty worktree is left on disk with its branch and a warning so the work stays recoverable, instead of being force-removed.
-
-### Fixed - missioncache-auto auto-commit edge cases (missioncache-auto)
-
-- Auto-commit now detects untracked-only task output via `git status --porcelain` (was `git diff --quiet`, which missed brand-new files).
-- `.env*` files are excluded from auto-commits at any nesting depth.
-
-### Changed - statusline context percent, color, and debug handling (missioncache-dashboard)
-
-- Removed the `SYSTEM_OVERHEAD_PERCENT` (+19) add; ctx% now equals Claude Code's `used_percentage` when present (the overhead term remains only in the no-percentage estimated fallback).
-- `NO_COLOR` is honored (plain-text render), and the stdin debug log is written only when `MISSIONCACHE_STATUSLINE_DEBUG` is set (was every render).
-
-### Changed - installer writes configs atomically (missioncache-install)
-
-- Config writes are atomic (temp + rename) and leave a one-time `<file>.bak` next to each modified config per run; a partial component failure now exits 1, with components attempted independently.
-
-### Fixed - dashboard hardening (missioncache-dashboard)
-
-- Escaped remaining unescaped user-supplied values (XSS), added error and freshness states, and made interactive elements keyboard-accessible.
-
-### Fixed - hardcoded Asia/Jerusalem timezone removed (missioncache-dashboard)
-
-- Timestamps use the local timezone instead of a hardcoded `Asia/Jerusalem` zone.
-
-### Fixed - process_heartbeats concurrency claim and rollback (missioncache-db)
-
-- `process_heartbeats` rolls back on failure, and its docstring's concurrency claim is corrected to match actual behavior.
-
-### Removed - cleanup command hardcoded migration (missioncache plugin)
-
-- Dropped the hardcoded legacy-path migration step from the cleanup command.
-
-### Fixed - Stop hook edit detection (missioncache plugin)
-
-- The Stop hook now detects edited project files correctly before reminding you to run `/missioncache:save`.
-
-### Added - context-file conventions: Waiting on, capped Recent Changes + journal, load digest, health check (missioncache-db 1.0.8, mcp-missioncache 1.0.11)
-
-Context files now share a canonical structure, and the pieces that made big files painful are automated:
-
-- **Waiting on section** (`| What | Who | Since | Gates |` before Next Steps) is first-class: the new-project template generates it, `update_context_file` maintains it via `waiting_on_add` / `waiting_on_resolve` (a resolve removes the row and records the resolution in today's Recent Changes; unmatched resolves come back in `waiting_on_unmatched`, never silently dropped), and `/missioncache:load` renders it next to Next Steps on resume. The section self-heals into files that predate the convention on the first `waiting_on_add`.
-- **Recent Changes cap + per-project journal**: the section keeps its newest 12 dated subsections; overflow rolls automatically into `<name>-journal.md` (oldest first, greppable, never read on resume), with a pointer line at the section bottom. Rollover happens under the same sidecar lock as the context write, journal written first so a crash duplicates rather than loses entries. The pre-compact hook deliberately does not enforce the cap (stays import-light); the next save re-trims.
-- **`get_context_digest` MCP tool**: `/missioncache:load` now reads a server-side digest (Waiting on + Next Steps verbatim, last 3 Recent Changes subsections, section index with line numbers, size, health warnings) instead of the whole context file - which also unblocks resumes on files past the 256KB Read-tool cap.
-- **`missioncache-db health` CLI command**: fleet-wide report of stale Last Updated (>14d), stale Waiting-on rows (>7d), context files over the 100KB budget, missing core sections, and over-cap Recent Changes. Report-only, exit 0. Same warnings surface in the load digest. Thresholds are plain constants in the new `missioncache_db/context_health.py`, which owns all context-file parsing for the CLI, the MCP server, and the migration script.
-- **New-project template rewritten to the canonical order** (Description, Definition of Done, Gotchas, Waiting on, Next Steps, Recent Changes, Key Architectural Decisions, Key Files; "Patterns Being Followed" dropped, "Key People" recognized-optional). The repo-root `templates/` copy is byte-identical; missioncache-auto's embedded template is updated to the same conventions while keeping its auto-specific sections. A test guards the cross-file invariants (usage note, table header, core sections) in all three copies. `/missioncache:new` now instructs filling Definition of Done at creation.
-- **Cross-project conventions documented** in the managed rules file: `**Related projects:**` header line, the self-contained imported-event section pattern, falsified-hypothesis Gotcha entries, and parallel-session discipline.
-- **One-time migration script** (`scripts/migrate_context_conventions.py`, dry-run first): inserts Waiting on into existing projects, consolidates legacy `## Recent Changes (timestamp)` h2 fragments, repairs entries misplaced by the heading-regex bug below, and rolls overflow into journals.
-
-### Fixed - unanchored section-heading regexes misplaced Recent Changes entries (mcp-missioncache 1.0.11, hooks)
-
-The Recent Changes prepend in `update_context_file` and the pre-compact hook matched `## Recent Changes` anywhere in the file, not just at line start. A prose bullet that mentioned the literal string (missioncache-release's own context file did, inside a Key Decisions entry) became the insertion anchor, sending weeks of dated entries into the middle of another section. All section-heading matches in the write path (`Recent Changes` prepend, `_update_section`, `_append_to_section`) are now `^`-anchored with MULTILINE; the migration script repairs the already-misplaced entries. Measured blast radius: 1 of 17 active projects.
-
-Two adjacent hardenings from the same review round: (1) every structure scan is now FENCE-AWARE - lines inside ``` / ~~~ code blocks are invisible to heading/subsection/table detection, so a code sample containing a column-0 `## Recent Changes` can neither shadow the real section nor trigger a false rollover that tears the fence apart (measured: no current file contained the shape; the fix is for arbitrary users' files). The prepend shape itself now has ONE owner (`context_health.prepend_recent_changes`), shared by `update_context_file` and the pre-compact hook, so this bug class can no longer require a double fix. (2) Waiting-on cell values are pipe-escaped and newline-flattened on render and unescaped on parse - previously a literal `|` in any cell silently shifted every column on the next table rewrite.
-
-### Fixed - version-skew startup break and fence-unaware sibling section writes (missioncache-db 1.0.9, mcp-missioncache 1.0.12)
-
-Two follow-ups from an adversarial review of the context-file conventions work above, both caught before any release:
-
-- **Dependency floor**: `mcp-missioncache` imports `missioncache_db.context_health` at module load, but its declared floor still allowed `missioncache-db>=1.0.6`, where that module does not exist. A user upgrading only the server (leaving `missioncache-db` at 1.0.6 or 1.0.7) would crash at startup with an ImportError before any tool could run - a hard version-skew break, not a degraded feature. The floor is now `missioncache-db>=1.0.9`, the version that carries the section helpers the server calls. The sibling packages are unaffected: the dashboard keeps its own parser copy and missioncache-auto does not import `context_health`, so only the server's floor moved.
-- **Fence-awareness extended to the sibling section writers**: the `^`-anchored `_update_section` and `_append_to_section` (Next Steps, Gotchas, Key Files, Key Architectural Decisions) were anchored but not fence-aware, so a column-0 `## <name>` inside a fenced code example appearing before the real section could still be treated as the section and rewritten over on save - the same bug class fixed for Recent Changes in the entry above, left open on its siblings. Both now route through the new `context_health.replace_section_body` / `append_to_section_body`, which locate the heading on fence-masked text. Measured current exposure across all 17 active projects: zero; the fix is for arbitrary users' files that embed the convention as a fenced example.
-
-### Added - custom categories (missioncache-db 1.0.6, mcp-missioncache 1.0.9, missioncache-dashboard)
-
-The built-in 13-value category taxonomy is now extensible. A new dashboard Settings section manages custom categories - a name (kebab-case, built-in names and the `'none'` sentinel are reserved), an emoji (content-validated: must contain non-ASCII and no HTML metacharacters, so plain text and markup fragments never reach the DB and render-time escaping is not the only XSS defense), and a palette color (validated server-side as strict `#RRGGBB`, since the value lands in style attributes). Custom categories surface everywhere the built-ins do: project-table icons (the emoji, in the chosen color), filter-bar chips, and the modal selector, and every category write path accepts them (the dashboard PUT endpoint, `update_task`, `create_task`, `create_missioncache_files`, and the CLI via the shared `TaskDB` validation). Cross-machine import counts locally-defined customs as known; a category only defined on the exporting machine still degrades to uncategorized with a warning, since custom definitions do not travel with bundles.
-
-Deleting a custom category always succeeds: projects still carrying the value keep it (rendered with default styling, still selectable per-task so a modal save cannot wipe it), and re-adding the name restores the emoji and color. New assignments of a deleted name are rejected. Storage is a new `custom_categories` SQLite table created by the idempotent schema DDL, so existing installs pick it up on the next open with no migration step; the dashboard reads it directly from SQLite (`GET/POST /api/categories`, `DELETE /api/categories/{name}`) with no DuckDB involvement. The dashboard's 15-minute auto-refresh re-fetches the category map, so customs created from another tab, another machine, or the CLI stop rendering as the generic fallback within one cycle; a failed categories fetch keeps the previous map and says so in Settings instead of showing a false "No custom categories yet".
-
-### Fixed - dashboard CORS was wildcard with credentials (missioncache-dashboard)
-
-The dashboard's CORS middleware allowed `*` origins with credentials, letting any website open in the user's browser read every API response and drive the mutating endpoints cross-origin (the 127.0.0.1 bind blocks remote hosts, not the user's own browser tabs). CORS is now scoped to the dashboard's own origin (`localhost:8787` / `127.0.0.1:8787`) and the credentials flag is gone (nothing uses cookies). Non-browser consumers - the statusline, hooks, curl - are unaffected, since CORS only gates browser-initiated cross-origin requests.
-
-### Added - edit category in place (missioncache-db 1.0.5, mcp-missioncache 1.0.8, missioncache-dashboard)
-
-Categories are now editable after creation, from both surfaces:
-
-- **Dashboard:** the task modal header carries an inline category selector (icon + dropdown next to the repo badge). It shows the stored value ("uncategorized" for NULL rows, even when the row icon renders a heuristic guess), refreshed from SQLite via the `/api/task/{id}/files` response so it stays correct across MCP/CLI writes, and saves through the new `PUT /api/tasks/{id}/category` endpoint; on success the modal icon, row icons, and filter-bar chips update in place. The endpoint validates against `CATEGORIES` server-side (the selector is not the validation layer), mirrors the rename endpoint's DuckDB-resync contract, and reports refresh problems in its `warnings` list - which the selector surfaces as a visible "Saved (list refresh delayed)" status instead of a clean green "Saved".
-- **MCP:** a new `update_task` tool sets `jira_key` and/or `category` post-creation in any MCP client - the conversational equivalent of the CLI's `set-jira`/`set-category`. Fields are optional, the literal string `'none'` clears (an empty string is rejected rather than stored or treated as clear), and all validation runs before ANY write so invalid input never half-applies. Backed by a new `TaskDB.set_task_jira()` primitive mirroring `set_task_category()`.
-
-### Fixed - task updates silently frozen out of the dashboard read path (missioncache-dashboard)
-
-On a DuckDB file created by `migrate_to_duckdb.py`, every task row referenced by sessions or heartbeats failed to sync updates from SQLite: the migrate script's schema declared foreign keys, DuckDB rejects upserts of FK-referenced parent rows ("still referenced by a foreign key"), and the sync's per-row try/except reduced each failure to a stdout print. Renames, completions, and category changes never reached `/api/tasks/active` on such files - the server-created schema (no FKs) was unaffected, which is why the drift went unnoticed. Fixed by removing the FK constraints from the migrate script's schema (the DuckDB mirror is a disposable read replica; SQLite owns integrity - the two schema definitions now agree), counting per-row sync failures into the sync result (`tasks_sync_failed`, `sessions_sync_failed`, `repos_sync_failed` - the sessions case previously dropped time-tracking data with no signal at all), and surfacing them as warnings from the rename/category endpoints, whose except-only handling could never fire for sync errors (`sync_from_sqlite` reports problems in its result dict rather than raising). Recovery for affected files: rerun `migrate_to_duckdb.py`. The missing-table leniency added to the migrate script is scoped to the lazily-created feature tables only - an absent core table still crashes loudly.
-
-### Fixed - jira_key rendered unescaped in the dashboard task lists (missioncache-dashboard)
-
-Both task-list renderers interpolated `task.jira_key` (and `task.jira_url`) raw into `innerHTML` templates - in element-body AND `title`/`href` attribute contexts - while every sibling field was escaped, a stored-XSS sink for hostile jira_key values (reachable via the CLI and the new `update_task` tool, which do not constrain the key's format). Both sites now escape, and `escapeHtml` itself switched from the textContent/innerHTML trick to an explicit replace chain that also escapes quotes, making it safe in attribute contexts (the old version was not, which the taxonomy-bounded `category` values masked).
-
-### Fixed - migrate_to_duckdb.py crashed on DBs without the shadow-repo feature tables (missioncache-dashboard)
-
-The script assumed `shadow_repos` / `shadow_commits` / `non_git_activity` exist in the source SQLite, but those are created lazily by their feature - any user who never enabled it got `sqlite3.OperationalError: no such table`. Missing feature tables now migrate as empty, reported explicitly in the source-counts and per-table output.
-
-### Added - projects filter bar (missioncache-dashboard)
-
-The Projects view gained a filter bar above the Active and Completed tables: a search box matching project name and description (subtask names/descriptions count toward their parent), category chips showing only the categories present in the loaded data (multi-select, OR semantics, icons matching the table rows), and a repo dropdown. Filtering is client-side and applies to both tables at once; on the Completed table it runs before the newest-10 display cap, so a search can surface older completions. Filters are session-only by design - a filter silently restored from a past visit would read as missing data.
-
-### Added - CLI reference and MCP signpost for CLI-only operations (mcp-missioncache 1.0.6)
-
-New `docs/cli.md` documents the deliberately-CLI-only operations - cross-machine `export`/`import` with the per-machine `config` path map, tag keyword management, `prune`/`cleanup` maintenance, and `add-repos-glob` bulk registration - linked from the README docs section. The MCP server now sets the FastMCP `instructions` field with a short pointer at that surface, so every MCP client (Claude Code, Codex, OpenCode, VSCode) learns per session that those operations live in the `missioncache-db` CLI rather than in MCP tools.
-
-### Added - project category taxonomy (missioncache-db 1.0.4, mcp-missioncache 1.0.5)
-
-Tasks gained a nullable `category` column validated against a 13-value taxonomy (`CATEGORIES` in missioncache-db: bug, feature, refactor, test, docs, infra, ui, api, database, security, perf, coding, noncoding). The category is assigned at creation time - `/missioncache:new` derives it from the project description via a rubric in `commands/new.md` and echoes it in the creation summary - replacing the dashboard's render-time name-keyword guess that mislabeled every `missioncache-*` project as `perf` via the embedded "cache".
-
-- **missioncache-db:** `create_task(category=...)`, new `set_task_category()`, CLI `create-task --category` flag and new `set-category <id> <category|none>` command. The idempotent column migration runs at connection-open as well as `initialize()`, so bare-`TaskDB()` consumers (CLI, hooks) migrate too. Cross-machine bundles now carry `category` (export manifest + import upsert); an incoming NULL preserves the local value on re-import, and an unknown bundle value imports as uncategorized with a warning.
-- **mcp-missioncache:** `category` param on `create_task` and `create_missioncache_files` (validated, echoed in results); `TaskSummary` exposes `category`.
-- **missioncache-dashboard:** the DuckDB mirror carries the column (schema, idempotent ALTER for existing files, sync upsert, `migrate_to_duckdb.py`); the frontend renders the stored category first and only falls back to the name heuristic for NULL, now with word-boundary matching. The icon `title` attribute is HTML-escaped.
-
-Existing rows stay NULL (heuristic fallback renders them); fill by hand via `missioncache-db set-category`.
-
-### Added - statusline can hide model-suspension notices (missioncache-dashboard 1.0.2)
-
-The statusline's Claude status field pulls live incidents from status.claude.com. Anthropic posts model-access suspensions (e.g. "We've suspended access to Claude Mythos 5 and Claude Fable 5") as `monitoring` incidents that never resolve, so they pin to the field for weeks. A new "Show model suspension / deprecation notices" toggle in the dashboard Settings (Statusline visibility) controls these, defaulting to off so they stay hidden. Classification is a keyword match on the incident name/body (`suspend`, `deprecat`, `sunset`, `retir`, `no longer available`); genuine operational outages, which use different phrasing, still show regardless of the toggle. The filter runs on cache read, so flipping the toggle applies on the next prompt render rather than waiting for the 60s health cache to expire.
-
-### Changed - statusline Last Action moved to the top row (missioncache-dashboard 1.0.2)
-
-The "Last Action" timestamp moved from the bottom Vitals row to the end of the top Project row. When no MissionCache project is loaded, it takes the row's first slot. The Vitals row now carries only the Claude Code version and Claude status.
-
-### Removed - statusline current-task field (missioncache-dashboard 1.0.2)
-
-The `Task:` field (the active checklist item, set via `set_active_missioncache_tasks`) was removed from the statusline; it rarely appeared and added little over what Claude already prints in chat. The project progress count (`[82/102]`) next to the project name is unchanged and still auto-updates each render. The MCP tools that write the active-task pointer are unaffected.
-
-### Fixed - `__version__` drifted from the packaged version (missioncache-install 1.0.2)
-
-`missioncache-install --version` reported `1.0.0` while the package was actually 1.0.1, because `__version__` was a hardcoded string in `__init__.py` that was not bumped alongside `pyproject.toml`. Every package's `__version__` now derives from its installed metadata via `importlib.metadata.version(...)`, so it can no longer drift from the published version. Same change applied to `mcp-missioncache`, `missioncache-auto`, and `missioncache-dashboard` (they republish on their next release).
-
-### Fixed - installer banner wraps mid-word on narrow terminals (missioncache-install 1.0.1)
-
-The `uvx missioncache-install` start banner rendered the `MissionCache` wordmark as a single ~76-column `ansi_shadow` line, which wrapped mid-word (`MISSIONCAC` / `HE`) on terminals narrower than 80 columns. It now renders as two stacked words (`MISSION` over `CACHE`, 52 columns) that fit comfortably.
-
-### Removed - `pending-task.json` legacy state file (orbit-db 1.0.4, mcp-orbit 0.2.13)
-
-The shared `~/.claude/hooks/state/pending-task.json` file is no longer written or read by any code path. It had been documented as vestigial state since the per-session `projects/<session-id>.json` pointer landed; this release deletes the writers too.
-
-Removed:
-- `hooks/session_start.py:write_pending_task` and its call site in `main`.
-- The `pending-task.json` echo at the start of `commands/go.md` Step 4.
-- The `pending-task.json` echo at the start of `commands/save.md` Step 1b.
-- The `rm -f pending-task.json` cleanup in `commands/done.md` Step 5.
-- The `pending-task.json` sweep in `TaskDB.rename_task` (`orbit-db/__init__.py`).
-
-**Migration:** old `pending-task.json` files left over from pre-0.2.13 installs are harmless and can be deleted by hand. No active code reads them, and the rename-sweep no longer maintains them on task renames.
-
-Cosmetic cleanup in `commands/save.md` Step 1b: the previous one-liner ended with `&& echo "done" || echo "done"`, a no-op short-circuit pair. Rewritten as a single `echo "done"` after the curl call.
-
-orbit-db bumped 1.0.3 → 1.0.4 to invalidate uvx's wheel cache for the rename-sweep change; mcp-server bumped 0.2.12 → 0.2.13 to invalidate uvx's source-keyed venv cache (per `CLAUDE.local.md` - the orbit-db code is reachable from the MCP server, so both versions need to advance).
-
-### Changed - `get_task` MCP tool accepts optional `session_id` for atomic binding (mcp-orbit 0.2.12)
-
-`mcp__plugin_missioncache_pm__get_task` now accepts an optional `session_id` parameter. When provided, the tool atomically writes the `project_state` row in `~/.claude/hooks-state.db` and the per-session `~/.claude/hooks/state/projects/<sid>.json` pointer alongside the task lookup, mirroring the `create_orbit_files` binding pattern shipped in 0.2.11.
-
-**Motivation:** `/missioncache:load`'s slash-command bash step (which used to be the sole binding writer for the resume path) can be silently skipped by Claude when it streams past Step 4 to the next instruction. The server-side binding makes it impossible to call `get_task` with a session_id without binding, eliminating the failure mode where the user runs `/missioncache:load new-project` and the statusline keeps showing the previous project.
-
-**Response shape:**
-- When `session_id` is provided: response includes `session_bound: bool` (True on success, False on validation/IO failure).
-- When `session_id` is omitted: `session_bound` field is omitted entirely. Existing read-only callers (UI, list views, tests) are unaffected.
-
-**`/missioncache:load` updates** to pass the resolved session_id to `get_task` via the same `$CLAUDE_CODE_SESSION_ID` env-var pattern adopted in `commands/save.md` / `commands/done.md` / `commands/new.md`. The Step 4 bash binding stays as defense-in-depth and to refresh the dashboard list view immediately, but the statusline binding is now driven server-side.
-
-### Fixed - Statusline shows stale project after resume at umbrella cwd
-
-When a Claude Code session resumed at a parent directory holding multiple project repos (e.g. `~/work`), the SessionStart hook would unconditionally inherit whatever project the previous session at that cwd was bound to. The inherited binding then routed heartbeats to the wrong task, made the statusline display the wrong project name, and survived subsequent `/missioncache:load <other-project>` invocations when the slash command's bash step did not fire correctly.
-
-**Root cause:** `_pickup_previous_session_binding` (`hooks/session_start.py`) used the cwd-session pointer match alone as sufficient evidence to inherit. For umbrella cwds, the previous session's specific project is unrelated to the new session's intent.
-
-**Fix:** added a cwd-compatibility gate. The inherited project is now accepted only when the project's repo path is the current cwd or an ancestor of it (i.e. the new session is sitting *inside* the project repo). If the repo lives *under* the cwd or in an unrelated location, the inherit is skipped and the statusline starts blank - the user resolves intent explicitly via `/missioncache:load`.
-
-**Conservative on failure:** if orbit-db is unavailable, the task lookup raises, or the task/repo row no longer exists, the inherit proceeds as before. The gate only fires on affirmative evidence that the inherit is wrong.
-
-**Non-coding tasks:** unaffected. Inherit always proceeds for tasks with no `repo_id`.
-
-**New contract for users:** if you have been relying on a parent cwd auto-inheriting the previous session's project, that behavior is gone. Run `/missioncache:load <project>` in the new session to bind explicitly, or `cd` into the project's repo before opening Claude Code.
+- Parallel missioncache-auto runs give each worker its own git worktree and branch by default. (missioncache-auto)
+- Three pre-run refusals prevent lost work when the worktree and auto-commit settings conflict. (missioncache-auto)
+- A dirty worktree is left on disk with its branch and a warning, instead of being force-removed. (missioncache-auto)
+- Auto-commit detects untracked-only output, and never commits `.env*` at any depth. (missioncache-auto)
+- The statusline's context percent matches Claude Code's own number, and `NO_COLOR` is honoured. (missioncache-dashboard)
+- Installer config writes are atomic and leave one `.bak` per run. (missioncache-install)
+- Dashboard hardening: remaining unescaped values, error and freshness states, and keyboard access. (missioncache-dashboard)
+- Timestamps use the local timezone instead of a hardcoded `Asia/Jerusalem`. (missioncache-dashboard)
+- `process_heartbeats` rolls back on failure. (missioncache-db)
+- Dropped the hardcoded legacy-path migration from the cleanup command. (plugin)
+- The Stop hook detects edited project files correctly before reminding you to save. (plugin)
+- New `## Waiting on` section, maintained by `waiting_on_add` and `waiting_on_resolve` and shown beside Next Steps on resume. (missioncache-db, mcp-missioncache)
+- Recent Changes keeps its newest 12 entries. Older ones roll into `<name>-journal.md`. (missioncache-db, mcp-missioncache)
+- New `get_context_digest` tool, so `/missioncache:load` reads a digest instead of the whole context file. (mcp-missioncache)
+- New `missioncache-db health`: stale saves, stale waiting-on rows, oversized context files and missing sections. (missioncache-db)
+- The new-project template follows the canonical section order. (missioncache-db, plugin)
+- One-time migration script brings existing context files onto the conventions. (missioncache-db)
+- Section-heading matches are anchored to line start. A bullet mentioning `## Recent Changes` had become the insertion anchor. (mcp-missioncache, plugin)
+- Every structure scan is fence-aware, so a heading inside a code sample cannot shadow the real section. (missioncache-db, mcp-missioncache)
+- Waiting-on cell values are pipe-escaped, so a literal `|` no longer shifts every column on the next rewrite. (missioncache-db)
+- The server's dependency floor moved to the missioncache-db version carrying the module it imports at load. (mcp-missioncache)
+- Custom categories: a name, an emoji and a colour, managed from Settings and accepted everywhere the built-ins are. (missioncache-db, mcp-missioncache, missioncache-dashboard)
+- Deleting a custom category always succeeds. Projects still carrying it keep the value. (missioncache-dashboard)
+- Dashboard CORS is scoped to its own origin, and the credentials flag is gone. (missioncache-dashboard)
+- Categories are editable after creation, from the dashboard and from the new `update_task` tool. (missioncache-db, mcp-missioncache, missioncache-dashboard)
+- Task updates reach the dashboard's read path again on DuckDB files created by the migrate script. (missioncache-dashboard)
+- `jira_key` is escaped in the task lists, in element bodies and in attributes. (missioncache-dashboard)
+- `migrate_to_duckdb.py` no longer crashes on databases without the lazily-created feature tables. (missioncache-dashboard)
+- New projects filter bar: search, category chips and a repo dropdown, across both tables at once. (missioncache-dashboard)
+- New `docs/cli.md` for the deliberately CLI-only operations, with the MCP server pointing every client at it. (mcp-missioncache)
+- New project category taxonomy, assigned at creation instead of guessed from the project name. (missioncache-db, mcp-missioncache, missioncache-dashboard)
+- The statusline can hide model-suspension notices, which never resolve and otherwise pin for weeks. (missioncache-dashboard)
+- The statusline's Last Action moved to the top row. (missioncache-dashboard)
+- Removed the statusline's `Task:` field. (missioncache-dashboard)
+- `__version__` derives from installed metadata, so it cannot drift from the published version. (missioncache-install, mcp-missioncache, missioncache-auto, missioncache-dashboard)
+- The installer banner no longer wraps mid-word on terminals narrower than 80 columns. (missioncache-install)
+- Removed the `pending-task.json` legacy state file and its writers. Leftover files are harmless and can be deleted by hand. (orbit-db, mcp-orbit, plugin)
+- `get_task` accepts `session_id` and binds the session atomically, so a skipped bash step cannot leave the statusline stale. (mcp-orbit, plugin)
+- The statusline no longer shows a stale project after resuming at a parent directory holding several repos. (plugin)

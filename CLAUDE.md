@@ -82,6 +82,21 @@ MCP server config is inlined in `.claude-plugin/plugin.json` under the `mcpServe
 2. Add instructions for Claude to follow when command is invoked
 3. Reinstall plugin (maintainer dev loop uses the local marketplace): `claude plugins install missioncache@local`
 
+## Writing a CHANGELOG Entry
+
+`CHANGELOG.md` is read by users deciding whether to update, not by the person who wrote the change. One line per change, **25 words or fewer**, saying what is different for the reader. Affected packages in parentheses at the end.
+
+What does NOT go in an entry: the mechanism, the measurements, what the review found, which tests were added, and why it was hard. That belongs in the commit message, where someone digging into the change will look for it. A line that needs a second sentence to be understood usually describes two changes, so split it.
+
+```
+GOOD  - The Windows dashboard survives login again. The hidden-console autostart died on its first print and left an empty log. (missioncache-dashboard)
+BAD   - The Windows dashboard survives login again. `serve --hidden` redirected file descriptors 1 and 2 to the log file but left `sys.stdout` as the object it started as, so `WriteConsoleW` failed with WinError 6 once fd 1 was a file handle, which aborted the uvicorn lifespan on its first print, and every message about that went to the same dead stream... (missioncache-dashboard)
+```
+
+Both say the same thing. The second is 60 words of mechanism nobody reading a changelog needs.
+
+Keep the `## YYYY-MM-DD` headings and their `Published package versions:` lines exactly as they are: those are the release record. Group related entries under a short `### Topic` heading only when a release has several of them on one subject.
+
 ## Database
 
 missioncache-db provides the `TaskDB` class with these key tables:
