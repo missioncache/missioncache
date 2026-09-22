@@ -8,8 +8,13 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-09-23
+
+Plugin-only release: no PyPI packages changed. Claude Code plugin 1.0.27.
+
 - `/missioncache:lead` no longer loops on its own. It asks how often to check and for how long, stopping after 7 hours by default. (plugin, hooks, docs)
 - `/missioncache:brief` takes `--until <ISO>`, which ends the lead loop at that time. (plugin)
+- The editor extension publishes to Open VSX and the VS Marketplace from one build on an `extension-v*` tag, so Cursor can install it. (ci)
 
 ## 2026-09-16
 
