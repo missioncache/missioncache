@@ -1586,5 +1586,31 @@
       "title": "/pulls",
       "uniques": 1
     }
+  ],
+  "2026-09-22": [
+    {
+      "count": 5,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 4
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/commands/prompts.md",
+      "title": "/blob/main/commands/prompts.md",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/docs/cli.md",
+      "title": "/blob/main/docs/cli.md",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/pulls",
+      "title": "/pulls",
+      "uniques": 1
+    }
   ]
 }
