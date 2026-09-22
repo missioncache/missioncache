@@ -27,6 +27,7 @@ One report across every project you are working on in parallel: what is on fire,
 | `--ask` | Also message each live peer session for a one-line status. Async: see Step 5 |
 | `--delta` | Report only what changed since the previous run in this session (the lead loop uses this) |
 | `--lang he\|en` | Force the output language. Without it, follow the conversation's language, defaulting to English |
+| `--until <ISO>` | Used with `--delta` by the lead loop. Past this local time the tick ends the loop instead of reporting |
 
 ## Workflow
 
@@ -133,6 +134,8 @@ Outside Claude Code `--ask` is unavailable; say so in one line and render the re
 Omit any block whose data is empty. Never render an empty calendar or an empty "stuck" section.
 
 ### Step 7: `--delta`
+
+**Before anything else, the window.** When `--until <ISO timestamp>` is present and the local time is now past it, the loop's window is over: say in one line that the lead loop ended and offer to restart it, end the loop, and do nothing else. No rollup, no snapshot write. The timestamp is absolute rather than a duration on purpose, because the loop re-sends this same prompt every tick and a duration would restart its own countdown each time, so the loop would never end.
 
 Compare this run against the previous one in this session and print only what changed. The previous snapshot is a file, so it survives compaction:
 

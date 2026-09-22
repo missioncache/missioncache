@@ -108,7 +108,7 @@ missioncache-db lead show [--json]                   # who the lead is, and whet
 missioncache-db lead stop                            # end the role
 ```
 
-One session at a time can be the lead: the project manager that `/missioncache:lead` turns a session into. `set` replaces any previous lead, and the replaced session finds out on its next brief tick. The lead carries the fixed session title `missioncache-lead`, applied by the title hook, so every working session that saves context or a PM item can address it without a lookup (the write tools return a `lead_session` field saying whom to notify). `show` distinguishes a running lead from a designated row whose process is gone; the latter is dropped by `prune-sessions`. The role lives in `~/.claude/hooks-state.db`, so it survives compaction.
+One session at a time can be the lead: the project manager that `/missioncache:lead` turns a session into. `set` replaces any previous lead, and the replaced session finds out on its next delta brief, whether that comes from an opted-in loop or from a brief you ask for. The lead carries the fixed session title `missioncache-lead`, applied by the title hook, so every working session that saves context or a PM item can address it without a lookup (the write tools return a `lead_session` field saying whom to notify). `show` distinguishes a running lead from a designated row whose process is gone; the latter is dropped by `prune-sessions`. The role lives in `~/.claude/hooks-state.db`, so it survives compaction.
 
 ## Calendar agenda
 
