@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- The rules no longer tell Windows sessions to skip peer notifications. Windows has had cross-session messaging since Claude Code 2.1.239. (rules, plugin)
+
 ## 2026-09-23
 
 Plugin-only release: no PyPI packages changed. Claude Code plugin 1.0.27.
