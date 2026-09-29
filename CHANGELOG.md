@@ -11,6 +11,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 - The rules no longer tell Windows sessions to skip peer notifications. Windows has had cross-session messaging since Claude Code 2.1.239. (rules, plugin)
 - The rules say which sends report back: a refusal is reported on the same machine, but a send across machines is never confirmed. (rules, plugin)
 - The rules use `ListAgents` naming the current session, so a session stops messaging itself, and `notify_when_idle` instead of polling a peer. (rules, plugin)
+- The editor extension has a sidebar: open tasks by section, Next Steps and Waiting on, each opening its file at that line. (extension)
+- New `missioncache-db extension-project <task_id>` returns one project's tasks, Next Steps and Waiting on, with line numbers, for the sidebar. (missioncache-db)
 
 ## 2026-09-23
 

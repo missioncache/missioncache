@@ -4,6 +4,8 @@ Status-bar companion for [MissionCache](https://github.com/missioncache/missionc
 
 Shows your active MissionCache project and task progress in the status bar. Click it for quick access to the project's tasks and context files, the dashboard, and your other active projects.
 
+The MissionCache icon in the activity bar opens a sidebar for the same project: open tasks grouped by section, Next Steps, Waiting on, and your other active projects. Click a task or step to open the file at that line, or click another project to switch to it. The sidebar is read-only. Tasks are checked off by your AI tool through MissionCache, not here.
+
 **This extension requires the MissionCache CLI.** Install it first:
 
 ```

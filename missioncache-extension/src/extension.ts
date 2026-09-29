@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { ProjectOutline, ProjectTree, TreeInput } from './tree';
 
 const run = promisify(execFile);
 
@@ -11,6 +12,7 @@ const DASHBOARD_URL = process.env.MISSIONCACHE_DASHBOARD_URL ?? 'http://localhos
 const PICK_KEY = 'missioncache.pickedProject';
 const SCHEMA = 1;
 const UPDATE_HINT = 'uvx --refresh missioncache-install@latest --update';
+const INSTALL_HINT = 'uvx missioncache-install';
 
 interface Project {
     id: number;
@@ -37,29 +39,30 @@ interface ExtensionState {
     projects: Project[];
 }
 
-type DataState =
-    | { kind: 'ok'; state: ExtensionState }
+type CliResult<T> =
+    | { kind: 'ok'; state: T }
     | { kind: 'not-installed' }
     | { kind: 'old-cli' }
     | { kind: 'error'; detail: string };
+
+type DataState = CliResult<ExtensionState>;
 
 function isOldCliOutput(text: string | undefined): boolean {
     return !!text && (text.includes('Unknown command') || text.includes('Usage:'));
 }
 
-async function fetchState(): Promise<DataState> {
-    const dir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const args = ['extension-state', ...(dir ? ['--dir', dir] : [])];
+/** Run a `missioncache-db` JSON verb, mapping every way it can fail to a state the UI renders. */
+async function runCli<T extends { schema: number }>(args: string[]): Promise<CliResult<T>> {
     try {
         const { stdout } = await run('missioncache-db', args, { timeout: 10000 });
         try {
-            const state = JSON.parse(stdout) as ExtensionState;
+            const state = JSON.parse(stdout) as T;
             // A schema we don't know renders wrong silently - route it to the
             // same update path as a missing command.
             if (state.schema !== SCHEMA) { return { kind: 'old-cli' }; }
             return { kind: 'ok', state };
         } catch {
-            // Binary exists, answered with prose: the pre-extension-state CLI.
+            // Binary exists, answered with prose: a CLI older than this verb.
             return isOldCliOutput(stdout)
                 ? { kind: 'old-cli' }
                 : { kind: 'error', detail: stdout.slice(-300) };
@@ -71,6 +74,11 @@ async function fetchState(): Promise<DataState> {
         const detail = (e.stderr || e.stdout || e.message || 'unknown error').trim().slice(-300);
         return { kind: 'error', detail };
     }
+}
+
+function fetchState(): Promise<DataState> {
+    const dir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return runCli<ExtensionState>(['extension-state', ...(dir ? ['--dir', dir] : [])]);
 }
 
 function pickProject(context: vscode.ExtensionContext, projects: Project[]): Project | undefined {
@@ -96,9 +104,11 @@ function relativeTime(ts: string | null): string {
     return `${Math.round(mins / (60 * 24))}d ago`;
 }
 
-async function openFile(filePath: string): Promise<void> {
+async function openFile(filePath: string, line?: number): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-    await vscode.window.showTextDocument(doc);
+    // `line` is 1-based, as missioncache-db reports it.
+    const selection = line ? new vscode.Range(line - 1, 0, line - 1, 0) : undefined;
+    await vscode.window.showTextDocument(doc, { selection });
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -107,6 +117,9 @@ export function activate(context: vscode.ExtensionContext): void {
     item.text = '$(checklist) MissionCache';
     item.show();
     context.subscriptions.push(item);
+
+    const tree = new ProjectTree();
+    context.subscriptions.push(tree, vscode.window.registerTreeDataProvider('missioncache.project', tree));
 
     let latest: DataState | undefined;
     let fetchSeq = 0;
@@ -117,6 +130,47 @@ export function activate(context: vscode.ExtensionContext): void {
         if (seq !== fetchSeq) { return; } // a newer refresh already landed
         latest = result;
         render();
+        const input = await treeInput(result);
+        if (seq !== fetchSeq) { return; }
+        tree.update(input);
+    }
+
+    function cliMessage(result: Exclude<CliResult<unknown>, { kind: 'ok' }>): TreeInput {
+        switch (result.kind) {
+            case 'not-installed':
+                return { kind: 'message', text: 'MissionCache CLI not found', tooltip: `Install with: ${INSTALL_HINT}` };
+            case 'old-cli':
+                return { kind: 'message', text: 'Update MissionCache to see this view', tooltip: `Run: ${UPDATE_HINT}` };
+            case 'error':
+                return { kind: 'message', text: 'missioncache-db failed', tooltip: result.detail };
+        }
+    }
+
+    async function treeInput(result: DataState): Promise<TreeInput> {
+        if (result.kind !== 'ok') { return cliMessage(result); }
+        const project = pickProject(context, result.state.projects);
+        if (!project) {
+            return { kind: 'message', text: 'No active MissionCache project' };
+        }
+        // old-cli here means a CLI that has extension-state but predates extension-project.
+        const outline = await runCli<ProjectOutline>(['extension-project', String(project.id)]);
+        if (outline.kind !== 'ok') { return cliMessage(outline); }
+        if (!outline.state.found) {
+            return { kind: 'message', text: `Project ${project.name} not found` };
+        }
+        const others = result.state.projects
+            .filter(p => p.name !== project.name)
+            .map(p => ({
+                name: p.name,
+                detail: `${p.status !== 'active' ? `${p.status} - ` : ''}${relativeTime(p.last_worked_on)}`,
+            }));
+        return { kind: 'outline', outline: outline.state, others };
+    }
+
+    async function switchProject(name: string | undefined): Promise<void> {
+        await context.workspaceState.update(PICK_KEY, name);
+        render(); // the status bar switches now, the sidebar after the fetch
+        await refresh();
     }
 
     function render(): void {
@@ -124,7 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
         switch (latest.kind) {
             case 'not-installed':
                 item.text = '$(circle-slash) MissionCache';
-                item.tooltip = 'MissionCache CLI not found. Install with: uvx missioncache-install';
+                item.tooltip = `MissionCache CLI not found. Install with: ${INSTALL_HINT}`;
                 return;
             case 'old-cli':
                 item.text = '$(arrow-up) MissionCache: update needed';
@@ -164,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!latest || latest.kind !== 'ok') {
             const message =
                 latest?.kind === 'not-installed'
-                    ? 'MissionCache CLI not found on PATH. Install with: uvx missioncache-install'
+                    ? `MissionCache CLI not found on PATH. Install with: ${INSTALL_HINT}`
                     : latest?.kind === 'error'
                         ? `missioncache-db failed: ${latest.detail}`
                         : `This extension needs a newer MissionCache. Run: ${UPDATE_HINT}`;
@@ -199,10 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (overridden) {
             items.push({
                 label: '$(discard) Back to automatic project detection',
-                action: async () => {
-                    await context.workspaceState.update(PICK_KEY, undefined);
-                    render();
-                },
+                action: () => switchProject(undefined),
             });
         }
         for (const project of state.projects) {
@@ -210,10 +261,7 @@ export function activate(context: vscode.ExtensionContext): void {
             items.push({
                 label: `$(repo) ${project.name}`,
                 description: `${project.dir_match ? 'this workspace - ' : ''}${project.status !== 'active' ? `${project.status} - ` : ''}${relativeTime(project.last_worked_on)}`,
-                action: async () => {
-                    await context.workspaceState.update(PICK_KEY, project.name);
-                    render();
-                },
+                action: () => switchProject(project.name),
             });
         }
         if (state.update_available) {
@@ -240,6 +288,14 @@ export function activate(context: vscode.ExtensionContext): void {
             void vscode.env.openExternal(vscode.Uri.parse(DASHBOARD_URL));
         }),
         vscode.commands.registerCommand('missioncache.showMenu', showMenu),
+        vscode.commands.registerCommand('missioncache.switchProject', switchProject),
+        vscode.commands.registerCommand('missioncache.openAtLine', async (file: string, line: number) => {
+            try {
+                await openFile(file, line);
+            } catch (err: unknown) {
+                void vscode.window.showWarningMessage(`MissionCache: ${(err as Error).message}`);
+            }
+        }),
     );
 
     // Event-driven refresh: MissionCache markdown writes (a *.md glob never

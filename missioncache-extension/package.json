@@ -1,8 +1,8 @@
 {
   "name": "missioncache",
   "displayName": "MissionCache",
-  "description": "Project status for MissionCache - active project, task progress, and quick access from the status bar. Companion to the MissionCache CLI install.",
-  "version": "0.1.0",
+  "description": "Project status for MissionCache - active project and task progress in the status bar, plus a sidebar of tasks, next steps and blockers. Companion to the MissionCache CLI install.",
+  "version": "0.2.0",
   "publisher": "missioncache",
   "license": "SEE LICENSE IN LICENSE",
   "repository": { "type": "git", "url": "https://github.com/missioncache/missioncache.git" },
@@ -14,9 +14,24 @@
   "contributes": {
     "commands": [
       { "command": "missioncache.showMenu", "title": "Show Menu", "category": "MissionCache" },
-      { "command": "missioncache.refresh", "title": "Refresh", "category": "MissionCache" },
-      { "command": "missioncache.openDashboard", "title": "Open Dashboard", "category": "MissionCache" }
-    ]
+      { "command": "missioncache.refresh", "title": "Refresh", "category": "MissionCache", "icon": "$(refresh)" },
+      { "command": "missioncache.openDashboard", "title": "Open Dashboard", "category": "MissionCache" },
+      { "command": "missioncache.switchProject", "title": "Switch Project", "category": "MissionCache" },
+      { "command": "missioncache.openAtLine", "title": "Open at Line", "category": "MissionCache" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "missioncache", "title": "MissionCache", "icon": "media/missioncache.svg" }]
+    },
+    "views": {
+      "missioncache": [{ "id": "missioncache.project", "name": "Project" }]
+    },
+    "menus": {
+      "view/title": [{ "command": "missioncache.refresh", "when": "view == missioncache.project", "group": "navigation" }],
+      "commandPalette": [
+        { "command": "missioncache.switchProject", "when": "false" },
+        { "command": "missioncache.openAtLine", "when": "false" }
+      ]
+    }
   },
   "scripts": {
     "build": "node esbuild.js",
