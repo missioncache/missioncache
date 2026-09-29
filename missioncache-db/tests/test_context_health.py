@@ -1439,3 +1439,45 @@ class TestPmMirrorIsNotRefusedOnADamagedFile:
             ch.replace_section_body(doc, "Action Items", "new")
         out = ch.replace_section_body(doc, "Action Items", "new", strict=False)
         assert "new" in out
+
+
+class TestExtensionOutlineParsers:
+    def test_checklist_items_sections_fences_and_quoted_boxes(self):
+        from missioncache_db.context_health import checklist_items
+
+        content = (
+            "# T\n- Flat: `- [ ] 1. example`\n\n## Phase 1\n- [x] 1. done\n"
+            "```\n- [ ] 9. fenced\n```\n  - [ ] 1.1. nested\n## Phase 2\n- [X] 2a. upper\n"
+            "- [ ] TBD\n"
+        )
+        assert checklist_items(content) == [
+            {"line": 5, "checked": True, "number": "1", "text": "done", "section": "Phase 1"},
+            {"line": 9, "checked": False, "number": "1.1", "text": "nested", "section": "Phase 1"},
+            {"line": 11, "checked": True, "number": "2a", "text": "upper", "section": "Phase 2"},
+            {"line": 12, "checked": False, "number": None, "text": "TBD", "section": "Phase 2"},
+        ]
+
+    def test_section_list_items_top_level_only(self):
+        from missioncache_db.context_health import section_list_items
+
+        content = (
+            "## Next Steps\n\n1. one\n   - sub\n- two\n```\n- fenced\n```\n3) three\n"
+            "## Recent Changes\n- not mine\n"
+        )
+        assert section_list_items(content, "Next Steps") == [
+            {"line": 3, "text": "one"},
+            {"line": 5, "text": "two"},
+            {"line": 9, "text": "three"},
+        ]
+        assert section_list_items(content, "Missing") == []
+
+    def test_waiting_on_with_lines_matches_parse_waiting_on(self):
+        from missioncache_db.context_health import (
+            parse_waiting_on,
+            waiting_on_with_lines,
+        )
+
+        content = "# C\n## Waiting on\n| What | Who | Since | Gates |\n|--|--|--|--|\n| a | b | c | d |\n"
+        rows = waiting_on_with_lines(content)
+        assert rows == [{"line": 5, "what": "a", "who": "b", "since": "c", "gates": "d"}]
+        assert [{k: v for k, v in r.items() if k != "line"} for r in rows] == parse_waiting_on(content)

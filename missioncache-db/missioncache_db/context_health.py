@@ -680,13 +680,25 @@ def parse_waiting_on(content: str) -> list[dict[str, str]]:
     short rows are padded with empty strings rather than dropped. Lines
     inside fenced code blocks are never treated as table rows.
     """
+    return [row for _, row in _waiting_on_rows(content)]
+
+
+def waiting_on_with_lines(content: str) -> list[dict[str, Any]]:
+    """``parse_waiting_on`` rows, each with its 1-based ``line`` in the file."""
+    return [{"line": line, **row} for line, row in _waiting_on_rows(content)]
+
+
+def _waiting_on_rows(content: str) -> list[tuple[int, dict[str, str]]]:
     span = _section_span(content, "Waiting on")
     if span is None:
         return []
     body = content[span[1] : span[2]]
     masked_body = mask_fences(content)[span[1] : span[2]]
+    first_line = content.count("\n", 0, span[1]) + 1
     rows = []
-    for line, masked_line in zip(body.splitlines(), masked_body.splitlines()):
+    for offset, (line, masked_line) in enumerate(
+        zip(body.splitlines(), masked_body.splitlines())
+    ):
         if not masked_line.strip().startswith("|"):
             continue
         cells = [_unescape_cell(c) for c in _split_row(line)]
@@ -695,10 +707,68 @@ def parse_waiting_on(content: str) -> list[dict[str, str]]:
         if cells and cells[0].lower() == "what":
             continue  # header row
         cells += [""] * (4 - len(cells))
-        rows.append(
-            {"what": cells[0], "who": cells[1], "since": cells[2], "gates": cells[3]}
-        )
+        rows.append((
+            first_line + offset,
+            {"what": cells[0], "who": cells[1], "since": cells[2], "gates": cells[3]},
+        ))
     return rows
+
+
+# Unlike _LIST_ITEM_RE (what bullets_remove may delete, table rows included),
+# this reads list items for display: no table rows, and `1)` counts too.
+_TOP_LEVEL_ITEM_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+(.*)$")
+_CHECKBOX_RE = re.compile(r"^\s*- \[([ xX])\]\s*(.*)$")
+# The checklist number grammar the MCP server uses (`7`, `54a`, `1.2`).
+_TASK_NUMBER_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)*[a-z]?)\.\s+(.*)$", re.DOTALL)
+
+
+def section_list_items(content: str, name: str) -> list[dict[str, Any]]:
+    """Top-level list items of ``## <name>`` as ``{"line", "text"}``.
+
+    Only column-0 bullets and numbered items count, so an indented
+    continuation or sub-bullet stays with its parent. Items inside fenced
+    code blocks are skipped. A missing section returns ``[]``.
+    """
+    span = _section_span(content, name)
+    if span is None:
+        return []
+    masked_body = mask_fences(content)[span[1] : span[2]]
+    first_line = content.count("\n", 0, span[1]) + 1
+    items = []
+    for offset, masked_line in enumerate(masked_body.split("\n")):
+        match = _TOP_LEVEL_ITEM_RE.match(masked_line)
+        if match:
+            items.append({"line": first_line + offset, "text": match.group(1).strip()})
+    return items
+
+
+def checklist_items(content: str) -> list[dict[str, Any]]:
+    """Every ``- [ ]`` / ``- [x]`` line as ``{"line", "checked", "number", "text", "section"}``.
+
+    ``number`` is the leading checklist number (``"54a"``) with ``text`` the
+    rest of the line, or None with ``text`` the whole line for an unnumbered
+    item. ``section`` is the ``## `` heading the item sits under (None above
+    the first one). Anchored to the start of a line, so a checkbox quoted inside
+    prose or backticks is not a task, and fenced blocks are skipped.
+    """
+    items = []
+    section = None
+    for number, masked_line in enumerate(mask_fences(content).split("\n"), start=1):
+        if masked_line.startswith("## "):
+            section = masked_line[3:].strip()
+            continue
+        match = _CHECKBOX_RE.match(masked_line)
+        if match:
+            text = match.group(2).strip()
+            numbered = _TASK_NUMBER_RE.match(text)
+            items.append({
+                "line": number,
+                "checked": match.group(1) != " ",
+                "number": numbered.group(1) if numbered else None,
+                "text": numbered.group(2) if numbered else text,
+                "section": section,
+            })
+    return items
 
 
 def render_waiting_on_row(row: dict[str, str]) -> str:

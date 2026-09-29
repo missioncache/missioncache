@@ -24,6 +24,7 @@ Usage:
     python missioncache_db.py list-completed [days]     # List recently completed tasks
     python missioncache_db.py get-task-by-name <name>   # Find task by name
     python missioncache_db.py extension-state [--dir PATH]  # Editor-extension snapshot (JSON)
+    python missioncache_db.py extension-project <task_id>  # One project's sidebar outline (JSON)
 
 Keyword Management:
     python missioncache_db.py add-keyword <keyword>     # Add custom tag keyword
@@ -5268,6 +5269,59 @@ class TaskDB:
             "projects": projects,
         }
 
+    def get_extension_project(self, task_id: int) -> Dict[str, Any]:
+        """One project's outline for the editor extension's sidebar.
+
+        Tasks from the tasks file (each with its line and the ``## `` section
+        it sits under), plus Next Steps and Waiting on from the context file,
+        every item carrying a 1-based line so a click can open the file there.
+        Looked up by id, the one ``get_extension_state`` returns, because task
+        names are not unique. A missing project comes back with ``found:
+        False``; a missing file or section comes back as empty lists.
+        """
+        from missioncache_db import context_health
+
+        result: Dict[str, Any] = {
+            "schema": 1,
+            "id": task_id,
+            "name": None,
+            "found": False,
+            "tasks_file": None,
+            "context_file": None,
+            "tasks": [],
+            "next_steps": [],
+            "waiting_on": [],
+        }
+        task = self.get_task(task_id)
+        if not task:
+            return result
+        result["name"] = task.name
+        repo = self.get_repo(task.repo_id) if task.repo_id else None
+        progress = self.parse_missioncache_progress(
+            repo.path if repo else "", task.full_path, task.parent_id
+        )
+        result["found"] = True
+        result["tasks_file"] = progress.get("tasks_file")
+        result["context_file"] = progress.get("context_file")
+
+        def read(path: Optional[str]) -> str:
+            try:
+                return Path(path).read_text(encoding="utf-8") if path else ""
+            except OSError:
+                return ""
+
+        # For a parent project the progress parser falls back to README.md or
+        # shared-context.md as the "tasks file"; checkboxes there are not tasks.
+        tasks_file = result["tasks_file"]
+        if tasks_file and tasks_file.endswith("tasks.md"):
+            result["tasks"] = context_health.checklist_items(read(tasks_file))
+        context_content = read(result["context_file"])
+        result["next_steps"] = context_health.section_list_items(
+            context_content, "Next Steps"
+        )
+        result["waiting_on"] = context_health.waiting_on_with_lines(context_content)
+        return result
+
 
 # =============================================================================
 # Tree Rendering
@@ -5611,6 +5665,12 @@ def main():
                     sys.exit(1)
                 directory = sys.argv[idx + 1]
             print(json.dumps(db.get_extension_state(directory)))
+
+        elif command == "extension-project":
+            if len(sys.argv) < 3 or not sys.argv[2].isdigit():
+                print("Usage: missioncache-db extension-project <task_id>")
+                sys.exit(1)
+            print(json.dumps(db.get_extension_project(int(sys.argv[2]))))
 
         elif command == "add-repo":
             if len(sys.argv) < 3:

@@ -136,3 +136,54 @@ class TestExtensionState:
         by_name = {p["name"]: p for p in db.get_extension_state()["projects"]}
         assert by_name["ext-child"]["fork_of"] == "ext-parent"
         assert by_name["ext-parent"]["fork_of"] is None
+
+
+class TestExtensionProject:
+    def test_unknown_project(self, db):
+        result = db.get_extension_project(99999)
+        assert result["found"] is False
+        assert result["tasks"] == [] and result["next_steps"] == [] and result["waiting_on"] == []
+
+    def test_outline_with_lines(self, db, tmp_path):
+        task = _project_with_files(db, tmp_path, "ext-p", "/tmp/ext-p-repo")
+        context = tmp_path / task.full_path / "ext-p-context.md"
+        context.write_text(
+            "# C\n\n## Waiting on\n\n| What | Who | Since | Gates |\n|---|---|---|---|\n"
+            "| PAT | Tomer | 2026-09-01 | publish |\n\n## Next Steps\n\n1. Build it\n   detail\n2. Ship it\n",
+            encoding="utf-8",
+        )
+        result = db.get_extension_project(task.id)
+        assert result["found"] is True
+        assert [(t["line"], t["checked"], t["number"], t["text"]) for t in result["tasks"]] == [
+            (5, True, "1", "done thing"),
+            (6, False, "2", "open thing"),
+        ]
+        assert result["next_steps"] == [
+            {"line": 11, "text": "Build it"},
+            {"line": 13, "text": "Ship it"},
+        ]
+        assert result["waiting_on"] == [
+            {"line": 7, "what": "PAT", "who": "Tomer", "since": "2026-09-01", "gates": "publish"}
+        ]
+
+    def test_missing_context_file(self, db, tmp_path):
+        task = _project_with_files(db, tmp_path, "ext-q", "/tmp/ext-q-repo")
+        (tmp_path / task.full_path / "ext-q-context.md").unlink()
+        result = db.get_extension_project(task.id)
+        assert len(result["tasks"]) == 2
+        assert result["context_file"] is None
+        assert result["next_steps"] == [] and result["waiting_on"] == []
+
+    def test_same_name_resolves_by_id(self, db, tmp_path):
+        first = _project_with_files(db, tmp_path, "ext-dup", "/tmp/ext-dup-a")
+        second = db.create_task("ext-dup", repo_id=db.add_repo("/tmp/ext-dup-b", "b-repo"))
+        with db.connection() as conn:
+            conn.execute("UPDATE tasks SET full_path = ? WHERE id = ?", ("active/b/ext-dup", second.id))
+        second_dir = tmp_path / "active" / "b" / "ext-dup"
+        second_dir.mkdir(parents=True)
+        (second_dir / "ext-dup-tasks.md").write_text("- [ ] 1. other repo\n", encoding="utf-8")
+        # A name lookup picks the newer row, so only the id keeps the first one.
+        assert db.get_task_by_name("ext-dup").id == second.id
+        result = db.get_extension_project(first.id)
+        assert [t["text"] for t in result["tasks"]] == ["done thing", "open thing"]
+        assert [t["text"] for t in db.get_extension_project(second.id)["tasks"]] == ["other repo"]
