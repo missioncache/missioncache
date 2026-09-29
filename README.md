@@ -54,9 +54,13 @@ MissionCache tracks heartbeats while you work, aggregates them into sessions, an
 
 MissionCache Auto runs project tasks in parallel with dependency-aware DAG scheduling, logs every iteration in real time, and streams execution state to the dashboard. You can watch the whole run as it happens or walk away and check the iteration log afterward. Every task, every attempt, every outcome is visible.
 
+### One lead session that keeps every other session in view
+
+When you run several Claude Code sessions at once, one per project, nobody sees the whole picture. Run `/missioncache:lead` in one session and it becomes the lead: it opens with a brief across all your projects (what is urgent, what is waiting on someone, which sessions are live, and today's calendar if you connect one), and from then on every other session tells it when its project changes. You check one window instead of six. If you want, the lead keeps the brief current on a schedule you choose, such as every 30 minutes for the next 7 hours. It only starts that loop when you ask, and it always stops at the end of the window.
+
 ---
 
-MissionCache exists because no single existing tool integrates all three. See [How MissionCache compares](#how-missioncache-compares) for the honest breakdown against the current field.
+MissionCache exists because no single existing tool integrates all of this. See [How MissionCache compares](#how-missioncache-compares) for the honest breakdown against the current field.
 
 ## Supported tools
 
@@ -255,6 +259,14 @@ A FastAPI + vanilla JS single-page app at `localhost:8787`. It opens on the **At
 
 ![Dashboard Activity view with today's sessions, hourly chart, weekly heatmap, and repository breakdown](assets/dashboard_activity_screenshot.jpg)
 
+### A lead session across all your open sessions
+
+`/missioncache:brief` gives you one view across every project: urgent items, overdue action items, Waiting-on rows that have gone quiet, live sessions, and today's schedule. `--delta` shows only what changed since the last brief.
+
+`/missioncache:lead` makes one Claude Code session the lead. Every write tool that changes a project's files tells the writing session who the lead is, and that session sends the lead a one-line notice, so the lead learns about each change as it happens instead of rereading every project. The lead holds the notices and folds them into its next brief rather than interrupting you. It is not bound to any project. Designating a new lead replaces the old one, and `/missioncache:lead stop` ends the role.
+
+The recurring brief is opt-in. After the first brief the lead asks how often to check (every 15 minutes, 30 minutes, an hour, another interval, or not at all) and for how long, 7 hours by default. The loop ends at that time on its own. After a compaction or resume the loop is gone, and the lead offers to restart it rather than restarting it silently. The lead needs Claude Code, because it relies on cross-session messaging. `/missioncache:brief` works in every supported tool.
+
 ### Autonomous execution with MissionCache Auto
 
 A standalone CLI that runs a project's tasks to completion in parallel. DAG scheduling respects task dependencies so dependent work waits for its prerequisites. Default eight workers, configurable with `-w N` or `--sequential`. Every iteration is logged with a timestamp, the task, the agent that ran it, and the outcome, and streamed live to the dashboard.
@@ -273,7 +285,7 @@ MissionCache's MCP server exposes tools across six categories: task lifecycle, f
 
 ### Lifecycle hooks
 
-Six Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Three `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, the other reminds you when task tracking drifts. All six ship with the plugin.
+Six Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Three `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, one reminds you when task tracking drifts, and one names the session after its project, so other sessions and the lead can send it messages. All six ship with the plugin.
 
 ## How MissionCache compares
 
@@ -393,6 +405,26 @@ The MCP server plus `missioncache-db` is the minimum viable install (and the onl
 | `~/.missioncache/completed/` | Archived completed projects |
 | `~/.missioncache/tasks.db` | SQLite database (task tracking, time heartbeats, Claude session cache) |
 | `~/.missioncache/tasks.duckdb` | DuckDB analytics (synced from SQLite, dashboard reads) |
+| `~/.missioncache/update-check.json` | Cached result of the update check |
+
+### What MissionCache writes and connects to
+
+Everything MissionCache stores stays on your machine. There is no account, no telemetry and no MissionCache server.
+
+**Files outside `~/.missioncache/`:**
+
+- `~/.claude/rules/`: the `SessionStart` hook copies the plugin's rule file there, so Claude follows the MissionCache conventions. It only updates files that carry the plugin's ownership marker on the first line. Remove the marker from your copy and the hook leaves it alone.
+- `~/.claude/hooks-state.db`: a small SQLite file with per-session state (which project each session is bound to, context usage for the statusline, terminal-to-session mapping).
+- `~/.claude/hooks/state/`: small pointer files the hooks use to find the current session.
+- With the full install: a dashboard service (launchd on macOS, systemd on Linux, Task Scheduler on Windows) and, if you choose the statusline, a `statusLine` entry in `~/.claude/settings.json`.
+
+**What runs and what it connects to:**
+
+- The MCP server starts through `uvx` from the plugin directory. On first launch `uv` downloads its Python dependencies from PyPI.
+- The dashboard listens on `127.0.0.1:8787` only, never on an external interface.
+- The update check asks `pypi.org` for the latest MissionCache versions and caches the answer.
+- The statusline reads `status.claude.com` to show Claude incidents. You can turn it off in the dashboard's statusline settings.
+- Hooks run on session start, before compaction, at the end of each turn, and on every prompt. They read and write only the paths above.
 
 ## Commands
 

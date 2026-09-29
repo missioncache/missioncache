@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- The README explains the lead session and lists every file MissionCache writes and every service it connects to. (docs)
+
 ## 2026-09-30
 
 Published package versions: missioncache-db 1.0.28. Claude Code plugin 1.0.30. Everything else is unchanged. The editor extension 0.2.0 is in the repo, not yet on the marketplaces.
