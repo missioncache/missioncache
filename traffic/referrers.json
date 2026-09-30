@@ -798,5 +798,12 @@
       "referrer": "pypi.org",
       "uniques": 1
     }
+  ],
+  "2026-09-30": [
+    {
+      "count": 2,
+      "referrer": "pypi.org",
+      "uniques": 1
+    }
   ]
 }
