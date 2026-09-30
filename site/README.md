@@ -29,7 +29,8 @@ python3 -m http.server -d site/dist 8899    # preview it
 | `docs.template.html` | Docs page shell (`{{SIDEBAR}}` + `{{CONTENT}}`) |
 | `changelog.template.html` | Changelog shell (`{{TIMELINE}}`) |
 | `build_site.py` | Renders the markdown, fills `{{TOKENS}}`, writes `dist/` |
-| `img/` | Screenshots and the logo mark, inlined into the pages as data URIs |
+| `img/` | Screenshots and logos. Most are inlined into the pages as data URIs; `og.jpg` and the two wordmark logos are served as files from the site root (`STATIC_FILES` in `build_site.py`) |
+| `make_og.py` | Renders `img/og.jpg`, the social preview card, from the landing page's `og:` metas with a headless browser. Run it after changing the headline or the logo: `python3 site/make_og.py` (needs the `playwright` package and `playwright install chromium` once) |
 | `requirements.txt` | The one build dependency, `markdown-it-py` |
 
 Templates are authored head-less (`<title>`, `<meta>`, `<style>`, then body
@@ -42,6 +43,7 @@ per-page canonical URL.
 - `dist/docs/<slug>/index.html` - one real page per doc, each with its own title
   and canonical URL. `dist/docs/` lands on the first doc.
 - `dist/changelog/index.html` - the release timeline, parsed from `CHANGELOG.md`.
+- `dist/og.jpg`, `dist/logo_white.png`, `dist/logo_black.png` - the static files copied from `img/`.
 - `dist/CNAME` = `missioncache.dev` (the canonical domain; `missioncache.com`
   redirects to it - that redirect is configured at the registrar, not here).
 

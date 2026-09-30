@@ -62,10 +62,12 @@ LANDING_IMAGES = {
     "{{IMG_ATTENTION}}":  ("img/demo_attention.jpg", "image/jpeg"),
     "{{IMG_ACTIVITY}}":   ("img/demo_activity.jpg", "image/jpeg"),
     "{{IMG_AUTO}}":       ("img/demo_auto.jpg", "image/jpeg"),
-    "{{IMG_THUMB_STATUSLINE}}": ("img/thumb_statusline.jpg", "image/jpeg"),
-    "{{IMG_THUMB_PROJECTS}}":   ("img/thumb_projects.jpg", "image/jpeg"),
-    "{{IMG_THUMB_AUTO}}":       ("img/thumb_auto.jpg", "image/jpeg"),
+    "{{IMG_STATUSLINE}}":       ("img/statusline_full.jpg", "image/jpeg"),
 }
+
+# Served as real files at the site root, not inlined: the social card must be a URL,
+# and the logos would otherwise ship twice (hero + footer) in both themes.
+STATIC_FILES = ["img/og.jpg", "img/logo_white.png", "img/logo_black.png"]
 
 _md = MarkdownIt("commonmark", {"html": True, "linkify": False}).enable("table")
 
@@ -73,6 +75,13 @@ _md = MarkdownIt("commonmark", {"html": True, "linkify": False}).enable("table")
 # --------------------------------------------------------------------------- #
 # Primitives
 # --------------------------------------------------------------------------- #
+
+def mcp_tool_count() -> int:
+    """How many tools the MCP server registers, so the landing page never quotes a stale number."""
+    src = REPO / "mcp-server" / "src" / "mcp_missioncache"
+    decorator = re.compile(r"^\s*@mcp\.tool\(", re.MULTILINE)
+    return sum(len(decorator.findall(f.read_text())) for f in src.glob("*.py"))
+
 
 def data_uri(rel: str, mime: str) -> str:
     return f"data:{mime};base64," + base64.b64encode((SITE / rel).read_bytes()).decode()
@@ -267,11 +276,19 @@ def build() -> None:
     # Landing ---------------------------------------------------------------
     landing_tpl = (SITE / "landing.template.html").read_text()
     landing_repl = {token: data_uri(rel, mime) for token, (rel, mime) in LANDING_IMAGES.items()}
-    landing_repl |= {"{{DOCS_URL}}": "/docs/", "{{CHANGELOG_URL}}": "/changelog/"}
+    landing_repl |= {
+        "{{DOCS_URL}}": "/docs/", "{{CHANGELOG_URL}}": "/changelog/", "{{SITE_URL}}": SITE_URL,
+        "{{MCP_TOOL_COUNT}}": str(mcp_tool_count()),
+    }
     (DIST / "index.html").write_text(
         as_document(render(landing_tpl, landing_repl),
                     canonical=f"{SITE_URL}/")
     )
+    for rel in STATIC_FILES:
+        src = SITE / rel
+        if not src.exists():
+            raise SystemExit(f"static file missing: {src} (the page links to /{src.name})")
+        (DIST / src.name).write_bytes(src.read_bytes())
 
     # Docs: one page per doc ------------------------------------------------
     docs_tpl = (SITE / "docs.template.html").read_text()
