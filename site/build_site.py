@@ -51,6 +51,7 @@ DOCS = [
     ("cli", "CLI Reference"),
     ("statusline", "Statusline"),
     ("extension", "Editor extension"),
+    ("comparison", "Comparison"),
     ("hooks", "Hooks"),
 ]
 DOC_SLUGS = {slug for slug, _ in DOCS}

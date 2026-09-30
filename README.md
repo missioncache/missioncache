@@ -29,10 +29,9 @@ MissionCache is the project layer for AI coding tools. It works in [Claude Code]
 - [Why MissionCache](#why-missioncache)
 - [Supported tools](#supported-tools)
 - [Install](#install)
-- [Upgrading](#upgrading)
 - [Your First Project](#your-first-project)
 - [Features](#features)
-- [How MissionCache compares](#how-missioncache-compares)
+- [When to use something else](#when-to-use-something-else)
 - [Architecture](#architecture)
 - [Commands](#commands)
 - [Documentation](#documentation)
@@ -60,30 +59,20 @@ When you run several Claude Code sessions at once, one per project, nobody sees 
 
 ---
 
-MissionCache exists because no single existing tool integrates all of this. See [How MissionCache compares](#how-missioncache-compares) for the honest breakdown against the current field.
+MissionCache exists because no single existing tool integrates all of this. See [docs/comparison.md](docs/comparison.md) for the honest breakdown against the current field.
 
 ## Supported tools
 
-MissionCache's MCP server and commands install into any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register MissionCache. Each prompt installs the MCP server and the commands together. The CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without the commands.
+The installer detects the AI tools you have and asks, per tool, whether to register MissionCache. The project files, the MCP server and the commands are the same everywhere. Only the way you type a command differs.
 
-| Tool | MCP server | Commands | Invocation | Hooks / statusline / missioncache-auto |
-|------|------------|----------|------------|----------------------------------------|
-| Claude Code | yes | yes (slash commands) | `/missioncache:load`, `/missioncache:save`, ... | yes (full) |
-| Codex CLI | yes | yes (native skills) | `$missioncache-load`, `$missioncache-save`, ... | not yet |
-| OpenCode | yes | yes (slash commands) | `/missioncache-load`, `/missioncache-save`, ... | not yet |
-| VSCode (Copilot Chat) | yes | yes (macOS, prompt files) | `/missioncache-load`, `/missioncache-save`, ... | n/a (editor-level) |
+| Tool | Project files + MCP tools | Commands | Lead, hooks, statusline, dashboard, auto |
+|------|---------------------------|----------|------------------------------------------|
+| Claude Code | yes | `/missioncache:load`, `/missioncache:save`, ... | yes |
+| Codex CLI | yes | `$missioncache-load`, `$missioncache-save`, ... (native skills) | no |
+| OpenCode | yes | `/missioncache-load`, `/missioncache-save`, ... | no |
+| VSCode (Copilot Chat) | yes | `/missioncache-load`, `/missioncache-save`, ... (macOS) | no |
 
-Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. OpenCode and VSCode have flat slash-command namespaces, so missioncache's commands ship as `missioncache-load.md` etc. and resolve to `/missioncache-load`. Codex gets the same commands as native skills, invoked as `$missioncache-load` etc. The behavior is identical across tools. Only the invocation token differs.
-
-Every command except `/missioncache:lead` ships to all four tools. The lead role depends on Claude Code's session titles, cross-session messaging and pid records, so it is Claude Code only.
-
-Per-tool registration details:
-
-- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.missioncache/codex-marketplace`. The `[plugins."missioncache@missioncache"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the skills.
-- **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
-- **VSCode** - prompt files written to `~/.missioncache/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
-
-Per-tool hooks, statuslines, and `missioncache-auto` integration stay Claude-only for this release - tracked as a follow-up phase post-launch.
+Every command except `/missioncache:lead` ships to all four tools. The lead needs Claude Code's session titles and cross-session messaging. How each tool is registered, and how to skip the commands for one of them, is in [docs/installation.md](docs/installation.md#other-tools-codex-opencode-vscode).
 
 ## Install
 
@@ -112,7 +101,7 @@ For a fully non-interactive install, use `uvx missioncache-install --all --yes`.
 
 **Requirements:** Python 3.11+, Claude Code CLI, and `uv` on your `PATH` (provides `uvx`). If `uvx --version` fails, install `uv` first with `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. `pipx` works in place of `uvx` if you prefer.
 
-**Windows note:** MissionCache runs on native Windows (no WSL). The installer registers the plugin, installs `missioncache-auto`, and registers the dashboard as a Task Scheduler task (falling back to an HKCU Run-key entry when run without elevation). The lifecycle hooks - including the pre-compaction snapshot and session tracking - run too: they launch through `uv` in exec form and the snapshot lock uses `msvcrt` on Windows. This requires **Claude Code 2.1.139+** (where hook exec form was added); an older client silently ignores it and the hooks will not run. A `windows-latest` CI job exercises this on real hardware on every push: it runs all six test suites, then runs the installer end to end and checks that the dashboard serves, the Task Scheduler task body runs, hooks receive stdin JSON through `uv run`, and the MCP server answers `initialize`.
+**Windows note:** MissionCache runs on native Windows (no WSL). The installer registers the plugin, installs `missioncache-auto`, and registers the dashboard as a Task Scheduler task (falling back to an HKCU Run-key entry when run without elevation). The lifecycle hooks - including the pre-compaction snapshot and session tracking - run too: they launch through `uv` in exec form and the snapshot lock uses `msvcrt` on Windows. This requires **Claude Code 2.1.139+** (where hook exec form was added); an older client silently ignores it and the hooks will not run.
 
 ### Plugin-only install
 
@@ -131,37 +120,17 @@ Restart your Claude Code session.
 
 **What you give up with the plugin-only install:** no local dashboard at `localhost:8787`, no `missioncache-auto` CLI for parallel execution, no rich statusline. You keep everything else: per-project plan/context/tasks files, `/missioncache:load` resume, time heartbeat tracking in `~/.missioncache/tasks.db`, and every MCP tool.
 
+### Updating later
+
+```bash
+uvx missioncache-install --update        # full install
+```
+
+Plugin-only: `/plugin update missioncache@missioncache` in Claude Code, then restart the session. Details, including the `uvx` cache trap, in [docs/installation.md](docs/installation.md#upgrading).
+
 ### Other tools (Codex, OpenCode, VSCode)
 
 The full installer also registers missioncache in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and commands are the same files missioncache ships to Claude. Only the invocation token differs: `/missioncache:load` in Claude Code, `$missioncache-load` in Codex, `/missioncache-load` in OpenCode and VSCode.
-
-## Upgrading
-
-### Full install
-
-Re-run the installer to refresh every component to the latest published version:
-
-```bash
-uvx missioncache-install --update
-```
-
-This pulls the latest `missioncache-dashboard` and `missioncache-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-missioncache`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update missioncache@missioncache` in Claude Code (or `claude plugins install missioncache@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `missioncache-db` is a transitive dependency of `missioncache-dashboard` and `missioncache-auto`, so it refreshes alongside them.
-
-If the `uvx` cache is pinning you to an older `missioncache-install` itself, clear it with `uvx cache prune` or `uvx --refresh missioncache-install --update`.
-
-### Plugin-only install
-
-From Claude Code:
-
-```
-/plugin update missioncache@missioncache
-```
-
-Restart your Claude Code session.
-
-### Maintainer install (editable from a clone)
-
-If you are developing on missioncache rather than consuming it, see [CONTRIBUTING.md](CONTRIBUTING.md) for the `uvx missioncache-install --local` workflow. A `git pull` picks up changes in the editable Python packages; you still need `claude plugins install missioncache@local` for plugin-cache refreshes and a service restart for dashboard server-code changes.
 
 ## Your First Project
 
@@ -255,7 +224,7 @@ If a context file gets damaged (duplicate sections, or Recent Changes entries st
 
 ### Forks: a shared context layer under a parent project
 
-Some work splits into parallel lanes that all lean on the same body of knowledge: one pipeline, two product-specific test layers on top of it. A fork is a full project with a parent. Each lane gets its own plan, its own task list, and its own clock, but the parent's context file is the one shared layer they all read, so the architecture, the access patterns, and the gotchas that cost you a day each are written down once instead of once per lane. Any session can update the shared layer, and sibling sessions are told when it changed, on resume and in the statusline. Tasks are never shared and never copied. It is the middle ground between a subtask, which cannot have its own task list, and a second project, which would keep a second copy of everything the two of you already know, and let it drift.
+A fork is a full project with a parent. It gets its own plan, task list and clock, but it reads the parent's context file as a shared layer, so the architecture and the gotchas are written once and every lane sees them. Sibling sessions are told when the shared layer changes. Use it when two efforts share one base, like a pipeline with a test layer per product. [docs/forks.md](docs/forks.md) has the decision test and a worked example.
 
 ### Local analytics dashboard
 
@@ -293,98 +262,17 @@ MissionCache's MCP server exposes tools across seven modules: task lifecycle, do
 
 Six Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Three `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, one reminds you when task tracking drifts, and one names the session after its project, so other sessions and the lead can send it messages. All six ship with the plugin.
 
-## How MissionCache compares
+## When to use something else
 
-MissionCache sits at the intersection of three categories that usually ship as separate tools: task management, context preservation, and execution with analytics. Here is an honest look at how missioncache stacks up against the current field, grouped by category so you can jump to the tool you already know.
+MissionCache is not the right answer for every workflow.
 
-### vs. Task and project management
+- **PRD to task decomposition across many IDEs:** [Taskmaster AI](https://github.com/eyaltoledano/claude-task-master)
+- **Memory that outlives any single project:** [claude-mem](https://github.com/thedotmack/claude-mem) or [MemPalace](https://www.mempalace.tech/)
+- **A fresh context for every task:** [GSD / GSD-2](https://github.com/gsd-build/get-shit-done)
+- **A methodology that enforces TDD:** [Superpowers](https://github.com/obra/superpowers), which works inside a MissionCache project
+- **Zero-install multi-session orchestration with no state between runs:** [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams)
 
-For readers who know the Anthropic Productivity Plugin or [Taskmaster AI](https://github.com/eyaltoledano/claude-task-master):
-
-| Capability | MissionCache | Productivity Plugin | Taskmaster AI |
-|---|---|---|---|
-| Auto task decomposition from PRD | manual (Claude-assisted) | manual | yes (dependency-aware) |
-| Plan + context + tasks files per project | yes | partial (tasks only) | no |
-| Parallel lanes sharing one context, separate task lists | yes (forks) | no (tasks only, no context file to share) | partial (tags give separate lists, no shared context file) |
-| Resume project across sessions | yes (`/missioncache:load`) | yes (workplace memory) | yes (file-based JSON) |
-| Time tracking per task | yes (heartbeats) | no | no |
-| Local dashboard | yes (web, analytics) | yes (HTML Kanban) | no |
-| Autonomous execution | yes (missioncache-auto) | no | no |
-| Build/test gates on task close | no | no | yes |
-| Multi-IDE support | Claude Code, Codex, OpenCode, VSCode (MCP) | Cowork-first | 13 IDEs |
-| License | MIT | Anthropic official | MIT + Commons Clause |
-
-**Honest takeaway:** Taskmaster is stronger at PRD decomposition and at working across multiple IDEs. Its tags also give you a separate task list per lane, which is half of what a fork does. What it does not give you is a shared context layer that those lanes read and write together, so each lane still keeps its own copy of what you know. The Productivity Plugin is the simplest official option, with a Kanban board and workplace memory, and it ships from Anthropic. MissionCache is the only one of the three with per-project time tracking, a local analytics dashboard, and autonomous execution in the same tool, and the only one where separate task lists per lane and one shared layer under them come together.
-
-### vs. Memory and context preservation
-
-For readers who know [claude-mem](https://github.com/thedotmack/claude-mem) or [MemPalace](https://www.mempalace.tech/):
-
-| Capability | MissionCache | claude-mem | MemPalace |
-|---|---|---|---|
-| Unit of organization | Projects | Sessions, entities | Wings, rooms (domains) |
-| Capture mode | On compaction + `/missioncache:save` | Auto per session | Auto every 15 messages |
-| Storage | Human-editable markdown | AI-compressed, vector search | Structured memory palace |
-| Project-scoped state | yes (plan, context, tasks) | partial | partial (wings can be projects) |
-| Task checklists with progress | yes | no | no |
-| Parallel lanes sharing one context, separate task lists | yes (forks) | no (no task lists) | no (no task lists) |
-| Time tracking | yes | no | no |
-| Dashboard | yes | partial (web viewer) | no |
-| Autonomous execution | yes | no | no |
-| Cross-domain recall across projects | partial | yes | yes (by design) |
-
-**Honest takeaway:** claude-mem and MemPalace are genuinely better than missioncache at cross-project memory recall. They auto-capture and query across everything you have ever worked on. MissionCache is better at project-scoped state: what is the plan for *this* project, what have I decided, what is the task list, how much time have I spent, what is next. Recall and forks sit on different axes and do not compete. Recall is a search over work you have already done. A fork is a live file that two currently-running projects share as a write target, and each one is told when the other changed it. claude-mem has the memory without the task lists, Taskmaster's tags have the task lists without the shared layer, and a fork is both at once. They compose. You can reasonably run missioncache alongside a memory layer: MemPalace or claude-mem for long-term cross-project recall, missioncache for the project you are actively building.
-
-### vs. Execution and methodology frameworks
-
-For readers who know [GSD](https://github.com/gsd-build/get-shit-done) or [Superpowers](https://github.com/obra/superpowers):
-
-| Capability | MissionCache | GSD (v2) | Superpowers |
-|---|---|---|---|
-| What it is | Project system | Autonomous execution CLI | Methodology / skills framework |
-| Prescribes a methodology | no (flexible) | yes (spec, research, execute) | yes (7 phases, TDD enforced) |
-| Autonomous execution | yes (DAG, parallel) | yes (sequential phases) | partial (native Task tool only) |
-| Context preservation across sessions | yes (plan/context/tasks files) | partial (fresh context per task) | no |
-| Parallel lanes sharing one context, separate task lists | yes (forks) | no (fresh context per task, nothing to share) | no (no cross-session context) |
-| Time tracking | yes (per project) | partial (cost and token tracking) | no |
-| Dashboard | yes | no | no |
-| Statusline integration | yes | no | no |
-| Token efficiency | moderate | low (fresh 200K context per task) | low (around 10x Plan mode per HN reports) |
-| Composable with missioncache | N/A | conflicts (both own execution) | yes (Superpowers skills inside a missioncache project) |
-
-**Honest takeaway:** GSD pioneered the "fresh context per task" pattern and remains the reference for aggressive context-rot elimination. Superpowers is a methodology, not a system, and it **composes with missioncache**: you can use Superpowers skills inside a missioncache-managed project to get TDD enforcement and structured planning on top of missioncache's project state and time tracking. MissionCache's unique contribution is integrating autonomous execution with persistent project state and analytics in a single tool.
-
-### vs. native Claude Code features
-
-For readers coming from [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams), the native statusline, or Claude's built-in analytics:
-
-| Capability | MissionCache | Agent Teams | Native Statusline | Native Analytics |
-|---|---|---|---|---|
-| Status | Stable | Experimental (v2.1.32+) | Stable | GA (Teams / Enterprise) |
-| Zero install | no (plugin) | yes | yes | yes |
-| Persistent project state between invocations | yes (plan, context, tasks files) | no | N/A | no |
-| Task list with dependencies | yes (DAG-scheduled) | yes (flat, shared) | N/A | no |
-| Parallel lanes sharing one context, separate task lists | yes (forks) | no (one flat shared task list, no persistent state) | N/A | no |
-| Multi-session orchestration | missioncache-auto (parallel, DAG) | yes (2 to 16 sessions) | N/A | no |
-| Time tracking per project | yes (heartbeats, JSONL merge) | no | no | no (contribution metrics only) |
-| Local dashboard with analytics | yes | no | N/A | cloud-only |
-| Project-aware statusline | yes (OSC 8 deep links into dashboard) | no | generic (model, tokens, git) | N/A |
-| Self-hosted | yes | yes | yes | no |
-| Available to individual users | yes | yes | yes | Teams / Enterprise plans only |
-
-**Honest takeaway:** Agent Teams is the most direct native competitor for the "run Claude autonomously across multiple sessions" use case. Its strengths are zero install and improving with every Claude Code release - that is a real risk to missioncache over time. Its current limits: it is still experimental, it has no persistent state between invocations, no dashboard, no time tracking, no per-task analytics, and a 16-session ceiling. Native analytics is GitHub-scoped, cloud-hosted, and only on paid Teams or Enterprise plans. MissionCache's statusline is project-aware with OSC 8 deep links into the local dashboard; the native statusline is a generic token/model/git display. Today missioncache wins on persistence, analytics, and the integrated experience. If Agent Teams adds persistent state and a dashboard, that story gets harder - tracked as a known long-term risk.
-
-### When to use something else
-
-MissionCache is not the right answer for every workflow. Use one of these instead if:
-
-- **You want PRD to task decomposition with multi-IDE support:** [Taskmaster AI](https://github.com/eyaltoledano/claude-task-master)
-- **You want a methodology that enforces TDD and structured planning:** [Superpowers](https://github.com/obra/superpowers) (and you can use it alongside missioncache)
-- **You want cross-domain memory that outlives any single project:** [MemPalace](https://www.mempalace.tech/) or [claude-mem](https://github.com/thedotmack/claude-mem)
-- **You want aggressive context-rot elimination with fresh contexts per task:** [GSD / GSD-2](https://github.com/gsd-build/get-shit-done)
-- **You want Anthropic's official Kanban and workplace memory with zero setup:** [Productivity Plugin](https://claude.com/plugins/productivity)
-- **You want zero-install native multi-session orchestration with no persistent state between runs:** [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) (experimental, ships with Claude Code)
-- **You want all of the above integrated into one workbench for a specific project:** MissionCache
+The full comparison tables, with where each tool beats MissionCache, are in [docs/comparison.md](docs/comparison.md).
 
 ## Architecture
 
@@ -462,6 +350,7 @@ Deep dives for each component live in `docs/`:
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks
 - [**Editor extension**](docs/extension.md) - status bar and sidebar for VSCode and Cursor
+- [**Comparison**](docs/comparison.md) - MissionCache against Taskmaster, claude-mem, MemPalace, GSD, Superpowers and Claude Code's native features, misses included
 
 ## Contributing
 

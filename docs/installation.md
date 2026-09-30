@@ -319,6 +319,33 @@ mcp-missioncache --help
 
 Should print the help text. Inside Claude Code, the MCP server is invoked via `uvx` from the plugin; you don't typically call it directly.
 
+## Upgrading
+### Full install
+
+Re-run the installer to refresh every component to the latest published version:
+
+```bash
+uvx missioncache-install --update
+```
+
+This pulls the latest `missioncache-dashboard` and `missioncache-auto` from PyPI for the components you originally installed, restarts the dashboard service, and reinstalls the Claude Code plugin. The MCP server (`mcp-missioncache`) runs through `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp-server`, so it refreshes from whatever the plugin marketplace pulled in. Run `/plugin update missioncache@missioncache` in Claude Code (or `claude plugins install missioncache@local` for maintainers) if you want to force a plugin-cache refresh. Restart your Claude Code session to pick up the new plugin code. `missioncache-db` is a transitive dependency of `missioncache-dashboard` and `missioncache-auto`, so it refreshes alongside them.
+
+If the `uvx` cache is pinning you to an older `missioncache-install` itself, clear it with `uvx cache prune` or `uvx --refresh missioncache-install --update`.
+
+### Plugin-only install
+
+From Claude Code:
+
+```
+/plugin update missioncache@missioncache
+```
+
+Restart your Claude Code session.
+
+### Maintainer install (editable from a clone)
+
+If you are developing on missioncache rather than consuming it, see [CONTRIBUTING.md](CONTRIBUTING.md) for the `uvx missioncache-install --local` workflow. A `git pull` picks up changes in the editable Python packages; you still need `claude plugins install missioncache@local` for plugin-cache refreshes and a service restart for dashboard server-code changes.
+
 ## Uninstall
 
 ### Via `missioncache-install`
