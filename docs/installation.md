@@ -83,6 +83,30 @@ uvx missioncache-install --local
 
 This is the workflow described in [`CONTRIBUTING.md`](../CONTRIBUTING.md). End users do not need `--local`.
 
+### Other tools (Codex, OpenCode, VSCode)
+
+The full installer detects Codex, OpenCode and VSCode Copilot Chat and asks per tool whether to register MissionCache there. Each registration installs the `mcp-missioncache` MCP server on your PATH (through `pipx` or `uv tool`) and the MissionCache commands:
+
+- **Codex** gets native skills, invoked as `$missioncache-load`, `$missioncache-save`, and so on. They ship as a plugin marketplace under `~/.missioncache/codex-marketplace`. Restart Codex after installing.
+- **OpenCode** and **VSCode** get slash commands, invoked as `/missioncache-load`, `/missioncache-save`, and so on.
+
+Every command except `/missioncache:lead` is installed for these tools. The lead role depends on Claude Code's session titles, cross-session messaging and pid records, so it stays Claude Code only. `/missioncache:brief` is installed everywhere.
+
+`uvx missioncache-install --update` refreshes these registrations too: it upgrades the `mcp-missioncache` server for Codex, OpenCode and VSCode and rewrites the commands from the current release.
+
+### Editor extension
+
+The VSCode / Cursor extension (status bar with the active project and progress, sidebar with tasks, Next Steps and Waiting on) is not on Open VSX or the VS Marketplace yet. Install the `.vsix` built from `missioncache-extension/`:
+
+```bash
+cd missioncache-extension
+npm ci
+npm run package
+code --install-extension missioncache-0.2.0.vsix
+```
+
+It reads project state through the `missioncache-db` CLI and needs `missioncache-db` 1.0.28 or newer on your PATH. Claude Code is not required. See [`docs/extension.md`](extension.md).
+
 ## Windows: native or WSL2
 
 Both work, and they are separate installs rather than two views of one. **Install MissionCache where Claude Code runs.** If Claude Code is the Windows app, install natively; if you work inside WSL, install inside WSL. Do not do both and expect one set of projects: WSL has its own home directory, so `~/.missioncache/` and `~/.claude/` are different directories in each, and neither install can see the other's projects, task DB, or time tracking.
@@ -102,11 +126,13 @@ The install command is the same, `uvx missioncache-install`. What differs from m
 | VSCode client | Not registered yet, macOS only. Codex and OpenCode register normally. |
 | Cross-machine sharing | Importing a bundle onto Windows works, including Windows-shaped path rewriting. Exporting **from** Windows does not: the embedded-path scanner only recognizes `/`-rooted absolutes. |
 
-How well this is verified: a `windows-latest` CI job runs on every push and does more than compile. It runs all six test suites on Windows, then runs `missioncache-install --all --yes` from a scratch directory the way a user would, and checks that the dashboard actually serves rather than merely registering, that the Task Scheduler task body runs (with the Run-key fallback path checked too), that stdin JSON reaches a hook through `uv run`, that `encode-cwd` produces the native drive-letter form rather than the MSYS one, and that the MCP server spawns through uvx and answers `initialize`. The known gaps are the specific ones in the table above, not general immaturity.
+**Updating on Windows.** The dashboard and statusline run from the very directory the upgrade replaces, and Windows cannot delete a directory that holds a running executable. So `missioncache-install --update` first stops every process running from the dashboard's install directory (`taskkill` per pid) and re-checks. If any survive, the dashboard upgrade is refused rather than leaving a half-deleted install: stop them or reboot, then re-run `missioncache-install --update`.
+
+A `windows-latest` CI job runs the test suites and the installer end to end on every push. The known gaps are the specific ones in the table above.
 
 ### WSL2
 
-WSL2 is the ordinary Linux path, with one difference that bites on a fresh install. **Default WSL ships without systemd**, so `missioncache-dashboard install-service` cannot register a user unit. It detects that (using the check systemd's own docs recommend) and installs a managed autostart block in your shell profile instead, which starts the dashboard when you open a shell. A fresh WSL Ubuntu used to crash here with `Failed to connect to bus` before that fallback existed. The block assumes bash; on a `~/.bash_login`-only setup you need to add the line yourself.
+WSL2 is the ordinary Linux path, with one difference that bites on a fresh install. **Default WSL ships without systemd**, so `missioncache-dashboard install-service` cannot register a user unit. It detects that (using the check systemd's own docs recommend) and installs a managed autostart block in your shell profile instead, which starts the dashboard when you open a shell. The block assumes bash. On a `~/.bash_login`-only setup you need to add the line yourself.
 
 If you would rather have a real service, enable systemd in `/etc/wsl.conf` and re-run `missioncache-dashboard install-service` - it will then take the normal Linux user-unit path.
 
@@ -125,7 +151,7 @@ In Claude Code:
 
 Restart your Claude Code session. The MCP server and bundled `missioncache-db` are built on demand via `uvx`; no manual `pip install` is needed.
 
-**What you get:** per-project plan/context/tasks files, `/missioncache:load` resume, time heartbeat tracking in `~/.missioncache/tasks.db`, all 30+ MCP tools, and all MissionCache rules.
+**What you get:** per-project plan/context/tasks files, `/missioncache:load` resume, time heartbeat tracking in `~/.missioncache/tasks.db`, every MCP tool, and all MissionCache rules.
 
 **What you give up:** local dashboard at `localhost:8787`, `missioncache-auto` CLI for parallel execution, rich statusline.
 
@@ -359,7 +385,7 @@ If it's crashed, check logs:
 Restart with `missioncache-dashboard reinstall-service`, which rewrites the unit file and reloads it.
 
 **Statusline missing after install**
-Check `~/.claude/settings.json` - the `statusLine.command` should be the bare string `"missioncache-statusline"`, not a path to a Python file. If you see `python3 ~/.claude/scripts/statusline.py`, that's from a pre-M10 install - rewrite it by hand or re-run `uvx missioncache-install --statusline`.
+Check `~/.claude/settings.json` - the `statusLine.command` should be the bare string `"missioncache-statusline"`, not a path to a Python file. If you see `python3 ~/.claude/scripts/statusline.py`, that's from an older install - rewrite it by hand or re-run `uvx missioncache-install --statusline`.
 
 **`pip install mcp-missioncache` fails resolving missioncache-db**
 `mcp-missioncache` depends on `missioncache-db` from PyPI. If your environment is offline or pinned to a private index that doesn't mirror missioncache-db, use the editable manual install instead or preload missioncache-db manually.

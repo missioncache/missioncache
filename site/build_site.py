@@ -50,6 +50,7 @@ DOCS = [
     ("mcp-tools", "MCP Tools"),
     ("cli", "CLI Reference"),
     ("statusline", "Statusline"),
+    ("extension", "Editor extension"),
     ("hooks", "Hooks"),
 ]
 DOC_SLUGS = {slug for slug, _ in DOCS}

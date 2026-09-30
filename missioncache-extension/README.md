@@ -14,4 +14,4 @@ uvx missioncache-install
 
 The extension reads project state through the `missioncache-db` CLI on your PATH. Without it, the status bar shows "MissionCache: not installed" and nothing else works - the extension is a companion to the CLI install, not a standalone tool.
 
-Works in VS Code, Cursor, and Windsurf (published to both the VS Marketplace and Open VSX).
+Built for VS Code and editors based on it. Cursor is untested so far. It will be published to the VS Marketplace and Open VSX. Until then, install the `.vsix` built from this folder (`npm run package`), see [docs/extension.md](../docs/extension.md).

@@ -4,7 +4,7 @@ This document covers MissionCache's forks: a way to run two or more projects tha
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (MissionCache file layout, the `tasks` table, `~/.claude/hooks/state/`, the MCP tools). If a term in this doc is not defined here, it is defined there.
 
-If you are just trying to *use* forks, the short version is: run `/missioncache:fork <parent> <child>`, the child gets its own task list, and shared knowledge goes in the parent's context file. The rest of this doc is for deciding *whether* to fork, which is the harder question and the one this doc mostly exists to answer.
+If you are just trying to *use* forks, the short version is: run `/missioncache:fork <parent> <child>`, the child gets its own task list, and shared knowledge goes in the parent's context file. The command ships to every client `missioncache-install` registers: `/missioncache:fork` in Claude Code, `$missioncache-fork` in Codex, and `/missioncache-fork` in OpenCode and VSCode (it is one of the `CANONICAL_COMMANDS` in `missioncache-install/missioncache_install/command_clients.py`). The rest of this doc is for deciding *whether* to fork, which is the harder question and the one this doc mostly exists to answer.
 
 ## What a fork is
 
@@ -79,7 +79,7 @@ The repo scan reconciles the two on every run (`_reconcile_fork_link` in `missio
 - Header removed: the link is cleared.
 - Header present but the name does not resolve to exactly one parent: **the scan refuses to guess.** It logs a warning and preserves whatever link is already there. Ambiguous names and cyclic links are both refused rather than resolved by guessing.
 
-Only the **header region** counts. That is everything before the first `##` heading, and the parse is fence-aware, so a `##` inside a fenced code block does not end the region early. A "Fork of" mention further down in the body, or inside a code fence, never links anything. The parse is `parse_fork_parent` at `missioncache-db/missioncache_db/context_health.py:499`. It accepts a plain name (`**Fork of:** my-parent`) or a balanced wikilink (`**Fork of:** [[my-parent]]`), and rejects a malformed half-link.
+Only the **header region** counts. That is everything before the first `##` heading, and the parse is fence-aware, so a `##` inside a fenced code block does not end the region early. A "Fork of" mention further down in the body, or inside a code fence, never links anything. The parse is `parse_fork_parent` in `missioncache-db/missioncache_db/context_health.py`. It accepts a plain name (`**Fork of:** my-parent`) or a balanced wikilink (`**Fork of:** [[my-parent]]`), and rejects a malformed half-link.
 
 The database column is the index, not the truth. It is what makes "find every child of this parent" a fast lookup, backed by `idx_tasks_parent`.
 
@@ -88,6 +88,8 @@ The database column is the index, not the truth. It is what makes "find every ch
 Reading it is automatic, but it is not unconditional. `get_context_digest` on a fork always returns a small `parent_digest` block next to the child's digest: the parent's name, its context path, when it was last updated, and whether it changed since this session last synced. `/missioncache:load` then reads the parent's **full** digest only when the shared layer actually moved since your last sync, or when this session has no marker yet. When the shared layer is already up to date, there is nothing new to read and the resume skips it. The parent resolves from `active/` first and then `completed/`, so a completed parent's shared layer stays reachable.
 
 Writing it is a deliberate act. To update the shared layer, call `update_context_file` on the **parent's** context path, which you resolve with `get_missioncache_files(<parent>)`. Do not duplicate the parent's content down into a child. Link to it and reference it.
+
+When a fact, a section or a task is in the wrong lane, move it with `move_to_project` ([`mcp-tools.md`](./mcp-tools.md)) rather than a remove on one side and an add on the other. It holds both projects' locks for the whole operation, so a split between a parent and a fork cannot half-apply.
 
 Any session may write the shared layer, which means two sessions can be writing near each other. The parallel-session discipline is the same as everywhere else in MissionCache, and it matters more here:
 
@@ -106,7 +108,7 @@ Two sessions on two forks are two people editing one shared file. MissionCache d
 | The `/missioncache:load` banner | On resume, the fork line reads either "shared context up to date" or "UPDATED by a parallel session since your last sync". On the second, `/missioncache:load` reads the parent's digest before continuing. |
 | The statusline cell | A `⤵ Fork of <parent>` cell, OSC 8-linked to the parent's dashboard modal, with a cyan `● parent updated HH:MM` note (local wall-clock time of the change; `Jul 14 14:32`-style when it is not from today) when the parent's context is newer than this session's marker. |
 
-The marker means "this session consumed the shared layer at this version". It is only stamped after the shared layer was actually read, never before. It is stamped by `/missioncache:fork`, `/missioncache:load`, `/missioncache:save` (when the fork wrote the parent layer), and - since mcp-missioncache 1.0.15 - automatically by `get_context_digest` when a fork session reads its parent's digest directly, so asking Claude to re-read the shared context clears the statusline note on the spot.
+The marker means "this session consumed the shared layer at this version". It is only stamped after the shared layer was actually read, never before. It is stamped by `/missioncache:fork`, `/missioncache:load`, `/missioncache:save` (when the fork wrote the parent layer), and automatically by `get_context_digest` when a fork session reads its parent's digest directly, so asking Claude to re-read the shared context clears the statusline note on the spot.
 
 ## Completing the parent
 
@@ -130,7 +132,7 @@ Deleting a parent is a different matter. `delete_task` refuses while forks still
 
 **The header parse grammar is a security control, not a style rule.** The name in a `**Fork of:**` line carries no slashes and must lead with an alphanumeric. That is what blocks path traversal through a hand-edited context header, and the header is a plain text file any user can write. The same pattern lives in two places and must stay byte-identical (see the invariant in [`architecture.md`](./architecture.md)). Do not loosen it.
 
-Note this is the grammar for **parsing the header line**, not the rule for naming a project. Project names are validated more strictly at creation, by `_TASK_NAME_RE` in `missioncache-db/missioncache_db/__init__.py:234`: lowercase letters, digits, and hyphens only. The header grammar is deliberately the looser of the two, so it can still parse a name written by an older version or by hand.
+Note this is the grammar for **parsing the header line**, not the rule for naming a project. Project names are validated more strictly at creation, by `_TASK_NAME_RE` in `missioncache-db/missioncache_db/__init__.py`: lowercase letters, digits, and hyphens only. The header grammar is deliberately the looser of the two, so it can still parse a name written by an older version or by hand.
 
 ## Troubleshooting
 
@@ -165,4 +167,4 @@ Note this is the grammar for **parsing the header line**, not the rule for namin
 - [`statusline.md`](./statusline.md) - the fork cell, the cyan parent-updated note, and the OSC 8 links.
 - [`dashboard.md`](./dashboard.md) - how a fork renders when its parent leaves the active set.
 - [`commands/fork.md`](../commands/fork.md) - the command itself, step by step, including migrating shared content out of a monolith parent.
-- `missioncache-db/missioncache_db/context_health.py:499` - `parse_fork_parent`, the header-region-only parse that every other piece depends on.
+- `parse_fork_parent` in `missioncache-db/missioncache_db/context_health.py` - the header-region-only parse that every other piece depends on.

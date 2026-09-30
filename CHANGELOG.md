@@ -10,6 +10,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 - The README explains the lead session and lists every file MissionCache writes and every service it connects to. (docs)
 - The landing page is redesigned: the lead session leads, the statusline and all four AI tools are shown, and links get a preview card. (site)
+- The docs match the code again: one tool count, Codex skill names, Windows facts, function names instead of line numbers, and a new editor extension page. (docs)
 
 ## 2026-09-30
 

@@ -44,7 +44,7 @@ MissionCache is the project layer for AI coding tools. It works in [Claude Code]
 
 ### Your projects keep their memory
 
-Every missioncache project lives under `~/.missioncache/active/<project-name>/` as three markdown files: `plan.md` (the agreed approach, locked after approval), `context.md` (your decisions, key files, gotchas, and next steps as a living document), and `tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/missioncache:load <project-name>` in any new Claude Code session (or `/missioncache-load` in Codex, OpenCode, or VSCode) and missioncache reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
+Every missioncache project lives under `~/.missioncache/active/<project-name>/` as three markdown files: `<project-name>-plan.md` (the agreed approach, locked after approval), `<project-name>-context.md` (your decisions, key files, gotchas, and next steps as a living document), and `<project-name>-tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/missioncache:load <project-name>` in any new Claude Code session (`$missioncache-load` in Codex, `/missioncache-load` in OpenCode or VSCode) and missioncache reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
 
 ### Full visibility into your Claude time
 
@@ -64,20 +64,22 @@ MissionCache exists because no single existing tool integrates all of this. See 
 
 ## Supported tools
 
-MissionCache's MCP server and slash commands install into any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register MissionCache. Each prompt installs both the MCP server and the slash commands together; the CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without slash commands.
+MissionCache's MCP server and commands install into any of the major AI coding tools. The full installer detects which tools you have and asks per-tool whether to register MissionCache. Each prompt installs the MCP server and the commands together. The CLI offers `--no-codex-commands` (and `--no-opencode-commands` / `--no-vscode-commands`) if you want MCP without the commands.
 
-| Tool | MCP server | Slash commands | Invocation | Hooks / statusline / missioncache-auto |
-|------|------------|----------------|------------|----------------------------------------|
-| Claude Code | yes | yes | `/missioncache:load`, `/missioncache:save`, ... | yes (full) |
-| Codex CLI | yes | yes | `/missioncache-load`, `/missioncache-save`, ... | not yet |
-| OpenCode | yes | yes | `/missioncache-load`, `/missioncache-save`, ... | not yet |
-| VSCode (Copilot Chat) | yes | yes (macOS) | `/missioncache-load`, `/missioncache-save`, ... | n/a (editor-level) |
+| Tool | MCP server | Commands | Invocation | Hooks / statusline / missioncache-auto |
+|------|------------|----------|------------|----------------------------------------|
+| Claude Code | yes | yes (slash commands) | `/missioncache:load`, `/missioncache:save`, ... | yes (full) |
+| Codex CLI | yes | yes (native skills) | `$missioncache-load`, `$missioncache-save`, ... | not yet |
+| OpenCode | yes | yes (slash commands) | `/missioncache-load`, `/missioncache-save`, ... | not yet |
+| VSCode (Copilot Chat) | yes | yes (macOS, prompt files) | `/missioncache-load`, `/missioncache-save`, ... | n/a (editor-level) |
 
-Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. The other three tools have flat slash-command namespaces, so missioncache's commands ship as `missioncache-load.md` etc. and resolve to `/missioncache-load`. The behavior is identical across tools - only the invocation token differs by one character.
+Claude commands use `:` namespacing because Claude's plugin system auto-prefixes plugin commands. OpenCode and VSCode have flat slash-command namespaces, so missioncache's commands ship as `missioncache-load.md` etc. and resolve to `/missioncache-load`. Codex gets the same commands as native skills, invoked as `$missioncache-load` etc. The behavior is identical across tools. Only the invocation token differs.
+
+Every command except `/missioncache:lead` ships to all four tools. The lead role depends on Claude Code's session titles, cross-session messaging and pid records, so it is Claude Code only.
 
 Per-tool registration details:
 
-- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.missioncache/codex-marketplace`. The `[plugins."missioncache@missioncache"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the commands.
+- **Codex** - registered as a real plugin via `codex plugin marketplace add ~/.missioncache/codex-marketplace`. The `[plugins."missioncache@missioncache"]` stanza lands in `~/.codex/config.toml`. Restart Codex to load the skills.
 - **OpenCode** - markdown commands written directly to `~/.config/opencode/commands/`. Picked up immediately, no restart needed.
 - **VSCode** - prompt files written to `~/.missioncache/vscode/prompts/` and registered in user `settings.json` via `chat.promptFilesLocations`. Available across every workspace, no per-repo opt-in required. macOS only for now (Linux/Windows VSCode app detection deferred).
 
@@ -131,7 +133,7 @@ Restart your Claude Code session.
 
 ### Other tools (Codex, OpenCode, VSCode)
 
-The full installer also registers missioncache in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and slash commands are the same files missioncache ships to Claude; only the invocation token (`/missioncache:load` vs `/missioncache-load`) differs.
+The full installer also registers missioncache in any non-Claude tool it detects. See [Supported tools](#supported-tools) above for the per-tool registration mechanics. The MCP server and commands are the same files missioncache ships to Claude. Only the invocation token differs: `/missioncache:load` in Claude Code, `$missioncache-load` in Codex, `/missioncache-load` in OpenCode and VSCode.
 
 ## Upgrading
 
@@ -239,13 +241,17 @@ That is the full lifecycle. Everything else is optional depth.
 
 ### Structured project files
 
-Every project has three markdown files: `plan`, `context`, and `tasks`. They live under `~/.missioncache/active/<project-name>/` and are fully human-editable. Plan captures the agreed approach and locks after approval. Context is a living document for decisions, key files, gotchas, and next steps. Tasks is a hierarchical checklist with per-item progress tracking.
+Every project has three markdown files: `<project-name>-plan.md`, `<project-name>-context.md`, and `<project-name>-tasks.md`. They live under `~/.missioncache/active/<project-name>/` and are fully human-editable. Plan captures the agreed approach and locks after approval. Context is a living document for decisions, key files, gotchas, and next steps. Tasks is a hierarchical checklist with per-item progress tracking.
+
+Removing content is a tool call too. `update_context_file` takes `sections_remove` (whole sections) and `bullets_remove` (one list item or table row), and `update_tasks_file` takes `tasks_remove`, which records the task under `## Removed` with a reason instead of leaving it to skew the progress count. When content belongs in another project, `move_to_project` moves sections, bullets, tasks and Waiting-on rows between two projects in one locked operation, so a split cannot half-apply.
 
 <!-- SCREENSHOT: example tasks.md with checkboxes and phases -->
 
 ### Context preservation across compaction
 
 MissionCache's `PreCompact` hook auto-saves project state before Claude Code compacts the context window. When you run `/missioncache:load` in a new session, the full state reloads. You never reconstruct your mental model from scratch, and you never lose a decision you made three sessions ago.
+
+If a context file gets damaged (duplicate sections, or Recent Changes entries stranded outside their section), `missioncache-db repair` fixes it. It is a dry run by default and writes only with `--apply`. See the [CLI reference](docs/cli.md#repairing-a-damaged-context-file).
 
 ### Forks: a shared context layer under a parent project
 
@@ -281,7 +287,7 @@ An optional terminal display showing the active project with progress fraction, 
 
 ### A full MCP tool suite for Claude
 
-MissionCache's MCP server exposes tools across six categories: task lifecycle, file operations, time tracking, iteration logging, and repository management. Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
+MissionCache's MCP server exposes tools across seven modules: task lifecycle, documentation and file operations, time tracking, iteration logging, planning, the active-project pointer, and project management (action items, stakeholders, tickets, due dates). Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
 
 ### Lifecycle hooks
 
@@ -382,7 +388,7 @@ MissionCache is not the right answer for every workflow. Use one of these instea
 
 ## Architecture
 
-MissionCache's load-bearing piece is the `mcp-missioncache` MCP server. Around it sit four standalone components you can install or skip independently:
+MissionCache's load-bearing piece is the `mcp-missioncache` MCP server. Around it sit six standalone components you can install or skip independently:
 
 | Component | Purpose | Installs via |
 |---|---|---|
@@ -392,6 +398,7 @@ MissionCache's load-bearing piece is the `mcp-missioncache` MCP server. Around i
 | `missioncache-auto` | Autonomous execution CLI (Claude Code only) | `pip install missioncache-auto` |
 | `missioncache-dashboard` | Local FastAPI + vanilla JS web UI at `localhost:8787`, DuckDB analytics layer (Claude Code only) | Runs as a launchd/systemd service |
 | `missioncache-statusline` | Optional multi-line terminal display (Claude Code only) | Bundled with `missioncache-dashboard`, wired into `~/.claude/settings.json` |
+| `missioncache-extension` | VSCode / Cursor extension: status bar with the active project and progress, sidebar with tasks, Next Steps and Waiting on (Claude Code not required, reads through the `missioncache-db` CLI) | Open VSX and VS Marketplace (not published yet), or the `.vsix` from the repo |
 
 <!-- DIAGRAM: plugin + MCP server + db + auto + dashboard + statusline component graph -->
 
@@ -450,10 +457,11 @@ Deep dives for each component live in `docs/`:
 - [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
 - [**Forks**](docs/forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness
 - [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
-- [**MCP Tools**](docs/mcp-tools.md) - all 43 tools by module, error handling, extension patterns
+- [**MCP Tools**](docs/mcp-tools.md) - all 44 tools by module, error handling, extension patterns
 - [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration
 - [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
 - [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks
+- [**Editor extension**](docs/extension.md) - status bar and sidebar for VSCode and Cursor
 
 ## Contributing
 

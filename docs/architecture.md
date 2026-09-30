@@ -6,7 +6,7 @@ If you are just looking to *use* MissionCache, start with the [README](../README
 
 ## Mental model
 
-MissionCache is not one program. It is six small programs that agree on two files and one database:
+MissionCache is not one program. It is nine components (the map below) that agree on two files and one database:
 
 - **Two files**: `~/.missioncache/<status>/<project>/<project>-tasks.md` and `<project>-context.md`. These are the human- and Claude-readable source of truth for what a project is doing.
 - **One database**: `~/.missioncache/tasks.db` (SQLite). This is the source of truth for cross-project metadata: which projects exist, when they were last worked on, how much time was spent, and which repository they belong to.
@@ -17,13 +17,14 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 
 | Component | Directory | What it does | When it runs |
 |-----------|-----------|--------------|--------------|
-| MCP server | `mcp-server/` | Exposes ~30 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
+| MCP server | `mcp-server/` | Exposes 44 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
 | missioncache-db | `missioncache-db/` | SQLite schema, data classes, and all direct DB operations. Every other component calls into this instead of opening the DB themselves | In-process library - embedded by MCP server, hooks, MissionCache Auto, and dashboard |
-| Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event, all four hooks have a timeout budget between 5 and 30 seconds |
+| Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event. Six hooks on four events, each with a timeout budget between 5 and 30 seconds |
 | Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/missioncache:<name>` |
 | missioncache-auto | `missioncache-auto/` | Standalone CLI that runs Claude in a loop over a task file, in either sequential or parallel-with-DAG mode | A long-running user-invoked process, one execution per `missioncache-auto <project>` call |
 | Dashboard | `missioncache-dashboard/` | FastAPI backend plus a single-file HTML frontend at `http://localhost:8787` for visualizing time, tasks, sessions, and MissionCache Auto runs | One persistent process, usually managed by launchd |
-| Statusline | `missioncache-dashboard/missioncache_dashboard/statusline.py` | ~1,350-line Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `missioncache-dashboard` package and exposed via the `missioncache-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
+| Statusline | `missioncache-dashboard/missioncache_dashboard/statusline.py` | Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `missioncache-dashboard` package and exposed via the `missioncache-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
+| Editor extension | `missioncache-extension/` | TypeScript VS Code extension (engine `^1.96`) that shows the active project and task progress in the status bar plus a sidebar of tasks, next steps and blockers. It never opens the DB itself: it runs `missioncache-db extension-state` and `missioncache-db extension-project <task_id>` through `execFile` and renders the JSON | Refreshes on a file watcher over `~/.missioncache/**/*.md` and on window focus. No polling |
 | Rules | `rules/` | Plain markdown files describing MissionCache conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `missioncache-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
 
 Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` registers the MCP server and metadata, and `marketplace.json` catalogs MissionCache as an installable plugin so the repo itself doubles as a one-plugin marketplace. End users install the full experience via `uvx missioncache-install`, or just the plugin core via `/plugin marketplace add missioncache/missioncache` followed by `/plugin install missioncache@missioncache`. Maintainers run `uvx missioncache-install --local` from a clone, which creates a separate local marketplace at `~/.claude/plugins/local-marketplace/` and installs the plugin from there as `missioncache@local` for fast iteration without pushing to GitHub.
@@ -34,7 +35,7 @@ Two files at `.claude-plugin/` wire the plugin into Claude Code: `plugin.json` r
 
 The package exposes a single `TaskDB` class that wraps a `sqlite3.Connection` with WAL mode enabled. You get it by calling `TaskDB()` (no arguments - it finds the DB at `~/.missioncache/tasks.db`). Every other component constructs its own instance; there is no global or singleton, because the consumers (hooks, MCP subprocess, MissionCache Auto, dashboard) are all different processes.
 
-The file is ~3,400 lines, but the mental model is small:
+The file is large, but the mental model is small:
 
 - A handful of schema tables (see [Storage](#storage) below).
 - One method per use case (`find_task_for_cwd`, `record_heartbeat`, `process_heartbeats`, `get_task_time`, `create_task`, `complete_task`, `get_repo_breakdown`, `scan_repos`, ...).
@@ -53,7 +54,7 @@ When Claude Code starts a new session in a repo, it fires the `SessionStart` hoo
 1. Resolves the session ID from the stdin JSON, falling back to `CLAUDE_SESSION_ID` only when stdin carries no session ID. stdin is the authority: it names the session this event belongs to, whereas an env var is ambient and a parent process can hand it down. The fallback is keyed on `CLAUDE_SESSION_ID` rather than the `CLAUDE_CODE_SESSION_ID` that Claude Code actually injects, and that is deliberate - the injected name is inherited by child sessions, so keying the fallback on it would let a parent's identity decide a child's binding.
 2. Writes a `term-session` mapping file so that the statusline can later map terminal IDs back to session IDs.
 3. Calls `db.find_task_for_cwd(cwd, session_id)` to see if the current directory belongs to a tracked MissionCache project.
-4. If a task is found, writes `~/.claude/hooks/state/projects/<session-id>.json` - the per-session project pointer used both by the statusline (to render the active project name) and by `TaskDB.find_task_for_cwd` on subsequent prompts (to resolve which task a heartbeat belongs to). (A legacy `pending-task.json` file used to be written here but was removed in mcp-orbit 0.2.13; see CHANGELOG.)
+4. If a task is found, writes `~/.claude/hooks/state/projects/<session-id>.json` - the per-session project pointer used both by the statusline (to render the active project name) and by `TaskDB.find_task_for_cwd` on subsequent prompts (to resolve which task a heartbeat belongs to).
 
 The hook also prints a short "Active Task Detected" block to stdout, which Claude Code injects into the conversation context. This is how Claude learns which project it is working on without the user having to say so.
 
@@ -63,14 +64,15 @@ Every time the user hits enter, Claude Code fires `UserPromptSubmit`. MissionCac
 
 - `hooks/activity_tracker.py` spawns a short-lived subprocess (`python -m missioncache_db heartbeat-auto`) with a hard 2-second timeout and `PYTHONPATH` set to the plugin-bundled `missioncache-db`. The subprocess calls `TaskDB.record_heartbeat_auto(cwd, session_id)`, which delegates to `find_task_for_cwd` - that checks `projects/<session-id>.json` and then pattern-matches `cwd` against `~/.missioncache/active/<task>/` and repo-local legacy `dev/active/` layouts. If a match is found, a row is inserted into the `heartbeats` table with the current timestamp and session ID. The subprocess boundary is deliberate: SQLite lock contention on the task DB can otherwise stall the heartbeat call for up to its 5-second `busy_timeout`, which would eat the entire `UserPromptSubmit` hook budget. The 2-second subprocess deadline bounds that worst case. Skip patterns filter out slash commands, shell commands, yes/no confirmations, and empty prompts so they do not inflate the count.
 - `hooks/task_tracker.py` checks for "divergence" between the tasks file and the context file (headings like `### Task 3` present in context while `- [ ] 3. ...` is still unchecked in tasks) and prints a reminder to stdout so Claude sees it. This is the guardrail that keeps the tasks file honest.
+- `hooks/session_title.py` names the session after its bound project (a second session on the same project gets a `-2` suffix), so peer sessions can address it with `SendMessage`. A session holding the lead role gets the title `missioncache-lead` instead, which outranks any project binding.
 
-Both hooks have a 5-second budget. If no task matches the current directory or session, they both exit silently; there is no penalty for running MissionCache in a repo that has no projects.
+All three hooks have a 5-second budget. If no task matches the current directory or session, they exit silently. There is no penalty for running MissionCache in a repo that has no projects.
 
 ### 3. Claude uses MCP tools
 
 When the user (or a slash command) asks Claude to do something that touches MissionCache state - "mark task 3 complete", "give me the current project status", "record an iteration" - Claude calls one of the `mcp__plugin_missioncache_pm__*` tools. Those tools live in the MCP server subprocess that was started by the plugin manifest.
 
-The MCP server is stdio-based and very thin. `mcp-server/src/mcp_missioncache/server.py` is 30 lines: it imports five tool modules, each of which registers its tools against a shared `FastMCP` instance from `app.py`. Every tool:
+The MCP server is stdio-based and very thin. `mcp-server/src/mcp_missioncache/server.py` is a short file: it imports seven tool modules (`tools_tasks`, `tools_docs`, `tools_tracking`, `tools_iteration`, `tools_planning`, `tools_active`, `tools_pm`), each of which registers its tools against a shared `FastMCP` instance from `app.py`. Every tool:
 
 1. Opens a `TaskDB` via a lazy `get_db()` helper.
 2. Calls a handful of `TaskDB` methods.
@@ -108,6 +110,14 @@ The six steps above are one linear trace of a prompt, and a fork is not a step i
 A project created with `/missioncache:fork` carries a `**Fork of:** <parent>` line in its context header. The child is a full project with its own plan, context, tasks, and clock. What it shares is the parent's context file, which becomes the knowledge layer every child and the parent's own sessions read. Tasks are never shared or copied.
 
 The header is the durable link. `tasks.parent_id` is derived from it by the scan's reconcile pass, not authored directly. `get_context_digest` on a fork returns a `parent_digest` block so `/missioncache:load` can tell you when a sibling session changed the shared layer, using a per-session marker at `~/.claude/hooks/state/shared-seen/<session-id>.json` that the statusline also reads. Full detail in [`forks.md`](./forks.md).
+
+### The lead session
+
+One session can be designated the portfolio lead: the session that watches every project you work on in parallel. It is not bound to a project and never appears in a project's live set. The role is recorded in the `lead_session` table of `~/.claude/hooks-state.db` (one row at a time: `set_lead_session` deletes any other row, `clear_lead_session` ends the role, `lead_session_id` and `live_lead_session` read it, all in `missioncache_db/__init__.py`). The CLI face is `missioncache-db lead set <session_id>`, `lead stop` and `lead show`.
+
+`/missioncache:lead` runs `lead set`, then a full brief, and offers to keep it live with a recurring `/missioncache:brief --delta` loop that starts only when the user picks a pace. `session_title.py` gives the lead session the constant title `missioncache-lead`, which is the address every working session sends its change notices to (the write tools return `lead_session` next to `live_sessions`). `/missioncache:lead` is Claude Code only, because it needs a session title, cross-session messaging and a pid record.
+
+`/missioncache:brief` works from any session and any client. It calls the `get_portfolio` tool (`tools_pm.py`), which wraps `build_portfolio` in `missioncache_db/portfolio.py`. The dashboard's `/api/today` calls the same function, so the chat brief and the Attention view carry the same ranking and counts.
 
 ## Storage
 
@@ -195,8 +205,7 @@ There is also a legacy layout under `<repo>/dev/{active,completed}/` that older 
 | `session-pids/<session-id>.json` | `session_start.py` (`write_session_pid`) | `missioncache_db.session_is_alive` | The Claude process pid plus its start time. Liveness for the parallel-session warning and for the live-session lookup; the start time catches a pid the OS has since recycled |
 | `session-title/<session-id>.json` | `session_title.py` | `missioncache_db.live_sessions_for_project` / `live_sessions_all`, and the hook itself | The title the hook applied and the project it applied it for. The project name is what decides whether to re-title, which is how a manual `/rename` survives |
 | `term-sessions/<term-id>` | `session_start.py` | `statusline.py` | Maps terminal-emulator session IDs back to Claude session IDs so mid-session lookups work from any tab |
-| `pending-project.json` | *(nothing)* | `TaskDB.find_task_for_cwd` priority-1 branch | Inverse legacy: read but never written. The priority-1 branch in `find_task_for_cwd` is effectively dead code - task resolution always falls through to the `projects/<session-id>.json` branch |
-| ~~`pending-task.json`~~ | *(removed in mcp-orbit 0.2.13)* | *(never read)* | Removed. Old files left on disk from pre-0.2.13 installs are harmless; the rename-sweep also stopped maintaining them. Safe to delete by hand |
+| `pending-project.json` | *(nothing)* | `TaskDB.find_task_for_cwd` priority-1 branch | Read but never written. The priority-1 branch in `find_task_for_cwd` is effectively dead code - task resolution always falls through to the `projects/<session-id>.json` branch |
 
 These files are deliberately plain JSON and deliberately per-session. Early versions of MissionCache used a single shared project file that race-conditioned badly once multiple Claude sessions ran concurrently. If you add new state here, shard by session ID by default.
 
@@ -212,6 +221,7 @@ It is easy to get confused about what is running where, because MissionCache has
 | missioncache-auto | User-invoked CLI | Until task complete or failed | Manual `missioncache-auto <project>` |
 | missioncache-auto workers | Subprocesses of missioncache-auto | One per subtask in parallel mode | `parallel.py` |
 | Statusline | Very short-lived | ~50-200ms per invocation | Claude Code after every message |
+| Editor extension | Runs inside the VS Code extension host, spawns `missioncache-db` per refresh | While the editor is open | File watcher on `~/.missioncache/**/*.md`, window focus, manual refresh |
 
 Rules and slash commands are not processes - they are files read by Claude Code.
 
@@ -235,6 +245,8 @@ Pick the tool module that matches your use case:
 - Time tracking (heartbeats, sessions, repos): `tools_tracking.py`
 - MissionCache Auto iteration logging: `tools_iteration.py`
 - Multi-agent planning: `tools_planning.py`
+- Active-task pointer for the statusline: `tools_active.py`
+- Action items, stakeholders, tickets, due dates, and the cross-project portfolio: `tools_pm.py`
 
 Then follow the pattern every existing tool uses:
 
@@ -275,7 +287,7 @@ If you are iterating against a marketplace-installed copy instead, push your cha
 
 ### 2. Add a new hook
 
-Decide which Claude Code hook event you want to react to. The supported events are documented in Claude Code's hook reference - MissionCache currently uses four: `SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`.
+Decide which Claude Code hook event you want to react to. The supported events are documented in Claude Code's hook reference - MissionCache currently uses four: `SessionStart`, `UserPromptSubmit` (three hooks), `PreCompact`, `Stop`.
 
 Write a Python script in `hooks/` that:
 
@@ -335,7 +347,7 @@ If you add a new mode (say, a "review mode" that spawns a code reviewer after ev
 
 ### 5. Customize the statusline
 
-`missioncache-dashboard/missioncache_dashboard/statusline.py` is a single ~1,350-line file because it is performance-sensitive - every import costs milliseconds at the bottom of every Claude message. It ships inside the `missioncache-dashboard` pip package and is exposed as the `missioncache-statusline` console entry point. The layout is:
+`missioncache-dashboard/missioncache_dashboard/statusline.py` is a single file because it is performance-sensitive - every import costs milliseconds at the bottom of every Claude message. It ships inside the `missioncache-dashboard` pip package and is exposed as the `missioncache-statusline` console entry point. The layout is:
 
 - **Constants and colors** at the top.
 - **Data collection functions** that read from the DB, the projects state dir, git, and the file system.
@@ -373,7 +385,7 @@ These are the things that will trip you up if you are new to the codebase, colle
 - **The dashboard's `_get_jsonl_task_times()` joins by `cwd = repo.path`.** Multiple tasks sharing a repo all draw from the same JSONL pool, and the only disambiguator is `c.date >= DATE(t.created_at)`. Overlapping tasks on the same repo can therefore double-count - known limitation.
 - **`_effective_time(task_id, heartbeat, jsonl) = max(heartbeat, jsonl)` is applied in `/api/tasks/active`, `/api/tasks/completed`, and `/api/task/<id>`.** Dashboard-reported times are merged MissionCache+Claude-JSONL, not pure heartbeats. If you are debugging a time discrepancy between missioncache-db and the dashboard, this is almost always why.
 - **`UserPromptSubmit` can receive `prompt` as a list of content blocks** (when the user attaches an image). Any hook or tool that treats `prompt` as a string without flattening the list will crash. `activity_tracker.py` and `task_tracker.py` both handle this - copy the pattern.
-- **The `**Fork of:**` header regex is hand-mirrored in two places and must stay byte-identical.** `_FORK_NAME_RE` at `missioncache-db/missioncache_db/context_health.py:494` and `_FORK_HEADER_RE` at `missioncache-dashboard/missioncache_dashboard/statusline.py:682` are the same pattern, written out twice. The statusline is a stdlib-only standalone script and cannot import `missioncache_db`, so it cannot share the constant. The pattern's shape - no slashes, must lead with an alphanumeric - is a load-bearing security control: it blocks path traversal through a hand-edited context header, and that header is a plain text file any user can write. `missioncache-dashboard/tests/test_statusline_fork.py:219` asserts the two patterns are equal. If you change one, change the other in the same commit, or that test fails, which is the point.
+- **The `**Fork of:**` header regex is hand-mirrored in two places and must stay byte-identical.** `_FORK_NAME_RE` in `missioncache-db/missioncache_db/context_health.py` and `_FORK_HEADER_RE` in `missioncache-dashboard/missioncache_dashboard/statusline.py` are the same pattern, written out twice. The statusline is a stdlib-only standalone script and cannot import `missioncache_db`, so it cannot share the constant. The pattern's shape - no slashes, must lead with an alphanumeric - is a load-bearing security control: it blocks path traversal through a hand-edited context header, and that header is a plain text file any user can write. `test_regex_byte_identical_to_db_copy` in `missioncache-dashboard/tests/test_statusline_fork.py` asserts the two patterns are equal. If you change one, change the other in the same commit, or that test fails, which is the point.
 
 ## Where to go from here
 

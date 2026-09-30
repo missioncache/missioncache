@@ -53,7 +53,7 @@ The Settings view's "Custom categories" section extends the built-in taxonomy: e
 
 Deletion always succeeds and orphans degrade: projects keeping a deleted value render with default styling, the value stays selectable on those projects (a save from the page cannot wipe it), and re-adding the name restores its look. The API surface is `GET /api/categories` (built-in names + custom rows), `POST /api/categories` (400 on validation, 409 on duplicate), and `DELETE /api/categories/{name}` (404 for unknown names) - all reading and writing SQLite directly, no DuckDB sync involved.
 
-The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` at `missioncache-dashboard/missioncache_dashboard/server.py:833`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
+The active table filters out "orphan" tasks where the DB still says `status=active` but `<project>-tasks.md` has been moved to `~/.missioncache/completed/<project>/`. Orphans appear in the completed table instead. This is handled server-side in `parse_missioncache_progress()` in `missioncache-dashboard/missioncache_dashboard/server.py`, which flags `missioncache_in_completed=True` when it finds the files under the completed path, and the `/api/tasks/active` handler skips those rows.
 
 #### Project category icons
 
@@ -94,7 +94,7 @@ This is the one part of the dashboard that trips people up, so it is worth a pro
 
 ### Two sources, one number
 
-Every active task is reported with a `time_spent_seconds` field, computed in `/api/tasks/active` like this (see `missioncache-dashboard/missioncache_dashboard/server.py:1131`):
+Every active task is reported with a `time_spent_seconds` field, computed in the `/api/tasks/active` handler (`api_tasks_active` in `missioncache-dashboard/missioncache_dashboard/server.py`) like this:
 
 ```python
 task_ids = [t.id for t in tasks]
@@ -132,7 +132,7 @@ It is under-counting-prone when:
 
 JSONL time is the reconstruction from Claude Code's transcript files. Every message in a JSONL file has a timestamp; a session's "duration" is the sum of the gaps between consecutive messages, capped at 5 minutes per gap (longer gaps are treated as idle). This gives a realistic "time spent typing and waiting for Claude" figure rather than a wall-clock-span figure.
 
-The gap-capping logic lives in `SessionMetrics.active_seconds_for_date()` at `missioncache-dashboard/missioncache_dashboard/lib/jsonl_parser.py:77`:
+The gap-capping logic lives in `SessionMetrics.active_seconds_for_date()` in `missioncache-dashboard/missioncache_dashboard/lib/jsonl_parser.py`:
 
 ```python
 max_gap_seconds = 5 * 60  # 5 minutes
@@ -148,7 +148,7 @@ JSONL sessions are parsed lazily and cached in the `claude_session_cache` table 
 
 ### Joining JSONL time to tasks
 
-The tricky bit is attributing cached JSONL sessions back to MissionCache tasks, because JSONL files are keyed by `cwd`, not by task. The join is at `_get_jsonl_task_times()` at `missioncache-dashboard/missioncache_dashboard/server.py:1099`:
+The tricky bit is attributing cached JSONL sessions back to MissionCache tasks, because JSONL files are keyed by `cwd`, not by task. The join is `_get_jsonl_task_times()` in `missioncache-dashboard/missioncache_dashboard/server.py`:
 
 ```sql
 SELECT t.id, SUM(c.duration_seconds) as total
@@ -170,9 +170,9 @@ This does two things worth noting:
 
 ### Caps and overrides
 
-One more subtlety: the `/api/stats/today` and `/api/stats/day` endpoints cap the reported `claude_seconds` at wall-clock elapsed time for the day (see `missioncache-dashboard/missioncache_dashboard/server.py:1569-1580`). This handles the case where multiple Claude sessions run in parallel and the naive sum of their per-session durations exceeds the actual elapsed time. For the current day, the cap is `(now - midnight).total_seconds()`; for past days, it is a hard 24 hours.
+One more subtlety: the `/api/stats/today` and `/api/stats/day` endpoints cap the reported `claude_seconds` at wall-clock elapsed time for the day (in the `api_stats_today` and `api_stats_day` handlers in `missioncache-dashboard/missioncache_dashboard/server.py`). This handles the case where multiple Claude sessions run in parallel and the naive sum of their per-session durations exceeds the actual elapsed time. For the current day, the cap is `(now - midnight).total_seconds()`. For past days, it is a hard 24 hours.
 
-The `/api/stats/history` endpoint does a similar merged-time override at `missioncache-dashboard/missioncache_dashboard/server.py:1862-1863`: the `trends.time.current` field is bumped to `max(trends, merged_total)` so the history trend number never undercounts when JSONL time exceeds MissionCache-tracked time.
+The `/api/stats/history` endpoint does a similar merged-time override in its handler, `api_stats_history`: the `trends.time.current` field is bumped to `max(trends, merged_total)` so the history trend number never undercounts when JSONL time exceeds MissionCache-tracked time.
 
 ## API reference
 
@@ -211,7 +211,14 @@ All PM writes go through `missioncache_db.pm_items` - the same path as the MCP t
 
 ### The two records behind "On other people"
 
-Two different things mean "someone else owes something", and they stay separate at rest because their shapes and lifecycles differ. An **action item assigned to a colleague** is a commitment: it has an owner, a due date, and a done/dropped end state, and it lives in SQLite with a stable id. A **Waiting-on row** is a dependency: it has an age and a `Gates` cell naming what it blocks, and it lives in the context file's markdown table, maintained by the save flow.
+Two different things mean "someone else owes something", and they stay separate at rest because their shapes and lifecycles differ. An **action item assigned to a colleague** is a commitment: an owner, a due date, and a done/dropped end state. A **Waiting-on row** is a dependency: an age and a `Gates` cell naming what it blocks.
+
+| | Commitment | Blocker |
+|---|---|---|
+| `kind` | `commitment` | `blocker` |
+| Id | Stable action-item id | None. Addressed by `task_id` + `row_index`, with the row's `what` text verified before removal |
+| Where stored | SQLite, written through `missioncache_db.pm_items` | The Waiting-on markdown table in the project's context file, maintained by the save flow |
+| How resolved | `PUT /api/action-items/{id}` | `POST /api/tasks/{id}/waiting-on/resolve`, 409 when the table shifted since the view loaded. The resolution goes into Recent Changes exactly as the save flow's `waiting_on_resolve` does |
 
 `/api/today` joins them for reading only. Each row carries `kind` (`commitment` or `blocker`) and a shared `days_past_line` score so one list can sort honestly across the seam: a commitment's line is its due date, a blocker's line is the 7-day staleness threshold, and rows that have not crossed a line sort below, oldest first.
 
@@ -221,19 +228,19 @@ The split is by **who owes the work**, not by which table stored the row, so a W
 
 **"Late" spans both kinds.** `counts.overdue` and each project's `overdue_count` count everything of *yours* that has crossed its line, on the same scale the endpoint uses for sorting: an action item past its due date, and equally a Waiting-on row naming you that has passed the 7-day threshold. Both counts reach across the two lists your late work lives in (action items in `on_me`, waiting rows in `on_others`) without double-counting either. A colleague sitting on an ask remains THEIR latency and counts into `stale`, never into overdue, because red is reserved for "you are late".
 
-**`counts` is what the board's strip shows.** The four attention numbers on screen - on you, late, out, no reply over 7d - render `counts` directly rather than re-counting the rows in the browser. That was not always true: the client used to derive them itself, and because it deduplicated rows the server had already emitted twice, the strip and the endpoint reported different totals for the same state. Duplicates are now removed at the source (see below), so there is one count and one owner.
+**`counts` is what the board's strip shows.** The four attention numbers on screen - on you, late, out, no reply over 7d - render `counts` directly rather than re-counting the rows in the browser, so there is one count and one owner.
 
 **Duplicate task rows are dropped, not deduplicated downstream.** Two task rows can point at one project - a fork and its parent, or a stale row whose `full_path` no longer resolves and which therefore falls back to the name and finds its twin's context file. Both would parse the same Waiting-on table, counting every ask twice. `get_today` iterates freshest-first and skips a task whose context file another task already consumed, so the duplicate never reaches the payload and the surviving twin is the one worked most recently.
 
-Which names mean *you* comes from git's global `user.name`, first token, plus the literal words "me" and "myself" - the same source the greeting uses, so the two cannot disagree. A machine with no git identity still matches "me" and "myself". This used to be a hardcoded set containing one person's first name, which filed everyone else's own work under "waiting on other people".
+Which names mean *you* comes from git's global `user.name`, first token, plus the literal words "me" and "myself" - the same source the greeting uses, so the two cannot disagree. A machine with no git identity still matches "me" and "myself".
 
-`who` is hand-typed prose, so `who_primary` normalizes it into a grouping key: parentheticals and any trailing note after ` - ` are dropped, multi-owner cells split on `/ + ,`, and the first name wins. Measured over 63 live rows, 47 distinct exact strings collapse to 34 owners with one holding 12 - counting exact strings measures string equality, not owners. The raw `who` is always kept alongside, because a first-name key can fuse two people who share one and the raw cells are the only evidence of a merge.
+`who` is hand-typed prose, so `who_primary` normalizes it into a grouping key: parentheticals and any trailing note after ` - ` are dropped, multi-owner cells split on `/ + ,`, and the first name wins. Counting exact strings would measure string equality, not owners. The raw `who` is always kept alongside, because a first-name key can fuse two people who share one and the raw cells are the only evidence of a merge.
 
-Per-project `days_since_worked` (from `tasks.last_worked_on`) separates a project whose asks rot while it is being worked from one whose asks rot because the project stopped. The Projects gadget shows it as the last column, and it is also what orders the list. Tracked minutes cannot answer that question: on a measured day only 9% of tracked time attributed to a project at all, and the most attention-owed project read 0m on a day it was worked.
+Per-project `days_since_worked` (from `tasks.last_worked_on`) separates a project whose asks rot while it is being worked from one whose asks rot because the project stopped. The Projects gadget shows it as the last column, and it is also what orders the list. Tracked minutes cannot answer that question: time attributes to a project only when a session is bound to it, so a project can be worked all day and still read 0m.
 
 Each project block also carries `completed_count` / `total_count` / `completion_pct` and `next_up` (the first unchecked checklist item), because who-owes-what alone reads identically on a project at 86% and one at 0%. `next_up` is picked server-side and the full parsed checklist is **never** in the payload - it runs to several hundred items across the active projects and a row needs one line of it. `ticket_label` / `ticket_url` come from the project's first tickets row, falling back to the legacy `tasks.jira_key` column with a URL derived from the configured `jira_urls` prefix map; both are `None` when a project has no reference, and the label renders as plain text when no URL resolves (the mapping is empty until set in Settings).
 
-Both kinds are resolvable from the UI, by different mechanisms. A commitment has a stable id, so it completes through `PUT /api/action-items/{id}`. A Waiting-on row has no per-row id - it is a hand-editable markdown table - so `POST /api/tasks/{id}/waiting-on/resolve` identifies it positionally via `row_index` and **verifies** the row's `what` text before removing it, answering 409 rather than resolving the wrong row when the table has shifted. The resolution lands in Recent Changes exactly as the save flow's `waiting_on_resolve` does. That resolve is identity-keyed by design; the save flow's substring match is the right shape for "the egress one came back" in conversation and the wrong one for a button press.
+The two resolve paths in the table differ by design. The button press is identity-keyed (position plus verified text). The save flow's substring match is the right shape for "the egress one came back" in conversation and the wrong one for a button press.
 
 Which one to file into at write time is unchanged: if it blocks your next step, it is a Waiting-on row; otherwise it is an action item.
 
@@ -295,7 +302,7 @@ The `/api/tasks/active` response shape is the largest; the relevant fields are:
 - `merge_hourly_activity(task_hourly, claude_hourly)` - the two sources joined into one 24-element array.
 - `_merge_untracked_sessions(...)` - untracked Claude sessions (anti-joined against the `sessions` table) grouped by cwd and appended to the task list.
 
-`_merge_untracked_sessions` is what makes "Claude Code activity with no MissionCache project loaded" visible in the dashboard. The anti-join query lives in `ClaudeSessionCache.get_untracked_sessions(date)` at `missioncache-dashboard/missioncache_dashboard/lib/analytics_db.py:3164` and returns JSONL sessions that do not appear in any MissionCache `sessions` row for the same `session_id`. Because the anti-join relies on both tables living in the same SQLite file, the invariant in `architecture.md` about not moving `claude_session_cache` to DuckDB matters here.
+`_merge_untracked_sessions` is what makes "Claude Code activity with no MissionCache project loaded" visible in the dashboard. The anti-join query lives in `ClaudeSessionCache.get_untracked_sessions(date)` in `missioncache-dashboard/missioncache_dashboard/lib/analytics_db.py` and returns JSONL sessions that do not appear in any MissionCache `sessions` row for the same `session_id`. Because the anti-join relies on both tables living in the same SQLite file, the invariant in `architecture.md` about not moving `claude_session_cache` to DuckDB matters here.
 
 ### MissionCache Auto execution tracking
 
@@ -350,7 +357,7 @@ The sync from SQLite to DuckDB is the mechanism that lets the dashboard read fas
 
 Sync runs in four places:
 
-1. **On startup** - `lifespan()` at `missioncache-dashboard/missioncache_dashboard/server.py:158` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
+1. **On startup** - `lifespan()` in `missioncache-dashboard/missioncache_dashboard/server.py` calls `db.sync_from_sqlite()` before taking traffic. This ensures the dashboard shows current data immediately, even after a long downtime.
 2. **Every 60 seconds** - the `background_sync()` async task runs on a `SYNC_INTERVAL_SECONDS=60` loop. This is why the dashboard always lags heartbeats by at most a minute.
 3. **On demand via `POST /api/sync`** - useful for the "I just committed, show me the latest" case where you do not want to wait for the background loop.
 4. **After task creation** - the MissionCache MCP server POSTs to `/api/hooks/task-created` after `create_task` and `create_missioncache_files` so a newly created task shows up in the active table right away instead of waiting up to 60s for the next background sync.
@@ -373,16 +380,17 @@ The trade-off is the ~60-second staleness window on the dashboard. For analytics
 
 The dashboard supports hash-based deep links so external tools (the statusline, other dashboards, notes) can point at specific views and task modals:
 
-- `#projects` or empty hash - Projects view.
+- `#attention` or empty hash - Attention view.
+- `#projects` - Projects view.
 - `#activity` - Activity view.
 - `#auto` - Auto view.
 - `#projects?task=<name>&tab=<tab>` - Projects view with a specific task modal opened. `tab` can be `tasks` (default), `context`, `plan`, or `structure`.
 
-The routing is handled by `handleHashChange()` at `missioncache-dashboard/missioncache_dashboard/index.html:5292`. Deep links resolve against both `/api/tasks/active` and `/api/tasks/completed?days=90`, so you can link to completed projects too. After opening the modal, the query string is stripped from the hash so that a page refresh does not re-open the modal unexpectedly.
+The routing is handled by `handleHashChange()` in `missioncache-dashboard/missioncache_dashboard/index.html`. Deep links resolve against both `/api/tasks/active` and `/api/tasks/completed?days=90`, so you can link to completed projects too. After opening the modal, the query string is stripped from the hash so that a page refresh does not re-open the modal unexpectedly.
 
 The statusline uses this for its clickable project name and progress fraction. When missioncache-statusline renders a line like `Project: missioncache-release (19/39)`, the project name is wrapped in an OSC 8 hyperlink to `#{MISSIONCACHE_DASHBOARD_URL}/#projects` and the progress fraction is wrapped in a link to `#{MISSIONCACHE_DASHBOARD_URL}/#projects?task=missioncache-release&tab=tasks`. Terminals that support OSC 8 (iTerm2, Ghostty, cmux, modern Windows Terminal) render these as clickable; terminals that do not, just see plain text with the same content.
 
-The `MISSIONCACHE_DASHBOARD_URL` environment variable is read at `missioncache-dashboard/missioncache_dashboard/statusline.py:1041` and defaults to `http://localhost:8787`. If you move the dashboard to a different host or port, set this in your shell init so the statusline builds the right links.
+The `MISSIONCACHE_DASHBOARD_URL` environment variable is read into the `_DASHBOARD_URL` constant in `missioncache-dashboard/missioncache_dashboard/statusline.py` and defaults to `http://localhost:8787`. If you move the dashboard to a different host or port, set this in your shell init so the statusline builds the right links.
 
 ## Customization
 
@@ -390,13 +398,13 @@ The dashboard is deliberately minimal about configuration - there are very few k
 
 | What | Where | How to change |
 |------|-------|---------------|
-| Listen port | `missioncache_dashboard/server.py:2761` (`uvicorn.run`) | `missioncache-dashboard serve --port <n>` or set `MISSIONCACHE_DASHBOARD_PORT` |
-| SQLite path | `missioncache_dashboard/lib/analytics_db.py:29` (`SQLITE_PATH`) | Edit the constant |
-| DuckDB path | `missioncache_dashboard/lib/analytics_db.py:28` (`DUCKDB_PATH`) | Edit the constant |
-| Sync interval | `missioncache_dashboard/server.py:124` (`SYNC_INTERVAL_SECONDS`) | Default 60s |
-| History cache TTL | `missioncache_dashboard/server.py:128` (`HISTORY_CACHE_TTL_SECONDS`) | Default 300s |
-| SSE refresh rate | `missioncache_dashboard/server.py:205` (`REFRESH_INTERVAL`) | Default 30s |
-| JIRA URL mapping | `missioncache_dashboard/server.py:224` (`get_jira_url()`) + runtime settings | Use the dashboard's Settings screen, or edit `~/.claude/missioncache-dashboard-config.json` `jira_urls` map |
+| Listen port | The `uvicorn.run` call in the `__main__` block of `missioncache_dashboard/server.py` | `missioncache-dashboard serve --port <n>` or set `MISSIONCACHE_DASHBOARD_PORT` |
+| SQLite path | `SQLITE_PATH` in `missioncache_dashboard/lib/analytics_db.py` | Edit the constant |
+| DuckDB path | `DUCKDB_PATH` in `missioncache_dashboard/lib/analytics_db.py` | Edit the constant |
+| Sync interval | `SYNC_INTERVAL_SECONDS` in `missioncache_dashboard/server.py` | Default 60s |
+| History cache TTL | `HISTORY_CACHE_TTL_SECONDS` in `missioncache_dashboard/server.py` | Default 300s |
+| SSE refresh rate | `REFRESH_INTERVAL` in `missioncache_dashboard/server.py` | Default 30s |
+| JIRA URL mapping | `get_jira_url()` in `missioncache_dashboard/server.py` + runtime settings | Use the dashboard's Settings screen, or edit `~/.claude/missioncache-dashboard-config.json` `jira_urls` map |
 | Statusline link base | `MISSIONCACHE_DASHBOARD_URL` env var | Set in shell init |
 | Dark/light theme | Frontend only | Toggle in the top-right of the UI (persisted in localStorage) |
 
@@ -453,7 +461,7 @@ The registered command is `"<path>\missioncache-dashboard.exe" serve --hidden`, 
 
 ### Adding a new endpoint
 
-The rule is simple: **reads go to DuckDB via `analytics_db.py`, writes go to SQLite via `missioncache-db`**. If you are adding a new aggregate query to the Activity view, you add a method to the `AnalyticsDB` class and call it from a new `@app.get()` handler. If you are adding a new mutation, you call into `TaskDB` (imported at `missioncache_dashboard/server.py:50`) and then trigger a sync.
+The rule is simple: **reads go to DuckDB via `analytics_db.py`, writes go to SQLite via `missioncache-db`**. If you are adding a new aggregate query to the Activity view, you add a method to the `AnalyticsDB` class and call it from a new `@app.get()` handler. If you are adding a new mutation, you call into `TaskDB` (imported from `missioncache_db` at the top of `missioncache_dashboard/server.py`) and then trigger a sync.
 
 The pattern for a new read endpoint:
 
@@ -486,9 +494,9 @@ Do not open either database directly from inside a route handler. The singletons
 
 The frontend is a single HTML file (`index.html`) with embedded CSS and JavaScript. There is no build tool, no framework, and no bundler. To add a view:
 
-1. Add a nav item in the `<nav>` block (around `missioncache-dashboard/missioncache_dashboard/index.html:4410`).
+1. Add a nav item in the `<nav class="sidebar">` block in `missioncache-dashboard/missioncache_dashboard/index.html`.
 2. Add a `<div class="view" id="myNewView">...</div>` section below the existing views.
-3. Add a lazy loader function (`loadMyNewData`) and hook it into `switchView()` at around `missioncache-dashboard/missioncache_dashboard/index.html:5359`.
+3. Add a lazy loader function (`loadMyNewData`) and hook it into `switchView()` in the same file.
 4. Write any render functions your view needs (convention: `renderMyNewThing(data)`).
 
 The CSS variable system at the top of `index.html` drives theming. Use `var(--bg)`, `var(--fg)`, `var(--accent)`, etc. and both the light and dark modes will Just Work.
@@ -497,7 +505,7 @@ For anything more complex than a table or a bar chart, you may want to pull in D
 
 ### Touching path resolution
 
-If you are changing how MissionCache files are located on disk, you need to update two places: `parse_missioncache_progress()` in `missioncache-dashboard/missioncache_dashboard/server.py:833` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
+If you are changing how MissionCache files are located on disk, you need to update two places: `parse_missioncache_progress()` in `missioncache-dashboard/missioncache_dashboard/server.py` (dashboard read path) and `helpers.py` in the MCP server (MCP write path). They are independent implementations of the same logic, so keep them consistent or the dashboard will render stale state.
 
 ## Troubleshooting
 
@@ -539,7 +547,7 @@ This is almost always the heartbeat-vs-JSONL merge at work. See [Time accounting
 
 **Cause:** Most likely the `claude_session_cache` is missing or got moved to a different database file. The anti-join that identifies untracked sessions requires `claude_session_cache` and `sessions` to live in the same SQLite file.
 
-**Fix:** Check `sqlite3 ~/.missioncache/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` at `missioncache-dashboard/missioncache_dashboard/lib/analytics_db.py:2946`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
+**Fix:** Check `sqlite3 ~/.missioncache/tasks.db ".tables"` - you should see both `claude_session_cache` and `sessions`. If the cache is missing, restart the dashboard (it is created on first access by `ClaudeSessionCache._ensure_table()` in `missioncache-dashboard/missioncache_dashboard/lib/analytics_db.py`). If it is present but queries return nothing, run `POST /api/sync` to force a rebuild.
 
 ### "Dashboard shows stale data"
 

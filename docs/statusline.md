@@ -17,16 +17,16 @@ The statusline is a 6- or 7-line block that renders below every Claude Code prom
 | 3 | Time | Elapsed session time, current date/time, edit count for the session. |
 | 4 | Metrics | Model name, tokens used, context window percentage with warning colors. Shows "Fast mode activated" if Claude Code fast mode is on. |
 | 5 | K8s/Ver | Kubernetes context (if `kubectl` is installed), Claude Code version + age + "reviewed" color coding via `/whats-new`, Claude service health status with clickable link to status.claude.com. |
-| 6 | Usage | Subscription type (Max/Pro/API/Bedrock/etc.), session usage percentage, weekly usage percentage, Opus usage percentage if applicable, extra credits spent. |
+| 6 | Usage | Subscription type (Max/Pro/API/Bedrock/etc.), session usage percentage, weekly usage percentage, a per-model weekly limit when the API reports one (its label comes from the API, so it reads `<model>: N%`), extra credits spent. |
 | 7 | Codex | Codex plan type, session and weekly usage percentages. **Only shown if the Codex CLI is installed** (`~/.codex/auth.json` exists and `STATUSLINE_CODEX` is not set to `false`). |
 
-The lines are rendered in a specific non-numeric order in the main() function - line 2 (Project+LastAction) prints first, then line 1 (Dir+Git), then line 4 (Time), then line 3 (Metrics), then lines 5/6/7. This ordering was tuned empirically by the author and is documented only by the order of the `out.write()` calls at the bottom of `main()`.
+The lines are rendered in a specific non-numeric order in `_run()` - line 2 (Project+LastAction) prints first, then line 1 (Dir+Git), then line 4 (Time), then line 3 (Metrics), then lines 5/6/7. The order is set by the sequence of `segments.append(...)` calls at the bottom of `_run()`, which are joined into one string and written with a single `out.write()`.
 
 ### Column alignment
 
 Every line is laid out as two-column or three-column "cells" separated by a pipe character (` │ `). The first column has a dynamic width computed as `max(CELL_WIDTH=24, widest_first_column_item)`, the second column the same, and subsequent columns use the fixed `CELL_WIDTH`. This gives you vertical alignment on the first two cells of every line, which is the thing your eye tracks when scanning the status block.
 
-Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is in `missioncache-dashboard/missioncache_dashboard/statusline.py:227` if you need to change it.
+Width calculations use a custom `display_width()` function that handles East Asian wide characters, zero-width joiners, and ANSI escape sequences. Counting just `len(s)` would misalign any line with an emoji or a foreign character - the implementation is `display_width` in `missioncache-dashboard/missioncache_dashboard/statusline.py` if you need to change it.
 
 ## How it gets invoked
 
@@ -38,7 +38,7 @@ Claude Code runs the statusline via the `statusLine` key in `~/.claude/settings.
 }
 ```
 
-`missioncache-statusline` is a pip entry point shipped by the `missioncache-dashboard` package. `uvx missioncache-install` wires it into `settings.json` automatically during the full install; if you cloned the repo and ran `uvx missioncache-install --local`, the entry point resolves to `missioncache_dashboard/statusline.py` in your checkout, so edits to that file are live instantly. No reinstall is needed for statusline-source changes in `--local` mode. For end users on the PyPI path, `uvx missioncache-install --update` pulls in the newest published version.
+`missioncache-statusline` is a pip entry point shipped by the `missioncache-dashboard` package. `uvx missioncache-install` wires it into `settings.json` automatically during the full install. On Windows the installer writes the absolute forward-slash path to the executable instead of the bare name, quoted when it contains a space, because Git Bash eats backslashes and the scripts directory is not guaranteed to be on the statusline's `PATH`. Also on Windows, `_force_utf8_stdout` reconfigures stdout to UTF-8 before the first write: Claude Code hands the statusline a piped stdout, which Python defaults to cp1252 there, and that encoding cannot carry the emoji every line uses. Off Windows both of these are no-ops. If you cloned the repo and ran `uvx missioncache-install --local`, the entry point resolves to `missioncache_dashboard/statusline.py` in your checkout, so edits to that file are live instantly. No reinstall is needed for statusline-source changes in `--local` mode. For end users on the PyPI path, `uvx missioncache-install --update` pulls in the newest published version.
 
 Claude Code spawns the script on every turn and sends session JSON on stdin:
 
@@ -215,9 +215,9 @@ Always renders dir; git cell is only shown inside a git repo.
 
 This line has the most branching. It starts with the subscription label (`_detect_subscription`), then:
 
-- **Foundry mode** - shows session cost/tokens/duration. No weekly/Opus.
+- **Foundry mode** - shows session cost/tokens/duration. No weekly or per-model limits.
 - **Max plan** - shows `Session: ∞` and `Weekly: ∞`. Max is unmetered.
-- **Metered plans** - shows `Session: N%`, `Weekly: N%`, and optionally `Opus: N%` and `Extra: spent/limit`. Each percentage has a reset time if the usage API returned one. Extra credits are only shown when spending is non-zero.
+- **Metered plans** - shows `Session: N%`, `Weekly: N%`, then a per-model weekly limit when the API reports one, then `Extra: spent/limit`. The per-model cell comes from the `weekly_scoped` entry in the API's `limits` array, parsed by `_parse_scoped_limit`: its label is `scope.model.display_name`, so whichever model is capped renders as `<model>: N%` without a code change. The older top-level `seven_day_opus` bucket, when the API still fills it, renders as `Opus: N%`. Each percentage has a reset time if the usage API returned one. Extra credits are only shown when spending is non-zero.
 
 The usage API response shape is flattened by `_parse_usage_response()`. Anything the API returns that is not in that parser is silently dropped. Extra usage (the Claude Code add-on credits) is fetched on a separate code path because stdin's `rate_limits` field does not include it - the statusline always hits the API for that one.
 
@@ -269,11 +269,11 @@ Fields:
 
 ### Change what is shown
 
-For your own fields, prefer the addon system above - it needs no code and survives package updates. To change the built-in lines, note that the two environment variables documented above are the easiest knob. Beyond that, the script is a single flat file - the layout is determined by the order of `out.write()` calls in `_run()` (the render body; `main()` is only the crash guard that wraps it), and the contents of each line are built in the `# Build items per line` section of `_run()`. To add, remove, or reorder lines:
+For your own fields, prefer the addon system above - it needs no code and survives package updates. To change the built-in lines, note that the two environment variables documented above are the easiest knob. Beyond that, the script is a single flat file - the layout is determined by the order of the `segments.append(...)` calls at the bottom of `_run()` (the render body; `main()` is only the crash guard that wraps it), and the contents of each line are built in the `# Build items per line` section of `_run()`. To add, remove, or reorder lines:
 
 1. Find the line-building block (`line1`, `line2`, `line3`, ..., `line_codex`) in `_run()`.
 2. Modify or add an `_item(COLORS[...], ICONS[...], "Label", value)` call.
-3. If you added a new line, include it in `all_lines`, `joined`, and `line_widths` tuples, then add an `out.write()` call in the output block at the bottom of `_run()` and bump the `lines` count in `_fallback_output()` to match.
+3. If you added a new line, include it in `all_lines`, `joined`, and `line_widths` tuples, then append it with `segments.append(...)` at the bottom of `_run()` and bump the `lines` count in `_fallback_output()` to match.
 
 Remember that the output block intentionally emits every line unconditionally (using blank-padded strings if a line has no content) so Claude Code allocates a fixed-height status area. If you add a conditional line, either make it always present with a blank fallback, or accept that the status area height will jump.
 
@@ -322,9 +322,9 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 ### "The statusline is missing entirely"
 
-**Cause:** Either the `missioncache-statusline` entry point is not on `PATH` (the `missioncache-dashboard` package was never pip-installed, or it was uninstalled), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup. A common legacy variant: `settings.json.statusLine.command` still points at `python3 ~/.claude/scripts/statusline.py` from a pre-M10 install, and that symlink now points at a deleted path.
+**Cause:** Either the `missioncache-statusline` entry point is not on `PATH` (the `missioncache-dashboard` package was never pip-installed, or it was uninstalled), or `settings.json` does not have a `statusLine` key, or the Python script crashed on startup. A common variant: `settings.json.statusLine.command` still points at `python3 ~/.claude/scripts/statusline.py`, a path an older install layout used, and that symlink now points at a deleted path.
 
-**Fix:** First run `which missioncache-statusline` - it should print a path. If not, re-run `uvx missioncache-install --dashboard --statusline` (or `--update` if MissionCache is already installed) to reinstall the package and wire the entry point. Then check `~/.claude/settings.json` - the `statusLine.command` value should be the bare string `missioncache-statusline`, not a `python3 ~/.claude/scripts/...` invocation. Rewrite it if needed. Finally, run the script in isolation with a dummy payload: `echo '{}' | missioncache-statusline`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
+**Fix:** First run `which missioncache-statusline` - it should print a path. If not, re-run `uvx missioncache-install --dashboard --statusline` (or `--update` if MissionCache is already installed) to reinstall the package and wire the entry point. Then check `~/.claude/settings.json` - the `statusLine.command` value should be the bare string `missioncache-statusline` (on Windows, the absolute forward-slash path to the executable that the installer writes, quoted when it contains a space), not a `python3 ~/.claude/scripts/...` invocation. Rewrite it if needed. Finally, run the script in isolation with a dummy payload: `echo '{}' | missioncache-statusline`. If it errors, read the traceback in `~/.claude/logs/statusline-errors.log`.
 
 ### "The statusline renders but some lines are blank"
 

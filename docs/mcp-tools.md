@@ -26,7 +26,7 @@ MissionCache ships a single MCP server, registered in `plugin.json` as:
 
 The server name is `pm` (for "project management"), and combined with the plugin name (`missioncache`), Claude Code exposes every tool under the prefix `mcp__plugin_missioncache_pm__<tool_name>`. So the Python function `list_active_tasks` in `mcp-server/src/mcp_missioncache/tools_tasks.py` is callable from Claude as `mcp__plugin_missioncache_pm__list_active_tasks`.
 
-The server itself is a [FastMCP](https://github.com/modelcontextprotocol/python-sdk) application. The entry point (`server.py`) is 31 lines long and does nothing but import the tool modules to trigger their `@mcp.tool()` decorators:
+The server itself is a [FastMCP](https://github.com/modelcontextprotocol/python-sdk) application. The entry point (`server.py`) is a short file that does nothing but import the tool modules to trigger their `@mcp.tool()` decorators:
 
 ```python
 from .app import mcp  # noqa: F401
@@ -37,12 +37,13 @@ from . import tools_tracking  # noqa: F401
 from . import tools_iteration # noqa: F401
 from . import tools_planning  # noqa: F401
 from . import tools_active    # noqa: F401
+from . import tools_pm        # noqa: F401
 
 def main():
     mcp.run(transport="stdio")
 ```
 
-All the logic lives in those six `tools_*` modules. Every tool function is an `async def` decorated with `@mcp.tool()` that takes `Annotated[...]` parameters with `Field(description=...)` for MCP schema generation and returns a `dict`. That return shape is important - tools never raise across the MCP boundary; they catch `MissionCacheError` and return `e.to_dict()`, and they catch everything else and return `{"error": True, "message": str(e)}`. Claude always sees a dict, never an exception.
+All the logic lives in those seven `tools_*` modules. Every tool function is an `async def` decorated with `@mcp.tool()` that takes `Annotated[...]` parameters with `Field(description=...)` for MCP schema generation and returns a `dict`. That return shape is important - tools never raise across the MCP boundary; they catch `MissionCacheError` and return `e.to_dict()`, and they catch everything else and return `{"error": True, "message": str(e)}`. Claude always sees a dict, never an exception.
 
 ### Why async, why dicts
 

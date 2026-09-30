@@ -28,7 +28,7 @@ Prerequisites:
 - Python 3.11 or newer (missioncache uses modern syntax like `str | None` and the walrus operator).
 - `uv` on your `PATH` (provides `uvx`). `pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`. Alternatively `pipx run missioncache-install --local` works if you prefer `pipx`.
 - `git filter-repo` if you plan to work on history-rewrite tooling (optional).
-- macOS is the primary test platform. Linux should work for the plugin core; on Linux the dashboard uses systemd user units instead of launchd. Windows service registration is not yet supported - the installer prints manual instructions.
+- macOS is the primary test platform. Linux should work for the plugin core, and on Linux the dashboard uses systemd user units instead of launchd. On native Windows the installer registers the dashboard as a Task Scheduler task, falling back to an HKCU Run-key entry when it runs without elevation. See [`docs/installation.md`](docs/installation.md#windows-native-or-wsl2) for the Windows specifics.
 
 ## Running tests
 
@@ -40,6 +40,16 @@ make test-fast   # stop at first failure, quiet
 ```
 
 This runs the component test suites under `mcp-server`, `missioncache-db`, `missioncache-auto`, `missioncache-dashboard`, and `hooks` (statusline tests now live under `missioncache-dashboard/tests/`). The `missioncache-install` suite lives in `missioncache-install/tests/` and is run separately (`cd missioncache-install && python3.11 -m pytest`). `main` should be fully green - if a test fails locally that isn't caused by your changes, please open an issue.
+
+The editor extension (`missioncache-extension/`, TypeScript) is not part of `make test`. Build and check it with:
+
+```bash
+cd missioncache-extension
+npm ci
+npm run typecheck   # tsc --noEmit
+npm run build       # esbuild bundle into dist/
+npm run package     # produces missioncache-<version>.vsix
+```
 
 ## Pull request standards
 

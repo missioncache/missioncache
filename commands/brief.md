@@ -1,6 +1,6 @@
 ---
 description: "Cross-project brief: what is urgent, what is waiting, which sessions are live, and a schedule for today"
-argument-hint: "[--all] [--ask] [--delta] [--lang he|en]"
+argument-hint: "[--all] [--ask] [--delta] [--until <ISO>] [--lang he|en]"
 ---
 
 # Brief the Portfolio

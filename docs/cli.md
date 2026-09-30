@@ -70,13 +70,7 @@ missioncache-db cleanup [--dry-run]
 
 `prune-sessions` deletes the per-session state left behind by sessions that are gone: the pid record (`~/.claude/hooks/state/session-pids/<id>.json`), the project pointer (`projects/<id>.json`), the `project_state` binding row, and the `lead_session` row when the designated lead is gone. Nothing removes these on session exit, so they accumulate one set per session for the life of the install - an install a few months old can hold a couple of thousand pid records. Run `--dry-run` first; it prints the same counts without deleting.
 
-Three things have to line up before a record goes:
-
-- **Its session is not proven alive.** A session whose pid still resolves is never touched, however long ago it started.
-- **The record is older than `--days`** (default 7, minimum 1). The `lead_session` row is the exception: it is meaningful only while its session runs, so it takes no age cutoff and the pid verdict alone decides.
-- **For pid records only, the session's transcript is also idle.** Parallel-session detection reads a dead session's pid record to tell "closed a moment ago" from "still running", and it decides on transcript mtime. Deleting the record turns "proven dead" into "unknown", and unknown is kept, so the session would come back as a phantom parallel session in the next session's startup banner. Record age cannot prevent that on its own, because the pid record is only rewritten on a session start, resume or compact: a session that runs for two days and then exits leaves a two-day-old record the moment it dies. So the pid sweep skips any session whose transcript was touched in the last 30 minutes. Pointers and binding rows have no such reader and are not gated.
-
-One case to know about, because it is the only way a running session can lose state here: liveness is a three-way answer, and "unknown" is swept the same as "dead". Unknown is not only ancient records - it also covers live sessions whose pid never resolved, which today means Claude Desktop and any startup where the hook could not import `missioncache_db`. If one of those gets swept it loses its statusline binding, and a `/missioncache:load` puts it back.
+A record goes only when it is older than `--days` (default 7, minimum 1) and its session is not still running. Pid records are also kept while the session's transcript was touched in the last 30 minutes, so a session that closed a moment ago is not mistaken for a live one. The `lead_session` row is the exception: it has no age cutoff and goes as soon as its session is gone.
 
 `cleanup` is the broader housekeeping pass, in four phases: archive orphaned active tasks whose files no longer exist on disk, move stray repo-local MissionCache files into the centralized `~/.missioncache/` layout, resolve duplicate task names, and normalize non-standard paths. Run it with `--dry-run` first - it prints exactly what each phase would touch.
 
@@ -158,10 +152,7 @@ What it fixes, all mechanical:
 
 It also runs the cap on its own, so a file whose only problem is an overdue rollover gets one even with no structural damage. That is the most common finding on a healthy fleet.
 
-What it deliberately does NOT do:
-
-- **Close an unbalanced fence.** It reports the line and stops. Closing one guesses where the code ended, and since the parsers now tolerate a dangling opener, it is a rendering problem rather than a data-loss one.
-- **Detect or delete a stray pasted-output section.** It neither reports these nor removes them - deciding a section is junk is your call. Recover the entries with `repair`, then find the leftover in `get_context_digest`'s `section_index` and drop it through the locked tool: `update_context_file(sections_remove=["Updated: my-project"])`.
+It does not close an unbalanced code fence (it reports the line and stops) and it does not delete stray pasted-output sections, which you drop yourself with `update_context_file(sections_remove=[...])`.
 
 Writes go through the same sidecar lock, journal-first, atomic-replace path every other context writer uses, so a repair cannot interleave with a live session's save.
 
@@ -169,9 +160,22 @@ Writes go through the same sidecar lock, journal-first, atomic-replace path ever
 
 ```bash
 missioncache-db extension-state [--dir PATH]
+missioncache-db extension-project <task_id>
 ```
 
-One-call JSON snapshot consumed by the MissionCache editor extension (VSCode/Cursor): every active project newest-first, each with task progress, resolved tasks/context file paths, the context file's last-save time, fork parent, and a `dir_match` flag when `--dir` (walked up to its git root) equals the project's registered repo path, plus update-availability from `update-check.json`. The output is machine-oriented; humans want `list-active`. The `schema` field versions the payload - the extension refuses shapes it does not know.
+`extension-state` is the one-call JSON snapshot consumed by the MissionCache editor extension (VSCode/Cursor): every active project newest-first, each with task progress, resolved tasks/context file paths, the context file's last-save time, fork parent, and a `dir_match` flag when `--dir` (walked up to its git root) equals the project's registered repo path, plus update-availability from `update-check.json`. The output is machine-oriented. Humans want `list-active`. The `schema` field versions the payload - the extension refuses shapes it does not know.
+
+`extension-project` (`get_extension_project` in `missioncache_db`) is the sidebar's outline for one project, looked up by the numeric id `extension-state` returns: the tasks from the tasks file (each with its 1-based line, checklist number and the `## ` section it sits under), plus Next Steps and Waiting on from the context file, each item with its line so a click can open the file there. An unknown id comes back with `found: false`.
+
+## Session and shell helpers
+
+```bash
+missioncache-db current-session [task_id]   # working time of the current session, formatted
+missioncache-db list-names [active|completed] # project names only, one per line (for shell completion)
+missioncache-db encode-cwd [path]           # Claude Code's projects-dir key for a path (default: cwd)
+```
+
+`current-session` prints the WakaTime-style working time of the current session from unprocessed heartbeats, for one task when given an id. `list-names` prints active project names by default, or projects completed in the last 90 days with `completed`. `encode-cwd` prints the key Claude Code uses for a directory under `~/.claude/projects/`, correct on Windows and for dots and underscores, which is what the slash commands' bash blocks use instead of a `sed` on `pwd`.
 
 ## Bulk repo registration
 
