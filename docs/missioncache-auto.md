@@ -43,7 +43,7 @@ Put the options after the project name, except `-v` and `--no-color`, which go b
 | `--pause N` | 3 | Seconds between tasks. Sequential only. |
 | `-s`, `--sequential` | off | Run one task at a time, top to bottom. |
 | `-p`, `--parallel` | on | Run in parallel, in dependency order. |
-| `--dry-run` | off | Show the plan and exit. Parallel only. |
+| `--dry-run` | off | Show the plan and exit. Nothing runs and nothing is written. |
 | `--fail-fast` | off | Stop all workers on the first failed task. Parallel only. |
 | `--worktree` | on in a git repo | Give each worker its own git worktree and branch. Parallel only. |
 | `--no-worktree` | off | Run every worker in your checkout. Parallel only. |
@@ -55,8 +55,6 @@ Put the options after the project name, except `-v` and `--no-color`, which go b
 | `--no-color` | off | Plain output, no colours. |
 
 Write it as `--visibility=minimal my-project`. The spaced form `-v minimal` fails. Or export `MISSIONCACHE_AUTO_VISIBILITY=minimal`.
-
-> WARNING: `--dry-run` has no effect with `--sequential`. The run starts for real.
 
 In sequential mode, commits and `--tdd` apply only when the project has a `prompts/` folder.
 

@@ -24,6 +24,7 @@ from missioncache_auto.task_parser import (
     get_first_uncompleted_task,
     get_prompt_for_task,
     get_task_progress,
+    get_uncompleted_tasks,
     mark_task_completed,
     update_timestamps,
     validate_prompts_exist,
@@ -72,6 +73,32 @@ class SequentialRunner:
         # Database logging for dashboard
         self.logger = create_logger(task_name, config, mode="sequential")
 
+    def _dry_run(self) -> int:
+        """Show what a sequential run would do, then stop.
+
+        Touches nothing: no auto log, no dashboard execution row, no Claude
+        call, no checkbox. Sequential mode takes the first unchecked task each
+        round and stops at a [WAIT] task, so the plan is that list in order.
+        """
+        pending = get_uncompleted_tasks(self.paths.tasks_file)
+        self.display.header()
+        self.display.task_info(
+            self.task_name,
+            {
+                "Directory": str(self.paths.task_dir),
+                "Prompts": "optimized" if self.use_prompts else "generic",
+                "Max retries/task": self.config.max_retries,
+                "Tasks to run": len(pending),
+            },
+        )
+        for task in pending:
+            if task.is_wait:
+                self.display.warning(f"{task.number}: {task.title} [WAIT] - the run would stop here")
+                break
+            self.display.info(f"{task.number}: {task.title}")
+        self.display.info("Dry run - not executing")
+        return 0
+
     def validate(self) -> list[str]:
         """Validate the task setup. Returns list of errors."""
         errors = self.paths.validate()
@@ -108,6 +135,9 @@ class SequentialRunner:
             for error in errors:
                 self.display.error(error)
             return 3
+
+        if self.config.dry_run:
+            return self._dry_run()
 
         # Initialize auto log
         self._init_auto_log()

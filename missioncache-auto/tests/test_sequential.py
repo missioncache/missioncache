@@ -76,3 +76,30 @@ def test_failure_does_not_mark_checkbox(tmp_path):
 
     assert ret is None
     assert "- [ ] 1." in tasks_file.read_text()  # still uncompleted
+
+
+def test_dry_run_runs_nothing(tmp_path, monkeypatch):
+    """--sequential --dry-run shows the plan and exits 0 without starting a run.
+
+    No Claude call, no auto log, no dashboard execution row, no checkbox ticked.
+    """
+    runner, tasks_file = _bare_runner(tmp_path)
+    runner.config = Config(auto_commit=False, dry_run=True)
+    runner.iteration = runner.total_iterations = 0
+    runner.validate = lambda: []
+    runner.paths.auto_log.unlink()
+    calls = []
+    monkeypatch.setattr(runner, "_init_auto_log", lambda: calls.append("auto_log"))
+
+    def no_claude(*a, **k):
+        raise AssertionError("dry run started a Claude call")
+
+    monkeypatch.setattr("missioncache_auto.sequential.ClaudeRunner", no_claude)
+
+    assert runner.run() == 0
+
+    assert calls == []
+    runner.logger.start.assert_not_called()
+    assert tasks_file.read_text() == "- [ ] 1. First\n- [ ] 2. Second\n"
+    shown = " ".join(str(c) for c in runner.display.method_calls)
+    assert "1" in shown and "First" in shown and "Second" in shown
