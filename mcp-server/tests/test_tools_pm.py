@@ -151,13 +151,13 @@ class TestStakeholderAndTicketTools:
         ))
         assert with_url["ticket"]["url"] == "https://monday.com/7"
 
-        mapped = asyncio.run(tools_pm.set_ticket(project_name="pm-proj", label="GC-1"))
-        assert mapped["ticket"]["url"] == "https://map/GC-1"
+        mapped = asyncio.run(tools_pm.set_ticket(project_name="pm-proj", label="PROJ-1"))
+        assert mapped["ticket"]["url"] == "https://map/PROJ-1"
 
     def test_ticket_remove(self, pm_project):
-        asyncio.run(tools_pm.set_ticket(project_name="pm-proj", label="GC-2"))
+        asyncio.run(tools_pm.set_ticket(project_name="pm-proj", label="PROJ-2"))
         result = asyncio.run(tools_pm.set_ticket(
-            project_name="pm-proj", label="GC-2", remove=True
+            project_name="pm-proj", label="PROJ-2", remove=True
         ))
         assert result == {"success": True, "removed": True}
 
@@ -229,9 +229,9 @@ class TestPmWritersNotifyPeers:
         self, pm_project, one_peer
     ):
         for coro in (
-            tools_pm.set_stakeholder(project_name="pm-proj", name="Dana"),
-            tools_pm.set_ticket(project_name="pm-proj", label="GC-1",
-                                url="https://x/GC-1"),
+            tools_pm.set_stakeholder(project_name="pm-proj", name="Pat"),
+            tools_pm.set_ticket(project_name="pm-proj", label="PROJ-1",
+                                url="https://x/PROJ-1"),
             tools_pm.set_project_due_date(project_name="pm-proj",
                                           due_date="2026-09-01"),
         ):
@@ -282,9 +282,9 @@ class TestPmWritersNotifyPeers:
     def test_real_remove_notifies_noop_remove_does_not(self, pm_project, one_peer):
         """A remove that deleted a row rewrote the mirror; one that matched
         nothing wrote nothing, and a notify hint for it would be noise."""
-        asyncio.run(tools_pm.set_stakeholder(project_name="pm-proj", name="Dana"))
+        asyncio.run(tools_pm.set_stakeholder(project_name="pm-proj", name="Pat"))
         real = asyncio.run(
-            tools_pm.set_stakeholder(project_name="pm-proj", name="Dana", remove=True)
+            tools_pm.set_stakeholder(project_name="pm-proj", name="Pat", remove=True)
         )
         assert real["removed"] is True
         assert [p["session_id"] for p in real["live_sessions"]] == ["sid-peer"]

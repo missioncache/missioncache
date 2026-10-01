@@ -1312,7 +1312,7 @@ class TestPmPortability:
         pm_items.complete_action_item(mc.db, done.id, outcome="did it", refresh_mirror=False)
         pm_items.add_stakeholder(mc.db, task.id, "Robin", role="team lead", refresh_mirror=False)
         pm_items.add_ticket(
-            mc.db, task.id, "GC-9", url="https://j/GC-9", system="jira",
+            mc.db, task.id, "PROJ-9", url="https://j/PROJ-9", system="jira",
             refresh_mirror=False,
         )
         return _export(mc, name, out=str(tmp_path / "bundle"))["bundle_path"]
@@ -1347,7 +1347,7 @@ class TestPmPortability:
         stakeholders = pm_items.list_stakeholders(mc_b.db, row.id)
         assert [(s.name, s.role) for s in stakeholders] == [("Robin", "team lead")]
         tickets = pm_items.list_tickets(mc_b.db, row.id)
-        assert [(t.label, t.url) for t in tickets] == [("GC-9", "https://j/GC-9")]
+        assert [(t.label, t.url) for t in tickets] == [("PROJ-9", "https://j/PROJ-9")]
         assert any(e["kind"] == "pm" for e in report["resolved"])
 
     def test_re_import_does_not_duplicate_pm_rows(self, mc, mc_b, tmp_path, monkeypatch):
@@ -1433,7 +1433,7 @@ class TestImportPlacementFailureRollback:
     ):
         name = "proj"
         bundle = _build_bundle(
-            mc, name, tmp_path / "bundle", status="paused", jira_key="GC-1"
+            mc, name, tmp_path / "bundle", status="paused", jira_key="PROJ-1"
         )
         r1 = _import(mc_b, monkeypatch, bundle)
         assert r1["action"] == "created"
@@ -1443,7 +1443,7 @@ class TestImportPlacementFailureRollback:
         _activate(monkeypatch, mc)
         with mc.db.connection() as conn:
             conn.execute(
-                "UPDATE tasks SET jira_key='GC-2', status='active' WHERE name=?",
+                "UPDATE tasks SET jira_key='PROJ-2', status='active' WHERE name=?",
                 (name,),
             )
             conn.commit()

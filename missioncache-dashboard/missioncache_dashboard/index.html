@@ -8014,9 +8014,9 @@ const bdWorked = d => d == null ? 'never' : d === 0 ? 'today'
   : d === 1 ? 'yesterday' : `${d}d ago`;
 
 // `who_primary` is a GROUPING key: it takes the first word so that "Alex",
-// "Alex Morgan" and "Alex (with Adam)" collapse to one person. Showing that
+// "Alex Morgan" and "Alex (with Chris)" collapse to one person. Showing that
 // key was wrong twice over - it dropped every surname, and for a cell like
-// "Epic owners (Gal, Sam, Riley)" or "platform / IT / support" the first
+// "Epic owners (Lee, Sam, Riley)" or "platform / IT / support" the first
 // word ("Epic", "Data-Infra") is not a name at all. So: group by the key,
 // DISPLAY the best raw variant the group actually contains.
 const BD_NOT_PEOPLE = new Set(['automatic', 'devex', 'epic', 'data-infra', 'unknown']);

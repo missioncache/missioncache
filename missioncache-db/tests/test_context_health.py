@@ -76,13 +76,13 @@ class TestDeriveJournalPath:
 class TestParseWaitingOn:
     def test_wellformed_rows(self):
         content = _context(
-            "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |\n"
-            "| Egress check | Nitzan | ~2026-07-09 | GC-2 closure |\n"
+            "| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |\n"
+            "| Egress check | Nitzan | ~2026-07-09 | PROJ-2 closure |\n"
         )
         rows = ch.parse_waiting_on(content)
         assert rows == [
-            {"what": "Reply on PR", "who": "Jose", "since": "2026-07-10", "gates": "GC-1 rework"},
-            {"what": "Egress check", "who": "Nitzan", "since": "~2026-07-09", "gates": "GC-2 closure"},
+            {"what": "Reply on PR", "who": "Jose", "since": "2026-07-10", "gates": "PROJ-1 rework"},
+            {"what": "Egress check", "who": "Nitzan", "since": "~2026-07-09", "gates": "PROJ-2 closure"},
         ]
 
     def test_empty_table(self):
@@ -560,7 +560,7 @@ class TestPipeEscaping:
     (flagged independently by three reviewers)."""
 
     def test_pipe_in_cell_roundtrips(self):
-        rows = [{"what": "Fix a|b split", "who": "Jose", "since": "2026-07-10", "gates": "GC-1 | GC-2"}]
+        rows = [{"what": "Fix a|b split", "who": "Jose", "since": "2026-07-10", "gates": "PROJ-1 | PROJ-2"}]
         section = ch.build_waiting_on_section(rows)
         parsed = ch.parse_waiting_on("# H\n\n" + section + "\n## Next Steps\n")
         assert parsed == rows

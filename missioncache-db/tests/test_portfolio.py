@@ -95,7 +95,7 @@ class TestScopePortfolio:
 
     def test_scope_does_not_mutate_the_full_result(self, rooted):
         db = missioncache_db.TaskDB(); db.initialize()
-        _project(rooted, db, "a", waiting_rows="| x | Dana | 2026-01-01 | y |")
+        _project(rooted, db, "a", waiting_rows="| x | Pat | 2026-01-01 | y |")
         full = portfolio.build_portfolio(db, today=date(2026, 9, 8), user_name="Tomer")
         db.close()
         # Deep snapshot, not a length. `scope_portfolio` returns a SHALLOW
@@ -143,7 +143,7 @@ class TestOwnerNames:
     @pytest.mark.parametrize("raw, expected", [
         ("Ilya (on vacation til Wed)", ["ilya"]),
         ("Itai Sela (IT) - I said I would handle it", ["itai"]),
-        ("Robin / Sam + Dana, Oren", ["robin", "sam", "dana", "oren"]),
+        ("Robin / Sam + Pat, Taylor", ["robin", "sam", "pat", "taylor"]),
         ("", []),
         (None, []),
     ])

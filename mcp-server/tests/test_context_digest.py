@@ -38,7 +38,7 @@ External replies/events that gate work. Check on every resume; when one resolves
 
 | What | Who | Since | Gates |
 |------|-----|-------|-------|
-| Reply on PR | Jose | 2026-07-10 | GC-1 rework |
+| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |
 
 ## Next Steps
 
@@ -99,7 +99,7 @@ class TestGetContextDigest:
 
     def test_verbatim_sections_and_header_lines(self, project):
         result = asyncio.run(tools_docs.get_context_digest(project_name="demo-project"))
-        assert "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |" in result["waiting_on"]
+        assert "| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |" in result["waiting_on"]
         assert "1. Do the thing" in result["next_steps"]
         assert result["hub"] == "Hub: [[demo-hub]]"
         assert result["related_projects"] == "**Related projects:** [[other-proj]] (shared pipeline)"

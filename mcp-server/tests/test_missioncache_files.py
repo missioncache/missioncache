@@ -749,8 +749,8 @@ External replies/events that gate work. Check on every resume; when one resolves
 
 | What | Who | Since | Gates |
 |------|-----|-------|-------|
-| Reply on PR | Jose | 2026-07-10 | GC-1 rework |
-| Egress check | Nitzan | 2026-07-09 | GC-2 closure |
+| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |
+| Egress check | Nitzan | 2026-07-09 | PROJ-2 closure |
 
 ## Next Steps
 
@@ -777,7 +777,7 @@ class TestWaitingOnAdd:
         content = ctx.read_text()
         assert "| SA reply | Shasho | 2026-07-10 | IAP binding |" in content
         # Existing rows survive.
-        assert "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |" in content
+        assert "| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |" in content
         # Usage note prose untouched.
         assert "External replies/events that gate work" in content
 
@@ -822,7 +822,7 @@ class TestWaitingOnAdd:
         update_context_file(
             str(ctx),
             waiting_on_add=[
-                {"what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "GC-1 | GC-2"}
+                {"what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "PROJ-1 | PROJ-2"}
             ],
         )
         # Second write touching the table re-parses and re-renders all rows.
@@ -833,7 +833,7 @@ class TestWaitingOnAdd:
         rows = ch.parse_waiting_on(ctx.read_text())
         piped = next(r for r in rows if "Fix a" in r["what"])
         assert piped == {
-            "what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "GC-1 | GC-2"
+            "what": "Fix a|b split", "who": "X", "since": "2026-07-11", "gates": "PROJ-1 | PROJ-2"
         }
 
     def test_multiple_rows_appended_in_order(self, tmp_path):
@@ -922,7 +922,7 @@ class TestWaitingOnPreservesNextStepsReplacement:
         assert "1. New step one" in content
         assert "1. Do the thing" not in content
         # Waiting on rows and note untouched by the Next Steps replacement.
-        assert "| Reply on PR | Jose | 2026-07-10 | GC-1 rework |" in content
+        assert "| Reply on PR | Jose | 2026-07-10 | PROJ-1 rework |" in content
         assert "External replies/events that gate work" in content
 
 
@@ -1267,7 +1267,7 @@ class TestImportedEvent:
         )
         update_context_file(
             str(ctx),
-            waiting_on_add=[{"what": "review", "who": "Dana", "gates": "rollout"}],
+            waiting_on_add=[{"what": "review", "who": "Pat", "gates": "rollout"}],
             imported_event={"heading": "Steering call", "body": "- x"},
         )
         names = [s["name"] for s in ch.section_index(ctx.read_text())]
@@ -1296,7 +1296,7 @@ class TestImportedEventCannotForgeStructure:
         "# demo - Context\n**Last Updated:** 2026-04-01 10:00\n"
         "\n## Description\n\nBody.\n"
         "\n## Waiting on\n\n| What | Who | Since | Gates |\n|---|---|---|---|\n"
-        "| real row | Dana | 2026-08-01 | rollout |\n"
+        "| real row | Pat | 2026-08-01 | rollout |\n"
         "\n## Next Steps\n\n1. MY REAL NEXT STEP\n"
         "\n## Recent Changes\n"
     )

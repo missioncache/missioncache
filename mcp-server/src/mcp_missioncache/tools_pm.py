@@ -254,7 +254,7 @@ async def set_stakeholder(
 async def set_ticket(
     project_name: Annotated[str, Field(description="Project name")],
     label: Annotated[
-        str, Field(description="Ticket label as displayed (e.g. 'PROJ-162794', 'MON-45')")
+        str, Field(description="Ticket label as displayed (e.g. 'PROJ-1234', 'MON-45')")
     ],
     url: Annotated[
         str | None,

@@ -214,7 +214,7 @@ class TestActionItemListing:
         task, _ = project
         pm_items.add_action_item(task_db, task.id, "mine")
         pm_items.add_action_item(task_db, task.id, "theirs", assignee="Jordan")
-        items = pm_items.list_action_items(task_db, task_id=task.id, assignee="yuval")
+        items = pm_items.list_action_items(task_db, task_id=task.id, assignee="jordan")
         assert [i.what for i in items] == ["theirs"]
 
 
@@ -242,9 +242,9 @@ class TestStakeholders:
 class TestTickets:
     def test_add_is_upsert_on_label(self, task_db, project):
         task, _ = project
-        pm_items.add_ticket(task_db, task.id, "GC-1", url="https://j/GC-1", system="jira")
+        pm_items.add_ticket(task_db, task.id, "PROJ-1", url="https://j/PROJ-1", system="jira")
         again = pm_items.add_ticket(
-            task_db, task.id, "GC-1", url="https://j/GC-1", system="jira",
+            task_db, task.id, "PROJ-1", url="https://j/PROJ-1", system="jira",
             status="In Progress",
         )
         assert again.status == "In Progress"
@@ -301,7 +301,7 @@ class TestJiraKeyMigration:
     def test_url_derived_from_prefix_map(self, task_db, jira_project, tmp_path, monkeypatch):
         task, _ = jira_project
         cfg = tmp_path / "dash-config.json"
-        cfg.write_text('{"jira_urls": {"GC-": "https://example.atlassian.net/browse/"}}')
+        cfg.write_text('{"jira_urls": {"PROJ-": "https://example.atlassian.net/browse/"}}')
         monkeypatch.setattr(pm_items, "_dashboard_config_file", lambda: cfg)
         pm_items.add_action_item(task_db, task.id, "trigger migration")
         tickets = pm_items.list_tickets(task_db, task.id)
@@ -359,7 +359,7 @@ class TestResolveWaitingOnRow:
         ctx.write_text(TEMPLATE.replace(
             "|------|-----|-------|-------|",
             "|------|-----|-------|-------|\n"
-            "| Egress check | Dana | 2026-07-01 | Retry rollout |\n"
+            "| Egress check | Pat | 2026-07-01 | Retry rollout |\n"
             "| Schema signoff | Ori | 2026-07-10 | The migration |",
         ))
         return task, ctx
@@ -368,14 +368,14 @@ class TestResolveWaitingOnRow:
         task, ctx = waiting_project
         removed = pm_items.resolve_waiting_on_row(
             task_db, task.id, 0,
-            {"what": "Egress check", "who": "Dana", "since": "2026-07-01"},
+            {"what": "Egress check", "who": "Pat", "since": "2026-07-01"},
             outcome="confirmed open",
         )
-        assert removed["who"] == "Dana"
+        assert removed["who"] == "Pat"
         content = ctx.read_text()
         assert "Egress check" not in content.split("## Recent Changes")[0]
         assert "Schema signoff" in content  # the other row survives
-        assert "Resolved (was waiting on Dana): Egress check - confirmed open" in content
+        assert "Resolved (was waiting on Pat): Egress check - confirmed open" in content
 
     def test_resolve_without_outcome(self, task_db, waiting_project):
         task, ctx = waiting_project
@@ -474,7 +474,7 @@ class TestMirrorSafetyEnvelope:
         task, ctx = project
         pm_items.add_action_item(task_db, task.id, "an item")
         pm_items.add_stakeholder(task_db, task.id, "Alex")
-        pm_items.add_ticket(task_db, task.id, "GC-1")
+        pm_items.add_ticket(task_db, task.id, "PROJ-1")
         content = ctx.read_text()
         assert "| ID | What | From | Owner | Due | Status |" in content
         assert "|----|------|------|-------|-----|--------|" in content
@@ -592,7 +592,7 @@ class TestCanonicalSectionOrder:
         """Creating Action Items first must not drag the other two after Gotchas."""
         task, ctx = project
         pm_items.add_action_item(task_db, task.id, "first")
-        pm_items.add_ticket(task_db, task.id, "GC-1")
+        pm_items.add_ticket(task_db, task.id, "PROJ-1")
         pm_items.add_stakeholder(task_db, task.id, "Robin")
         order = self._order(ctx)
         assert order.index("Stakeholders") < order.index("Gotchas")
@@ -678,37 +678,37 @@ class TestTicketUrlScheme:
     def test_javascript_url_rejected(self, task_db, project):
         task, _ = project
         with pytest.raises(ValueError, match="Only http"):
-            pm_items.add_ticket(task_db, task.id, "GC-1", url="javascript:alert(1)")
+            pm_items.add_ticket(task_db, task.id, "PROJ-1", url="javascript:alert(1)")
 
     def test_data_url_rejected(self, task_db, project):
         task, _ = project
         with pytest.raises(ValueError, match="Only http"):
-            pm_items.add_ticket(task_db, task.id, "GC-2", url="data:text/html,<script>")
+            pm_items.add_ticket(task_db, task.id, "PROJ-2", url="data:text/html,<script>")
 
     def test_http_and_https_accepted(self, task_db, project):
         task, _ = project
         assert pm_items.add_ticket(
-            task_db, task.id, "GC-3", url="http://jira/GC-3"
-        ).url == "http://jira/GC-3"
+            task_db, task.id, "PROJ-3", url="http://jira/PROJ-3"
+        ).url == "http://jira/PROJ-3"
         assert pm_items.add_ticket(
-            task_db, task.id, "GC-4", url="https://jira/GC-4"
-        ).url == "https://jira/GC-4"
+            task_db, task.id, "PROJ-4", url="https://jira/PROJ-4"
+        ).url == "https://jira/PROJ-4"
 
     def test_no_url_still_allowed(self, task_db, project):
         task, _ = project
-        assert pm_items.add_ticket(task_db, task.id, "GC-5").url is None
+        assert pm_items.add_ticket(task_db, task.id, "PROJ-5").url is None
 
     def test_hostile_prefix_map_cannot_inject(self, task_db, tmp_path, monkeypatch):
         cfg = tmp_path / "cfg.json"
-        cfg.write_text('{"jira_urls": {"GC-": "javascript:alert(1)//"}}')
+        cfg.write_text('{"jira_urls": {"PROJ-": "javascript:alert(1)//"}}')
         monkeypatch.setattr(pm_items, "_dashboard_config_file", lambda: cfg)
-        assert pm_items.jira_url_for("GC-9") is None
+        assert pm_items.jira_url_for("PROJ-9") is None
 
     def test_config_top_level_array_does_not_raise(self, task_db, tmp_path, monkeypatch):
         cfg = tmp_path / "cfg.json"
         cfg.write_text('["not", "a", "mapping"]')
         monkeypatch.setattr(pm_items, "_dashboard_config_file", lambda: cfg)
-        assert pm_items.jira_url_for("GC-9") is None
+        assert pm_items.jira_url_for("PROJ-9") is None
 
 
 class TestPmHealthWarnings:
@@ -801,7 +801,7 @@ class TestMirror:
         task, ctx = project
         # Ticket first, stakeholder second - rendered order must still be
         # Stakeholders, Tickets, Gotchas (anchor lists, not insertion order).
-        pm_items.add_ticket(task_db, task.id, "GC-9", url="https://j/GC-9")
+        pm_items.add_ticket(task_db, task.id, "PROJ-9", url="https://j/PROJ-9")
         pm_items.add_stakeholder(task_db, task.id, "Robin", role="team lead")
         content = ctx.read_text()
         assert (
@@ -810,7 +810,7 @@ class TestMirror:
             < content.index("## Gotchas")
         )
         assert "| Robin | team lead |  |" in content
-        assert "| GC-9 |  |  | [link](https://j/GC-9) |" in content
+        assert "| PROJ-9 |  |  | [link](https://j/PROJ-9) |" in content
 
     def test_no_empty_sections_created(self, task_db, project):
         task, ctx = project

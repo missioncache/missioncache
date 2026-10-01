@@ -194,17 +194,17 @@ class TestStakeholderCli:
     def test_add_list_remove_and_mirror(self, cli):
         run, ctx = cli
         added = run(
-            "stakeholder", "add", "cli-proj", "Alex", "Ben", "Naon",
+            "stakeholder", "add", "cli-proj", "Alex", "van", "Morgan",
             "--role", "Manager", "--notes", "direct",
         )
-        assert added["name"] == "Alex Morgan"
+        assert added["name"] == "Alex van Morgan"
         assert added["role"] == "Manager"
         assert "## Stakeholders" in ctx.read_text()
 
         assert [s["name"] for s in run("stakeholder", "list", "cli-proj")] == [
-            "Alex Morgan"
+            "Alex van Morgan"
         ]
-        assert run("stakeholder", "remove", "cli-proj", "Alex", "Ben", "Naon") == {
+        assert run("stakeholder", "remove", "cli-proj", "Alex", "van", "Morgan") == {
             "removed": True
         }
         assert run("stakeholder", "remove", "cli-proj", "Nobody") == {"removed": False}
@@ -236,7 +236,7 @@ class TestTicketCli:
     def test_javascript_url_is_rejected_cleanly(self, cli):
         run, _ = cli
         with pytest.raises(SystemExit) as exc:
-            run("ticket", "add", "cli-proj", "GC-9", "--url", "javascript:alert(1)")
+            run("ticket", "add", "cli-proj", "PROJ-9", "--url", "javascript:alert(1)")
         assert exc.value.code == 1
 
 

@@ -213,7 +213,7 @@ class TestWaitingOnResolveEndpoint:
         d.mkdir(parents=True)
         ctx = d / "wait-proj-context.md"
         ctx.write_text(_with_waiting_rows(
-            "| Egress check | Dana | 2026-07-01 | Retry rollout |",
+            "| Egress check | Pat | 2026-07-01 | Retry rollout |",
             "| Schema signoff | Ori | 2026-07-10 | The migration |",
         ))
         db.close()
@@ -224,15 +224,15 @@ class TestWaitingOnResolveEndpoint:
         result = asyncio.run(server.resolve_waiting_on(
             task.id,
             server.WaitingOnResolvePayload(
-                row_index=0, what="Egress check", who="Dana",
+                row_index=0, what="Egress check", who="Pat",
                 since="2026-07-01", outcome="confirmed open",
             ),
         ))
         assert result["success"] is True
-        assert result["row"]["who"] == "Dana"
+        assert result["row"]["who"] == "Pat"
         content = ctx.read_text()
         assert "Schema signoff" in content
-        assert "Resolved (was waiting on Dana): Egress check - confirmed open" in content
+        assert "Resolved (was waiting on Pat): Egress check - confirmed open" in content
         # And it disappears from the Today feed.
         groups = asyncio.run(server.get_today())["on_others"]
         assert [r["what"] for r in groups[0]["rows"]] == ["Schema signoff"]
@@ -352,7 +352,7 @@ class TestTodayEndpoint:
         d = sandboxed / "active" / "proj"
         d.mkdir(parents=True)
         (d / "proj-context.md").write_text(_with_waiting_rows(
-            "| Broker config review | Dana | 2020-01-01 | Retry rollout |"
+            "| Broker config review | Pat | 2020-01-01 | Retry rollout |"
         ))
         pm_items.add_action_item(
             db, task.id, "update the test plan", assignee="Jordan",
@@ -364,7 +364,7 @@ class TestTodayEndpoint:
         rows = {r["kind"]: r for r in groups[0]["rows"]}
         # Both kinds fill What / Who / why-it-matters / project identically.
         blocker = rows["blocker"]
-        assert (blocker["what"], blocker["who"]) == ("Broker config review", "Dana")
+        assert (blocker["what"], blocker["who"]) == ("Broker config review", "Pat")
         assert blocker["why"] == "Retry rollout"
         assert blocker["since"] == "2020-01-01"
         # No action-item id, but a verified positional handle to resolve by.
@@ -387,7 +387,7 @@ class TestTodayEndpoint:
         d = sandboxed / "active" / "proj"
         d.mkdir(parents=True)
         (d / "proj-context.md").write_text(CONTEXT)
-        pm_items.add_action_item(db, task.id, "nice to have", assignee="Oren")
+        pm_items.add_action_item(db, task.id, "nice to have", assignee="Taylor")
         db.close()
 
         result = asyncio.run(server.get_today())
@@ -596,7 +596,7 @@ class TestWhoPrimary:
             _with_waiting_rows(
                 "| First | Alex | 2026-07-01 | a |",
                 "| Second | Alex Morgan | 2026-07-01 | b |",
-                "| Third | Alex (with Adam) | 2026-07-01 | c |",
+                "| Third | Alex (with Chris) | 2026-07-01 | c |",
             )
         )
         db.close()
@@ -604,7 +604,7 @@ class TestWhoPrimary:
         assert {r["who_primary"] for r in rows} == {"Alex"}
         # The raw cell survives untouched, so a merge stays inspectable.
         assert sorted(r["who"] for r in rows) == [
-            "Alex", "Alex (with Adam)", "Alex Morgan",
+            "Alex", "Alex (with Chris)", "Alex Morgan",
         ]
 
     def test_multi_owner_cell_keys_on_the_first_named(self, sandboxed):
@@ -944,7 +944,7 @@ class TestGroupOrderIsTotal:
         self._project_with(
             sandboxed, "aaa-many",
             f"| First thing | Mor | {same} | a |",
-            f"| Second thing | Gal | {old} | b |",
+            f"| Second thing | Lee | {old} | b |",
             f"| Third thing | Jordan | {old} | c |",
         )
         groups = asyncio.run(server.get_today())["on_others"]
@@ -972,7 +972,7 @@ class TestGroupOrderIsTotal:
         self._project_with(
             sandboxed, "busy-but-old",
             f"| One | Mor | {old} | a |",
-            f"| Two | Gal | {old} | b |",
+            f"| Two | Lee | {old} | b |",
             f"| Three | Jordan | {old} | c |",
         )
         self._project_with(
@@ -1186,7 +1186,7 @@ class TestWhoSelf:
 
     def test_someone_elses_name_does_not(self, monkeypatch):
         monkeypatch.setattr(server, "_display_name", lambda: "Ada")
-        assert "dana" not in server._who_self()
+        assert "pat" not in server._who_self()
 
     def test_no_git_identity_still_gives_the_generic_words(self, monkeypatch):
         """A machine with no git identity must still file "Me" rows correctly."""
