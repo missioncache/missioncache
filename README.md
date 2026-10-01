@@ -8,9 +8,9 @@
 
 <h1 align="center">MissionCache</h1>
 
-<p align="center"><strong>One workbench for your AI coding projects.</strong></p>
+<p align="center"><strong>Every session remembers. One session watches.</strong></p>
 
-<p align="center"><em>Plan, execute, track, and resume - without losing state.</em></p>
+<p align="center"><em>Run many AI coding sessions without losing the thread.</em></p>
 
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg">
@@ -20,9 +20,11 @@
 
 ---
 
-MissionCache is the project layer for AI coding tools. It works in [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), and VSCode Copilot Chat - any tool that speaks MCP. Every missioncache project gets a durable home: a plan, a living context file, and a task checklist. That state persists across sessions, survives context compaction, and reloads when you come back. On the Claude Code side, missioncache also adds time tracking, a local analytics dashboard, autonomous execution, and a rich statusline; the other three currently get the project state and the MCP tool suite.
+MissionCache gives every AI coding project a memory that survives compaction: the plan, the decisions, the gotchas, what is left. It lives in three markdown files per project, and it reloads with one command in the next session, or in another tool.
 
-<!-- HERO GIF: dashboard + statusline + /missioncache:new flow -->
+When you run several sessions at once, one of them can be the **lead**. It hears from all the others, so you watch one window instead of five.
+
+It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time tracking, a local dashboard, a rich statusline and autonomous runs.
 
 ## Contents
 
@@ -41,25 +43,12 @@ MissionCache is the project layer for AI coding tools. It works in [Claude Code]
 
 ## Why MissionCache
 
-### Your projects keep their memory
+- **Your project keeps its memory.** Sessions end and context windows compact. The plan, your decisions and the next step stay in files, and `/missioncache:load` brings them back.
+- **One session keeps the others in view.** `/missioncache:lead` makes one session the lead. Every other session tells it when its project changes.
+- **You see where the time went.** A local dashboard shows hours per project, per repo and per day, including Claude Code sessions outside any project.
+- **Tasks can run on their own.** `missioncache-auto` runs a project's tasks in parallel, in dependency order, and you can watch it live.
 
-Every missioncache project lives under `~/.missioncache/active/<project-name>/` as three markdown files: `<project-name>-plan.md` (the agreed approach, locked after approval), `<project-name>-context.md` (your decisions, key files, gotchas, and next steps as a living document), and `<project-name>-tasks.md` (a hierarchical checklist with progress). Sessions end, context windows compact, but your project state stays put. Run `/missioncache:load <project-name>` in any new Claude Code session (`$missioncache-load` in Codex, `/missioncache-load` in OpenCode or VSCode) and missioncache reloads the full state. You pick up where you left off with your plan, your decisions, and your next steps already loaded.
-
-### Full visibility into your Claude time
-
-MissionCache tracks heartbeats while you work, aggregates them into sessions, and shows per-project, per-repo, per-day, and per-week breakdowns on a local web dashboard at `localhost:8787`. It merges missioncache's own heartbeat data with Claude Code's JSONL session logs, so the picture includes time you spent in Claude sessions that were not formally tracked. You always know which projects are actually eating your cycles.
-
-### Autonomous execution you can watch live
-
-MissionCache Auto runs project tasks in parallel with dependency-aware DAG scheduling, logs every iteration in real time, and streams execution state to the dashboard. You can watch the whole run as it happens or walk away and check the iteration log afterward. Every task, every attempt, every outcome is visible.
-
-### One lead session that keeps every other session in view
-
-When you run several Claude Code sessions at once, one per project, nobody sees the whole picture. Run `/missioncache:lead` in one session and it becomes the lead: it opens with a brief across all your projects (what is urgent, what is waiting on someone, which sessions are live, and today's calendar if you connect one), and from then on every other session tells it when its project changes. You check one window instead of six. If you want, the lead keeps the brief current on a schedule you choose, such as every 30 minutes for the next 7 hours. It only starts that loop when you ask, and it always stops at the end of the window.
-
----
-
-MissionCache exists because no single existing tool integrates all of this. See [docs/comparison.md](docs/comparison.md) for the honest breakdown against the current field.
+No other single tool does all four. [docs/comparison.md](docs/comparison.md) has the honest comparison.
 
 ## Supported tools
 
@@ -208,59 +197,20 @@ That is the full lifecycle. Everything else is optional depth.
 
 ## Features
 
-### Structured project files
+| Feature | What you get | Read more |
+|---|---|---|
+| Project files | A plan, a living context and a task checklist per project, in plain markdown you can edit. | [forks.md](docs/forks.md) for projects that share context |
+| Survives compaction | A hook saves your state before Claude compacts the window. `missioncache-db repair` fixes a damaged context file. | [cli.md](docs/cli.md#repairing-a-damaged-context-file) |
+| The lead session | A brief across every project, a notice from each session when its project changes, and an optional check on a schedule you set. | [Commands](#commands) |
+| Dashboard | What you owe, who owes you, and where your hours went, at `localhost:8787`. | [dashboard.md](docs/dashboard.md) |
+| Statusline | Project and progress, git, model, context use and usage limits, one glance up in Claude Code. | [statusline.md](docs/statusline.md) |
+| Autonomous runs | `missioncache-auto` runs tasks in parallel in dependency order and streams every step to the dashboard. | [missioncache-auto.md](docs/missioncache-auto.md) |
+| Editor extension | The active project in the VSCode status bar, and a sidebar with its tasks and next steps. | [extension.md](docs/extension.md) |
+| MCP tools | 44 tools any MCP agent can call, for tasks, files, time, planning and action items. | [mcp-tools.md](docs/mcp-tools.md) |
 
-Every project has three markdown files: `<project-name>-plan.md`, `<project-name>-context.md`, and `<project-name>-tasks.md`. They live under `~/.missioncache/active/<project-name>/` and are fully human-editable. Plan captures the agreed approach and locks after approval. Context is a living document for decisions, key files, gotchas, and next steps. Tasks is a hierarchical checklist with per-item progress tracking.
+![The dashboard's Projects view](assets/dashboard_projects_screenshot.jpg)
 
-Removing content is a tool call too. `update_context_file` takes `sections_remove` (whole sections) and `bullets_remove` (one list item or table row), and `update_tasks_file` takes `tasks_remove`, which records the task under `## Removed` with a reason instead of leaving it to skew the progress count. When content belongs in another project, `move_to_project` moves sections, bullets, tasks and Waiting-on rows between two projects in one locked operation, so a split cannot half-apply.
-
-<!-- SCREENSHOT: example tasks.md with checkboxes and phases -->
-
-### Context preservation across compaction
-
-MissionCache's `PreCompact` hook auto-saves project state before Claude Code compacts the context window. When you run `/missioncache:load` in a new session, the full state reloads. You never reconstruct your mental model from scratch, and you never lose a decision you made three sessions ago.
-
-If a context file gets damaged (duplicate sections, or Recent Changes entries stranded outside their section), `missioncache-db repair` fixes it. It is a dry run by default and writes only with `--apply`. See the [CLI reference](docs/cli.md#repairing-a-damaged-context-file).
-
-### Forks: a shared context layer under a parent project
-
-A fork is a full project with a parent. It gets its own plan, task list and clock, but it reads the parent's context file as a shared layer, so the architecture and the gotchas are written once and every lane sees them. Sibling sessions are told when the shared layer changes. Use it when two efforts share one base, like a pipeline with a test layer per product. [docs/forks.md](docs/forks.md) has the decision test and a worked example.
-
-### Local analytics dashboard
-
-A FastAPI + vanilla JS single-page app at `localhost:8787`. It opens on the **Attention** view: what you owe (your action items plus the Waiting-on rows that name you), who owes you what grouped by how long it has been quiet, and every project with something outstanding, each with its next step, or what you last did when there is none. The rest shows active and completed projects with time tracking, per-repo breakdowns, hourly heatmaps, a weekly activity view, MissionCache Auto execution monitoring with DAG visualization, and untracked Claude Code sessions alongside the tracked ones. Dual-database under the hood: SQLite for writes, DuckDB for analytics reads.
-
-![Dashboard Projects view with active and completed projects, descriptions, progress, and time tracking](assets/dashboard_projects_screenshot.jpg)
-
-![Dashboard Activity view with today's sessions, hourly chart, weekly heatmap, and repository breakdown](assets/dashboard_activity_screenshot.jpg)
-
-### A lead session across all your open sessions
-
-`/missioncache:brief` gives you one view across every project: urgent items, overdue action items, Waiting-on rows that have gone quiet, live sessions, and today's schedule. `--delta` shows only what changed since the last brief.
-
-`/missioncache:lead` makes one Claude Code session the lead. Every write tool that changes a project's files tells the writing session who the lead is, and that session sends the lead a one-line notice, so the lead learns about each change as it happens instead of rereading every project. The lead holds the notices and folds them into its next brief rather than interrupting you. It is not bound to any project. Designating a new lead replaces the old one, and `/missioncache:lead stop` ends the role.
-
-The recurring brief is opt-in. After the first brief the lead asks how often to check (every 15 minutes, 30 minutes, an hour, another interval, or not at all) and for how long, 7 hours by default. The loop ends at that time on its own. After a compaction or resume the loop is gone, and the lead offers to restart it rather than restarting it silently. The lead needs Claude Code, because it relies on cross-session messaging. `/missioncache:brief` works in every supported tool.
-
-### Autonomous execution with MissionCache Auto
-
-A standalone CLI that runs a project's tasks to completion in parallel. DAG scheduling respects task dependencies so dependent work waits for its prerequisites. Default eight workers, configurable with `-w N` or `--sequential`. Every iteration is logged with a timestamp, the task, the agent that ran it, and the outcome, and streamed live to the dashboard.
-
-![MissionCache Auto execution view with DAG and streaming iteration log](assets/dashboard_auto_screenshot.jpg)
-
-### Rich multi-line statusline
-
-An optional terminal display showing the active project with progress fraction, git branch and status, Claude model, context usage, API limits, and last action time. OSC 8 hyperlinks open directly into the dashboard's project view from your terminal. Configurable, dark-mode friendly, low-latency.
-
-![MissionCache multi-line statusline showing project, git, model, tokens, session limits, and edits](assets/statusline_screenshot.jpg)
-
-### A full MCP tool suite for Claude
-
-MissionCache's MCP server exposes tools across seven modules: task lifecycle, documentation and file operations, time tracking, iteration logging, planning, the active-project pointer, and project management (action items, stakeholders, tickets, due dates). Claude uses them automatically during `/missioncache:new`, `/missioncache:load`, and other commands, but you can call any of them directly if you want fine-grained control.
-
-### Lifecycle hooks
-
-Six Claude Code hooks across four events tie missioncache directly into the session lifecycle, and they are what makes "resume tomorrow" actually work. `SessionStart` auto-detects the active project as soon as you open a terminal. `PreCompact` auto-saves your context before Claude Code compacts the window, so nothing gets lost on long sessions. `Stop` reminds you to run `/missioncache:save` if you edited project files without saving. Three `UserPromptSubmit` hooks run on every prompt: one records the activity heartbeats that power time tracking, one reminds you when task tracking drifts, and one names the session after its project, so other sessions and the lead can send it messages. All six ship with the plugin.
+![The MissionCache statusline](assets/statusline_screenshot.jpg)
 
 ## When to use something else
 
@@ -338,19 +288,20 @@ Everything MissionCache stores stays on your machine. There is no account, no te
 
 ## Documentation
 
-Deep dives for each component live in `docs/`:
+**Using MissionCache**
 
-- [**Installation**](docs/installation.md) - all three install paths (`uvx missioncache-install`, marketplace, manual), verification, uninstall, troubleshooting
-- [**Architecture**](docs/architecture.md) - component boundaries, database schema, extension points
-- [**Dashboard**](docs/dashboard.md) - screens, time accounting, API reference, customization
-- [**Forks**](docs/forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness
-- [**MissionCache Auto**](docs/missioncache-auto.md) - sequential vs parallel, DAG scheduling, learning tags, worker model, review stages
-- [**MCP Tools**](docs/mcp-tools.md) - all 44 tools by module, error handling, extension patterns
-- [**CLI**](docs/cli.md) - the CLI-only operations: cross-machine export/import with the per-machine path map, tag keywords, prune/cleanup, bulk repo registration
-- [**Statusline**](docs/statusline.md) - lines explained, env vars, customization, performance notes
-- [**Hooks**](docs/hooks.md) - SessionStart, UserPromptSubmit, PreCompact, Stop, state files, adding new hooks
-- [**Editor extension**](docs/extension.md) - status bar and sidebar for VSCode and Cursor
-- [**Comparison**](docs/comparison.md) - MissionCache against Taskmaster, claude-mem, MemPalace, GSD, Superpowers and Claude Code's native features, misses included
+- [Installation](docs/installation.md): every install path, updating, uninstall, troubleshooting
+- [Dashboard](docs/dashboard.md): the views, settings, and what to do when something looks wrong
+- [Statusline](docs/statusline.md): what each line shows and how to change it
+- [Forks](docs/forks.md): projects that share one context
+- [MissionCache Auto](docs/missioncache-auto.md): running tasks on their own
+- [Editor extension](docs/extension.md): status bar and sidebar for VSCode
+- [CLI](docs/cli.md): the `missioncache-db` commands
+- [Comparison](docs/comparison.md): MissionCache next to the other tools, misses included
+
+**For maintainers**
+
+- [Architecture](docs/architecture.md), [MCP tools](docs/mcp-tools.md), [Hooks](docs/hooks.md), and the `docs/internals/` folder
 
 ## Contributing
 

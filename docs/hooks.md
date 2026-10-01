@@ -256,7 +256,7 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 
-The shared-seen marker records the parent-context mtime this session last read. That is how the statusline knows whether to show the cyan `● parent updated HH:MM` note on a fork, and how `/missioncache:load` knows whether to banner that a parallel session changed the shared layer. Besides the slash commands, `get_context_digest` restamps it when a fork session reads its parent's digest. See [`forks.md`](./forks.md).
+The shared-seen marker records the parent-context mtime this session last read. That is how the statusline knows whether to show the cyan `● parent updated HH:MM` note on a fork, and how `/missioncache:load` knows whether to banner that a parallel session changed the shared layer. Besides the slash commands, `get_context_digest` restamps it when a fork session reads its parent's digest. See [`internals/forks.md`](./internals/forks.md).
 
 **Nothing in the table is deleted when a session ends.** Three of the rows are keyed by session id and so grow one entry per session forever: `projects/<session-id>.json`, `session-pids/<session-id>.json`, and the `project_state` row. `missioncache-db prune-sessions` is the only thing that removes them, and it only touches a session whose pid does not prove it is still running, older than a floor of at least a day. Pid records carry a third gate on top of that: the sweep skips any session whose transcript was touched in the last 30 minutes, because `_detect_parallel_sessions` reads a dead session's pid record inside its own 10-minute transcript window and deleting it there would turn "proven dead" into "unknown", which that path keeps. Record age cannot stand in for this - `write_session_pid` runs only on a SessionStart, so a long session's record is old the moment the session dies. `PRUNE_TRANSCRIPT_WINDOW_SECONDS` and `_PARALLEL_THRESHOLD_SECONDS` live in different packages and are held in order by `test_prune_transcript_window_covers_the_hook_window`. See [`cli.md`](./cli.md) for the full contract.
 
@@ -399,7 +399,7 @@ Watch for import errors or exceptions. (On macOS/Linux a plain `echo '{}' | pyth
 ## Where to go from here
 
 - [`architecture.md`](./architecture.md) - for the shared context on `hooks-state.db`, `tasks.db`, and how the pieces fit together.
-- [`dashboard.md`](./dashboard.md) - for the HTTP hook endpoints and how they overlap with the plugin-registered path.
-- [`missioncache-auto.md`](./missioncache-auto.md) - for the `MISSIONCACHE_AUTO_MODE` signal and how autonomous runs interact with hooks.
+- [`internals/dashboard.md`](./internals/dashboard.md) - for the HTTP hook endpoints and how they overlap with the plugin-registered path.
+- [`internals/missioncache-auto.md`](./internals/missioncache-auto.md) - for the `MISSIONCACHE_AUTO_MODE` signal and how autonomous runs interact with hooks.
 - `hooks/hooks.json` - the source-of-truth registry.
 - `hooks/*.py` - the scripts themselves. Each is short (under 250 lines) and standalone.

@@ -97,6 +97,19 @@ Both say the same thing. The second is 60 words of mechanism nobody reading a ch
 
 Keep the `## YYYY-MM-DD` headings and their `Published package versions:` lines exactly as they are: those are the release record. Group related entries under a short `### Topic` heading only when a release has several of them on one subject.
 
+## Writing a Doc
+
+User docs (`README.md`, `docs/*.md`) are read by someone who wants to get a thing done, not by the person who built it. `docs/dashboard.md` is the model.
+
+- **Open with what it is, then how to start.** One sentence, then the command or the URL.
+- **Short sentences, "you", plain words.** One idea per sentence.
+- **A table when items are parallel.** Views, commands, settings, links, problems.
+- **Troubleshooting as problem, then what to do.** One or two sentences each. Every command must work for someone who installed from PyPI.
+- **Keep out of user docs:** line numbers, function names, measurements, history ("used to", "since 1.0.15", dates), and the reasoning behind a design. That goes in `docs/internals/<name>.md`, linked once at the end.
+- **About 1,000 words at most.** A doc that needs more is two docs.
+
+`docs/internals/` is for maintainers and may go deep. It still follows the no-line-numbers rule, because they rot.
+
 ## Database
 
 missioncache-db provides the `TaskDB` class with these key tables:

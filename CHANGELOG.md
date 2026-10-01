@@ -13,6 +13,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 - The docs match the code again: one tool count, Codex skill names, Windows facts, function names instead of line numbers, and a new editor extension page. (docs)
 - The landing page scales up on 2K and 4K screens instead of sitting as a narrow column in the middle. (site)
 - The README gets to your first project right after Install. Comparisons moved to docs/comparison.md, upgrading to docs/installation.md. (docs)
+- Every user guide is rewritten short and plain, about a fifth of its old length. The maintainer detail moved to docs/internals/. (docs)
 
 ## 2026-09-30
 

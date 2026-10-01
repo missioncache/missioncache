@@ -109,7 +109,7 @@ The six steps above are one linear trace of a prompt, and a fork is not a step i
 
 A project created with `/missioncache:fork` carries a `**Fork of:** <parent>` line in its context header. The child is a full project with its own plan, context, tasks, and clock. What it shares is the parent's context file, which becomes the knowledge layer every child and the parent's own sessions read. Tasks are never shared or copied.
 
-The header is the durable link. `tasks.parent_id` is derived from it by the scan's reconcile pass, not authored directly. `get_context_digest` on a fork returns a `parent_digest` block so `/missioncache:load` can tell you when a sibling session changed the shared layer, using a per-session marker at `~/.claude/hooks/state/shared-seen/<session-id>.json` that the statusline also reads. Full detail in [`forks.md`](./forks.md).
+The header is the durable link. `tasks.parent_id` is derived from it by the scan's reconcile pass, not authored directly. `get_context_digest` on a fork returns a `parent_digest` block so `/missioncache:load` can tell you when a sibling session changed the shared layer, using a per-session marker at `~/.claude/hooks/state/shared-seen/<session-id>.json` that the statusline also reads. Full detail in [`internals/forks.md`](./internals/forks.md).
 
 ### The lead session
 
@@ -146,7 +146,7 @@ The canonical tables are all defined in `missioncache-db/missioncache_db/__init_
 
 Triggers keep `updated_at` fresh on every row update and set `completed_at`/`archived_at` when `status` transitions into the corresponding state. The `tasks` table has a `UNIQUE(repo_id, full_path)` constraint that matters during scan - rescanning the same repo should not produce duplicate rows.
 
-`tasks.parent_id` is the fork linkage (see [`forks.md`](./forks.md)). You never author it directly. It is derived from the `**Fork of:** <parent>` line in the child's context header: the scan's reconcile pass sets it, re-heals it when the link was lost, and clears it when the header goes away. The header is the source of truth, the column is the index - `idx_tasks_parent` is what makes the children lookup fast. The FK is `ON DELETE SET NULL`, which is why `delete_task` refuses to delete a parent that still has children rather than silently unlinking them.
+`tasks.parent_id` is the fork linkage (see [`internals/forks.md`](./internals/forks.md)). You never author it directly. It is derived from the `**Fork of:** <parent>` line in the child's context header: the scan's reconcile pass sets it, re-heals it when the link was lost, and clears it when the header goes away. The header is the source of truth, the column is the index - `idx_tasks_parent` is what makes the children lookup fast. The FK is `ON DELETE SET NULL`, which is why `delete_task` refuses to delete a parent that still has children rather than silently unlinking them.
 
 **Created by the dashboard (also in `~/.missioncache/tasks.db`):**
 
@@ -391,10 +391,10 @@ These are the things that will trip you up if you are new to the codebase, colle
 
 This doc is the foundation; the other component docs assume you have read it.
 
-- [`dashboard.md`](./dashboard.md) - dashboard screens, API endpoints, sync, customization.
-- [`forks.md`](./forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness.
-- [`missioncache-auto.md`](./missioncache-auto.md) - sequential vs parallel, DAG resolution, learning tags, worker model.
+- [`internals/dashboard.md`](./internals/dashboard.md) - dashboard screens, API endpoints, sync, customization.
+- [`internals/forks.md`](./internals/forks.md) - when to fork, the shared context layer, the `Fork of:` header, parallel-session freshness.
+- [`internals/missioncache-auto.md`](./internals/missioncache-auto.md) - sequential vs parallel, DAG resolution, learning tags, worker model.
 - [`mcp-tools.md`](./mcp-tools.md) - full MCP tool reference with parameters and return shapes.
-- [`statusline.md`](./statusline.md) - statusline layout, configuration, icons.
+- [`internals/statusline.md`](./internals/statusline.md) - statusline layout, configuration, icons.
 - [`hooks.md`](./hooks.md) - hook event reference, state files, adding new hooks.
 

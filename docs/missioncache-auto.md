@@ -1,587 +1,125 @@
 # MissionCache Auto
 
-This document covers `missioncache-auto`, the autonomous execution CLI that runs Claude Code in a loop over a MissionCache project's task list until every box is checked, something blocks, or the retry budget runs out. It is the component with the least amount of magic and the most amount of subprocess orchestration - once you understand the core loop, everything else is a variation on it.
+A command that works through a project's tasks for you. Each task runs in its own Claude Code session. Auto checks the result, retries what failed, and stops when every task is done or something needs you.
 
-It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (MissionCache file layout, `~/.missioncache/active/<project>/`, `tasks.db`, heartbeats, `auto_executions`, `auto_execution_logs`). If a term in this doc is not defined here, it is defined there.
-
-If you are just trying to *use* missioncache-auto, the short version is: run `missioncache-auto <project>` from inside your project's git repo, answer the confirmation prompt, and watch. The rest of this doc is for when you want to understand what it is doing, debug a run, or change how it behaves.
-
-## The mental model
-
-MissionCache Auto's philosophy fits on one line: *iteration beats perfection on the first attempt*. Claude is good enough to complete a well-specified task in one shot most of the time, but "most of the time" is not "always", and a human sitting in front of the terminal to retry failures one at a time is a waste of a human. MissionCache Auto is the retry loop, the scheduler, and the scoreboard.
-
-The loop itself is four steps:
-
-```
-PROMPT -> WORK -> CHECK -> EXIT?  (YES=done, NO=repeat)
-```
-
-- **PROMPT** is "the next uncompleted task in `<project>-tasks.md`", or "the next task whose dependencies are satisfied" in parallel mode. The prompt is either generic (built at runtime from the tasks file) or read from a pre-generated prompt file under `prompts/task-NN-prompt.md`.
-- **WORK** is spawning `claude --print --output-format stream-json` as a subprocess, piping the prompt in, and parsing the streaming JSON response line by line.
-- **CHECK** is looking for learning-centric XML tags in Claude's reply: `<what_worked>` means this task succeeded, `<promise>COMPLETE</promise>` means every task is done, `<blocker>WAITING_FOR_HUMAN</blocker>` means something needs human input. No tag means the task failed and will be retried up to `--retries` times.
-- **EXIT?** is either "all tasks done" (exit 0), "retry budget burned" (exit 1), "blocked on a `[WAIT]` task" (exit 2), or "configuration error before the loop started" (exit 3).
-
-Every piece of state that needs to survive an iteration lives on disk: the task list, the context file, the per-iteration auto log, the parallel-mode state file, the execution record in SQLite. Nothing is held in memory between iterations except the Python process running the loop itself, which can die and be restarted without losing progress.
-
-### Two execution modes
-
-| Mode | Entry point | When to use |
-|------|-------------|-------------|
-| Sequential | `missioncache-auto <project> --sequential` | Simple linear workflows, debugging one task at a time, or tasks that must run in strict order |
-| Parallel (default) | `missioncache-auto <project>` or `missioncache-auto <project> -w 12` | Multi-task projects with pre-generated prompts, where you want real concurrency and dependency-aware scheduling |
-
-The difference is not just speed. Sequential mode walks the task list top to bottom and only cares about completion status. Parallel mode needs a `prompts/` directory, parses YAML frontmatter from each prompt file to build a dependency graph, computes execution waves, and spawns a worker pool that atomically claims tasks from shared state. The rest of this doc treats them separately because they have different invariants.
-
-## Task layout and the file contract
-
-Every missioncache-auto run operates on the same directory:
-
-```
-~/.missioncache/active/<project>/
-├── <project>-tasks.md         # Checkbox items, parsed every iteration
-├── <project>-context.md       # Durable learnings, decisions, gotchas
-├── <project>-plan.md          # Implementation plan (optional, read-only)
-├── <project>-auto-log.md      # Iteration history (written by missioncache-auto)
-├── prompts/                   # Optional, required for parallel mode
-│   ├── task-01-prompt.md
-│   ├── task-02-prompt.md
-│   └── ...
-├── .missioncache-parallel-state/     # Parallel-mode state, only exists mid-run
-│   ├── state.json
-│   ├── state.lock
-│   └── adjacency.txt
-└── logs/                      # Per-task stdout/stderr logs (optional)
-    └── worker-<wid>-task-<tid>-<timestamp>.log
-```
-
-The location is hard-coded in `missioncache_auto/models.py:TaskPaths.from_task_name()` and is not configurable. This is deliberate: every other MissionCache component (dashboard, hooks, MCP tools, the `/missioncache:load` slash command) expects to find the files here, and having one canonical location means no path plumbing.
-
-### Task file format
-
-Tasks are parsed from `<project>-tasks.md` with a strict regex:
-
-```
-- [ ] 1. Task title
-- [x] 2. Completed task
-- [ ] [WAIT] 3. Task that needs human review
-- [ ] 4. Another task `[auto]`
-- [ ] 5. Review the PR `[inter]`
-- [ ] 6. Depends on #4 `[auto:depends=4]`
-```
-
-The parser (`missioncache_auto/task_parser.py:parse_tasks_md`) matches `^\s*- \[([ x])\] (\[WAIT\])? (\d+)[.:] (.+)$`. A task number can be flat (`1`, `2`, `10`) or hierarchical (`1.1`, `1.2`) - hierarchical tasks get resolved as subtasks of their parent when computing sequential dependencies. The trailing mode marker in backticks (`[auto]`, `[inter]`, `[auto:depends=1,3]`) is optional and only used by `/missioncache:mode` and the runnable-task calculator.
-
-A task is "completed" when its checkbox is `[x]`. missioncache-auto only writes checkboxes by calling `state.sync_to_tasks_md()` in parallel mode or `mark_task_completed()` in sequential mode, both of which use atomic file writes (temp file + `os.replace`) to avoid corruption under concurrent access. Completing a parent ticks the parent line only: `mark_task_completed` in `task_parser.py` and the MCP server's `_mark_task_checked_by_number` in `project_files.py` (behind `update_tasks_file`) both end their number match with a `(?!\d)` guard, so completing `1` flips `- [ ] 1.` and leaves `1.1` and `1.2` unchecked. **You can edit the file while missioncache-auto is running** - the loop re-parses it every iteration, so human edits are picked up within one cycle.
-
-### Context file and auto log
-
-`<project>-context.md` is never written by missioncache-auto during a run. It is read by Claude (as part of the prompt, either embedded or referenced by path) and it is the one file you should edit manually between runs to record architectural decisions or hard-won lessons. It survives compaction and is what `/missioncache:load` reads when you come back to a project.
-
-`<project>-auto-log.md` is the opposite: missioncache-auto writes to it every iteration, and you can delete it after completion without losing anything the context file should have preserved. Its role is detailed debugging history - which attempt on which task succeeded or failed, what files were modified, what learnings Claude extracted. The sequential runner writes entries with `_write_iteration_log()`, and patterns and gotchas discovered via `<pattern_discovered>` and `<gotcha>` tags get bubbled up into a "Codebase Knowledge" section at the top of the file so they are visible to future iterations without having to scroll through the history.
-
-The three-file split - tasks, context, auto log - is the invariant that makes `/missioncache:load` and missioncache-auto compose. You can run `missioncache-auto` for an hour, delete the auto log, and the next `/missioncache:load` still has everything it needs.
-
-## Sequential mode in detail
-
-Sequential mode is the original missioncache-auto execution path. It is what you want when there are no prompt files, when tasks must run in strict order, or when you are debugging a single task failure.
-
-### The loop
-
-`missioncache_auto/sequential.py:SequentialRunner.run()` is the top of the loop. Each iteration:
-
-1. **Read progress.** Call `get_task_progress()` to count completed vs total tasks in `<project>-tasks.md`.
-2. **Pick the next task.** Call `get_first_uncompleted_task()`, which returns the first `- [ ]` item in file order. If it returns `None`, every task is complete and the runner exits via `_handle_completion()`.
-3. **Check for `[WAIT]`.** If the next task is marked `[WAIT]`, print the blocked summary, log the block, and exit with code 2. Resuming requires a human to either complete the task by hand and remove the marker, or decide the task is unblocked and re-run missioncache-auto.
-4. **Build the prompt.** If a `prompts/task-NN-prompt.md` file exists for this task number, use `extract_prompt_content()` to strip the YAML frontmatter and pass the body through. Otherwise fall back to `build_generic_prompt()`, which assembles a prompt from the task number, title, and absolute paths to the tasks and context files.
-5. **Run Claude.** Create a `ClaudeRunner(visibility=config.visibility, on_tool_use=display.tool_use)` and call `.run(prompt, project_root)`. This spawns `claude --print --output-format stream-json --verbose --exclude-dynamic-system-prompt-sections`, sets `MISSIONCACHE_AUTO_MODE=1` in the child environment (so hooks know to skip), pipes the prompt into stdin, and parses the streaming JSON output. The `stream-json` format gives one JSON object per line, so tool use events and text deltas can be processed as they arrive.
-
-   On Windows, three things differ inside `ClaudeRunner.run`. The executable is resolved with `shutil.which`, because npm installs `claude` as a `.cmd` shim that a list-form `Popen` cannot spawn by bare name. A resolution whose parent directory is the current directory is refused (Windows `which` searches the cwd before `PATH`, and this process hands the child the full environment plus the prompt, so a planted `claude.bat` must not win). And on timeout or termination the process tree is killed with `taskkill /T /F` in `_kill_process_group`, with `process.kill()` on the root as the fallback, because there is no `os.killpg`. POSIX uses `start_new_session=True` and kills the process group.
-6. **Parse the response for tags.** `_build_result()` in `claude_runner.py` pulls the accumulated text out of the stream and searches for `<learnings>`, `<what_worked>`, `<what_failed>`, `<dont_retry>`, `<try_next>`, `<pattern_discovered>`, `<gotcha>`, `<run_summary>`, `<promise>COMPLETE</promise>`, and `<blocker>WAITING_FOR_HUMAN</blocker>`. Success is defined as: `is_complete=True` OR (`what_worked is not None` AND not blocked). This is the central completion invariant - without an explicit positive signal, the task is a failure.
-7. **Handle the result.** `_handle_result()` is the big decision tree. On success, reset the retry counter, update timestamps, run `process-heartbeats` for time tracking, mark the checkbox, auto-commit changes if enabled, and loop. On failure, increment the per-task retry counter and loop without advancing. On blocked, exit with code 2. On completion (`<promise>COMPLETE</promise>`), call `_handle_completion()` and exit with code 0.
-8. **Pause.** `time.sleep(config.pause_seconds)` before the next iteration. Default is 3 seconds, configurable via `--pause`.
-
-The loop runs until `max_retries` is exhausted on a single task (exit 1), a `[WAIT]` marker is hit (exit 2), or every task is `[x]`-ed (exit 0).
-
-### Why no iteration cap
-
-Sequential mode does not have a global iteration limit. The retry cap is **per task**: if task 3 fails `max_retries` times, the loop exits. But if every task succeeds on attempt 2 out of 3, the loop will run `2 × num_tasks` iterations and exit happily. This is intentional - a project with 30 tasks and a 3-retry budget per task can legitimately need 90 iterations, and a single global cap would either be too small or too large to be useful.
-
-The things that actually make the loop stop are:
-
-- **Per-task retry exhaustion.** `current_task_attempts >= max_retries` on the current task.
-- **Explicit completion signal.** `<promise>COMPLETE</promise>` from Claude, which takes precedence over uncompleted checkboxes - if Claude says it is done and the human has written their tasks file optimistically, missioncache-auto will exit 0.
-- **`[WAIT]` marker.** Task parser returns `is_wait=True`, runner exits 2.
-- **KeyboardInterrupt.** Falls through to the `finally` block and shuts down gracefully.
-
-### Retry context
-
-When a task fails and the loop comes back around, missioncache-auto does not just retry blindly. Sequential mode passes the previous error message back to Claude via `_build_retry_prompt()`, which prepends a `<retry-context>` block explaining what went wrong last time and listing common fixes (missing tag, CLI error, specific error). This is the "learning from failure" part of the philosophy - Claude sees its own previous output summarized and can correct course. The parallel worker uses the same mechanism (`worker.py:_build_retry_prompt`) with the same format.
-
-## Parallel mode in detail
-
-Parallel mode is what you want when you have a project with a `prompts/` directory and independent tasks that can run concurrently. It is the default (`missioncache-auto <project>` is the same as `missioncache-auto <project> --parallel`), and it is what ships in the screenshots and dashboard demos.
-
-### Setup requirements
-
-Parallel mode requires:
-
-1. **A prompts directory.** `~/.missioncache/active/<project>/prompts/` must exist and must contain `task-NN-prompt.md` files. If it does not, `ParallelRunner.validate()` returns an error and the CLI exits with code 3.
-2. **YAML frontmatter on every prompt.** Each prompt file must start with a `---` delimited block containing at minimum `task_id: "NN"`. `task_title` is strongly recommended (used for display and commits). `dependencies: ["01", "03"]` is optional but required for anything other than strict sequential order.
-3. **Task numbers that match.** The prompt file's `task_id` must correspond to an uncompleted line in `<project>-tasks.md`. The plan validator (`plan_validator.py:validate_plan`) cross-references the two and warns about mismatches.
-
-You get all of this for free if you run `/missioncache:prompts <project>` after `/missioncache:new` - that command generates the prompt files with proper frontmatter, lists the relevant agents and skills, and shows everything in a batch-approval flow.
-
-### The DAG build
-
-`dag.py:DAG.build_from_prompts()` walks `prompts/task-*-prompt.md` in sorted order and extracts three things from each file: `task_id`, `task_title`, and `dependencies`. The dependency extraction is a small state machine:
-
-- If the prompt has an explicit `dependencies: [...]` field, use it.
-- If the field is missing, compute an implicit dependency: task `NN` depends on task `NN-1` (padded to two digits). Task `01` has no dependencies.
-
-The result is an adjacency list mapping task IDs to their prerequisites. This is stored as a simple dict and serialized to `adjacency.txt` in the state directory so worker subprocesses can reload it without re-parsing YAML.
-
-Before the DAG is used, it runs through `detect_cycles()` (DFS with a recursion stack) and `validate_plan()` (checks for missing frontmatter, dependencies pointing at non-existent tasks, orphan prompts, orphan task lines, missing `<acceptance_criteria>` sections). Cycles are fatal. Validation errors are fatal; warnings are shown but do not block execution.
-
-### Waves and the execution plan
-
-Once the DAG is valid, `get_waves()` computes "waves" - groups of tasks that can execute concurrently. A task's wave is `max(wave of its deps) + 1`, with no-dep tasks in wave 1. This gives you the natural parallel structure of the project: wave 1 is everything that can start immediately, wave 2 is everything that only waits on wave 1, and so on. The display step (`display.execution_plan()`) prints this before asking the user to confirm, so you can see exactly what is going to run and in what order.
-
-The critical path (`get_critical_path()`) is the longest chain of dependent tasks. It is the theoretical minimum number of sequential steps needed - if the critical path is 4 tasks long, no amount of parallelism can finish the project in fewer than 4 Claude invocations. The CLI uses this for the execution summary.
-
-Waves are a display and planning concept. The workers themselves do not care about waves - they just check dependencies on every claim, which gives you strictly better scheduling than wave-locked execution would (a worker that finishes task 2 of wave 1 early can start a wave 2 task immediately without waiting for the rest of wave 1).
-
-### The worker pool
-
-After confirmation, `ParallelRunner._run_workers()` spawns `config.max_workers` worker processes via `multiprocessing.Process`. The default is 8, the max is 12 (capped in `Config.__post_init__`), and each worker gets the same constructor arguments - worker ID, project root, state and prompts dirs, adjacency file path, retry config, visibility settings. They all share the state file via file locking.
-
-Each worker runs `Worker.run()`, which is a simple claim loop:
-
-```python
-while True:
-    task_id = state_manager.claim_task(worker_id, dag)
-    if task_id is None:
-        if should_wait():
-            sleep(0.5)
-            continue
-        else:
-            break
-    success, error = _execute_task(task_id, previous_error)
-    if success:
-        if enable_review: run_review()
-        if auto_commit: git_commit_task()
-        state_manager.complete_task(task_id)
-    else:
-        result = state_manager.release_task(task_id, max_retries, error)
-        # result is "released" (retry later) or "max_retries_reached" (failed)
-```
-
-`claim_task` is the atomic primitive. It acquires an exclusive `fcntl.flock` on `.missioncache-parallel-state/state.lock`, reads the current state, finds the first pending task whose dependencies are satisfied, flips it to `in_progress`, writes the state atomically (temp file + `os.replace` via `_atomic_write_text`), and releases the lock. Multiple workers hitting this concurrently will serialize on the lock and only one will get any given task.
-
-Tasks that a worker claims but cannot finish (because the worker process died, or because `release_task` hit the retry cap) go through `release_orphaned_tasks()`, which runs from the parent runner's monitoring loop every 500ms. It scans for `in_progress` tasks owned by dead worker IDs and either flips them back to pending (if attempts left) or marks them failed. This is what makes missioncache-auto robust to worker crashes - the orchestrator notices, recovers the claim, and lets another worker pick it up.
-
-### State file structure
-
-`.missioncache-parallel-state/state.json` is the shared memory for parallel mode. It looks like this:
-
-```json
-{
-  "status": "running",
-  "started": "2026-04-14T02:30:17.284912+00:00",
-  "tasks": {
-    "01": {"status": "completed", "worker": null, "attempts": 1, "error_message": null},
-    "02": {"status": "in_progress", "worker": 3, "attempts": 1, "error_message": null},
-    "03": {"status": "pending", "worker": null, "attempts": 0, "error_message": null},
-    "04": {"status": "failed", "worker": null, "attempts": 3, "error_message": "Missing <what_worked> tag in response"}
-  },
-  "workers": {}
-}
-```
-
-Every transition writes the whole file atomically. There is no journal and no delta format - the file is small enough (a few KB for a 30-task project) that full rewrites are cheap, and the simpler format makes debugging trivial. Just `cat state.json` to see what is happening.
-
-State also survives interruptions. If you `Ctrl-C` a parallel run and restart, `_get_pre_completed_tasks()` reads the tasks.md file and initializes state with those checkboxes already marked completed, and any in-progress tasks from the previous run's `state.json` get picked up via `release_orphaned_tasks()` on the next worker's claim cycle. You will sometimes see a task with `attempts > 0` from an interrupted run; that is correct and will be retried up to `max_retries`.
-
-### Monitoring and progress display
-
-The main `ParallelRunner` process does not execute tasks itself. It sits in a monitoring loop:
-
-```python
-while not state_manager.is_complete():
-    state = state_manager.read()
-    completed, in_progress, failed = _classify(state)
-    display.parallel_progress(completed, total, in_progress, failed)
-    logger.update_progress(completed, failed)
-    if config.fail_fast and failed:
-        terminate_all_workers()
-        break
-    release_orphaned_tasks(dead_workers, max_retries)
-    if no_workers_alive and not complete:
-        break
-    time.sleep(0.5)
-```
-
-The 500ms sleep is the progress-bar refresh rate. It is also how often the dashboard sees updated progress - `logger.update_progress()` writes `completed_subtasks` and `failed_subtasks` to the `auto_executions` SQLite row, and the dashboard's `/api/auto/*` endpoints read from there.
-
-`fail-fast` (`--fail-fast`) terminates every worker on the first failure. This is useful when you want to catch a problem early, but the default is to let every worker run to completion so you can see the full failure picture.
-
-## Prompts and the YAML contract
-
-Prompt files are the bridge between `/missioncache:prompts` and missioncache-auto. They are what makes parallel mode possible, and they are also a reproducible way to re-run a single task without the whole loop.
-
-### Structure
-
-```markdown
----
-task_id: "03"
-task_title: "Wire up the /api/users endpoint"
-dependencies: ["01", "02"]
-agents:
-  - python-pro
-  - code-reviewer
-skills:
-  - pytest-patterns
-tdd: true
----
-
-# Task 03: Wire up the /api/users endpoint
-
-<context>
-The `/api/users` endpoint is currently returning a 501. You need to connect it
-to the `User.list_all()` ORM method and return results as JSON.
-</context>
-
-<instructions>
-1. Read src/routes/users.py to understand the existing route stub.
-2. Read src/models/user.py for the ORM.
-3. Implement the handler with pagination support.
-4. Add tests in tests/test_users.py covering empty, single, and multiple users.
-</instructions>
-
-<constraints>
-- Preserve existing route registration order.
-- Default page size is 50, max is 500.
-</constraints>
-
-<agents>
-## Available Agents
-Use the Task tool with the specified subagent_type:
-| Agent | Invoke With | Use For |
-|-------|-------------|---------|
-| python-pro | subagent_type="python-pro" | Type hints, async, pytest |
-| code-reviewer | subagent_type="code-reviewer" | Pre-completion review |
-</agents>
-
-<validation>
-Run `pytest tests/test_users.py -v` and confirm all tests pass.
-</validation>
-
-<acceptance_criteria>
-- GET /api/users returns 200 with JSON list
-- Pagination via ?page=N&per_page=M works
-- Tests added and pass
-- Typecheck passes
-</acceptance_criteria>
-```
-
-Only `task_id` is strictly required by the parser (`task_parser.py:parse_prompt_yaml`). Everything else is advisory:
-
-- `task_title` is used in auto-commit messages and display output.
-- `dependencies` drives the DAG; without it, the task gets an implicit dep on `task_id - 1`.
-- `agents` and `skills` are metadata for `/missioncache:prompts`; they are not read by missioncache-auto at runtime.
-- `tdd` is a per-task override for the TDD enforcement flag - `true` forces TDD wrapping on, `false` forces it off, absent means use the global `--tdd` setting.
-
-### How prompts are picked up
-
-In parallel mode, the worker extracts `prompts/task-NN-prompt.md` for the task it claimed, strips the YAML frontmatter, and pipes the body into Claude. In sequential mode, the runner checks for a prompt file and uses it if one exists, falling back to `build_generic_prompt()` otherwise. The fallback is a minimal prompt template that references the task file and context file by path and includes the mandatory learning-tag instructions - it works fine for projects that do not bother with pre-generated prompts, at the cost of less structured guidance for Claude.
-
-Progress is tracked entirely through checkboxes in `<project>-tasks.md`. Prompts do not have their own "completed" state. When `tasks.md` has `- [x] 3.` and the corresponding `task-03-prompt.md` still exists on disk, missioncache-auto skips the prompt - the checkbox is the source of truth.
-
-## Learning tags: the completion contract
-
-The learning-tag system is the most subtle thing about missioncache-auto, and getting it wrong produces the single most common failure mode: a task that looks like it succeeded (Claude edited files, ran tests, wrote a correct implementation) but gets retried anyway because the required tag was missing.
-
-### The rule
-
-A task is complete if and only if Claude's response contains at least one of:
-
-1. `<promise>COMPLETE</promise>` - signals that **all tasks in the project** are done. The loop stops entirely.
-2. `<what_worked>...</what_worked>` - signals that **this specific task** succeeded. The loop marks the task completed and moves on.
-
-The detection happens in `claude_runner.py:_build_result()`:
-
-```python
-success = is_complete or (what_worked is not None and not is_blocked)
-```
-
-Everything else - `<learnings>`, `<what_failed>`, `<dont_retry>`, `<try_next>`, `<pattern_discovered>`, `<gotcha>` - is purely informational. It is written to the auto log, surfaced in the dashboard, and may be used to enrich retry prompts, but it does not affect the pass/fail decision.
-
-### Why an explicit tag
-
-An earlier version of missioncache-auto inferred success from the absence of errors, and it produced a lot of false positives: Claude would crash, the CLI would rate-limit, the prompt would fail to parse, and the loop would count the empty response as "nothing went wrong, must have worked". Moving to an explicit positive signal is a forcing function. Claude has to commit to "this is done" in a way that shows up in the output, and missioncache-auto simply counts tags.
-
-The failure mode you will actually hit is not "Claude forgot the tag" (the prompt template is explicit about it), but "Claude crashed mid-response" or "the CLI errored before Claude saw the prompt". Both cases produce no `<what_worked>` and both are correctly counted as failures, which is exactly what you want.
-
-### The full tag set
-
-| Tag | Required? | Effect |
-|-----|-----------|--------|
-| `<learnings>` | Always | Written to auto log, shown in console output |
-| `<what_worked>` | On success | **Marks task complete**; written to auto log |
-| `<what_failed>` | On failure | Written to auto log; fed into next retry's error context |
-| `<dont_retry>` | On failure | Written to auto log; suggests approaches to avoid |
-| `<try_next>` | On failure | Written to auto log; prioritized list of next attempts |
-| `<pattern_discovered>` | Optional | Bubbled into Codebase Knowledge section at top of auto log |
-| `<gotcha>` | Optional | Bubbled into Codebase Knowledge section at top of auto log |
-| `<run_summary>` | On final task | Written to auto log completion entry |
-| `<promise>COMPLETE</promise>` | On final task | **Exits the loop with code 0** |
-| `<blocker>WAITING_FOR_HUMAN</blocker>` | On blocked task | **Exits the loop with code 2** |
-
-Patterns and gotchas deserve special mention because they are the only tags that compound across iterations. When Claude emits `<pattern_discovered>Temp file cleanup: always use trap to clean temp files on EXIT</pattern_discovered>`, missioncache-auto inserts it into the "Codebase Knowledge > Patterns Discovered" section of the auto log, which is at the top of the file and therefore visible to every subsequent iteration. Over a long run, the auto log accumulates a small local knowledge base about the codebase, and later tasks can benefit from earlier lessons without the human ever touching it.
-
-## Execution logging and the dashboard feedback loop
-
-Everything missioncache-auto does is logged to `tasks.db` so the dashboard can show you what happened. This integration has two halves: the execution record (one row in `auto_executions` per `missioncache-auto` invocation) and the streaming logs (many rows in `auto_execution_logs` per execution).
-
-### The execution record
-
-`db_logger.py:ExecutionLogger.start()` creates the row when the runner starts. It looks up the task by name in the `tasks` table, calls `create_auto_execution(task_id, mode, worker_count, total_subtasks)`, and stores the returned execution ID on the logger instance. From that point on, every log line and every progress update carries this ID.
-
-The record tracks:
-
-- `task_id` - foreign key into `tasks`
-- `mode` - `sequential` or `parallel`
-- `worker_count` - how many workers were configured (null for sequential)
-- `total_subtasks` / `completed_subtasks` / `failed_subtasks` - updated live during the run
-- `started_at` / `completed_at` - timestamps
-- `status` - `running`, `completed`, `failed`, `cancelled`
-- `error_message` - populated on failure
-
-`update_progress()` is called from the parallel runner's monitoring loop every 500ms and from the sequential runner's `_handle_result()` after every task completion. `finish()` is called at the end, setting the final status and writing the completion timestamp. If the runner dies without calling `finish()`, the row stays in `running` state - the dashboard handles this gracefully (shows "running" indefinitely until a new row for the same task_id replaces it) but you can also clean up by starting a new run, since the retention policy kicks in on every `start()`.
-
-### Retention
-
-`ExecutionLogger._cleanup_old_executions()` runs automatically every time a new execution starts. It keeps the last 10 executions per task and deletes anything older than 30 days. Log entries tied to deleted executions go with them. This keeps the DB from growing unbounded on projects that get rerun frequently without requiring any manual maintenance.
-
-The constants are class attributes (`KEEP_EXECUTIONS_PER_TASK = 10`, `DELETE_OLDER_THAN_DAYS = 30`) and changing them requires editing `db_logger.py`. They are not exposed as CLI flags because nobody has asked for different values yet.
-
-### Streaming logs
-
-`auto_execution_logs` is the rolling stream of log lines. Every worker and the orchestrator emit rows here via `add_auto_execution_log(execution_id, message, level, worker_id, subtask_id)`. The dashboard streams these to the frontend over SSE (`GET /api/auto/output/{execution_id}/stream`), which is what gives the Auto tab its live-log feel.
-
-Log levels are `debug`, `info`, `warn`, `error`, `success`. There is no central enforcement - workers choose their own level per message. The conventions in the codebase are:
-
-- `info` for "worker claimed task" and "worker started"
-- `success` for "task completed" with duration
-- `warn` for "retrying task" and "merge conflict in worktree"
-- `error` for "task failed permanently" and "validation error"
-- `debug` for "cleaned up N old executions"
-
-The dashboard's log viewer has a per-level filter, so sprinkling `debug` liberally for internal state is fine - users can hide it.
-
-### Workers that cannot log
-
-`_WorkerDBLogger` in `worker.py` is a lightweight wrapper around `TaskDB` that each worker process instantiates on startup. If `missioncache_db` cannot be imported (which happens in some install configurations) or `~/.missioncache/tasks.db` does not exist on a fresh install, the logger silently becomes a no-op. One exception to the silence: if the DB is missing because MissionCache data still lives at the legacy `~/.claude/` paths, `warn_if_migration_required` (in `db_logger.py`, shared by `ExecutionLogger` and `Worker`) prints the full migration recipe to stderr - once per process, not once per worker - so you know why the run produced no dashboard logs and how to fix it. Every `log()` call is wrapped in try/except with a bare `pass`, so logging failures never crash a worker. This is deliberate: the dashboard is a nice-to-have, not a dependency, and a missioncache-auto run must succeed in minimal-install environments too.
-
-## Advanced features
-
-Parallel and sequential are the two core modes, but missioncache-auto has a handful of features that layer on top. Most are opt-in; worktree isolation is the exception - it is the default in parallel mode on a git repo (see below).
-
-### Worktree isolation (default in parallel mode; `--no-worktree` to opt out)
-
-In parallel mode on a git repo, each worker gets its own git worktree by default, created under `.claude/worktrees/missioncache-auto-<project>-w<worker_id>`. Each worker runs in its own worktree with its own branch (`missioncache-auto/<project>/worker-<id>`), does its work in isolation, and when the run finishes, `WorktreeManager.merge_all()` merges every worker branch back into the original branch sequentially, in worker ID order. This is what keeps two workers from clobbering each other when they edit the same file - without isolation, whichever worker writes last wins and you lose changes.
-
-`--no-worktree` opts back into the shared checkout: every worker runs in the same directory - the project root you ran `missioncache-auto` from. That is fine for tasks that touch non-overlapping files, but concurrent edits to the same file will race. Sequential mode is unaffected either way: it has a single worker and always runs in the project root. Worktrees also require a git repo, so on a non-git directory missioncache-auto warns and falls back to the shared checkout automatically.
-
-Merge conflicts are reported but not auto-resolved. If a conflict happens, the worktree branch is preserved (not deleted) so you can resolve it manually with `git merge missioncache-auto/<project>/worker-3` and inspect the conflict in-repo. Successful merges clean up both the worktree and the branch.
-
-The worktree manager also copies `.env*` files from the project root into each worktree on creation (`_copy_env_files`), because git worktrees do not inherit gitignored files and environment variables often live in `.env.local`. If your project has other gitignored config that workers need, they will not be there automatically - you would need to add them to the copy list in `worktree.py`.
-
-Worktrees are cleaned up via `cleanup_with_results()`, which respects conflict branches. A conflicted worktree is left on disk (with its branch) so you can resolve it manually; cleaned worktrees have their branch deleted with `git branch -d` (safe delete) and a warning is printed if the branch has unmerged commits.
-
-### Auto-commit
-
-By default, missioncache-auto commits after each successful task with a message like `feat(03): Wire up the /api/users endpoint`. The title comes from the prompt's `task_title` frontmatter or, if missing, from the first markdown heading in the prompt body. Everything the task changed in the working tree is committed, except `.env*` files, which are excluded at any nesting depth so secrets are never committed. The commit fires whether the task produced tracked edits or brand-new untracked files - the detection is `git status --porcelain`, not `git diff --quiet`, so new-file-only output still commits.
-
-Because worktrees are the default in parallel mode, each worker commits into its own isolated branch and there is no commit race. The flag combinations that would produce lost or discarded work are refused up front with exit code 3, rather than run and corrupt the result:
-
-- **`--no-worktree` + auto-commit + more than one worker** on a git repo: refused, because all workers would commit into the same shared checkout and race on `git add`/commit. Drop `--no-worktree` to isolate workers, pass `--no-commit` and commit manually, or run a single worker with `-w 1`.
-- **worktrees + `--no-commit`**: refused, because a worker's output lives only on its worktree branch and reaches the main branch through the commit-then-merge; with `--no-commit` there is nothing to merge and the work would be discarded.
-
-Sequential mode also auto-commits, but with less fighting - there is only one worker. The commit happens in `_handle_result()` after `update_timestamps()` and `_process_heartbeats()`.
-
-### Spec, quality, and TDD review (`--enable-review`, `--spec-review-only`, `--tdd`)
-
-These flags run an additional Claude invocation after each successful task to review the work:
-
-- `--spec-review-only` runs only the spec compliance check (`code_reviewer.py:run_spec_review`). Cheap, roughly $0.15 per task. It diffs `HEAD~1` against the original prompt and checks whether the implementation matches the acceptance criteria.
-- `--enable-review` runs both spec compliance **and** code quality (`run_quality_review`). More thorough but more expensive.
-- `--tdd` wraps the task prompt with RED-GREEN-REFACTOR instructions before execution, then runs a **blocking** TDD review after (`run_tdd_review`). If no test files were added or modified, the task is treated as failed and retried.
-
-Spec and quality reviews are advisory - their results are logged to the auto log and the dashboard but do not block task completion. TDD review is blocking: a TDD failure counts as a task failure and consumes a retry.
-
-All three reviews use `ClaudeRunner(visibility=Visibility.NONE)` and write their output to `logs/review-<stage>-task-<id>-<timestamp>.log` if `logs_dir` is set. The review prompts are in `code_reviewer.py` and are short enough to read in one sitting if you need to understand what they are asking.
-
-Per-task TDD can be overridden with `tdd: true` or `tdd: false` in the prompt's YAML frontmatter (`worker.py:_check_tdd_override`). This lets you enable TDD globally for the run but skip it on tasks where it does not make sense (docs, config, non-code changes).
-
-### Task timeout (`--timeout`)
-
-Each task has a 30-minute default timeout (`task_timeout=1800`), applied to the Claude CLI subprocess via `process.communicate(input=prompt, timeout=timeout)`. On timeout, the process is killed, pipes are drained, and the result is marked as a CLI error (`"Task timed out after 1800s"`). Set `--timeout 0` to disable entirely.
-
-The timeout is per task invocation, not per missioncache-auto run. A project with 30 tasks and a 30-minute timeout per task can legitimately run for 15 hours if every task runs to the max. In practice most tasks finish in 1-3 minutes, but the default is high to avoid killing long-running refactors in the middle.
-
-### Dry run (`--dry-run`)
-
-`--dry-run` runs the validation and planning phases (DAG build, cycle detection, plan validation, execution plan display) and exits without spawning any workers. It is what you want when you are not sure whether the dependency graph is correct or whether all the prompts are in place. The execution plan output shows waves, the critical path, and any validation warnings, so you can fix problems before the run starts.
-
-## The CLI, end to end
-
-### Commands
+Run it from your repo:
 
 ```bash
-missioncache-auto <project>                       # run (parallel, default)
-missioncache-auto <project> --sequential          # run (sequential)
-missioncache-auto <project> --dry-run             # show plan, do not run
-missioncache-auto init <project> "description"    # create task files from templates
-missioncache-auto status <project>                # show progress and blocking status
+missioncache-auto my-project
 ```
 
-`missioncache-auto run` is the implicit default when the first positional argument is not a known command. `missioncache-auto my-project` and `missioncache-auto run my-project` are equivalent, and `missioncache-auto status my-project` and `missioncache-auto init my-project "..."` use their named subcommands.
+It comes with the full install (`uvx missioncache-install`), not the plugin-only one.
 
-`status` is the one command that does not invoke Claude at all. It reads `<project>-tasks.md` via `parse_tasks_md()`, runs `get_runnable_tasks()` to compute blocking status, and prints a per-task list with `[ready]`, `[waiting on #3]`, `[blocked by #2]`, or `[WAIT]` annotations. It is the fastest way to see "what is actually runnable right now" without starting the worker pool.
+## Before you run it
 
-### Options reference
+Auto reads the project files in `~/.missioncache/active/<project>/`. A good run needs three things:
 
-| Option | Default | Used by | Description |
-|--------|---------|---------|-------------|
-| `-w, --workers N` | 8 | parallel | Number of parallel workers (capped at 12) |
-| `-r, --retries N` | 3 | both | Max retries per task before failure |
-| `--pause N` | 3 | sequential | Seconds to sleep between iterations |
-| `--timeout N` | 1800 | both | Per-task Claude subprocess timeout (0 = none) |
-| `--sequential, -s` | off | - | Force sequential mode |
-| `--parallel, -p` | on | - | Force parallel mode (default) |
-| `--fail-fast` | off | parallel | Terminate all workers on first failure |
-| `--dry-run` | off | both | Plan only, do not execute |
-| `--worktree` | on (parallel, git repo) | parallel | Per-worker git worktree isolation (the default on a git repo) |
-| `--no-worktree` | off | parallel | Opt out of worktrees; run all workers in the shared checkout |
-| `--no-commit` | off | both | Disable auto-commit after tasks |
-| `--enable-review` | off | both | Run spec + quality review after each task |
-| `--spec-review-only` | off | both | Run only spec compliance review |
-| `--tdd` | off | both | Enforce RED-GREEN-REFACTOR + blocking TDD review |
-| `-v, --visibility` | verbose | both | Tool output detail: verbose, minimal, none |
-| `--no-color` | off | both | Disable ANSI colors in output |
+1. **Small tasks.** One Claude session should be able to finish and check each task in `<project>-tasks.md`.
+2. **Modes.** `/missioncache:mode` marks each task `[auto]` or `[inter]`. No mark counts as `[inter]`. If nothing is runnable because open `[inter]` tasks block the rest, Auto exits before it starts.
+3. **Prompts.** `/missioncache:prompts <project>` writes one prompt file per task under `prompts/`, with its dependencies. Parallel mode needs them. Sequential mode does not.
 
-### Environment variables
+## Common commands
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MISSIONCACHE_AUTO_VISIBILITY` | `verbose` | Sets `-v` without a flag; useful in `.envrc` |
-| `MISSIONCACHE_AUTO_MODE` | set to `1` by missioncache-auto | Set in the child Claude CLI environment so hooks and skills can detect autonomous mode and skip interactive prompts |
+```bash
+missioncache-auto my-project                  # run in parallel, 8 workers
+missioncache-auto my-project -w 12            # 12 workers
+missioncache-auto my-project --sequential     # one task at a time, in file order
+missioncache-auto my-project --dry-run        # show the plan, run nothing
+missioncache-auto status my-project           # progress and what is ready
+missioncache-auto init my-project "summary"   # create empty project files
+```
 
-`MISSIONCACHE_AUTO_MODE=1` is the signal that every hook in the MissionCache plugin looks for. When it is set, `permission-whitelist.sh` auto-approves certain plan-exit transitions, `activity_tracker.py` tags heartbeats as autonomous, and various skills skip clarification steps. **If you are running missioncache-auto on a machine where hooks check this variable, changing its value manually will produce surprising results** - leave it to the CLI.
+A parallel run shows its plan and asks `Proceed? [Y/n]`. A sequential run starts at once.
 
-### Exit codes
+## Options
 
-| Code | Meaning | When |
-|------|---------|------|
-| 0 | All tasks completed successfully | `<promise>COMPLETE</promise>` or every checkbox is `[x]` |
-| 1 | One or more tasks failed, or the run ended with tasks unfinished | Retry budget exhausted on at least one task, or the run stopped before every task completed |
-| 2 | Blocked on `[WAIT]` task | Human input required to proceed |
-| 3 | Configuration / setup error, or a refused flag combination | Missing files, invalid YAML, DAG validation failure; or a pre-run refusal: `--no-worktree` + auto-commit + more than one worker on a git repo, worktrees + `--no-commit`, or worktrees + dirty tracked changes in the main checkout (commit/stash them, or pass `--no-worktree`) |
+Put the options after the project name, except `-v` and `--no-color`, which go before it.
 
-These are documented in the CLI `--help` epilog too, so you do not need to open this doc when writing a wrapper script.
+| Option | Default | What it does |
+|---|---|---|
+| `-w`, `--workers N` | 8 | Parallel workers, from 1 to 12. |
+| `-r`, `--retries N` | 3 | Tries per task before giving up. |
+| `--timeout N` | 1800 | Seconds a task may run. `0` means no limit. Parallel only. |
+| `--pause N` | 3 | Seconds between tasks. Sequential only. |
+| `-s`, `--sequential` | off | Run one task at a time, top to bottom. |
+| `-p`, `--parallel` | on | Run in parallel, in dependency order. |
+| `--dry-run` | off | Show the plan and exit. Parallel only. |
+| `--fail-fast` | off | Stop all workers on the first failed task. Parallel only. |
+| `--worktree` | on in a git repo | Give each worker its own git worktree and branch. Parallel only. |
+| `--no-worktree` | off | Run every worker in your checkout. Parallel only. |
+| `--no-commit` | off | Do not commit after each task. |
+| `--spec-review-only` | off | Check each change against the task's acceptance criteria. Parallel only. |
+| `--enable-review` | off | The spec check plus a code quality review. Parallel only. |
+| `--tdd` | off | Ask for tests first, and fail a task that adds no tests. |
+| `-v`, `--visibility` | `verbose` | Tool output: `verbose`, `minimal` or `none`. |
+| `--no-color` | off | Plain output, no colours. |
 
-## Extending missioncache-auto
+Write it as `--visibility=minimal my-project`. The spaced form `-v minimal` fails. Or export `MISSIONCACHE_AUTO_VISIBILITY=minimal`.
 
-### Adding a new execution mode
+> WARNING: `--dry-run` has no effect with `--sequential`. The run starts for real.
 
-If you want a mode that does not fit sequential or parallel - say, a "one-task-at-a-time-with-human-approval" mode or a "replay" mode that re-executes a completed task without checkpointing - create a new file alongside `sequential.py` and `parallel.py` in `missioncache_auto/`. Implement a runner class that takes the same constructor arguments (`task_name`, `project_root`, `config`, `display`), exposes a `run()` method that returns an exit code, and uses the shared components: `TaskPaths` for file resolution, `ClaudeRunner` for subprocess invocation, `StateManager` if you need concurrent state, `ExecutionLogger` for dashboard integration.
+In sequential mode, commits and `--tdd` apply only when the project has a `prompts/` folder.
 
-Wire the new mode into `cli.py:cmd_run()` by adding a flag to `_add_run_arguments()` and a branch in `cmd_run`. Make sure to validate flag conflicts in the mutex group if your mode is mutually exclusive with the existing ones.
+## Exit codes
 
-Do not fork `worker.py`. The completion-detection logic (tag parsing, retry budget, failure classification) is subtle and shared across modes intentionally. If you need to change how "success" is determined, change it in one place - `ClaudeRunner._build_result()` - and the change propagates everywhere.
+| Code | Meaning |
+|---|---|
+| 0 | Every task is done. Also when you answer no at `Proceed?`, or nothing was left to run. |
+| 1 | A task ran out of retries, or the run ended with tasks unfinished. Also `status` on a missing project. |
+| 2 | Blocked: the next task is `[WAIT]`, or open `[inter]` tasks leave nothing runnable. Also a mistyped command line. |
+| 3 | Setup problem: missing files or prompts, a bad dependency graph, or a refused option mix (see below). |
 
-### Adding a new learning tag
+## Watching a run
 
-Learning tags are extracted in `claude_runner.py:_build_result()` by calling `_extract_tag(text, name)` for each known tag. Adding a new one is three steps:
+- **Dashboard.** Open the **Auto** view at `http://localhost:8787/#auto` for a graph of every task and a live log.
+- **Logs.** In the project folder. A parallel run writes each task's raw output to `logs/`. A sequential run records every attempt in `<project>-auto-log.md`.
 
-1. Add a field to `ExecutionResult` in `models.py`.
-2. Call `_extract_tag(text, "your_tag")` in `_build_result()` and assign to the field.
-3. Decide what to do with it in the runners. `SequentialRunner._write_iteration_log()` writes learning tags to the auto log; update it if the new tag should be visible there. If the tag should affect the pass/fail decision (rare - most tags are advisory), update the `success = ...` line at the top of `_build_result()`.
+## How Auto decides a task is done
 
-Do not add a new success-condition tag without really thinking about it. The current two (`<what_worked>` and `<promise>COMPLETE</promise>`) are the result of iterating through several false-positive failure modes, and adding a third is the kind of change that can regress completion detection in non-obvious ways.
+Claude's reply must carry one of these tags. A reply without one is a failure, and the task is retried.
 
-### Adding a new review stage
+| Tag | Result |
+|---|---|
+| `<what_worked>...</what_worked>` | This task is done. Auto ticks it. |
+| `<promise>COMPLETE</promise>` | Every task is done. A sequential run ends with code 0. Parallel counts it as this task done. |
+| `<blocker>WAITING_FOR_HUMAN</blocker>` | Claude needs you. A sequential run stops with code 2. Parallel counts it as a failed try. |
 
-Reviews live in `code_reviewer.py` as module-level functions: `run_tdd_review`, `run_spec_review`, `run_quality_review`. Each one builds a review prompt, spawns Claude via `ClaudeRunner(visibility=Visibility.NONE)`, parses the response for `<passed>true</passed>` and `<summary>...</summary>` tags, and returns `(passed: bool, summary: str)`.
+Prompts from `/missioncache:prompts` already ask for them.
 
-To add a new review:
+## Worktrees and commits
 
-1. Write a new `run_<stage>_review()` function following the existing signature.
-2. Add a corresponding CLI flag in `cli.py:_add_run_arguments()` and a field in `Config`.
-3. Call it from `worker.py:_run_review()` (parallel) or `sequential.py:_handle_result()` (sequential). Decide if it is blocking (TDD) or advisory (spec, quality).
-4. If you want the review visible in the dashboard, log it through `self._log()` with appropriate level.
+In a git repo, each parallel worker gets its own worktree under `.claude/worktrees/` and its own branch, `missioncache-auto/<project>/worker-<id>`. Auto commits after each task and merges the branches back at the end. A branch with a merge conflict is kept for you to merge by hand. Outside a git repo, workers share the folder.
 
-Review prompts must include `<what_worked>...</what_worked>` at the end, otherwise the Claude subprocess will appear to fail and retry forever. This is the same completion-detection invariant as regular tasks, and the review runners use the same parser.
+Your `.env*` files are copied into each worktree and never committed.
 
-### Adding a new display output
+Auto refuses to start, with code 3, when:
 
-`display.py` is the ANSI output layer. Every user-facing string in missioncache-auto goes through it: iteration headers, tool visibility, progress bars, completion summaries. It uses no third-party dependencies - just ANSI escape codes wrapped in simple print functions.
+- worktrees are on and you pass `--no-commit`. The work would be lost.
+- worktrees are on and tracked files have uncommitted changes. Workers would not see them. Commit or stash first.
+- `--no-worktree` with more than one worker and commits on. Workers would clash on commits. Use `-w 1` or `--no-commit`.
 
-If you want to add a new display method, add it to the `Display` class and call it from wherever in the runners you want. If you are adding structured output for a new CLI feature, prefer a new method over inlining `print()` statements - it keeps the runners clean and gives you a single place to add things like `--no-color` handling or alternate output formats (e.g., a hypothetical JSON mode).
+## Windows
 
-## Troubleshooting
+Auto runs on native Windows. A `claude` installed with npm works. A `claude.bat` in the current folder is ignored. A task that times out is stopped with everything it started.
 
-### "Task completed successfully but missioncache-auto retried it"
+## When something looks wrong
 
-**Cause:** Claude's response did not contain `<what_worked>...</what_worked>`. This is the #1 issue and it happens because a prompt got out of sync with the template, or Claude was distracted by something mid-response and forgot to close the tag.
+**`missioncache-auto: command not found`.** You have the plugin-only install. Run `uvx missioncache-install`, or `uvx missioncache-install --missioncache-auto` for this part only.
 
-**Fix:** Look at the auto log entry for that task - it will show the raw Claude output. If `<what_worked>` is missing, either the prompt's instructions are not clear enough (edit `prompts/task-NN-prompt.md` to re-emphasize) or Claude's response was truncated (check for CLI errors or rate limits in the log). The generic prompt template (`build_generic_prompt`) always includes the instructions, so the issue is almost always a pre-generated prompt that drifted from the template.
+**It printed the plan and stopped with code 0.** Nothing answered `Proceed?`, as in a script or cron job. Run `echo y | missioncache-auto my-project`.
 
-### "Parallel mode says 'Missing prompt' for a task in tasks.md"
+**A task did its work but was retried.** The reply had no `<what_worked>` tag. Check its output in `logs/`, or its entry in `<project>-auto-log.md` for a sequential run. If Claude skipped the tag, ask for it in the prompt file. If the reply was cut off, look for a CLI error or a rate limit.
 
-**Cause:** A line in `<project>-tasks.md` does not have a matching `prompts/task-NN-prompt.md` file. `plan_validator.py:validate_plan()` catches this during the pre-run check.
+**`Parallel mode requires prompts/ directory`.** Run `/missioncache:prompts <project>`, or use `--sequential`.
 
-**Fix:** Either create the missing prompt file (copy an existing one as a template, or re-run `/missioncache:prompts <project>` to regenerate), or remove the unwanted task from the tasks file. Parallel mode will refuse to run until every uncompleted task in `tasks.md` has a prompt.
+**`Dependency '1' does not exist`.** A prompt lists a task that has no prompt file. Task IDs have two digits: `"01"`, not `"1"`.
 
-### "Parallel mode says 'Dependency 01 does not exist'"
+**A long task gets killed at 30 minutes.** Pass `--timeout 3600`, or `--timeout 0` for no limit.
 
-**Cause:** A prompt's YAML frontmatter lists a dependency on a task ID that has no prompt file. Often this is a typo (`"1"` instead of `"01"`) or a leftover from a deleted task.
+**`--tdd` fails a task that has tests.** It counts only tests the task added or changed. Put `tdd: false` in the prompt file to skip the check.
 
-**Fix:** Edit the offending prompt file's `dependencies:` field. Task IDs must be padded to two digits (`01`, `02`, ..., `10`, `11`). The validation error message tells you which task and which bad dependency.
+**Worktrees are left over after a crash.** Run `git worktree list`, then `git worktree remove <path>` for each one.
 
-### "Worker process died and its task is stuck in_progress"
+## More
 
-**Cause:** A worker crashed before releasing its task. The parent process should catch this via `release_orphaned_tasks()` in the monitoring loop, but if the parent itself died, no cleanup happened.
-
-**Fix:** Start a fresh `missioncache-auto` run. The new run's `init()` re-initializes the state file with tasks from tasks.md, and any old `in_progress` rows get discarded. If the old run left behind worktrees (the default for parallel runs on a git repo, unless you passed `--no-worktree`), you may need to `git worktree list` and `git worktree remove` them manually - `WorktreeManager.create_worktrees()` does clean up stale worktrees for the same worker IDs, but only if you run with the same `--workers N` count.
-
-### "Dashboard shows 'running' forever for an execution that finished"
-
-**Cause:** The missioncache-auto process was killed (SIGKILL, OS crash) before `ExecutionLogger.finish()` ran. The `auto_executions` row still has `status=running`.
-
-**Fix:** Start a new run. The next `ExecutionLogger.start()` on the same task does not touch the old row, but `_cleanup_old_executions()` will eventually delete it via the retention policy. If you want to clean it up immediately, `UPDATE auto_executions SET status='cancelled' WHERE id=<id>` via `sqlite3 ~/.missioncache/tasks.db` is fine - the dashboard will refresh on its next poll.
-
-### "Task times out at 1800s but I want it to keep going"
-
-**Cause:** The 30-minute per-task timeout is the default, and long-running tasks (large refactors, big test suites) can legitimately need more.
-
-**Fix:** Pass `--timeout 3600` for a 1-hour budget, or `--timeout 0` to disable the per-task timeout entirely. Keep in mind that `--timeout 0` also disables the safety valve - a genuinely stuck Claude subprocess will hang forever without manual intervention.
-
-### "TDD review fails even though tests exist"
-
-**Cause:** `run_tdd_review` runs `git diff HEAD~1 --name-only` to detect test changes, so tests that were committed before the task started do not count. It wants to see test files added or modified *as part of the task*.
-
-**Fix:** Either explicitly modify or add tests in the task (which is the point of TDD), or set `tdd: false` in the task's prompt frontmatter to opt out.
-
-### "missioncache-auto command not found"
-
-**Cause:** You are on the quick (marketplace) install path, which does not include the `missioncache-auto` CLI - it ships only the plugin core.
-
-**Fix:** Do the full install: `uvx missioncache-install` (or `uvx missioncache-install --missioncache-auto` if you only want this component). That pip-installs `missioncache-auto` from PyPI and puts `missioncache-auto` on your `PATH`. From a clone you can run `uvx missioncache-install --local`, or `pip install -e ./missioncache-auto` by hand if you would rather skip the installer. The CLI binary lands in whatever Python environment you installed into - if `which missioncache-auto` is empty after install, check that that environment's `bin/` directory is on `PATH`.
-
-## Where to go from here
-
-- [`architecture.md`](./architecture.md) - if you need the big picture on MissionCache's storage model, hooks, and how the pieces fit together.
-- [`dashboard.md`](./dashboard.md) - for the other end of the pipeline: how the Auto view, the execution record, and the streaming logs actually get rendered.
-- `missioncache-auto/CLAUDE.md` - the in-repo maintainer guide, which has more details on the PRD builder skill and task-writing heuristics that did not fit in this doc.
-- `missioncache-auto/missioncache_auto/` - the source. Start with `cli.py` to see the entry points, then `sequential.py` or `parallel.py` depending on which mode you care about. Everything else is called from one of those two.
+How the loop, the scheduler and the tags work, and how to extend them: [internals/missioncache-auto.md](internals/missioncache-auto.md).

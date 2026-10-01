@@ -176,8 +176,23 @@ def _wrap_tables(html_str: str) -> str:
     return html_str.replace("<table>", '<div class="tbl"><table>').replace("</table>", "</table></div>")
 
 
+# Repo images a doc embeds with `../assets/<file>`. The build copies each one to
+# dist/assets/ and points the page at it, so the docs make no third-party request.
+_DOC_ASSETS: set[str] = set()
+
+
+def _rewrite_images(html_str: str) -> str:
+    def repl(m: re.Match) -> str:
+        name = m.group(2)
+        if not (REPO / "assets" / name).exists():
+            raise SystemExit(f"doc image missing: assets/{name}")
+        _DOC_ASSETS.add(name)
+        return f'{m.group(1)}/assets/{name}"'
+    return re.sub(r'(<img [^>]*src=")\.\./assets/([\w.-]+)"', repl, html_str)
+
+
 def render_doc(md_text: str) -> str:
-    return _wrap_tables(_rewrite_links(_add_heading_ids(_md.render(md_text))))
+    return _wrap_tables(_rewrite_images(_rewrite_links(_add_heading_ids(_md.render(md_text)))))
 
 
 # --------------------------------------------------------------------------- #
@@ -323,6 +338,10 @@ def build() -> None:
         }),
         canonical=f"{SITE_URL}/changelog/",
     ))
+
+    (DIST / "assets").mkdir(exist_ok=True)
+    for name in sorted(_DOC_ASSETS):
+        (DIST / "assets" / name).write_bytes((REPO / "assets" / name).read_bytes())
 
     (DIST / "CNAME").write_text(DOMAIN + "\n")
     (DIST / ".nojekyll").touch()
