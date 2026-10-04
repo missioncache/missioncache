@@ -43,7 +43,7 @@ It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time 
 
 ## Why MissionCache
 
-- **Your project keeps its memory.** Sessions end and context windows compact. The plan, your decisions and the next step stay in files, and `/missioncache:load` brings them back.
+- **Your project keeps its memory.** Sessions end and context windows compact, and every compaction summary drops details, like a constraint or a "don't do X". Anthropic calls this [goal drift](https://claude.dev/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code/). The plan, your decisions and the next step stay in files, and `/missioncache:load` brings them back.
 - **One session keeps the others in view.** `/missioncache:lead` makes one session the lead. Every other session tells it when its project changes.
 - **You see where the time went.** A local dashboard shows hours per project, per repo and per day, including Claude Code sessions outside any project.
 - **Tasks can run on their own.** `missioncache-auto` runs a project's tasks in parallel, in dependency order, and you can watch it live.
