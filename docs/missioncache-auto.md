@@ -40,6 +40,7 @@ Put the options after the project name, except `-v` and `--no-color`, which go b
 | `-w`, `--workers N` | 8 | Parallel workers, from 1 to 12. |
 | `-r`, `--retries N` | 3 | Tries per task before giving up. |
 | `--timeout N` | 1800 | Seconds a task may run. `0` means no limit. |
+| `-y`, `--yes` | off | Start without asking `Proceed?`. Needed when there is no terminal, such as in a script or a scheduled job. |
 | `--effort LEVEL` | your setting | Claude's effort for every task: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `--pause N` | 3 | Seconds between tasks. Sequential only. |
 | `-s`, `--sequential` | off | Run one task at a time, top to bottom. |
@@ -65,8 +66,8 @@ In sequential mode, commits and `--tdd` apply only when the project has a `promp
 |---|---|
 | 0 | Every task is done. Also when you answer no at `Proceed?`, or nothing was left to run. |
 | 1 | A task ran out of retries, or the run ended with tasks unfinished. Also `status` on a missing project. |
-| 2 | Blocked: the next task is `[WAIT]`, or open `[inter]` tasks leave nothing runnable. Also a mistyped command line. |
-| 3 | Setup problem: missing files or prompts, a bad dependency graph, or a refused option mix (see below). |
+| 2 | Blocked: the next task is `[WAIT]`, or open `[inter]` tasks leave nothing runnable. Also a mistyped command line: that one prints usage to stderr, a block prints the blocking task. |
+| 3 | Setup problem: missing files or prompts, a bad dependency graph, a refused option mix (see below), or a parallel run with no terminal and no `--yes`. |
 
 ## Watching a run
 

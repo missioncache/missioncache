@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import multiprocessing
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -220,10 +221,9 @@ class ParallelRunner:
                 self.display.info("Nothing to do. Exiting.")
                 return 0
 
-        # Ask for confirmation before proceeding
-        if not self._confirm_execution():
-            self.display.info("Aborted by user")
-            return 0
+        stop = self._confirm_start()
+        if stop is not None:
+            return stop
 
         # Initialize state with pre-completed tasks
         self.state_manager = StateManager(self.paths.state_dir)
@@ -253,6 +253,25 @@ class ParallelRunner:
 
         # Spawn workers
         return self._run_workers(worktree_paths)
+
+    def _confirm_start(self) -> int | None:
+        """None to start, or the exit code to stop with.
+
+        ``--yes`` skips the question. With no terminal to ask on, refuse
+        with 3 instead of reading EOF as "no": that used to exit 0 having
+        done nothing, which a script reads as a finished run.
+        """
+        if self.config.assume_yes:
+            return None
+        if not sys.stdin.isatty():
+            self.display.error(
+                "No terminal to ask 'Proceed?' on. Pass --yes to run without asking."
+            )
+            return 3
+        if not self._confirm_execution():
+            self.display.info("Aborted by user")
+            return 0
+        return None
 
     def _confirm_execution(self) -> bool:
         """Ask user for confirmation before starting execution."""

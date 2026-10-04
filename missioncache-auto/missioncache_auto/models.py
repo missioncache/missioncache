@@ -119,6 +119,7 @@ class Config:
     auto_commit: bool = True
     tdd_mode: bool = False
     effort: str | None = None
+    assume_yes: bool = False
 
     def __post_init__(self) -> None:
         """Validate and cap configuration values."""

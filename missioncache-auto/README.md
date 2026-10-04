@@ -53,6 +53,7 @@ missioncache-auto status <task-name>
 | `--parallel, -p` | Run in parallel mode (default) |
 | `--dry-run` | Show execution plan without running |
 | `--fail-fast` | Stop all workers on first failure |
+| `-y, --yes` | Start without asking Proceed? (required without a terminal) |
 | `--effort LEVEL` | Claude effort for every task: low, medium, high, xhigh, max (default: your setting) |
 | `--worktree` | Isolate each worker in its own git worktree (default on git repos) |
 | `--no-worktree` | Run all workers in the shared checkout instead of per-worker worktrees |

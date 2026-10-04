@@ -209,3 +209,42 @@ def test_run_workers_reports_failure_when_tasks_left_pending(tmp_path, monkeypat
     assert rc == 1
     runner.logger.finish.assert_called_once()
     assert runner.logger.finish.call_args.kwargs.get("status") == "failed"
+
+
+# --- Starting without a terminal ---------------------------------------------
+
+
+class _Stdin:
+    def __init__(self, tty):
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+
+def test_no_terminal_refuses_with_3_instead_of_a_silent_0(tmp_path, monkeypatch):
+    """Piped or scheduled, the old prompt read EOF as "no" and exited 0
+    having run nothing, which a script took for a finished run."""
+    runner = _guard_runner(tmp_path)
+    monkeypatch.setattr(sys, "stdin", _Stdin(False))
+    assert runner._confirm_start() == 3
+    assert "--yes" in str(runner.display.error.call_args)
+
+
+def test_yes_starts_without_asking(tmp_path, monkeypatch):
+    runner = _guard_runner(tmp_path, assume_yes=True)
+    monkeypatch.setattr(sys, "stdin", _Stdin(False))
+    runner._confirm_execution = MagicMock(side_effect=AssertionError("asked"))
+    assert runner._confirm_start() is None
+
+
+def test_answering_no_at_a_terminal_still_exits_0(tmp_path, monkeypatch):
+    runner = _guard_runner(tmp_path)
+    monkeypatch.setattr(sys, "stdin", _Stdin(True))
+    runner._confirm_execution = MagicMock(return_value=False)
+    assert runner._confirm_start() == 0
+
+
+def test_yes_flag_reaches_the_config(monkeypatch):
+    args = _parse(monkeypatch, ["missioncache-auto", "my-task", "--yes"])
+    assert _config_from_args(args).assume_yes is True

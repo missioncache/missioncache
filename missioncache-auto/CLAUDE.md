@@ -251,6 +251,7 @@ missioncache-auto status <task-name>
 | `--sequential, -s` | | Run in sequential mode |
 | `--parallel, -p` | + | Run in parallel mode (default) |
 | `--fail-fast` | | Stop all workers on first failure |
+| `-y, --yes` | | Start without asking Proceed? (required without a terminal) |
 | `--effort LEVEL` | your setting | Claude effort per task: low, medium, high, xhigh, max |
 | `--dry-run` | | Show execution plan without running |
 | `-v, --visibility` | verbose | Output level: verbose, minimal, none |

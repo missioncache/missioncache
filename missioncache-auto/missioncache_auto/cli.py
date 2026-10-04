@@ -158,6 +158,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Timeout per task in seconds (default: 1800 = 30 min, 0 = no timeout)",
     )
     parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Start without asking Proceed? (needed when there is no terminal, e.g. in a script)",
+    )
+    parser.add_argument(
         "--effort",
         choices=EFFORT_LEVELS,
         help="Claude effort level for every task (default: your Claude Code setting)",
@@ -225,6 +231,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         auto_commit=not getattr(args, "no_commit", False),
         tdd_mode=getattr(args, "tdd", False),
         effort=getattr(args, "effort", None),
+        assume_yes=getattr(args, "yes", False),
     )
 
 
