@@ -392,8 +392,9 @@ def main() -> int:
         return _run_uninstall(args, ctx)
 
     if args.update:
-        installers.update_all(ctx)
-        return 0
+        # A failed component is a failed update, as it is for an install, so
+        # a script or CI step checking the exit code can see it.
+        return 1 if installers.update_all(ctx) else 0
 
     # Install verbs record the install-time mode so a later --update/--uninstall
     # run (which resolves mode from the CWD) can recover how we installed.

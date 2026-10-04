@@ -372,9 +372,8 @@ jobs:
           $env:UV_FIND_LINKS = "$env:GITHUB_WORKSPACE\local-wheels"
           Set-Location $env:USERPROFILE
           missioncache-install --update --yes
-          # No exit-code assertion: missioncache-install --update currently
-          # exits 0 even when components fail (recorded as a product bug in
-          # the tasks file). The teeth of this gate are the probes below.
+          # PowerShell does not fail the step on a native command's exit code.
+          if ($LASTEXITCODE -ne 0) { throw "missioncache-install --update exited $LASTEXITCODE" }
           # The dashboard must be serving again after the update.
           $ok = $false
           for ($i = 0; $i -lt 30; $i++) {

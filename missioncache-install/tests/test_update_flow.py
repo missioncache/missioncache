@@ -176,6 +176,39 @@ def test_update_all_retries_previously_failed_components(
     assert state.failed_components() == []
 
 
+def test_update_all_returns_what_failed(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--update exits non-zero on a failed component, like an install, so a
+    script or CI step can see the failure. update_all reports the list."""
+    state.record_component("dashboard", {"mode": "pypi"})
+    state.record_component("codex", {"mode": "pypi"})
+    _fake_installers(monkeypatch, failing=frozenset({"codex"}))
+
+    assert installers.update_all(_make_ctx()) == ["codex"]
+
+
+def test_update_all_returns_nothing_when_all_succeed(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state.record_component("dashboard", {"mode": "pypi"})
+    _fake_installers(monkeypatch)
+
+    assert installers.update_all(_make_ctx()) == []
+
+
+def test_main_update_exits_1_on_a_failed_component(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from missioncache_install import __main__ as cli
+
+    state.record_component("codex", {"mode": "pypi"})
+    _fake_installers(monkeypatch, failing=frozenset({"codex"}))
+    monkeypatch.setattr("sys.argv", ["missioncache-install", "--update", "--yes"])
+
+    assert cli.main() == 1
+
+
 def test_update_all_refuses_recorded_local_mode_without_a_clone(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

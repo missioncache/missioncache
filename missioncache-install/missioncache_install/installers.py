@@ -1321,12 +1321,15 @@ def uninstall_components(components: list[str], ctx: InstallContext) -> None:
     _invalidate_update_cache()
 
 
-def update_all(ctx: InstallContext) -> None:
+def update_all(ctx: InstallContext) -> list[str]:
     """Refresh what state tracks and retry previously failed installs.
 
     Never adds components the user did not choose: anything installed on this
     machine but absent from state (a manual/maintainer install, or a reset
     state file) is detected read-only and reported, not acted on.
+
+    Returns the components that failed, so ``--update`` can exit non-zero the
+    way an install does. Nothing to update is not a failure.
     """
     st = state.load()
     tracked = list(st.get("components", {}).keys())
@@ -1335,7 +1338,7 @@ def update_all(ctx: InstallContext) -> None:
     if not targets:
         ui.warn("Nothing to update - no prior install detected in state file.")
         _report_untracked(targets)
-        return
+        return []
     # Update must reinstall in the SAME mode it was installed in, not the mode
     # re-derived from the current directory. The install-time mode was recorded
     # globally at install; prefer it so an update run from a clone doesn't flip
@@ -1363,8 +1366,9 @@ def update_all(ctx: InstallContext) -> None:
             "Retrying previously failed: "
             + ", ".join(c.replace("_", "-") for c in failed_prev)
         )
-    install_components(targets, ctx)
+    failed = install_components(targets, ctx)
     _report_untracked(state.installed_components() + state.failed_components())
+    return failed
 
 
 def _invalidate_update_cache() -> None:
