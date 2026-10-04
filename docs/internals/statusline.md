@@ -20,7 +20,7 @@ The statusline is a 6- or 7-line block that renders below every Claude Code prom
 | 4 | Metrics | Model name, tokens used, context window percentage with warning colors. Shows "Fast mode activated" if Claude Code fast mode is on. |
 | 5 | K8s/Ver | Kubernetes context (if `kubectl` is installed), Claude Code version + age + "reviewed" color coding via `/whats-new`, Claude service health status with clickable link to status.claude.com. |
 | 6 | Usage | Subscription type (Max/Pro/API/Bedrock/etc.), session usage percentage, weekly usage percentage, a per-model weekly limit when the API reports one (its label comes from the API, so it reads `<model>: N%`), extra credits spent. |
-| 7 | Codex | Codex plan type, session and weekly usage percentages. **Only shown if the Codex CLI is installed** (`~/.codex/auth.json` exists and `STATUSLINE_CODEX` is not set to `false`). |
+| 7 | Codex | Codex plan type, session and weekly usage percentages. **Only shown if the Codex CLI is installed** (`~/.codex/auth.json` exists) and the `statusline.codex` setting is on. |
 
 The lines are rendered in a specific non-numeric order in `_run()` - line 2 (Project+LastAction) prints first, then line 1 (Dir+Git), then line 4 (Time), then line 3 (Metrics), then lines 5/6/7. The order is set by the sequence of `segments.append(...)` calls at the bottom of `_run()`, which are joined into one string and written with a single `out.write()`.
 
@@ -97,8 +97,6 @@ The statusline has a small but useful set of environment-variable knobs, documen
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `STATUSLINE_CODEX` | `true` | Show the Codex usage line. Set to `false` to hide it even if Codex is installed. |
-| `STATUSLINE_HEALTH_SERVICES` | `Code,Claude API` | Comma-separated list of Anthropic services to monitor. Available values: `Code`, `Claude API`, `claude.ai`, `platform.claude.com`, `Claude for Government`, `Claude Cowork`. Only incidents affecting services in this list are shown. |
 | `MISSIONCACHE_DASHBOARD_URL` | `http://localhost:8787` | Base URL used for the OSC 8 clickable hyperlinks on the project name and progress bracket. Change if your dashboard runs on a non-default port or a remote host. |
 | `NO_COLOR` | unset | When set to any non-empty value, disables ANSI colors and renders the statusline as plain text, honoring the [NO_COLOR](https://no-color.org/) convention. |
 | `MISSIONCACHE_STATUSLINE_DEBUG` | unset | When set, dumps Claude Code's raw stdin JSON to `~/.claude/hooks/state/statusline-ctx-debug.log` on each render. Off by default; turn it on only to debug display issues. |
@@ -211,7 +209,7 @@ Always renders dir; git cell is only shown inside a git repo.
 
 - **K8s** - `get_k8s_context()` runs `kubectl config current-context`. Cell is empty if `kubectl` is not installed or returns nothing.
 - **Version** - `claude --version` + a GitHub releases API lookup for the release date. Shows age as `(Nd)` after the version. Color is green if the version has been reviewed (`/whats-new` ran for it) or yellow if not - the "reviewed" state lives in `~/.claude/cache/whats-new-version`.
-- **Health** - incidents from `https://status.claude.com/api/v2/incidents.json`, filtered to the services named in `STATUSLINE_HEALTH_SERVICES`. Unresolved incidents render with a colored status label; resolved-within-recent-hours render with a green checkmark and muted color; otherwise shows `Claude Status: OK`.
+- **Health** - incidents from `https://status.claude.com/api/v2/incidents.json`, filtered to the services in the `statusline.claude_status_services` setting (default `Code`, `Claude API`), and shown only while `statusline.claude_status` is on. Unresolved incidents render with a colored status label; resolved-within-recent-hours render with a green checkmark and muted color; otherwise shows `Claude Status: OK`.
 
 ### Line 6: Usage
 
@@ -352,11 +350,11 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 **Fix:** Run `/whats-new` to update the reviewed marker, or manually `echo '1.0.50' > ~/.claude/cache/whats-new-version` to suppress the warning.
 
-### "Codex line won't hide even though I set `STATUSLINE_CODEX=false`"
+### "Codex line won't hide"
 
-**Cause:** Environment variables must be set in your shell profile *before* Claude Code is launched. If you set it in a new terminal and Claude Code is already running in another, the existing statusline process will not see the change - it is read once per invocation from `os.environ`.
+**Cause:** The Codex line is controlled by the `statusline.codex` setting, not an environment variable.
 
-**Fix:** Restart Claude Code after adding the variable to your shell profile, or test with `env STATUSLINE_CODEX=false claude` from a fresh terminal.
+**Fix:** Turn it off under dashboard Settings > Statusline, or set `"codex": false` under `"statusline"` in `~/.claude/missioncache-dashboard-config.json`. The next render picks it up.
 
 ### "Terminal title bar doesn't update"
 
