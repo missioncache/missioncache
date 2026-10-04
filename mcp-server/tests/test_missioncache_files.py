@@ -1675,6 +1675,34 @@ class TestTasksRemove:
         assert "superseded by the Flyway direction" in content
         assert "moved to automation-infra-lead" in content
 
+    def test_removes_an_unnumbered_checklist_line(self, tmp_path):
+        """Old templates left unnumbered stub lines such as '- [ ] Tests pass'.
+        The progress counter counts them, so they must be removable too."""
+        tasks = tmp_path / "p-tasks.md"
+        tasks.write_text(
+            "# P\n**Last Updated:** x\n\n## Phase 1\n\n"
+            "- [ ] 1. real task\n- [ ] Typecheck passes\n- [ ] Tests pass\n\n"
+            "```\n- [ ] Tests pass inside a fence\n```\n"
+        )
+        before = update_tasks_file(str(tasks))["progress"]["total_items"]
+        result = update_tasks_file(
+            str(tasks),
+            tasks_remove=[
+                {"match": "typecheck passes", "reason": "template stub"},
+                {"match": "Tests pass", "reason": "template stub"},
+                {"match": "Lint passes", "reason": "not there"},
+            ],
+        )
+        content = tasks.read_text()
+        assert result["remove_unmatched"] == ["Lint passes"]
+        assert result["removed_numbers"] == []
+        assert "- [ ] Typecheck passes" not in content
+        assert "- [ ] Tests pass\n" not in content
+        assert "- [ ] 1. real task" in content
+        assert "- [ ] Tests pass inside a fence" in content
+        assert "~~Typecheck passes~~ (removed" in content
+        assert result["progress"]["total_items"] == before - 2
+
     def test_a_removed_task_stops_counting_toward_progress(self, tmp_path):
         tasks = tmp_path / "p-tasks.md"
         tasks.write_text(REMOVABLE_TASKS)

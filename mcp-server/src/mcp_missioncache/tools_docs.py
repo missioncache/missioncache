@@ -819,8 +819,10 @@ async def update_tasks_file(
                 "progress counter forever. The line leaves the checklist and "
                 "a struck-through record with the reason lands under "
                 "'## Removed', so the history survives. 'reason' is required. "
-                "A task with children is refused; remove them first. Entries "
-                "matching no item come back in 'remove_unmatched'."
+                "A task with children is refused; remove them first. A "
+                "substring can also match an unnumbered checklist line, such "
+                "as a template's '- [ ] Tests pass'. Entries matching no item "
+                "come back in 'remove_unmatched'."
             )
         ),
     ] = None,

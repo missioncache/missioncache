@@ -898,6 +898,26 @@ def _remove_task_line(content: str, number: str) -> tuple[str, str | None]:
     return content[: match.start()] + content[match.end() :], match.group(0).rstrip("\n")
 
 
+def _remove_unnumbered_line(content: str, match_text: str) -> tuple[str, str | None]:
+    """Cut the first unnumbered checklist line containing ``match_text``.
+
+    Old templates left lines like ``- [ ] Tests pass``: ``parse_tasks_md``
+    skips them, but the progress counter counts them. Uses the counter's own
+    reading (``checklist_items``), so whatever is counted can be removed and a
+    checklist shown inside a fenced block is never taken. Returns
+    ``(content, text)``, with None for no match.
+    """
+    needle = match_text.lower()
+    if not needle:
+        return content, None
+    for item in context_health.checklist_items(content):
+        if item["number"] is None and needle in item["text"].lower():
+            lines = content.split("\n")
+            del lines[item["line"] - 1]
+            return "\n".join(lines), item["text"]
+    return content, None
+
+
 def update_tasks_file(
     tasks_file: str | Path,
     completed_tasks: list[str] | None = None,
@@ -1008,6 +1028,7 @@ def update_tasks_file(
         # Remove tasks. Runs after completions so a call that both completes
         # and removes behaves the same whatever order the caller listed them.
         if tasks_remove:
+            today = timestamp.split(" ")[0]
             for item in tasks_remove:
                 match_text = (item.get("match") or "").strip()
                 reason = (item.get("reason") or "").strip()
@@ -1024,27 +1045,6 @@ def update_tasks_file(
                         ),
                         None,
                     )
-                if target is None:
-                    remove_unmatched.append(match_text)
-                    continue
-                # Removing a parent would orphan its children in the file
-                # and leave them counted under a number with no owner.
-                children = [
-                    i.number
-                    for i in items
-                    if i.number.startswith(target.number + ".")
-                ]
-                if children:
-                    raise ValidationError(
-                        f"task {target.number} still has children "
-                        f"({', '.join(children)}) - remove them first",
-                        field="tasks_remove",
-                    )
-                content, line = _remove_task_line(content, target.number)
-                if line is None:
-                    remove_unmatched.append(match_text)
-                    continue
-                today = timestamp.split(" ")[0]
                 # Collapse the reason to one line, the same normalization
                 # _apply_imported_event does on its heading. The record is a
                 # single list item, and a reason carrying newlines writes
@@ -1052,13 +1052,35 @@ def update_tasks_file(
                 # "superseded\n- [x] 3. fake\n- [ ] 4. fake" invented two
                 # tasks that parse_tasks_md then counted, in the one file
                 # where the number is how every surface addresses an item.
-                record = (
-                    f"- ~~{target.number}. {target.text}~~ "
-                    f"(removed {today}: {' '.join(reason.split())})"
-                )
+                reason_line = " ".join(reason.split())
+                if target is None:
+                    content, label = _remove_unnumbered_line(content, match_text)
+                    if label is None:
+                        remove_unmatched.append(match_text)
+                        continue
+                else:
+                    # Removing a parent would orphan its children in the file
+                    # and leave them counted under a number with no owner.
+                    children = [
+                        i.number
+                        for i in items
+                        if i.number.startswith(target.number + ".")
+                    ]
+                    if children:
+                        raise ValidationError(
+                            f"task {target.number} still has children "
+                            f"({', '.join(children)}) - remove them first",
+                            field="tasks_remove",
+                        )
+                    content, line = _remove_task_line(content, target.number)
+                    if line is None:
+                        remove_unmatched.append(match_text)
+                        continue
+                    removed_numbers.append(target.number)
+                    label = f"{target.number}. {target.text}"
+                record = f"- ~~{label}~~ (removed {today}: {reason_line})"
                 content = _append_to_section(content, REMOVED_SECTION, record)
-                removed_numbers.append(target.number)
-                updates_made.append(f"Removed: {target.number}. {target.text[:50]}")
+                updates_made.append(f"Removed: {label[:50]}")
 
         # Diff post-transform: any number that was [ ] before and is [x]
         # now is a real transition. This catches edits regardless of how
