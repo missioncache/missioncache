@@ -5,7 +5,7 @@
 - **MCP Server**: Primary interface (`mcp-server/src/mcp_missioncache/`)
 - **Database**: `missioncache-db/` package (SQLite at `~/.missioncache/tasks.db`)
 - **Hooks**: Auto-save on compaction, detect active project on start
-- **Commands**: Slash commands (`/missioncache:new`, `/missioncache:fork`, `/missioncache:load`, `/missioncache:save`, `/missioncache:done`, `/missioncache:prompts`, `/missioncache:mode`, `/missioncache:brief`, `/missioncache:lead`)
+- **Commands**: Slash commands (`/missioncache:new`, `/missioncache:fork`, `/missioncache:load`, `/missioncache:save`, `/missioncache:done`, `/missioncache:prompts`, `/missioncache:mode`, `/missioncache:brief`, `/missioncache:lead`, `/missioncache:rename`)
 - **MissionCache Auto**: Autonomous execution CLI (`missioncache-auto/`)
 - **MissionCache Dashboard**: Web UI at localhost:8787 (`missioncache-dashboard/`)
 - **Statusline**: Optional terminal status display (bundled in `missioncache-dashboard/missioncache_dashboard/statusline.py`, installed via the `missioncache-statusline` pip entry point)
@@ -28,7 +28,7 @@
 | `mcp-server/src/mcp_missioncache/tools_iteration.py` | Iteration logging tools |
 | `mcp-server/src/mcp_missioncache/tools_planning.py` | Planning tools |
 | `mcp-server/src/mcp_missioncache/tools_pm.py` | PM tools: action items, stakeholders, tickets, due dates |
-| `missioncache-db/missioncache_db/__init__.py` | Core database layer (~4600 lines) |
+| `missioncache-db/missioncache_db/__init__.py` | Core database layer |
 | `missioncache-db/missioncache_db/pm_items.py` | PM layer: CRUD + context-file mirror render (single write path for MCP/dashboard/CLI) |
 | `missioncache-auto/missioncache_auto/cli.py` | MissionCache Auto CLI entry point |
 | `missioncache-dashboard/missioncache_dashboard/server.py` | FastAPI dashboard backend |
@@ -129,6 +129,10 @@ missioncache-db provides the `TaskDB` class with these key tables:
 ## Testing
 
 ```bash
+# Run a package's tests against the repo source (db, dashboard, auto, hooks)
+PYTHONPATH=missioncache-db:missioncache-dashboard python3.11 -m pytest missioncache-dashboard/tests -q
+# mcp-server tests need an env where mcp>=2 resolves, not a Python pinned to mcp 1.x
+
 # Run MCP server manually
 cd mcp-server && uvx --from . mcp-missioncache
 
@@ -146,7 +150,7 @@ missioncache-auto my-project --dry-run
 
 Two paths depending on context:
 
-**Public user install** (plugin core + dashboard + missioncache-auto + statusline, via PyPI; live once the missioncache-* packages publish at Task 74):
+**Public user install** (plugin core + dashboard + missioncache-auto + statusline, via PyPI):
 ```bash
 uvx missioncache-install
 # or
@@ -173,7 +177,7 @@ The `@local` suffix refers to the local marketplace that `missioncache-install -
 ## Dependencies
 
 - Python 3.11+
-- mcp>=1.0.0
+- mcp>=2.0.0,<3 (mcp-server, SDK 2.0 `MCPServer`)
 - pydantic>=2.0.0
 - pydantic-settings>=2.0.0
 - fastapi, uvicorn, duckdb (dashboard)
