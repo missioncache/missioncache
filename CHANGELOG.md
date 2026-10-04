@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- `/missioncache:lead` is now `/missioncache:lead-start`, and the new `/missioncache:lead-stop` ends the role. The old command is gone. (plugin)
+
 ## 2026-10-04.2
 
 Published package versions: missioncache-db 1.0.30, mcp-missioncache 1.0.36, missioncache-auto 1.0.8, missioncache-install 1.0.20. Claude Code plugin 1.0.33. missioncache-dashboard is unchanged.

@@ -67,10 +67,11 @@ if TYPE_CHECKING:
 
 # Canonical MissionCache commands. Order matches the existing Claude plugin layout.
 #
-# `lead` is deliberately ABSENT, and it is the only command that is. The role
-# is built out of four Claude-Code-only mechanisms: the session-title hook that
-# gives it its address, SendMessage for the notices, the loop machinery for its
-# tick, and the pid record its own liveness check reads. Outside Claude Code a
+# The lead commands (`CLAUDE_ONLY_COMMANDS`) are deliberately ABSENT, and they
+# are the only ones that are. The role is built out of four Claude-Code-only
+# mechanisms: the session-title hook that gives it its address, SendMessage
+# for the notices, the loop machinery for its tick, and the pid record its own
+# liveness check reads. Outside Claude Code a
 # designated lead has no address, no loop and no pid row, so `lead show` cannot
 # even see it. Rendering it for the other clients also produced a document that
 # contradicted itself, because the region resolving the session id is stripped
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
 CANONICAL_COMMANDS: tuple[str, ...] = (
     "load", "save", "new", "done", "prompts", "mode", "fork", "rename", "brief",
 )
+CLAUDE_ONLY_COMMANDS: tuple[str, ...] = ("lead-start", "lead-stop")
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
 OPENCODE_COMMANDS_DIR = Path.home() / ".config" / "opencode" / "commands"

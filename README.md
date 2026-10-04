@@ -44,7 +44,7 @@ It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time 
 ## Why MissionCache
 
 - **Your project keeps its memory.** Sessions end and context windows compact, and every compaction summary drops details, like a constraint or a "don't do X". Anthropic calls this [goal drift](https://claude.dev/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code/). The plan, your decisions and the next step stay in files, and `/missioncache:load` brings them back.
-- **One session keeps the others in view.** `/missioncache:lead` makes one session the lead. Every other session tells it when its project changes.
+- **One session keeps the others in view.** `/missioncache:lead-start` makes one session the lead, and `/missioncache:lead-stop` ends the role. Every other session tells it when its project changes.
 - **You see where the time went.** A local dashboard shows hours per project, per repo and per day, including Claude Code sessions outside any project.
 - **Tasks can run on their own.** `missioncache-auto` runs a project's tasks in parallel, in dependency order, and you can watch it live.
 
@@ -61,7 +61,7 @@ The installer detects the AI tools you have and asks, per tool, whether to regis
 | OpenCode | yes | `/missioncache-load`, `/missioncache-save`, ... | no |
 | VSCode (Copilot Chat) | yes | `/missioncache-load`, `/missioncache-save`, ... (macOS) | no |
 
-Every command except `/missioncache:lead` ships to all four tools. The lead needs Claude Code's session titles and cross-session messaging. How each tool is registered, and how to skip the commands for one of them, is in [docs/installation.md](docs/installation.md#other-tools-codex-opencode-vscode).
+Every command except the two lead commands ships to all four tools. The lead needs Claude Code's session titles and cross-session messaging. How each tool is registered, and how to skip the commands for one of them, is in [docs/installation.md](docs/installation.md#other-tools-codex-opencode-vscode).
 
 ## Install
 
@@ -284,7 +284,8 @@ Everything MissionCache stores stays on your machine. There is no account, no te
 | `/missioncache:prompts` | Regenerate optimized prompts for subtasks |
 | `/missioncache:mode` | Assign workflow mode (interactive or autonomous) to tasks |
 | `/missioncache:brief` | Cross-project brief: what is urgent, what is waiting, which sessions are live, and a schedule for today |
-| `/missioncache:lead` | Designate this session as the project-manager lead that keeps the brief live, or `stop` the role |
+| `/missioncache:lead-start` | Make this session the lead that keeps the brief live across every project |
+| `/missioncache:lead-stop` | End the lead role and its update loop |
 
 ## Documentation
 

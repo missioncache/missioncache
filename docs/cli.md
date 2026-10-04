@@ -32,7 +32,7 @@ Daily work goes through the slash commands and the [MCP tools](mcp-tools.md). Us
 | `stakeholder add\|remove\|list ...` | People on a project. |
 | `ticket add\|remove\|list ...` | Tickets linked to a project. |
 | `due-date <task> <YYYY-MM-DD\|none>` | Set or clear the project's due date. |
-| `lead set\|show\|stop` | Manage the lead session behind `/missioncache:lead`. |
+| `lead set\|show\|stop` | Manage the lead session behind `/missioncache:lead-start` and `/missioncache:lead-stop`. |
 | `agenda [--date today\|tomorrow\|YYYY-MM-DD] [--json] [--source NAME] [--no-cache]` | Print one day of your configured calendar. |
 | **Time** | |
 | `heartbeat <task> [session_id]` | Record activity on a project. |

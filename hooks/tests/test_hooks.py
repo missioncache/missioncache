@@ -3273,7 +3273,7 @@ class TestMirrorDrift:
 
 
 class TestLeadSessionTitle:
-    """Spec: the lead session (/missioncache:lead) carries the fixed title
+    """Spec: the lead session (/missioncache:lead-start) carries the fixed title
     `missioncache-lead` so working sessions can address it without a lookup.
     That title outranks any project binding and, like a project title, is
     emitted once and stays silent in the steady state."""

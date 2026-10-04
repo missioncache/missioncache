@@ -253,6 +253,20 @@ def test_real_command_source_renders_without_claude_machinery(name: str) -> None
 @pytest.mark.skipif(
     not REPO_COMMANDS_DIR.is_dir(), reason="repo command sources not available"
 )
+def test_every_command_is_either_shipped_or_claude_only() -> None:
+    """Each file in commands/ is a decision: it ships to the other tools, or it
+    is Claude Code only, like the two lead commands, which need session titles,
+    messaging and a loop. A new command that is neither fails here until someone
+    decides, and so would `lead.md` coming back next to its replacements."""
+    claude_only = set(command_clients.CLAUDE_ONLY_COMMANDS)
+    on_disk = {p.stem for p in REPO_COMMANDS_DIR.glob("*.md")}
+    assert on_disk == set(command_clients.CANONICAL_COMMANDS) | claude_only
+    assert not claude_only & set(command_clients.CANONICAL_COMMANDS)
+
+
+@pytest.mark.skipif(
+    not REPO_COMMANDS_DIR.is_dir(), reason="repo command sources not available"
+)
 def test_real_rename_render_keeps_a_working_resolution_path() -> None:
     """Stripping rename's Claude path must not leave it unable to identify the
     project. The other tools have no session binding, so the render has to ask

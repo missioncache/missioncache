@@ -110,7 +110,7 @@ def resolve_title(session_id: str, prompt_project: str | None = None) -> tuple[s
         read_session_title,
     )
 
-    # The lead session (/missioncache:lead) outranks any project binding: its
+    # The lead session (/missioncache:lead-start) outranks any project binding: its
     # fixed title is the address every working session sends change notices
     # to, so it must never be replaced by a project name. The recorded
     # "project" is the title itself, which keeps the steady-state comparison
