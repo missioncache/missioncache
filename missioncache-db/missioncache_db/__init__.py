@@ -6550,6 +6550,12 @@ def main():
                             f"{report['rolled_to_journal']} entries rolled to "
                             f"{journal_path.name}"
                         )
+                    if report["moved_to_journal"]:
+                        findings.append(
+                            "sections below Recent Changes moved to "
+                            f"{journal_path.name}: "
+                            + ", ".join(report["moved_to_journal"])
+                        )
                     if report["unbalanced_fence_line"]:
                         findings.append(
                             "unbalanced code fence at line "
@@ -6585,16 +6591,13 @@ def main():
                     # Copy 3 of the journal-first write. See the ledger in
                     # pm_items.py before changing the order here.
                     if journal_append:
-                        if journal_path.exists():
-                            journal_content = (
-                                journal_path.read_text(encoding="utf-8").rstrip("\n")
-                                + "\n\n"
-                            )
-                        else:
-                            journal_content = (
-                                context_health.journal_header(name) + "\n"
-                            )
-                        journal_content += journal_append
+                        journal_content = context_health.appended(
+                            journal_path.read_text(encoding="utf-8")
+                            if journal_path.exists()
+                            else None,
+                            context_health.journal_header(name),
+                            journal_append,
+                        )
                         journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
                         journal_tmp.write_text(journal_content, encoding="utf-8")
                         replace_with_retry(journal_tmp, journal_path)

@@ -36,11 +36,34 @@ RECENT_CHANGES_CAP = 12
 STALE_CONTEXT_DAYS = 14
 STALE_WAITING_DAYS = 7
 CONTEXT_SIZE_BUDGET_KB = 100
+# One section past this is where a file's weight usually sits (88KB of
+# Gotchas in a 214KB file), so it is named on its own, not just the total.
+SECTION_SIZE_BUDGET_KB = 15
 
 # Sections every context file is expected to carry. "Key Architectural
 # Decisions" and "Key Files" are canonical too but older files predate the
 # convention; the health check only flags the resume-critical core.
 CORE_SECTIONS = ["Description", "Gotchas", "Waiting on", "Next Steps", "Recent Changes"]
+
+# Every section name the context convention and the context templates
+# (templates/context.md, templates/task-context.md) define. Below Recent
+# Changes, any OTHER ``## `` section is output whose heading broke out of an
+# entry: health reports it and repair moves it to the journal. Keep this in
+# step with the templates, or a section they create gets moved.
+CANONICAL_SECTIONS = frozenset(CORE_SECTIONS) | {
+    "Definition of Done",
+    "Key People",
+    "Stakeholders",
+    "Tickets",
+    "Action Items",
+    "Key Architectural Decisions",
+    "Key Files",
+    "Notes",
+    "Discoveries",
+    "Task Overview",
+    "Dependencies",
+    "Sibling Gotchas",
+}
 
 # Plain text (not italics) to match the hand-written shape the convention
 # was lifted from.
@@ -207,6 +230,33 @@ def derive_journal_path(context_path: Path) -> Path:
     return context_path.with_name(context_path.stem + "-journal.md")
 
 
+def derive_archive_path(context_path: Path) -> Path:
+    """Archive filename for a context file: ``X-context.md`` -> ``X-archive.md``."""
+    journal = derive_journal_path(context_path)
+    return journal.with_name(journal.name[: -len("journal.md")] + "archive.md")
+
+
+def archive_header(project_name: str) -> str:
+    """Header written when the archive file is first created."""
+    return (
+        f"# {project_name} - Archive\n\n"
+        "Items moved out of the context file on request, oldest first. "
+        "Greppable, never read on resume.\n"
+    )
+
+
+def appended(existing: Optional[str], header: str, entry: str) -> str:
+    """The text of a journal or archive file after adding ``entry``.
+
+    ``existing`` is the file's current text, or None when it does not exist
+    yet, in which case it starts with ``header``. One blank line separates
+    entries. Pure: each writer keeps its own lock and atomic replace.
+    """
+    if existing is None:
+        return header + "\n" + entry
+    return existing.rstrip("\n") + "\n\n" + entry
+
+
 def journal_header(project_name: str) -> str:
     """Header written when the journal file is first created."""
     return (
@@ -218,13 +268,43 @@ def journal_header(project_name: str) -> str:
 
 
 def section_index(content: str) -> list[dict[str, Any]]:
-    """All ``## `` headings as ``{"name", "line"}`` (1-based), in order."""
+    """All ``## `` headings as ``{"name", "line", "size_bytes"}``, in order.
+
+    ``line`` is 1-based. ``size_bytes`` runs from the heading to the next
+    ``## `` heading or EOF, in UTF-8 bytes like the file size.
+    """
     masked = mask_fences(content)
+    matches = list(_H2_RE.finditer(masked))
     index = []
-    for match in _H2_RE.finditer(masked):
-        line = masked.count("\n", 0, match.start()) + 1
-        index.append({"name": match.group(1), "line": line})
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        index.append({
+            "name": match.group(1),
+            "line": masked.count("\n", 0, match.start()) + 1,
+            "size_bytes": len(content[match.start() : end].encode()),
+        })
     return index
+
+
+def stray_sections(content: str) -> list[dict[str, Any]]:
+    """``## `` sections below Recent Changes that the convention does not define.
+
+    Same entries as ``section_index``. Legacy ``## Recent Changes (<date>)``
+    siblings are history, not strays. Empty when there is no bare
+    ``## Recent Changes`` heading to be below.
+    """
+    index = section_index(content)
+    start = next(
+        (i for i, entry in enumerate(index) if entry["name"] == "Recent Changes"), None
+    )
+    if start is None:
+        return []
+    return [
+        entry
+        for entry in index[start + 1 :]
+        if entry["name"] not in CANONICAL_SECTIONS
+        and not entry["name"].startswith("Recent Changes")
+    ]
 
 
 def _section_span(content: str, name: str) -> Optional[tuple[int, int, int]]:
@@ -1079,6 +1159,22 @@ def parse_fork_parent(content: str) -> Optional[str]:
     return match.group(1) or match.group(2)
 
 
+def waiting_on_rows(content: str, now: Optional[datetime] = None) -> list[dict[str, Any]]:
+    """Waiting-on rows with ``age_days`` and ``stale`` added.
+
+    ``stale`` means older than ``STALE_WAITING_DAYS``. A Since cell that does
+    not parse gives ``age_days`` None and ``stale`` False, the same rows the
+    health check skips.
+    """
+    today = (now or datetime.now()).date()
+    rows = []
+    for row in parse_waiting_on(content):
+        since = parse_since_date(row["since"])
+        age = (today - since).days if since is not None else None
+        rows.append({**row, "age_days": age, "stale": age is not None and age > STALE_WAITING_DAYS})
+    return rows
+
+
 def build_digest(content: str, path: Path) -> dict[str, Any]:
     """The /missioncache:load digest: resume-critical slices, not the file.
 
@@ -1098,6 +1194,7 @@ def build_digest(content: str, path: Path) -> dict[str, Any]:
         "fork_of": _header_line(content, "**Fork of:**"),
         "related_projects": _header_line(content, "**Related projects:**"),
         "waiting_on": extract_section(content, "Waiting on"),
+        "waiting_on_rows": waiting_on_rows(content),
         "next_steps": extract_section(content, "Next Steps"),
         "recent_changes_last3": [
             f"{heading}\n{body.rstrip()}" for heading, body in subsections[:3]
@@ -1127,16 +1224,11 @@ def check_context_health(
         if age > STALE_CONTEXT_DAYS:
             warnings.append(f"Last Updated is {age} days old (> {STALE_CONTEXT_DAYS}d)")
 
-    for row in parse_waiting_on(content):
-        since = parse_since_date(row["since"])
-        if since is None:
-            continue
-        age = (now.date() - since).days
-        if age > STALE_WAITING_DAYS:
-            what = row["what"][:60]
+    for row in waiting_on_rows(content, now):
+        if row["stale"]:
             warnings.append(
-                f"Waiting on '{what}' ({row['who']}) is {age} days old "
-                f"(> {STALE_WAITING_DAYS}d)"
+                f"Waiting on '{row['what'][:60]}' ({row['who']}) is {row['age_days']} "
+                f"days old (> {STALE_WAITING_DAYS}d)"
             )
 
     try:
@@ -1147,6 +1239,13 @@ def check_context_health(
         warnings.append(
             f"context file is {file_size // 1024}KB (> {CONTEXT_SIZE_BUDGET_KB}KB budget)"
         )
+
+    for entry in section_index(content):
+        if entry["size_bytes"] > SECTION_SIZE_BUDGET_KB * 1024:
+            warnings.append(
+                f"## {entry['name']} is {_kb(entry['size_bytes'])} "
+                f"(> {SECTION_SIZE_BUDGET_KB}KB section budget)"
+            )
 
     for name in CORE_SECTIONS:
         if extract_section(content, name) is None:
@@ -1203,15 +1302,27 @@ def check_context_health(
             )
         else:
             remedy = (
-                "these are hand-written headings, not writer entries - move "
-                "them yourself, `repair` leaves them alone"
+                "these are hand-written headings, not writer entries, so "
+                "`repair` does not put them back into Recent Changes"
             )
         warnings.append(
             f"{len(orphans)} dated Recent Changes entries sit outside the section "
             f"(first at line {orphans[0]}) and never roll to the journal ({remedy})"
         )
 
+    for entry in stray_sections(content):
+        warnings.append(
+            f"'## {entry['name']}' ({_kb(entry['size_bytes'])}) sits below Recent "
+            "Changes and is not a context section (run `missioncache-db repair` "
+            "to move it to the journal)"
+        )
+
     return warnings
+
+
+def _kb(size_bytes: int) -> str:
+    """``"4KB"``, or ``"<1KB"`` for a small section."""
+    return f"{size_bytes // 1024}KB" if size_bytes >= 1024 else "<1KB"
 
 
 # ── repair ───────────────────────────────────────────────────────────────
@@ -1328,12 +1439,13 @@ def repair_content(content: str, journal_name: str) -> tuple[str, str | None, di
     unconditionally, so a file whose only problem is an overdue rollover is
     fixed too.
 
+    A ``## `` section below Recent Changes that the convention does not
+    define (``stray_sections``) is output whose heading broke out of an
+    entry. It moves to the journal whole, so nothing is lost, and is listed
+    in ``moved_to_journal``. A section above Recent Changes is never touched.
+
     Deliberately does NOT rewrite prose. An unclosed fence is REPORTED and
-    left alone: closing it guesses where the code ended. A stray
-    pasted-output section is neither reported nor removed - deciding a
-    section is junk is the user's call, and
-    ``update_context_file(sections_remove=[...])`` is the sanctioned way to
-    drop one.
+    left alone: closing it guesses where the code ended.
     """
     report = {
         "merged_sections": [],
@@ -1342,6 +1454,7 @@ def repair_content(content: str, journal_name: str) -> tuple[str, str | None, di
         "unbalanced_fence_line": unbalanced_fence_line(content),
         "orphans_left": 0,
         "skipped_for_fence": False,
+        "moved_to_journal": [],
     }
     if report["unbalanced_fence_line"] is not None:
         # Refuse to restructure a file whose fence state is unknown. Every
@@ -1365,8 +1478,26 @@ def repair_content(content: str, journal_name: str) -> tuple[str, str | None, di
     # Changes`` heading to move anything into, and hand-written dated
     # headings that _WRITER_H3_RE deliberately does not claim.
     report["orphans_left"] = len(orphaned_recent_changes(content))
+    # After the orphans went back, what is left under a stray heading is the
+    # pasted output itself.
+    moved = []
+    for entry in stray_sections(content):
+        content, body = remove_section(content, entry["name"])
+        if body is None:
+            continue
+        report["moved_to_journal"].append(entry["name"])
+        # Bold, not a `###` heading: journal headings are dated entries.
+        if body.strip():
+            moved.append(
+                f"**Moved out of the context file by repair: {entry['name']}**\n\n"
+                f"{body.strip()}\n"
+            )
     content, journal_append, rolled = split_recent_changes_for_cap(
         content, journal_name
     )
     report["rolled_to_journal"] = rolled
+    if moved:
+        journal_append = "\n".join(
+            part.rstrip("\n") + "\n" for part in [journal_append, *moved] if part
+        )
     return content, journal_append, report

@@ -140,14 +140,15 @@ class TestWhatItRepairs:
         assert "stranded Recent Changes entries moved back" in capsys.readouterr().out
         assert ch.orphaned_recent_changes((d / "p-context.md").read_text()) == []
 
-    def test_the_stray_section_is_left_for_the_user(self, monkeypatch, tmp_path):
-        # Deciding a section is junk is the user's call; repair recovers the
-        # entries and leaves the prose for `sections_remove`.
+    def test_the_stray_section_moves_to_the_journal(self, monkeypatch, tmp_path, capsys):
+        # Repair recovers the entries first, then moves the pasted prose under
+        # the stray heading to the journal, where nothing is lost.
         d = _write(tmp_path, "p", STRANDED)
         _run(monkeypatch, tmp_path, "--apply")
+        assert "moved to p-journal.md: Updated: p" in capsys.readouterr().out
         content = (d / "p-context.md").read_text()
-        assert "## Updated: p" in content
-        assert "a pasted save report" in content
+        assert "## Updated: p" not in content
+        assert "a pasted save report" in (d / "p-journal.md").read_text()
 
     def test_a_healthy_project_reports_nothing(self, monkeypatch, tmp_path, capsys):
         healthy = (

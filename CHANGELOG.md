@@ -14,6 +14,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 - `missioncache-auto --effort <level>` sets Claude's effort for every task. (missioncache-auto)
 - Sequential runs honor `--timeout`. It used to apply only to parallel runs. (missioncache-auto)
 - `/missioncache:fork` splits a parent through `move_to_project` instead of hand edits. (plugin)
+- A compaction leaves one line in Recent Changes. The recent turns it saves go to the project's journal instead. (plugin)
+- `missioncache-db health` names any section over 15KB, and sections pasted below Recent Changes. `repair --apply` moves those to the journal. (missioncache-db)
+- `/missioncache:save` lists stale Waiting-on rows together and drops the ones you pick in one step. (plugin, missioncache-db)
+- `bullets_remove` can archive an item to `<name>-archive.md`, and `/missioncache:save` offers it when Gotchas grow too big. (plugin, mcp-missioncache)
 
 ## 2026-10-04
 

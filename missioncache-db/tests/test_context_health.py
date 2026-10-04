@@ -305,6 +305,7 @@ class TestBuildDigest:
         digest = ch.build_digest(content, f)
         assert set(digest) == {
             "last_updated", "hub", "fork_of", "related_projects", "waiting_on",
+            "waiting_on_rows",
             "next_steps", "recent_changes_last3", "section_index",
             "file_size_bytes", "health_warnings",
         }
@@ -337,8 +338,9 @@ class TestBuildDigest:
     def test_section_index_one_based_lines(self, tmp_path):
         content = "# X\n\n## Description\n\nd\n\n## Next Steps\n\n1. a\n"
         digest = ch.build_digest(content, tmp_path / "x.md")
-        assert digest["section_index"][0] == {"name": "Description", "line": 3}
-        assert digest["section_index"][1] == {"name": "Next Steps", "line": 7}
+        index = digest["section_index"]
+        assert (index[0]["name"], index[0]["line"]) == ("Description", 3)
+        assert (index[1]["name"], index[1]["line"]) == ("Next Steps", 7)
 
     def test_large_content_handled(self, tmp_path):
         # Larger than the 256KB Read-tool cap - the whole point of the digest.
@@ -1025,12 +1027,27 @@ class TestRepairContent:
         assert out.count("## Key Files") == 1
         assert "| `a.py` | does a |" in out and "| `b.py` | does b |" in out
 
-    def test_the_stray_prose_section_is_left_for_the_user_to_remove(self):
-        # Repair fixes structure. Deciding a section is junk is the user's
-        # call, made through update_context_file(sections_remove=[...]).
-        out, _, _ = ch.repair_content(self.DAMAGED, "p-journal.md")
-        assert "## Updated: p" in out
-        assert "a pasted save report" in out
+    def test_a_stray_section_below_recent_changes_moves_to_the_journal(self):
+        """A heading that broke out of an entry leaves pasted output as its
+        own section. Repair moves it whole to the journal, so nothing is
+        lost, and the stranded entries under it still come back first."""
+        out, journal, report = ch.repair_content(self.DAMAGED, "p-journal.md")
+        assert "## Updated: p" not in out
+        assert "a pasted save report" not in out
+        assert report["moved_to_journal"] == ["Updated: p"]
+        assert "a pasted save report" in journal
+        assert report["reabsorbed_entries"] == 2
+        assert "| `a.py` | does a |" in out, "Key Files is a context section and stays"
+
+    def test_a_custom_section_above_recent_changes_is_never_moved(self):
+        content = (
+            "# P\n\n## Rollout plan\n\nkeep me\n\n"
+            "## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n"
+            "## Key Architectural Decisions\n\n- y\n"
+        )
+        out, _, report = ch.repair_content(content, "p-journal.md")
+        assert report["moved_to_journal"] == []
+        assert out == content
 
     def test_an_unbalanced_fence_is_reported_and_not_edited(self):
         content = "# P\n\n## Recent Changes\n\n### 2026-09-01 10:00\n\n- x\n\n```\ncut...\n"
@@ -1239,11 +1256,13 @@ class TestOrphanWarningOnlyPromisesWhatRepairDoes:
         warning = next(
             w for w in ch.check_context_health(content, path) if "outside the section" in w
         )
-        assert "repair` leaves them alone" in warning
-        # And repair genuinely does not move it.
-        out, _, report = ch.repair_content(content, "p-journal.md")
+        assert "does not put them back into Recent Changes" in warning
+        # And repair genuinely does not reabsorb it. The section it sits in is
+        # not a context section, so the whole of it moves to the journal.
+        out, journal, report = ch.repair_content(content, "p-journal.md")
         assert report["reabsorbed_entries"] == 0
-        assert "## Some Event" in out
+        assert "## Some Event" not in out
+        assert "### 2026-08-14 sync notes" in journal and "prose" in journal
 
     def test_a_writer_shaped_orphan_is_promised_to_repair(self, tmp_path):
         content = (
@@ -1481,3 +1500,57 @@ class TestExtensionOutlineParsers:
         rows = waiting_on_with_lines(content)
         assert rows == [{"line": 5, "what": "a", "who": "b", "since": "c", "gates": "d"}]
         assert [{k: v for k, v in r.items() if k != "line"} for r in rows] == parse_waiting_on(content)
+
+
+class TestSectionSizes:
+    """Health names the section that carries the weight, not only the file."""
+
+    def test_section_index_reports_each_section_size(self):
+        content = "# P\n\n## Gotchas\n\n- a\n\n## Next Steps\n\n1. go\n"
+        index = ch.section_index(content)
+        assert [e["size_bytes"] for e in index] == [
+            len("## Gotchas\n\n- a\n\n"),
+            len("## Next Steps\n\n1. go\n"),
+        ]
+
+    def test_an_oversized_section_is_named_with_its_size(self, tmp_path):
+        big = "\n".join(f"- gotcha {i} " + "x" * 200 for i in range(100))
+        content = _context("", _rc_subsections(1)).replace(
+            "## Gotchas\n", f"## Gotchas\n\n{big}\n", 1
+        )
+        warnings = ch.check_context_health(content, tmp_path / "x.md", now=TestHealthCheck.NOW)
+        assert any(w.startswith("## Gotchas is 20KB") for w in warnings), warnings
+
+    def test_a_small_file_has_no_section_warning(self, tmp_path):
+        content = _context("", _rc_subsections(1))
+        warnings = ch.check_context_health(content, tmp_path / "x.md", now=TestHealthCheck.NOW)
+        assert not any("section budget" in w for w in warnings)
+
+    def test_a_stray_section_is_reported_with_its_size(self, tmp_path):
+        content = _context("", _rc_subsections(1)) + "\n## Proposed Pull Request\n\npasted\n"
+        warnings = ch.check_context_health(content, tmp_path / "x.md", now=TestHealthCheck.NOW)
+        assert any("'## Proposed Pull Request' (<1KB) sits below Recent Changes" in w for w in warnings), warnings
+
+
+class TestWaitingOnRows:
+    """The digest hands save and load the age of each row, so neither one
+    recomputes staleness from the table text."""
+
+    NOW = datetime(2026, 7, 11, 12, 0)
+
+    def test_rows_carry_age_and_stale(self):
+        content = _context(
+            "| Fresh reply | Alex | 2026-07-10 | rollout |\n"
+            "| Old reply | Robin | 2026-07-03 | review |\n"
+            "| Someday | Sam | soon | nothing |\n"
+        )
+        rows = {r["what"]: r for r in ch.waiting_on_rows(content, self.NOW)}
+        assert (rows["Fresh reply"]["age_days"], rows["Fresh reply"]["stale"]) == (1, False)
+        assert (rows["Old reply"]["age_days"], rows["Old reply"]["stale"]) == (8, True)
+        assert (rows["Someday"]["age_days"], rows["Someday"]["stale"]) == (None, False)
+
+    def test_the_digest_carries_the_rows(self, tmp_path):
+        content = _context("| Old reply | Robin | 2026-07-03 | review |\n")
+        digest = ch.build_digest(content, tmp_path / "x.md")
+        (row,) = digest["waiting_on_rows"]
+        assert row["who"] == "Robin" and row["stale"] is True
