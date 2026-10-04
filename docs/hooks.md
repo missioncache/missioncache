@@ -180,7 +180,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 **Re-emit only when the computed address changes.** The hook records what it applied in `~/.claude/hooks/state/session-title/<session-id>.json` as `{sessionId, title, projectName, updated}`, recomputes the title every prompt, and emits only on a difference. So:
 
 - Steady state (same project, same peers) is silent, which is what lets a user's manual `/rename` survive day to day.
-- A mid-session `/missioncache:load other-project` retitles on the next prompt, because the computation changed.
+- `/missioncache:load <project>` and `/missioncache:new <project>` retitle in the same prompt: the hook reads the name from the command, because the binding itself is written only while the command runs. It does so only for an exact active project (load) or a free name (new). A load without a name, or with a name it cannot match, retitles on the next prompt from the binding.
 - A stale suffix self-heals: a session left holding `<project>-2` after the plain-name holder died drops back to `<project>` on its next prompt. Without this, suffixes only accumulate (a real machine reached `-3` with zero live peers) and the recorded address stops matching any `ListAgents` row.
 - The accepted narrow cost: a manual `/rename` is overwritten when the peer set changes (a collision appears or a suffix frees up), not only on rebind. An unaddressable session fails every notify; a clobbered rename costs one repeated `/rename`.
 

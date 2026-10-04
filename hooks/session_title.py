@@ -31,6 +31,7 @@ Three behaviours worth knowing:
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -41,7 +42,45 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
     sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 
-def resolve_title(session_id: str) -> tuple[str, str] | None:
+# `/missioncache:load <name>` and `/missioncache:new <name>` name their project in
+# the prompt. The binding they create is written while the command runs, after
+# this hook has already fired, so without reading the argument the title would
+# only follow on the next prompt.
+# The whole argument has to be the name (new may add `--jira <key>`): new is
+# often given a description, and its first word is not the project.
+_BINDING_COMMAND_RE = re.compile(r"^/missioncache:(load|new)\s+(\S+)(?:\s+--jira\s+\S+)?$")
+
+
+def project_from_prompt(prompt: str) -> str | None:
+    """Project a load or new command in ``prompt`` is about to bind, or None.
+
+    Only an exact name counts. A load needs the project to be active, and a new
+    needs the name to be free, since an existing one makes the command stop and
+    ask. Anything else (a picker, a fuzzy name, a description) falls back to
+    titling from the binding on the next prompt.
+    """
+    match = _BINDING_COMMAND_RE.match(prompt.strip())
+    if not match:
+        return None
+    command, name = match.groups()
+    from missioncache_db import (  # type: ignore[import-not-found]
+        MISSIONCACHE_ROOT,
+        validate_task_name,
+    )
+
+    try:
+        validate_task_name(name)
+    except ValueError:
+        return None
+
+    active = (MISSIONCACHE_ROOT / "active" / name).is_dir()
+    if command == "load":
+        return name if active else None
+    taken = active or (MISSIONCACHE_ROOT / "completed" / name).is_dir()
+    return None if taken else name
+
+
+def resolve_title(session_id: str, prompt_project: str | None = None) -> tuple[str, str] | None:
     """``(title, project_name)`` to apply to ``session_id``, or None for nothing.
 
     The title is recomputed every prompt and emitted only when it DIFFERS from
@@ -51,7 +90,7 @@ def resolve_title(session_id: str) -> tuple[str, str] | None:
       recorded one -> silent. A manual ``/rename`` therefore survives, because
       nothing is re-asserted while the environment is unchanged.
     * Rebind: ``/missioncache:load other-project`` changes the computation ->
-      re-title.
+      re-title, in the same prompt when ``prompt_project`` names it.
     * Self-heal: a session left holding ``<project>-2`` after the peer that
       owned the plain name died re-titles to the plain name on its next prompt.
       Without this, suffixes only ever accumulate (a real machine reached ``-3``
@@ -82,7 +121,7 @@ def resolve_title(session_id: str) -> tuple[str, str] | None:
             return None
         return LEAD_SESSION_TITLE, LEAD_SESSION_TITLE
 
-    project_name = bound_project_for_session(session_id)
+    project_name = prompt_project or bound_project_for_session(session_id)
 
     # Demotion. `missioncache-lead` is a reserved address, not a name this
     # session gets to keep: every working session sends its change notices
@@ -136,7 +175,15 @@ def main() -> None:
     try:
         from missioncache_db import write_session_title  # type: ignore[import-not-found]
 
-        resolved = resolve_title(session_id)
+        prompt = data.get("prompt", "")
+        if isinstance(prompt, list):
+            prompt = " ".join(
+                b.get("text", "") for b in prompt if isinstance(b, dict) and b.get("type") == "text"
+            )
+        if not isinstance(prompt, str):
+            prompt = ""
+
+        resolved = resolve_title(session_id, project_from_prompt(prompt))
         if resolved is None:
             return
         title, project_name = resolved

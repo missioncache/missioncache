@@ -2835,7 +2835,12 @@ class TestSessionTitleHook:
         db_path = home / ".claude" / "hooks-state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", home / ".missioncache")
         return db_path
+
+    @staticmethod
+    def _project_dir(home: Path, name: str, where: str = "active") -> None:
+        (home / ".missioncache" / where / name).mkdir(parents=True)
 
     @staticmethod
     def _bind(db_path: Path, session_id: str, project_name: str, alive: bool = True):
@@ -2924,6 +2929,76 @@ class TestSessionTitleHook:
             monkeypatch, capsys, {"session_id": "sid-a", "prompt": "/missioncache:load x"}
         )
         assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_load_with_a_name_titles_in_the_same_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The load command binds the session while it runs, after this hook
+        fired. Its argument names the project, so the title must not wait for
+        the next prompt."""
+        self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "demo-proj")
+        out = self._run(
+            monkeypatch, capsys,
+            {"session_id": "sid-a", "prompt": "/missioncache:load demo-proj"},
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj"
+
+    def test_load_moves_the_title_off_the_old_project_at_once(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "other-proj")
+        self._bind(db, "sid-a", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        out = self._run(
+            monkeypatch, capsys,
+            {"session_id": "sid-a", "prompt": "/missioncache:load other-proj"},
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "other-proj"
+
+    def test_load_takes_a_suffix_when_a_live_peer_holds_the_name(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "demo-proj")
+        self._bind(db, "sid-a", "demo-proj")
+        self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": "hi"})
+        out = self._run(
+            monkeypatch, capsys,
+            {"session_id": "sid-b", "prompt": "/missioncache:load demo-proj"},
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-proj-2"
+
+    def test_new_with_a_free_name_titles_in_the_same_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        self._redirect_state(monkeypatch, tmp_path)
+        out = self._run(
+            monkeypatch, capsys,
+            {"session_id": "sid-a", "prompt": "/missioncache:new fresh-proj --jira PROJ-1"},
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "fresh-proj"
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "/missioncache:load missing-proj",  # not an active project
+            "/missioncache:load",  # no name: the command shows a picker
+            "/missioncache:new done-proj",  # taken: the command stops to ask
+            "/missioncache:new add caching layer",  # a description, not a name
+            "/missioncache:new Bad_Name",  # a name the command rejects
+            "load demo-proj",  # not the command
+        ],
+    )
+    def test_no_title_from_a_name_the_command_will_not_bind(
+        self, tmp_path, monkeypatch, capsys, prompt
+    ):
+        """Only an exact, usable name counts. Everything else waits for the
+        binding the command writes, and titles on the next prompt."""
+        self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "done-proj", where="completed")
+        assert self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": prompt}) is None
 
     def test_second_live_session_on_one_project_gets_a_suffix(
         self, tmp_path, monkeypatch, capsys
