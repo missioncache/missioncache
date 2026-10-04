@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-04.4
+
+Published package versions: Claude Code plugin 1.0.35. No PyPI package changed.
+
 - `/missioncache:lead-start` renames the session to `missioncache-lead` right away, and `/missioncache:lead-stop` gives the name back, without waiting for another prompt. (plugin)
 
 ## 2026-10-04.3
