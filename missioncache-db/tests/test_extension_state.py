@@ -53,6 +53,22 @@ class TestExtensionState:
         assert proj["completion_pct"] == 50
         assert proj["context_saved_at"] is not None
 
+    def test_progress_skips_quoted_and_fenced_checkboxes(self, db, tmp_path):
+        """A tasks file shows its own checklist format in prose and code. Those
+        examples are not tasks, so only the real checklist lines count."""
+        task = _project_with_files(db, tmp_path, "ext-q", "/tmp/ext-q-repo")
+        (tmp_path / task.full_path / "ext-q-tasks.md").write_text(
+            "# T\n\n## Task Numbering Format\n\n"
+            "- Flat: `- [ ] 1. Task description`\n"
+            "- Done: `- [x] 2. Shipped`\n\n"
+            "```\n- [ ] 3. inside a fence\n```\n\n"
+            "## Phase 1\n\n- [x] 1. done thing\n- [ ] 2. open thing\n- [ ] 3. another\n",
+            encoding="utf-8",
+        )
+        (proj,) = db.get_extension_state()["projects"]
+        assert proj["completed_count"] == 1
+        assert proj["total_count"] == 3
+
     def test_dir_match_resolves_git_root(self, db, tmp_path):
         repo = tmp_path / "repo-root"
         (repo / ".git").mkdir(parents=True)

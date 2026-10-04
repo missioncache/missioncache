@@ -171,9 +171,9 @@ def _checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict
 
     Reproduces exactly the two behaviors of the dashboard's full progress
     parser that these four fields depend on, and nothing else. It is NOT
-    ``TaskDB.parse_missioncache_progress``: that one counts with an unanchored
-    regex, returns ``has_docs: False`` rather than zeros, and has no notion of
-    numbered items, so it cannot produce ``next_up``. Zeros on any miss.
+    ``TaskDB.parse_missioncache_progress``: that one returns ``has_docs: False``
+    rather than zeros, and has no notion of numbered items, so it cannot produce
+    ``next_up``. Zeros on any miss.
     """
     zeros = {"completed_count": 0, "total_count": 0, "completion_pct": 0, "next_up": None}
     if not task_full_path:

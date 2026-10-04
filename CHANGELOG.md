@@ -8,6 +8,13 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- Progress counts ignore checkboxes quoted in prose or code, like a tasks file's format examples. (missioncache-db)
+- `tasks_remove` can remove an unnumbered checklist line, such as an old template's `- [ ] Tests pass`. (plugin, mcp-missioncache)
+- `missioncache-auto -v minimal <project>` works. The spaced form used to fail. (missioncache-auto)
+- `missioncache-auto --effort <level>` sets Claude's effort for every task. (missioncache-auto)
+- Sequential runs honor `--timeout`. It used to apply only to parallel runs. (missioncache-auto)
+- `/missioncache:fork` splits a parent through `move_to_project` instead of hand edits. (plugin)
+
 ## 2026-10-04
 
 Published package versions: mcp-missioncache 1.0.34, missioncache-auto 1.0.6, missioncache-dashboard 1.0.23, missioncache-install 1.0.18. Claude Code plugin 1.0.31. missioncache-db is unchanged.

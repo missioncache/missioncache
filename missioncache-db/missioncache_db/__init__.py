@@ -4538,10 +4538,14 @@ class TaskDB:
         )
         last_updated = updated_match.group(1) if updated_match else None
 
-        # Count checkboxes
-        completed_items = len(re.findall(r"- \[x\]", content, re.IGNORECASE))
-        pending_items = len(re.findall(r"- \[ \]", content))
-        total_items = completed_items + pending_items
+        # Count checklist lines only: a checkbox quoted in prose, backticks or a
+        # fenced block (the format examples in a tasks file) is not a task.
+        from missioncache_db import context_health
+
+        items = context_health.checklist_items(content)
+        completed_items = sum(1 for item in items if item["checked"])
+        pending_items = len(items) - completed_items
+        total_items = len(items)
 
         # Calculate completion percentage
         completion_pct = (
