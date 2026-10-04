@@ -1087,23 +1087,14 @@ def get_version_info(running: str) -> tuple[str, str]:
         except Exception:
             pass
 
-    # The arrow always points at the newer version. In the standard case
-    # (running < latest) that's running -> latest+age. In the canary /
-    # cache-lag case (running > latest, e.g. a self-built or pre-release
-    # session ahead of the GitHub-tagged release), the display flips so
-    # the arrow still points at the newer side: latest -> running. Age
-    # only attaches to GitHub's tagged latest (the only side with a
-    # known release date) and is dropped in the flipped case.
-    if latest_version:
-        latest_tup = _parse_semver(latest_version)
-        running_tup = _parse_semver(running)
-        if latest_tup > running_tup:
-            age = ""
-            if latest_date:
-                age = f" ({(date.today() - latest_date.astimezone().date()).days}d)"
-            return running, f"v{latest_version}{age}"
-        if running_tup > latest_tup:
-            return latest_version, f"v{running}"
+    # Only a newer tagged release gets an arrow. A running version ahead of
+    # the cached latest usually means the cache predates a release (it lives
+    # 6h), so it reads as up to date rather than as an upgrade.
+    if latest_version and _parse_semver(latest_version) > _parse_semver(running):
+        age = ""
+        if latest_date:
+            age = f" ({(date.today() - latest_date.astimezone().date()).days}d)"
+        return running, f"v{latest_version}{age}"
     return running, ""
 
 

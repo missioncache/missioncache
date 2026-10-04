@@ -64,8 +64,7 @@ class TestGetVersionInfo:
     """The arrow always points at the newer version.
 
     Standard case (running < latest): running -> latest+age.
-    Canary/cache-lag case (running > latest): latest -> running.
-    Equal: no arrow.
+    Equal, or running ahead of the cached latest: no arrow.
     """
 
     def _seed_cache(self, tmp_path, monkeypatch, latest_version: str):
@@ -87,19 +86,12 @@ class TestGetVersionInfo:
         assert running == "2.1.121"
         assert upgrade.startswith("v2.1.122")
 
-    def test_running_ahead_of_latest_flips_so_arrow_points_at_newer(
-        self, tmp_path, monkeypatch
-    ):
-        """Bug from screenshot: running 2.1.122, GitHub latest 2.1.121.
-        Pre-fix this rendered as ``v2.1.122 -> v2.1.121`` with the arrow
-        pointing at the OLDER version. Post-fix the display flips so the
-        arrow points at the newer (running) version: ``v2.1.121 -> v2.1.122``.
-        Age suffix is dropped because it only applies to GitHub's tagged
-        release date, not to the running session's version."""
-        self._seed_cache(tmp_path, monkeypatch, "2.1.121")
-        left, right = mod.get_version_info("2.1.122")
-        assert left == "2.1.121"
-        assert right == "v2.1.122"
+    def test_running_ahead_of_cached_latest_hides_arrow(self, tmp_path, monkeypatch):
+        """Reported bug: the cache said 2.1.288 while 2.1.289 was running and
+        released, and the statusline showed ``v2.1.288 -> v2.1.289``. Being
+        ahead of the cache is not an upgrade, so no arrow."""
+        self._seed_cache(tmp_path, monkeypatch, "2.1.288")
+        assert mod.get_version_info("2.1.289") == ("2.1.289", "")
 
     def test_running_equals_latest_hides_arrow(self, tmp_path, monkeypatch):
         """Up-to-date sessions show no upgrade indicator."""
