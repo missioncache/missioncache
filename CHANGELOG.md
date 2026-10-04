@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-04.3
+
+Published package versions: missioncache-install 1.0.21. Claude Code plugin 1.0.34. missioncache-db, mcp-missioncache, missioncache-auto and missioncache-dashboard are unchanged.
+
 - `/missioncache:lead` is now `/missioncache:lead-start`, and the new `/missioncache:lead-stop` ends the role. The old command is gone. (plugin)
 - Hooks start with `uv run --quiet --no-project --frozen`, which the Claude plugin directory requires. Nothing changes in how they run. (plugin, missioncache-install)
 
