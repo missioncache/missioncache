@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-04.1
+
+Published package versions: missioncache-db 1.0.29, mcp-missioncache 1.0.35, missioncache-auto 1.0.7, missioncache-install 1.0.19. Claude Code plugin 1.0.32. missioncache-dashboard is unchanged.
+
 - Progress counts ignore checkboxes quoted in prose or code, like a tasks file's format examples. (missioncache-db)
 - `tasks_remove` can remove an unnumbered checklist line, such as an old template's `- [ ] Tests pass`. (plugin, mcp-missioncache)
 - `missioncache-auto -v minimal <project>` works. The spaced form used to fail. (missioncache-auto)
