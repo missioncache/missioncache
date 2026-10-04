@@ -142,6 +142,52 @@ def sidecar_locks(paths: Iterable[Path]) -> Iterator[None]:
         yield
 
 
+# The files in a project directory that writers lock through their
+# ``<file>.lock`` sidecar. Journal and archive files are written only while
+# the context lock is held, so they carry no lock of their own.
+_PROJECT_LOCKED_SUFFIXES = ("-context.md", "-tasks.md", "-plan.md")
+_PROJECT_LOCKED_LEGACY = ("context.md", "tasks.md", "plan.md")
+
+
+@contextlib.contextmanager
+def project_dir_locked(project_dir: Path) -> Iterator[None]:
+    """Keep a project's writers out while its directory is moved or renamed.
+
+    Takes the same sidecar locks every writer takes, in ``sidecar_locks``
+    order, so it cannot deadlock against ``move_to_project``. On POSIX they
+    are held for the whole block: a writer queued on the old path gets the
+    lock after the move and then fails on a missing file, instead of losing
+    its ``os.replace`` halfway. Windows will not rename a directory while
+    any file in it is open, our own lock files included, so there the locks
+    only drain the writers already running and are released before the
+    move. A writer that starts in that gap holds a file open, which makes
+    Windows refuse the move (retried by ``move_with_retry``) rather than
+    break the write.
+    """
+    files = sorted(
+        path
+        for path in project_dir.glob("*.md")
+        if path.name.endswith(_PROJECT_LOCKED_SUFFIXES)
+        or path.name in _PROJECT_LOCKED_LEGACY
+    )
+    if _HAVE_FCNTL:
+        with sidecar_locks(files):
+            yield
+    else:
+        with sidecar_locks(files):
+            pass
+        yield
+
+
+def move_with_retry(src: Path, dst: Path, attempts: int = 8) -> None:
+    """``shutil.move`` with the Windows sharing-violation retry of
+    ``replace_with_retry``: a writer holding a file open in ``src`` blocks a
+    directory move there until it closes."""
+    import shutil
+
+    _retry_sharing_violation(lambda: shutil.move(str(src), str(dst)), attempts)
+
+
 def replace_with_retry(src: "str | Path", dst: "str | Path", attempts: int = 8) -> None:
     """``os.replace`` with a bounded retry on Windows sharing violations.
 
@@ -164,12 +210,17 @@ def replace_with_retry(src: "str | Path", dst: "str | Path", attempts: int = 8) 
     ``missioncache_install/fs_utils.py`` ``_replace_with_retry`` (the
     installer runs before missioncache-db is installed).
     """
+    _retry_sharing_violation(lambda: os.replace(src, dst), attempts)
+
+
+def _retry_sharing_violation(op, attempts: int) -> None:
+    """Run ``op``, retrying a Windows ``PermissionError`` with backoff."""
     if attempts < 1:
         raise ValueError("attempts must be >= 1")
     delay = 0.01
     for attempt in range(attempts):
         try:
-            os.replace(src, dst)
+            op()
             return
         except PermissionError:
             # Retry is a Windows sharing-violation workaround. On POSIX a

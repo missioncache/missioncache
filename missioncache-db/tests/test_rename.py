@@ -92,6 +92,19 @@ def _seed_active_project(
 
 
 class TestRenameHappyPath:
+    def test_lock_sidecars_follow_their_files(self, env):
+        """Writers lock <file>.lock next to the file. A renamed file whose
+        old .lock stays behind leaves a stray lock for a file that is gone."""
+        db, orbit_root, _ = env
+        tid, old_dir = _seed_active_project(db, orbit_root, "kafka-consumer-fix")
+        (old_dir / "kafka-consumer-fix-context.md.lock").write_text("")
+
+        db.rename_task(tid, "consumer-resilience")
+
+        new_dir = orbit_root / "active" / "consumer-resilience"
+        assert (new_dir / "consumer-resilience-context.md.lock").exists()
+        assert not (new_dir / "kafka-consumer-fix-context.md.lock").exists()
+
     def test_renames_dir_files_h1_and_db_row(self, env):
         db, orbit_root, _ = env
         tid, old_dir = _seed_active_project(db, orbit_root, "kafka-consumer-fix")

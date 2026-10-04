@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- Completing, reopening or renaming a project waits for a write in progress instead of breaking it. (missioncache-db, plugin)
+- `missioncache-install --update` exits 1 when a component fails, like an install does. (missioncache-install)
+- A parallel `missioncache-auto` run with no terminal stops with exit 3 and asks for `--yes`, instead of exiting 0 having done nothing. (missioncache-auto)
+
 ## 2026-10-04.1
 
 Published package versions: missioncache-db 1.0.29, mcp-missioncache 1.0.35, missioncache-auto 1.0.7, missioncache-install 1.0.19. Claude Code plugin 1.0.32. missioncache-dashboard is unchanged.

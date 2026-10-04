@@ -96,7 +96,7 @@ from glob import glob as glob_files
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
-from . import proc  # portable process backend
+from . import filelock, proc  # filelock: project dir locks; proc: portable process backend
 from .filelock import replace_with_retry  # noqa: F401  (re-export; impl lives with the lock)
 
 logger = logging.getLogger(__name__)
@@ -2975,8 +2975,6 @@ class TaskDB:
         historical MCP behavior): every consumer resolves it by searching
         active/ then completed/.
         """
-        import shutil
-
         task = self.get_task(task_id)
         if not task:
             return {
@@ -2993,8 +2991,10 @@ class TaskDB:
             }
 
         previous_status = task.status
-        updated = self.update_task_status(task_id, "completed")
 
+        # Files first, status second, the order reopen_project and
+        # rename_task already use: a move that fails leaves the project
+        # active with its files in active/, not completed with them there.
         files_moved = False
         if move_files and task.task_type == "coding":
             # Canonical layout first (active/<name> - what create_missioncache_files
@@ -3008,8 +3008,11 @@ class TaskDB:
             if source is not None:
                 dest = MISSIONCACHE_ROOT / "completed" / task.name
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(dest))
+                with filelock.project_dir_locked(source):
+                    filelock.move_with_retry(source, dest)
                 files_moved = True
+
+        updated = self.update_task_status(task_id, "completed")
 
         time_total = self.get_task_time(task_id)
         result: Dict[str, Any] = {
@@ -3054,8 +3057,6 @@ class TaskDB:
         flip status back. Symmetric counterpart of complete_project and the
         shared primitive under the MCP reopen_task tool and the dashboard's
         reopen endpoint."""
-        import shutil
-
         task = self.get_task(task_id)
         if not task:
             return {
@@ -3076,7 +3077,8 @@ class TaskDB:
             if source.exists():
                 dest = MISSIONCACHE_ROOT / "active" / task.name
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(dest))
+                with filelock.project_dir_locked(source):
+                    filelock.move_with_retry(source, dest)
 
         self.reopen_task(task_id)
         return {
@@ -3226,49 +3228,55 @@ class TaskDB:
                         f"'{old_dir}'. Resolve manually before renaming."
                     )
 
-            old_dir.rename(new_dir)
-            fs_renamed = True
+            with filelock.project_dir_locked(old_dir):
+                filelock.move_with_retry(old_dir, new_dir)
+                fs_renamed = True
 
-            # File renames inside. Prompts subdir uses unprefixed names
-            # (task-NN-prompt.md) so it stays untouched.
-            for suffix in ("plan", "context", "tasks", "iteration-log"):
-                old_file = new_dir / f"{old_name}-{suffix}.md"
-                new_file = new_dir / f"{new_name}-{suffix}.md"
-                if old_file.exists():
-                    old_file.rename(new_file)
-                    renamed_pairs.append((new_file, old_file))
-                    files_renamed.append(new_file.name)
+                # File renames inside. Prompts subdir uses unprefixed names
+                # (task-NN-prompt.md) so it stays untouched. A file's
+                # ``.lock`` sidecar moves with it, or the old one is left
+                # behind next to a file that no longer exists.
+                for suffix in ("plan", "context", "tasks", "iteration-log"):
+                    old_file = new_dir / f"{old_name}-{suffix}.md"
+                    new_file = new_dir / f"{new_name}-{suffix}.md"
+                    if old_file.exists():
+                        old_file.rename(new_file)
+                        renamed_pairs.append((new_file, old_file))
+                        files_renamed.append(new_file.name)
+                        old_lock = old_file.with_name(old_file.name + ".lock")
+                        if old_lock.exists():
+                            old_lock.rename(new_file.with_name(new_file.name + ".lock"))
 
-            # H1 rewrite - only when the H1 still matches the exact
-            # template default. If the user has edited the H1 (different
-            # text, different shape), leave it alone and report skipped.
-            old_titlecase = old_name.replace("-", " ").title()
-            new_titlecase = new_name.replace("-", " ").title()
-            for suffix, label in (
-                ("plan", "Plan"),
-                ("context", "Context"),
-                ("tasks", "Tasks"),
-            ):
-                f = new_dir / f"{new_name}-{suffix}.md"
-                if not f.exists():
-                    continue
-                try:
-                    content = f.read_text(encoding="utf-8")
-                except OSError:
-                    h1_skipped.append(f.name)
-                    continue
-                head, _, rest = content.partition("\n")
-                expected_h1 = f"# {old_titlecase} - {label}"
-                if head.rstrip() == expected_h1:
-                    new_h1 = f"# {new_titlecase} - {label}"
+                # H1 rewrite - only when the H1 still matches the exact
+                # template default. If the user has edited the H1 (different
+                # text, different shape), leave it alone and report skipped.
+                old_titlecase = old_name.replace("-", " ").title()
+                new_titlecase = new_name.replace("-", " ").title()
+                for suffix, label in (
+                    ("plan", "Plan"),
+                    ("context", "Context"),
+                    ("tasks", "Tasks"),
+                ):
+                    f = new_dir / f"{new_name}-{suffix}.md"
+                    if not f.exists():
+                        continue
                     try:
-                        f.write_text(new_h1 + "\n" + rest if rest else new_h1, encoding="utf-8")
-                        h1_originals.append((f, content))
-                        h1_rewritten.append(f.name)
+                        content = f.read_text(encoding="utf-8")
                     except OSError:
                         h1_skipped.append(f.name)
-                else:
-                    h1_skipped.append(f.name)
+                        continue
+                    head, _, rest = content.partition("\n")
+                    expected_h1 = f"# {old_titlecase} - {label}"
+                    if head.rstrip() == expected_h1:
+                        new_h1 = f"# {new_titlecase} - {label}"
+                        try:
+                            f.write_text(new_h1 + "\n" + rest if rest else new_h1, encoding="utf-8")
+                            h1_originals.append((f, content))
+                            h1_rewritten.append(f.name)
+                        except OSError:
+                            h1_skipped.append(f.name)
+                    else:
+                        h1_skipped.append(f.name)
 
         # DB update - re-check the auto-run guard inside the same
         # connection used for the UPDATE so a concurrent missioncache-auto INSERT

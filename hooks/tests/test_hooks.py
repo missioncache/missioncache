@@ -3206,7 +3206,8 @@ class TestMirrorDrift:
         )
         # Backoff constants: both start at 0.01 and double - assert via source
         # rather than execution (executing needs a stuck file).
-        canon_src = inspect.getsource(filelock.replace_with_retry)
+        # The canonical loop is shared by replace_with_retry and move_with_retry.
+        canon_src = inspect.getsource(filelock._retry_sharing_violation)
         mirror_src = inspect.getsource(pc._replace_with_retry)
         for token in ("0.01", "delay *= 2", 'os.name != "nt"'):
             assert token in canon_src, token
