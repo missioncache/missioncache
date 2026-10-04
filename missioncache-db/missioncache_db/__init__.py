@@ -1047,6 +1047,25 @@ class NameCollisionError(RenameError):
     """Another task in the same repo already has the target name."""
 
 
+def _destination_exists(dest: Path) -> Dict[str, Any]:
+    """The error a project move returns when its target directory exists.
+
+    ``shutil.move`` into an existing directory nests the project inside it
+    (``active/<name>/<name>/``) instead of failing. A stray target is most
+    often a leftover: a writer that arrived after an earlier move recreated
+    the old directory to hold its lock file.
+    """
+    return {
+        "error": True,
+        "code": "INVALID_STATE",
+        "message": (
+            f"{dest} already exists, so the project was not moved. Check what "
+            "is in it, move or delete it, and try again."
+        ),
+        "current_state": "destination exists",
+    }
+
+
 class FilesystemCollisionError(RenameError):
     """The target MissionCache directory already exists on disk."""
 
@@ -3007,6 +3026,8 @@ class TaskDB:
             source = next((c for c in candidates if c.exists()), None)
             if source is not None:
                 dest = MISSIONCACHE_ROOT / "completed" / task.name
+                if dest.exists():
+                    return _destination_exists(dest)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with filelock.project_dir_locked(source):
                     filelock.move_with_retry(source, dest)
@@ -3076,6 +3097,8 @@ class TaskDB:
             source = MISSIONCACHE_ROOT / "completed" / task.name
             if source.exists():
                 dest = MISSIONCACHE_ROOT / "active" / task.name
+                if dest.exists():
+                    return _destination_exists(dest)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with filelock.project_dir_locked(source):
                     filelock.move_with_retry(source, dest)

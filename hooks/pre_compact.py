@@ -65,7 +65,8 @@ _WIN_RETRY_INTERVAL = 0.25
 def _file_lock(path):
     """Exclusive cross-process lock on the ``<path>.lock`` sidecar (never deleted)."""
     lock_path = path.with_name(path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # No mkdir of the parent, as in missioncache_db/filelock.py: recreating a
+    # moved project's directory to hold a lock leaves a stray folder behind.
     # "a", never "w" - see missioncache_db/filelock.py (truncate-before-lock).
     with open(lock_path, "a", encoding="utf-8") as lockfd:
         if _HAVE_FCNTL:

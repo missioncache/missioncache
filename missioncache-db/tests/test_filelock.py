@@ -199,3 +199,16 @@ class TestSidecarLocks:
         # Re-acquirable, so the ExitStack unwound.
         with filelock.sidecar_locks([target]):
             pass
+
+
+def test_a_missing_directory_is_not_recreated(tmp_path):
+    """A writer whose project moved must not bring the old directory back
+    just to hold a lock: a later move into that path would nest the project
+    inside it. It gets FileNotFoundError instead."""
+    import pytest
+
+    gone = tmp_path / "active" / "moved-project"
+    with pytest.raises(FileNotFoundError):
+        with filelock.exclusive_lock(gone / "moved-project-context.md.lock"):
+            pass
+    assert not gone.exists()

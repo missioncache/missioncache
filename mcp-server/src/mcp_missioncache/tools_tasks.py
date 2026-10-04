@@ -575,7 +575,7 @@ async def complete_task(
         if result.get("error"):
             if result.get("code") == "INVALID_STATE":
                 raise InvalidStateError(
-                    "Task is already completed", current_state="completed"
+                    result["message"], current_state=result.get("current_state")
                 )
             raise TaskNotFoundError(task.id)
         # Completion moves the whole project directory to completed/, the
@@ -633,9 +633,7 @@ async def reopen_task(
         if result.get("error"):
             if result.get("code") == "INVALID_STATE":
                 raise InvalidStateError(
-                    "Task is not completed",
-                    current_state=task.status,
-                    expected_state="completed",
+                    result["message"], current_state=result.get("current_state")
                 )
             raise TaskNotFoundError(task.id)
         # Mirror of complete_task: the directory moved back to active/ under

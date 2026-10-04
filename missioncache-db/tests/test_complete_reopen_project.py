@@ -123,16 +123,12 @@ class TestMovesWaitForWriters:
     ):
         """complete_project runs on this thread (the DB connection is
         thread-bound). A writer thread holds the context lock for a moment
-        and records whether the directory was still in place when it let go."""
-        import sys
+        and records whether the directory was still in place when it let go.
+        Runs on Windows too, where the move waits for the writer to drain
+        rather than holding the lock across the move, with the same result."""
         import threading
 
-        import pytest
-
         from missioncache_db import filelock
-
-        if sys.platform == "win32":
-            pytest.skip("Windows drains writers and releases before the move")
         root = _with_root(monkeypatch, tmp_path)
         task = task_db.create_task("proj-w", task_type="coding", repo_id=None)
         project = root / "active" / "proj-w"
@@ -229,3 +225,39 @@ class TestProjectDirLockOnWindows:
         with filelock.project_dir_locked(tmp_path):
             events.append(("move",))
         assert events == [("lock",), ("move",), ("unlock",)]
+
+
+class TestMovesRefuseAnExistingDestination:
+    """shutil.move into an existing directory nests the project inside it
+    (active/<name>/<name>/) instead of failing, so the movers check first."""
+
+    def test_complete_refuses_and_changes_nothing(self, task_db, tmp_path, monkeypatch):
+        root = _with_root(monkeypatch, tmp_path)
+        task = task_db.create_task("proj-d", task_type="coding", repo_id=None)
+        (root / "active" / "proj-d").mkdir()
+        (root / "active" / "proj-d" / "proj-d-context.md").write_text("# ctx\n")
+        (root / "completed" / "proj-d").mkdir(parents=True)
+
+        result = task_db.complete_project(task.id)
+
+        assert result["error"] and result["code"] == "INVALID_STATE"
+        assert "already exists" in result["message"]
+        assert (root / "active" / "proj-d" / "proj-d-context.md").is_file()
+        assert not (root / "completed" / "proj-d" / "proj-d").exists()
+        assert task_db.get_task(task.id).status == "active"
+
+    def test_reopen_refuses_and_changes_nothing(self, task_db, tmp_path, monkeypatch):
+        root = _with_root(monkeypatch, tmp_path)
+        task = task_db.create_task("proj-e", task_type="coding", repo_id=None)
+        (root / "active" / "proj-e").mkdir()
+        task_db.complete_project(task.id)
+        # A writer that came late recreated the old directory for its lock.
+        (root / "active" / "proj-e").mkdir()
+        (root / "active" / "proj-e" / "proj-e-context.md.lock").write_text("")
+
+        result = task_db.reopen_project(task.id)
+
+        assert result["error"] and result["code"] == "INVALID_STATE"
+        assert (root / "completed" / "proj-e").is_dir()
+        assert not (root / "active" / "proj-e" / "proj-e").exists()
+        assert task_db.get_task(task.id).status == "completed"

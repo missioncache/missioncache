@@ -68,9 +68,12 @@ def exclusive_lock(lock_path: Path, shared: bool = False) -> Iterator[None]:
 
     The file is created if missing and never deleted (deleting a lock file
     races: a process can lock an unlinked inode while a new file takes its
-    place, silently splitting the mutex).
+    place, silently splitting the mutex). Its directory is NOT created: a
+    writer arriving after its project moved would recreate the old project
+    directory just to hold a lock, and a later move into that path nests the
+    project inside it. A missing directory is a FileNotFoundError here, where
+    the caller can see it.
     """
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     # "a", never "w": "w" truncates BEFORE the lock is taken - on Windows that
     # writes into a byte range another process may hold, and on any platform a
     # pre-planted symlink at the lock path would have its target truncated.

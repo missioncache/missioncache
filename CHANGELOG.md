@@ -9,6 +9,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 ## Unreleased
 
 - Completing, reopening or renaming a project waits for a write in progress instead of breaking it. (missioncache-db, plugin)
+- Completing or reopening a project refuses when the target folder already exists, instead of nesting the project inside it. A late write no longer recreates a moved project's folder. (missioncache-db, plugin)
 - `missioncache-install --update` exits 1 when a component fails, like an install does. (missioncache-install)
 - A parallel `missioncache-auto` run with no terminal stops with exit 3 and asks for `--yes`, instead of exiting 0 having done nothing. (missioncache-auto)
 
