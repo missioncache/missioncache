@@ -120,6 +120,7 @@ class Worker:
         spec_review_only: bool = False,
         auto_commit: bool = True,
         tdd_mode: bool = False,
+        effort: str | None = None,
     ) -> None:
         self.worker_id = worker_id
         self.task_name = task_name
@@ -136,6 +137,7 @@ class Worker:
         self.spec_review_only = spec_review_only
         self.auto_commit = auto_commit
         self.tdd_mode = tdd_mode
+        self.effort = effort
 
         self.state_manager = StateManager(state_dir)
         self.dag: DAG | None = None
@@ -428,7 +430,7 @@ Rules:
             log_file = self.logs_dir / f"worker-{self.worker_id:02d}-task-{task_id}-{timestamp}.log"
 
         # Run Claude
-        runner = ClaudeRunner(visibility=self.visibility)
+        runner = ClaudeRunner(visibility=self.visibility, effort=self.effort)
         timeout = self.task_timeout if self.task_timeout > 0 else None
         session_name = f"{self.task_name}/t{task_id}/w{self.worker_id:02d}"
         result = runner.run(

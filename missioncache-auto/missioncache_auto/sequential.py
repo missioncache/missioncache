@@ -277,11 +277,13 @@ class SequentialRunner:
         runner = ClaudeRunner(
             visibility=self.config.visibility,
             on_tool_use=self.display.tool_use,
+            effort=self.config.effort,
         )
 
         self.display.working()
         session_name = f"{self.task_name}/t{task_number}" if task_number else self.task_name
-        return runner.run(prompt, self.project_root, session_name=session_name)
+        timeout = self.config.task_timeout if self.config.task_timeout > 0 else None
+        return runner.run(prompt, self.project_root, timeout=timeout, session_name=session_name)
 
     def _handle_result(
         self,

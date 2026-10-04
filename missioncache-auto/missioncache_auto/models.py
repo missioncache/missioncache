@@ -118,6 +118,7 @@ class Config:
     spec_review_only: bool = False
     auto_commit: bool = True
     tdd_mode: bool = False
+    effort: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and cap configuration values."""

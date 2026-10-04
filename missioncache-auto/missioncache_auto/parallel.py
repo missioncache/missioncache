@@ -414,6 +414,7 @@ class ParallelRunner:
                 spec_review_only=self.config.spec_review_only,
                 auto_commit=self.config.auto_commit,
                 tdd_mode=self.config.tdd_mode,
+                effort=self.config.effort,
             )
 
             # Write adjacency file for workers

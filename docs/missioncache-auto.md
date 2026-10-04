@@ -39,7 +39,8 @@ Put the options after the project name, except `-v` and `--no-color`, which go b
 |---|---|---|
 | `-w`, `--workers N` | 8 | Parallel workers, from 1 to 12. |
 | `-r`, `--retries N` | 3 | Tries per task before giving up. |
-| `--timeout N` | 1800 | Seconds a task may run. `0` means no limit. Parallel only. |
+| `--timeout N` | 1800 | Seconds a task may run. `0` means no limit. |
+| `--effort LEVEL` | your setting | Claude's effort for every task: `low`, `medium`, `high`, `xhigh` or `max`. |
 | `--pause N` | 3 | Seconds between tasks. Sequential only. |
 | `-s`, `--sequential` | off | Run one task at a time, top to bottom. |
 | `-p`, `--parallel` | on | Run in parallel, in dependency order. |
@@ -54,7 +55,7 @@ Put the options after the project name, except `-v` and `--no-color`, which go b
 | `-v`, `--visibility` | `verbose` | Tool output: `verbose`, `minimal` or `none`. |
 | `--no-color` | off | Plain output, no colours. |
 
-Write it as `--visibility=minimal my-project`. The spaced form `-v minimal` fails. Or export `MISSIONCACHE_AUTO_VISIBILITY=minimal`.
+To set it for every run, export `MISSIONCACHE_AUTO_VISIBILITY=minimal`.
 
 In sequential mode, commits and `--tdd` apply only when the project has a `prompts/` folder.
 

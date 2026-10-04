@@ -28,6 +28,10 @@ def find_project_root() -> Path:
     return Path.cwd()
 
 
+# The levels `claude --effort` accepts.
+EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     # Pre-process argv: if first positional arg isn't a known command, insert "run"
@@ -36,13 +40,13 @@ def parse_args() -> argparse.Namespace:
     # Find first positional arg (skip options that start with -)
     argv = sys.argv[1:]
     first_positional_idx = None
-    for i, arg in enumerate(argv):
-        if not arg.startswith("-"):
+    i = 0
+    while i < len(argv):
+        if not argv[i].startswith("-"):
             first_positional_idx = i
             break
-        # Skip option values (e.g., -v verbose)
-        if arg in ("-v", "--visibility"):
-            continue
+        # A spaced option value (`-v minimal`) is not the first positional.
+        i += 2 if argv[i] in ("-v", "--visibility") else 1
 
     # If first positional is not a known command, insert "run"
     if first_positional_idx is not None:
@@ -154,6 +158,11 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Timeout per task in seconds (default: 1800 = 30 min, 0 = no timeout)",
     )
     parser.add_argument(
+        "--effort",
+        choices=EFFORT_LEVELS,
+        help="Claude effort level for every task (default: your Claude Code setting)",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="Stop all workers on first failure (parallel mode)",
@@ -215,6 +224,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         spec_review_only=getattr(args, "spec_review_only", False),
         auto_commit=not getattr(args, "no_commit", False),
         tdd_mode=getattr(args, "tdd", False),
+        effort=getattr(args, "effort", None),
     )
 
 

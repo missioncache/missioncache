@@ -103,3 +103,23 @@ def test_dry_run_runs_nothing(tmp_path, monkeypatch):
     assert tasks_file.read_text() == "- [ ] 1. First\n- [ ] 2. Second\n"
     shown = " ".join(str(c) for c in runner.display.method_calls)
     assert "1" in shown and "First" in shown and "Second" in shown
+
+
+def test_sequential_passes_effort_and_timeout_to_claude(tmp_path, monkeypatch):
+    """--effort and --timeout apply in sequential mode, not only in parallel."""
+    runner, _ = _bare_runner(tmp_path)
+    runner.config = Config(auto_commit=False, effort="low", task_timeout=600)
+    seen = {}
+
+    class FakeClaude:
+        def __init__(self, **kwargs):
+            seen["init"] = kwargs
+
+        def run(self, prompt, working_dir, **kwargs):
+            seen["run"] = kwargs
+            return ExecutionResult(task_id="1", success=True, output="", duration=0.0)
+
+    monkeypatch.setattr("missioncache_auto.sequential.ClaudeRunner", FakeClaude)
+    runner._run_claude("prompt", "1")
+    assert seen["init"]["effort"] == "low"
+    assert seen["run"]["timeout"] == 600

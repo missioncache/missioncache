@@ -118,6 +118,7 @@ class ClaudeRunner:
         self,
         visibility: Visibility = Visibility.VERBOSE,
         on_tool_use: Callable[[str, str], None] | None = None,
+        effort: str | None = None,
     ) -> None:
         """
         Initialize ClaudeRunner.
@@ -125,9 +126,11 @@ class ClaudeRunner:
         Args:
             visibility: Output visibility level
             on_tool_use: Optional callback for tool use events (tool_name, display_info)
+            effort: Passed to `claude --effort`; None keeps the user's setting
         """
         self.visibility = visibility
         self.on_tool_use = on_tool_use
+        self.effort = effort
 
     def run(
         self,
@@ -172,6 +175,8 @@ class ClaudeRunner:
         cmd = [claude_bin, "--print", "--output-format", "stream-json", "--verbose", "--exclude-dynamic-system-prompt-sections"]
         if session_name:
             cmd.extend(["--name", session_name])
+        if self.effort:
+            cmd.extend(["--effort", self.effort])
 
         # Set up environment to signal autonomous execution
         # This allows hooks to skip when running in missioncache-auto mode
