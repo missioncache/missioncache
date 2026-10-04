@@ -37,6 +37,8 @@ ERROR_FILE = (
 SNAPSHOT_PREFIX = "Pre-Compact Snapshot"
 MAX_TURNS = 5
 MAX_TURN_CHARS = 800
+# The context file keeps one line per snapshot; the turns go to the journal.
+SNAPSHOT_LINE_PROMPT_CHARS = 120
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 0.4  # exponential backoff between retries
 
@@ -109,14 +111,26 @@ def _replace_with_retry(src, dst, attempts=8):
             delay *= 2
 
 
-def _atomic_update_text(path, transform):
-    """Read-modify-write under flock with os.replace for crash safety."""
+def _write_atomic(path, text):
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    _replace_with_retry(tmp_path, path)
+
+
+def _atomic_update_text(path, transform, before=None):
+    """Read-modify-write under flock with os.replace for crash safety.
+
+    ``before`` runs inside the same lock, ahead of the write. The snapshot
+    uses it to append to the journal first, the order every journal writer
+    keeps, so a crash between the two leaves an extra journal entry rather
+    than a pointer to text that was never written.
+    """
     with _file_lock(path):
+        if before is not None:
+            before()
         content = path.read_text(encoding="utf-8")
         new_content = transform(content)
-        tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(new_content, encoding="utf-8")
-        _replace_with_retry(tmp_path, path)
+        _write_atomic(path, new_content)
         return new_content
 
 
@@ -309,6 +323,32 @@ def _build_snapshot_body(user_prompts, assistant_replies):
     return "\n".join(lines)
 
 
+def _snapshot_line(user_prompts, journal_name):
+    """The one Recent Changes line that points at the snapshot in the journal."""
+    if user_prompts:
+        last = " ".join(user_prompts[-1].split())
+        if len(last) > SNAPSHOT_LINE_PROMPT_CHARS:
+            last = last[:SNAPSHOT_LINE_PROMPT_CHARS] + "..."
+        what = f'Last prompt: "{last}".'
+    else:
+        what = "No recent turns captured."
+    return f"- {SNAPSHOT_PREFIX}. {what} Full text in `{journal_name}`."
+
+
+def _journal_appender(journal_path, project_name, timestamp, snapshot_body, context_health):
+    """Build the in-lock step that appends the full snapshot to the journal."""
+
+    def append():
+        entry = f"### {timestamp}\n\n{context_health.sanitize_bullet(snapshot_body).strip()}\n"
+        existing = journal_path.read_text(encoding="utf-8") if journal_path.exists() else None
+        _write_atomic(
+            journal_path,
+            context_health.appended(existing, context_health.journal_header(project_name), entry),
+        )
+
+    return append
+
+
 # ── context.md transform ─────────────────────────────────────────────────
 
 
@@ -327,13 +367,12 @@ def _make_transform(timestamp, snapshot_body, context_health):
     on the next update_context_file call. A compaction snapshot can
     therefore leave the section temporarily over cap; that is expected.
 
-    The body goes through ``context_health.sanitize_bullet`` first, and that
-    is not optional. The snapshot is raw transcript text: an assistant reply
-    routinely contains column-0 ``## `` headings, and ``_truncate`` can cut
-    inside a fenced block and leave the fence open. Both wreck the file.
-    Measured before the fix: 8 of 64 live snapshots carried a stray ``## ``
-    that ended the Recent Changes section early and stranded every entry
-    below it, across seven projects.
+    The body is the one-line pointer from ``_snapshot_line``; the turns
+    themselves go to the journal. Up to ten turns of raw transcript, about
+    8KB, used to land in Recent Changes on every compaction. It still goes
+    through ``context_health.sanitize_bullet``, as the journal entry does:
+    the snapshot quotes transcript text, and a column-0 ``## `` in it ended
+    the section early in 8 of 64 live snapshots before that was added.
     """
     snapshot_body = context_health.sanitize_bullet(snapshot_body)
 
@@ -458,9 +497,16 @@ def main():
     # site so we record the moment the snapshot landed, not whenever the
     # hook started.
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    journal_path = context_health.derive_journal_path(context_file)
     try:
         _atomic_update_text(
-            context_file, _make_transform(timestamp, snapshot_body, context_health)
+            context_file,
+            _make_transform(
+                timestamp, _snapshot_line(user_prompts, journal_path.name), context_health
+            ),
+            before=_journal_appender(
+                journal_path, task.name, timestamp, snapshot_body, context_health
+            ),
         )
     except Exception as e:
         _write_sticky_error(

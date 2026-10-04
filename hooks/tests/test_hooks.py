@@ -788,14 +788,51 @@ class TestPreCompact:
 
         self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
 
-        content = ctx_file.read_text()
-        assert "fix the bug in foo.py" in content
-        assert "also add tests" in content
-        assert "I will fix it now." in content
-        assert "Tests added in test_foo.py" in content
+        # The turns go to the journal; the context file keeps one line.
+        journal = (ctx_file.parent / "compact-task-journal.md").read_text()
+        assert "fix the bug in foo.py" in journal
+        assert "also add tests" in journal
+        assert "I will fix it now." in journal
+        assert "Tests added in test_foo.py" in journal
         # Filtered noise must NOT appear
-        assert "system-injected" not in content
-        assert "THINKING-BLOCK-XYZZY" not in content  # thinking block dropped
+        assert "system-injected" not in journal
+        assert "THINKING-BLOCK-XYZZY" not in journal  # thinking block dropped
+
+        content = ctx_file.read_text()
+        assert "I will fix it now." not in content
+        assert 'Last prompt: "also add tests".' in content
+        assert "`compact-task-journal.md`" in content
+
+    def test_the_context_entry_is_one_line_and_each_compaction_appends(
+        self, tmp_path, monkeypatch
+    ):
+        """Up to ten turns of transcript used to land in Recent Changes on
+        every compaction. Now each snapshot is one line there, and the
+        journal keeps every snapshot, not only the last."""
+        from missioncache_db import context_health as ch
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        _task_dir, ctx_file, mock_task = self._setup_task(tmp_path)
+        transcript = tmp_path / "transcript.jsonl"
+        long_reply = "word " * 400
+        transcript.write_text(
+            "\n".join([
+                json.dumps({"type": "user", "message": {"role": "user", "content": "first ask"}}),
+                json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": long_reply}]}}),
+            ])
+        )
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = mock_task
+        self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
+        self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
+
+        content = ctx_file.read_text()
+        newest_heading, newest_body = ch.parse_recent_changes_subsections(content)[0]
+        assert len(newest_body.strip().splitlines()) == 1
+        assert "word word" not in content
+        journal = (ctx_file.parent / "compact-task-journal.md").read_text()
+        assert journal.startswith("# compact-task - Journal")
+        assert journal.count("**Pre-Compact Snapshot**") == 2
 
     def test_a_reply_carrying_markdown_headings_cannot_break_the_section(
         self, tmp_path, monkeypatch
@@ -842,14 +879,17 @@ class TestPreCompact:
         self._run(monkeypatch, mock_db, transcript_path=transcript, tmp_path=tmp_path)
 
         content = ctx_file.read_text()
-        # The reply is still there and still readable as headings.
-        assert "### Updated: compact-task" in content
-        assert "**Session binding:** abc" in content
-        # But nothing it carried can act as structure.
         assert ch.orphaned_recent_changes(content) == []
         assert len(ch.parse_recent_changes_subsections(content)) == 2
         assert ch.unbalanced_fence_line(content) is None
         assert ch.extract_section(content, "Key Files") is not None
+        # The reply is in the journal, still readable as headings, and it
+        # cannot act as structure there either.
+        journal = (ctx_file.parent / "compact-task-journal.md").read_text()
+        assert "### Updated: compact-task" in journal
+        assert "**Session binding:** abc" in journal
+        assert ch.unbalanced_fence_line(journal) is None
+        assert [l for l in journal.splitlines() if l.startswith("## ")] == []
 
     def test_db_lock_writes_sticky_error(self, tmp_path, monkeypatch):
         """OperationalError('database is locked') after retry → sticky error file,
