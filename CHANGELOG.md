@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-04
+
+Published package versions: mcp-missioncache 1.0.34, missioncache-auto 1.0.6, missioncache-dashboard 1.0.23, missioncache-install 1.0.18. Claude Code plugin 1.0.31. missioncache-db is unchanged.
+
 - `missioncache-auto --sequential --dry-run` shows the plan and stops. It used to start a real run. (missioncache-auto)
 - The README explains the lead session and lists every file MissionCache writes and every service it connects to. (docs)
 - The landing page is redesigned: the lead session leads, the statusline and all four AI tools are shown, and links get a preview card. (site)
