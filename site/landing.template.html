@@ -427,7 +427,7 @@
     <div>
       <span class="label rv">The lead session</span>
       <h2 class="rv">One seat that sees every screen.</h2>
-      <p class="lede rv">Run <code>/missioncache:lead-start</code> in any Claude Code session. It becomes the lead: the one place that knows what every other session is doing.</p>
+      <p class="lede rv">Run <code>/missioncache:lead</code> in any Claude Code session. It becomes the lead: the one place that knows what every other session is doing.</p>
       <ul class="points">
         <li class="rv"><span class="n">01</span><div><b>A brief across all your projects</b><span>What is urgent, what is waiting on someone, which sessions are live, and today's calendar if you connect one.</span></div></li>
         <li class="rv"><span class="n">02</span><div><b>Every session reports in</b><span>When a session changes its project, it sends the lead one line. The lead holds them for its next brief, so it never interrupts you.</span></div></li>
@@ -437,7 +437,7 @@
     <div class="console gb rv">
       <div class="console-bar"><span class="g">&#9679;</span> missioncache-lead</div>
       <div class="console-body">
-        <div class="you">&gt; /missioncache:lead-start</div>
+        <div class="you">&gt; /missioncache:lead</div>
         <dl class="brief">
           <dt class="r">URGENT</dt><dd>billing-migration: 2 action items overdue</dd>
           <dt class="a">WAITING</dt><dd>mobile-app: design reply, 9 days</dd>
@@ -749,7 +749,7 @@
       orbit.addEventListener('pointerleave', function () { lean(0, 0); });
     }
 
-    /* ---------- the lead's pace picker: the /loop line the way /missioncache:lead-start builds it (absolute stop time) ---------- */
+    /* ---------- the lead's pace picker: the /loop line the way /missioncache:lead builds it (absolute stop time) ---------- */
     var sched = document.getElementById('sched'), win = document.getElementById('win');
     var chips = Array.prototype.slice.call(document.querySelectorAll('.chip')), pace = '30m';
     function pad(n) { return (n < 10 ? '0' : '') + n; }

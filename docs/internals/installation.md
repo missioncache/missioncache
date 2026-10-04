@@ -92,7 +92,7 @@ The full installer detects Codex, OpenCode and VSCode Copilot Chat and asks per 
 - **Codex** gets native skills, invoked as `$missioncache-load`, `$missioncache-save`, and so on. They ship as a plugin marketplace under `~/.missioncache/codex-marketplace`. Restart Codex after installing.
 - **OpenCode** and **VSCode** get slash commands, invoked as `/missioncache-load`, `/missioncache-save`, and so on.
 
-Every command except `/missioncache:lead-start` and `/missioncache:lead-stop` is installed for these tools. The lead role depends on Claude Code's session titles, cross-session messaging and pid records, so it stays Claude Code only. `/missioncache:brief` is installed everywhere.
+Every command except `/missioncache:lead` and `/missioncache:unlead` is installed for these tools. The lead role depends on Claude Code's session titles, cross-session messaging and pid records, so it stays Claude Code only. `/missioncache:brief` is installed everywhere.
 
 `uvx missioncache-install --update` refreshes these registrations too: it upgrades the `mcp-missioncache` server for Codex, OpenCode and VSCode and rewrites the commands from the current release.
 

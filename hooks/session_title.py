@@ -52,17 +52,17 @@ _BINDING_COMMAND_RE = re.compile(r"^/missioncache:(load|new)\s+(\S+)(?:\s+--jira
 
 # The lead commands have the same timing problem: `lead set` / `lead stop` run
 # after this hook, so the role change would only show on the next prompt.
-_LEAD_COMMAND_RE = re.compile(r"^/missioncache:lead-(start|stop)$")
+_LEAD_COMMAND_RE = re.compile(r"^/missioncache:(lead|unlead)$")
 
 
 def lead_from_prompt(prompt: str) -> bool | None:
-    """True for a lead-start in ``prompt``, False for a lead-stop, else None.
+    """True for ``/missioncache:lead`` in ``prompt``, False for ``/missioncache:unlead``, else None.
 
     Taken on trust: if the command then fails to record the role, the next
     prompt reads the database again and gives the title back.
     """
     match = _LEAD_COMMAND_RE.match(prompt.strip())
-    return None if match is None else match.group(1) == "start"
+    return None if match is None else match.group(1) == "lead"
 
 
 def project_from_prompt(prompt: str) -> str | None:
@@ -126,7 +126,7 @@ def resolve_title(
         read_session_title,
     )
 
-    # The lead session (/missioncache:lead-start) outranks any project binding: its
+    # The lead session (/missioncache:lead) outranks any project binding: its
     # fixed title is the address every working session sends change notices
     # to, so it must never be replaced by a project name. The recorded
     # "project" is the title itself, which keeps the steady-state comparison

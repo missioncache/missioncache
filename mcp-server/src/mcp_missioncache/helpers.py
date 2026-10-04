@@ -205,7 +205,7 @@ def attach_lead_session(response: dict) -> dict:
     """Add ``lead_session`` to a write response when a live lead exists.
 
     The project-manager half of the notification contract. A session
-    designated with /missioncache:lead-start wants to hear about EVERY project's
+    designated with /missioncache:lead wants to hear about EVERY project's
     writes, not only those of a project it is bound to, so this rides beside
     ``live_sessions`` on every mutating tool and is project-independent. The
     caller is excluded for the same reason peers are: a lead saving its own

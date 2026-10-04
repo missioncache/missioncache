@@ -181,7 +181,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 
 - Steady state (same project, same peers) is silent, which is what lets a user's manual `/rename` survive day to day.
 - `/missioncache:load <project>` and `/missioncache:new <project>` retitle in the same prompt: the hook reads the name from the command, because the binding itself is written only while the command runs. It does so only for an exact active project (load) or a free name (new). A load without a name, or with a name it cannot match, retitles on the next prompt from the binding.
-- `/missioncache:lead-start` and `/missioncache:lead-stop` take or give back the `missioncache-lead` title in the same prompt, for the same reason. The prompt has to be the bare command. If the role was not recorded after all, the next prompt reads the database and gives the title back.
+- `/missioncache:lead` and `/missioncache:unlead` take or give back the `missioncache-lead` title in the same prompt, for the same reason. The prompt has to be the bare command. If the role was not recorded after all, the next prompt reads the database and gives the title back.
 - A stale suffix self-heals: a session left holding `<project>-2` after the plain-name holder died drops back to `<project>` on its next prompt. Without this, suffixes only accumulate (a real machine reached `-3` with zero live peers) and the recorded address stops matching any `ListAgents` row.
 - The accepted narrow cost: a manual `/rename` is overwritten when the peer set changes (a collision appears or a suffix frees up), not only on rebind. An unaddressable session fails every notify; a clobbered rename costs one repeated `/rename`.
 
@@ -189,7 +189,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 
 **No skip patterns.** Unlike `activity_tracker.py` and `task_tracker.py`, this hook runs on *every* prompt including slash commands. (It does keep the subagent guard those hooks have: a subagent would otherwise retitle the parent session it runs under.) Those hooks skip slash commands to keep heartbeat time honest; skipping them here would mean `/missioncache:load` - the very command that creates the binding - never triggers the retitle.
 
-**The lead session.** A session designated with `/missioncache:lead-start` (row in `hooks-state.db:lead_session`) gets the fixed title `missioncache-lead` instead of a project name, and that outranks any binding: the title is the address every working session sends change notices to, so it must never be replaced by a project's. Same emit-once rule as project titles.
+**The lead session.** A session designated with `/missioncache:lead` (row in `hooks-state.db:lead_session`) gets the fixed title `missioncache-lead` instead of a project name, and that outranks any binding: the title is the address every working session sends change notices to, so it must never be replaced by a project's. Same emit-once rule as project titles.
 
 **State files written:** `~/.claude/hooks/state/session-title/<session-id>.json`, whose path is owned by `missioncache_db.session_title_path`.
 
@@ -254,7 +254,7 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
 | `~/.claude/hooks/state/session-title/<session-id>.json` | session_title | `missioncache_db.live_sessions_for_project`, `live_sessions_all` | JSON file |
-| `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead-start`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `prune-sessions` | SQLite row |
+| `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `prune-sessions` | SQLite row |
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 

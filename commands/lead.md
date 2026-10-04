@@ -7,7 +7,7 @@ description: "Make this session the lead that watches every project"
 > Claude Code only. The role needs a session title, cross-session messaging, a loop and a pid record, and none of those exist in Codex, OpenCode or VSCode. `/missioncache:brief` works everywhere.
 
 
-Make this session the one that watches every project you work on in parallel. It runs a full brief now, and every other session that saves pushes its change notices here. It can also keep the picture live with a recurring delta brief, but that loop never starts on its own: after the first brief it asks how often you want it checked and for how long, and it runs only at the pace you pick, stopping after 7 hours unless you choose a different window. The role lasts until you run `/missioncache:lead-stop`.
+Make this session the one that watches every project you work on in parallel. It runs a full brief now, and every other session that saves pushes its change notices here. It can also keep the picture live with a recurring delta brief, but that loop never starts on its own: after the first brief it asks how often you want it checked and for how long, and it runs only at the pace you pick, stopping after 7 hours unless you choose a different window. The role lasts until you run `/missioncache:unlead`.
 
 One lead at a time. Designating a new session replaces the previous one, which notices on its next tick and stops itself. The lead is not bound to any project and never appears in a project's live set: it is the manager, not a worker.
 
@@ -109,7 +109,7 @@ Lead session designated: 2e941f... now carries the title missioncache-lead.
 ## Today's brief
 ...
 
-How often should I check the projects, and for how long? Every 15 minutes, half an hour, an hour, another interval, or not at all. I will stop after 7 hours unless you want a different window. /missioncache:lead-stop ends the role.
+How often should I check the projects, and for how long? Every 15 minutes, half an hour, an hour, another interval, or not at all. I will stop after 7 hours unless you want a different window. /missioncache:unlead ends the role.
 ```
 
 ## MCP Tools Used

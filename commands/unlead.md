@@ -4,9 +4,9 @@ description: "Stop being the lead and end its update loop"
 
 # Stop Leading the Portfolio
 
-> Claude Code only, like `/missioncache:lead-start`.
+> Claude Code only, like `/missioncache:lead`.
 
-End the lead role that `/missioncache:lead-start` gave a session. Working sessions stop sending it change notices, and the session gives up the `missioncache-lead` title right away: it takes its project's name back, or a `session-<id>` name when it has no project.
+End the lead role that `/missioncache:lead` gave a session. Working sessions stop sending it change notices, and the session gives up the `missioncache-lead` title right away: it takes its project's name back, or a `session-<id>` name when it has no project.
 
 ## Workflow
 

@@ -5,7 +5,7 @@ argument-hint: "[--all] [--ask] [--delta] [--until <ISO>] [--lang he|en]"
 
 # Brief the Portfolio
 
-One report across every project you are working on in parallel: what is on fire, what is stuck with other people, which projects have a live session, what the calendar holds, and a suggested order for the day. Read-only by default. Works from any session with no mode at all; `/missioncache:lead-start` is the role that keeps it live.
+One report across every project you are working on in parallel: what is on fire, what is stuck with other people, which projects have a live session, what the calendar holds, and a suggested order for the day. Read-only by default. Works from any session with no mode at all; `/missioncache:lead` is the role that keeps it live.
 
 ## Quick Start
 

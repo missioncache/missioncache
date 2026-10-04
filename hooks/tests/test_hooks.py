@@ -3273,7 +3273,7 @@ class TestMirrorDrift:
 
 
 class TestLeadSessionTitle:
-    """Spec: the lead session (/missioncache:lead-start) carries the fixed title
+    """Spec: the lead session (/missioncache:lead) carries the fixed title
     `missioncache-lead` so working sessions can address it without a lookup.
     That title outranks any project binding and, like a project title, is
     emitted once and stays silent in the steady state."""
@@ -3380,7 +3380,7 @@ class TestLeadSessionTitle:
         new_out = self._run(monkeypatch, capsys, {"session_id": "sid-new"})
         assert new_out["hookSpecificOutput"]["sessionTitle"] == missioncache_db.LEAD_SESSION_TITLE
 
-    def test_lead_start_titles_the_session_in_the_same_prompt(
+    def test_lead_titles_the_session_in_the_same_prompt(
         self, tmp_path, monkeypatch, capsys
     ):
         """`lead set` runs after this hook, so the title must come from the
@@ -3389,11 +3389,11 @@ class TestLeadSessionTitle:
 
         self._redirect(monkeypatch, tmp_path)
         out = self._run(
-            monkeypatch, capsys, {"session_id": "sid-lead", "prompt": "/missioncache:lead-start"}
+            monkeypatch, capsys, {"session_id": "sid-lead", "prompt": "/missioncache:lead"}
         )
         assert out["hookSpecificOutput"]["sessionTitle"] == missioncache_db.LEAD_SESSION_TITLE
 
-    def test_lead_stop_gives_the_title_back_in_the_same_prompt(
+    def test_unlead_gives_the_title_back_in_the_same_prompt(
         self, tmp_path, monkeypatch, capsys
     ):
         import missioncache_db  # type: ignore[import-not-found]
@@ -3402,13 +3402,13 @@ class TestLeadSessionTitle:
         missioncache_db.set_lead_session("sid-lead")
         assert self._run(monkeypatch, capsys, {"session_id": "sid-lead"}) is not None
 
-        # The row is still there: lead-stop clears it only after this hook.
+        # The row is still there: unlead clears it only after this hook.
         out = self._run(
-            monkeypatch, capsys, {"session_id": "sid-lead", "prompt": "/missioncache:lead-stop"}
+            monkeypatch, capsys, {"session_id": "sid-lead", "prompt": "/missioncache:unlead"}
         )
         assert out["hookSpecificOutput"]["sessionTitle"] == "session-sid-le"
 
-    def test_a_lead_start_that_never_recorded_the_role_is_undone(
+    def test_a_lead_command_that_never_recorded_the_role_is_undone(
         self, tmp_path, monkeypatch, capsys
     ):
         """The command title is taken on trust. When `lead set` did not record
@@ -3417,7 +3417,7 @@ class TestLeadSessionTitle:
         import missioncache_db  # type: ignore[import-not-found]
 
         self._redirect(monkeypatch, tmp_path)
-        self._run(monkeypatch, capsys, {"session_id": "sid-x", "prompt": "/missioncache:lead-start"})
+        self._run(monkeypatch, capsys, {"session_id": "sid-x", "prompt": "/missioncache:lead"})
         out = self._run(monkeypatch, capsys, {"session_id": "sid-x", "prompt": "hello"})
         assert out["hookSpecificOutput"]["sessionTitle"] != missioncache_db.LEAD_SESSION_TITLE
 
@@ -3428,7 +3428,7 @@ class TestLeadSessionTitle:
         out = self._run(
             monkeypatch,
             capsys,
-            {"session_id": "sid-x", "prompt": "what does /missioncache:lead-start do?"},
+            {"session_id": "sid-x", "prompt": "what does /missioncache:lead do?"},
         )
         assert out is None
 

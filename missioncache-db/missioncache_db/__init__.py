@@ -691,7 +691,7 @@ def live_lead_session() -> Optional[Dict[str, Any]]:
 
     Returns ``{session_id, title, since}`` or None. A lead row whose session is
     dead or unknown is ignored here and dropped by ``prune_session_state``, so
-    a session closed without ``/missioncache:lead-stop`` stops being notified
+    a session closed without ``/missioncache:unlead`` stops being notified
     the moment its pid is gone.
     """
     if not HOOKS_STATE_DB_PATH.exists():

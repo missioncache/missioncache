@@ -257,7 +257,7 @@ def test_every_command_is_either_shipped_or_claude_only() -> None:
     """Each file in commands/ is a decision: it ships to the other tools, or it
     is Claude Code only, like the two lead commands, which need session titles,
     messaging and a loop. A new command that is neither fails here until someone
-    decides, and so would `lead.md` coming back next to its replacements."""
+    decides, and so does a file left behind by a rename."""
     claude_only = set(command_clients.CLAUDE_ONLY_COMMANDS)
     on_disk = {p.stem for p in REPO_COMMANDS_DIR.glob("*.md")}
     assert on_disk == set(command_clients.CANONICAL_COMMANDS) | claude_only

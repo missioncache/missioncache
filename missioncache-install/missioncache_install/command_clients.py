@@ -80,7 +80,7 @@ if TYPE_CHECKING:
 CANONICAL_COMMANDS: tuple[str, ...] = (
     "load", "save", "new", "done", "prompts", "mode", "fork", "rename", "brief",
 )
-CLAUDE_ONLY_COMMANDS: tuple[str, ...] = ("lead-start", "lead-stop")
+CLAUDE_ONLY_COMMANDS: tuple[str, ...] = ("lead", "unlead")
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
 OPENCODE_COMMANDS_DIR = Path.home() / ".config" / "opencode" / "commands"

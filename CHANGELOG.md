@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- `/missioncache:lead-start` and `/missioncache:lead-stop` are now `/missioncache:lead`, its name before 2026-10-04.3, and `/missioncache:unlead`. Shorter names sit higher in the command menu. (plugin)
+
 ## 2026-10-04.4
 
 Published package versions: Claude Code plugin 1.0.35. No PyPI package changed.
