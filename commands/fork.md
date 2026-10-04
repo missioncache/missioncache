@@ -87,8 +87,8 @@ Only when the user says the parent is a pre-fork monolith they want to split:
 1. Read the parent's full context file.
 2. Propose a bullet-level split: content specific to the new child MOVES down into the child's context; shared infra/architecture/access/gotchas content STAYS in the parent. Sections like Gotchas, Key Architectural Decisions, Who's who, and Next Steps usually mix lanes bullet-by-bullet - split within sections, not whole sections.
 3. Show the user the proposed moves as a summary and get an explicit yes BEFORE writing.
-4. Apply the split with DIRECT file edits (Read + Edit on both context files) - `update_context_file` can only append to sections, it cannot remove bullets, so it cannot express a move. Two cautions that replace the tool's guarantees: (a) do the split only when no sibling session is actively writing these files (the file locks serialize the MCP tools, not direct edits); (b) moves are MOVES, not copies - after editing, verify each moved bullet appears exactly once, in the child. Then use `update_context_file` on the parent to add a one-line Recent Changes note saying what moved to which child.
-5. Tasks are never migrated. Ever.
+4. Apply the split with `mcp__plugin_missioncache_pm__move_to_project(source_project="<parent>", target_project="<child>", sections=[...], bullets=[{"section": ..., "match": ...}], note="<why>")`. Pass whole `## ` sections that move entirely in `sections`, and single bullets from mixed sections in `bullets`. The tool holds both projects' locks for the whole move, so a split never half-applies, and it records the move in both files' Recent Changes. Check its `unmatched` field and tell the user about any entry that did not move.
+5. Tasks are never migrated. Ever. Leave the `tasks` argument out.
 
 ### Step 7: Confirm
 
