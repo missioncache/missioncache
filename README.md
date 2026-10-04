@@ -24,7 +24,7 @@ MissionCache gives every AI coding project a memory that survives compaction: th
 
 When you run several sessions at once, one of them can be the **lead**. It hears from all the others, so you watch one window instead of five.
 
-It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time tracking, a local dashboard, a rich statusline and autonomous runs.
+It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time tracking, a local dashboard, a rich statusline and autonomous runs. It runs on your machine and needs [`uv`](https://docs.astral.sh/uv/), so it does not work in claude.ai chat.
 
 ## Contents
 
@@ -266,6 +266,7 @@ Everything MissionCache stores stays on your machine. There is no account, no te
 **What runs and what it connects to:**
 
 - The MCP server starts through `uvx` from the plugin directory. On first launch `uv` downloads its Python dependencies from PyPI.
+- The hooks start through `uv run`. If the machine has no Python 3.11 or newer, `uv` downloads one the first time.
 - The dashboard listens on `127.0.0.1:8787` only, never on an external interface.
 - The update check asks `pypi.org` for the latest MissionCache versions and caches the answer.
 - The statusline reads `status.claude.com` to show Claude incidents. You can turn it off in the dashboard's statusline settings.

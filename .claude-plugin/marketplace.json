@@ -10,9 +10,9 @@
     {
       "name": "missioncache",
       "source": "./",
-      "description": "Project management with time tracking, autonomous execution, and context preservation",
+      "description": "Project memory that survives compaction. The plan, decisions, gotchas and next steps live in markdown files and reload with one command. One lead session watches the rest.",
       "category": "productivity",
-      "keywords": ["missioncache", "task", "time-tracking", "context", "missioncache-auto"]
+      "keywords": ["memory", "context", "compaction", "project-management", "multi-session", "time-tracking"]
     }
   ]
 }

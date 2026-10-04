@@ -1,14 +1,14 @@
 {
   "name": "missioncache",
   "version": "1.0.33",
-  "description": "Fast MissionCache project management with time tracking, file operations, and MissionCache Auto loop integration. Replaces 5-10+ tool calls with single MCP calls.",
+  "description": "Project memory that survives compaction. The plan, decisions, gotchas and next steps live in markdown files and reload with one command. One lead session watches the rest.",
   "author": {
     "name": "Tomer Brami"
   },
   "homepage": "https://github.com/missioncache/missioncache",
   "repository": "https://github.com/missioncache/missioncache.git",
   "license": "MIT",
-  "keywords": ["missioncache", "task", "time-tracking", "context", "missioncache-auto"],
+  "keywords": ["memory", "context", "compaction", "project-management", "multi-session", "time-tracking"],
   "mcpServers": {
     "pm": {
       "type": "stdio",

@@ -9,6 +9,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 ## Unreleased
 
 - `/missioncache:lead` is now `/missioncache:lead-start`, and the new `/missioncache:lead-stop` ends the role. The old command is gone. (plugin)
+- Hooks start with `uv run --quiet --no-project --frozen`, which the Claude plugin directory requires. Nothing changes in how they run. (plugin, missioncache-install)
 
 ## 2026-10-04.2
 
