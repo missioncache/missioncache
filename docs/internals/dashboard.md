@@ -341,7 +341,7 @@ MissionCache hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three
 
 All of these write to (or read from) `~/.claude/hooks-state.db`, a separate SQLite file from `tasks.db`. That file holds ephemeral per-session state that has a shorter lifetime than task tracking: `session_state`, `project_state`, `term_sessions`, `validation_state`, `guard_warned`. The statusline reads from it, the hooks write to it, and neither interacts with the main MissionCache task database.
 
-The fallback flow for writing project state is instructive: `/missioncache:load` first tries to POST to `/api/hooks/project` (which handles JSON escaping correctly), and if the dashboard is down it falls back to a direct SQLite write against `hooks-state.db`. See the `missioncache.md` rule file in `rules/` for the exact bash snippet. This is the only case where MissionCache writes to `hooks-state.db` from outside the dashboard process.
+The fallback flow for writing project state is instructive: `/missioncache:load` first tries to POST to `/api/hooks/project` (which handles JSON escaping correctly), and if the dashboard is down it falls back to a direct SQLite write against `hooks-state.db`. See Step 4 of `commands/load.md` for the exact bash snippet. This is the only case where MissionCache writes to `hooks-state.db` from outside the dashboard process.
 
 ### Sync and health
 

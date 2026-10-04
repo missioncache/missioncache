@@ -16,6 +16,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 - The README gets to your first project right after Install. Comparisons moved to docs/comparison.md, upgrading to docs/installation.md. (docs)
 - Every user guide is rewritten short and plain, about a fifth of its old length. The maintainer detail moved to docs/internals/. (docs)
 - The statusline no longer shows an upgrade arrow when you already run the newest version. (missioncache-dashboard)
+- The MissionCache rules Claude loads in every session are about a quarter of their old size. What the MCP tools already say is no longer repeated. (plugin, missioncache-install)
 
 ## 2026-09-30
 
