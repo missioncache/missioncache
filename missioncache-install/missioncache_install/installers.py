@@ -44,7 +44,12 @@ Mode = Literal["pypi", "local"]
 # the two cannot drift - raising the >=3.11 floor in hooks.json without matching
 # it here would leave the warm preparing the wrong interpreter. A test asserts
 # hooks.json's args start with this prefix.
-HOOK_UV_ARGS = ["run", "--no-project", "--python", ">=3.11", "python"]
+HOOK_UV_ARGS = ["run", "--quiet", "--no-project", "--frozen", "--python", ">=3.11", "python"]
+# The warm drops the two flags that only matter inside a hook: `--quiet` would
+# hide the download progress the warm streams on purpose, and `--frozen` (a
+# no-op beside `--no-project`, there for the directory's launcher check) would
+# print uv's warning saying so.
+WARM_UV_ARGS = [a for a in HOOK_UV_ARGS if a not in ("--quiet", "--frozen")]
 
 
 @dataclass
@@ -95,7 +100,7 @@ def install_plugin(ctx: InstallContext) -> None:
 def _warm_hook_interpreter() -> None:
     """Pre-resolve the Python that hooks.json's `uv run` launcher will use.
 
-    The plugin's hooks run via `uv run --no-project --python ">=3.11" python`.
+    The plugin's hooks run via `uv run --quiet --no-project --frozen --python ">=3.11" python`.
     On a machine with no suitable interpreter, uv downloads one on first use -
     a download the UserPromptSubmit hooks' 5s timeout would lose. Warming here
     moves that one-time cost into the install, where waiting is expected.
@@ -112,7 +117,7 @@ def _warm_hook_interpreter() -> None:
         # download, and the module's own convention is that long-running
         # commands with live output use run_streaming (captured output would
         # sit silent for the whole download).
-        subprocess_utils.run_streaming(["uv", *HOOK_UV_ARGS, "-V"])
+        subprocess_utils.run_streaming(["uv", *WARM_UV_ARGS, "-V"])
         ui.detail("Hook interpreter ready")
     except subprocess_utils.CommandFailed as e:
         ui.warn(f"Could not pre-warm the hook interpreter: {e.stderr.strip() or 'unknown error'}")

@@ -216,7 +216,7 @@ class TestWarmHookInterpreter:
                             lambda cmd, **k: cmds.append(cmd) or 0)
         monkeypatch.setattr(installers.ui, "detail", lambda *a, **k: None)
         _REAL_WARM()
-        assert cmds == [["uv", *installers.HOOK_UV_ARGS, "-V"]]
+        assert cmds == [["uv", "run", "--no-project", "--python", ">=3.11", "python", "-V"]]
 
     def test_failed_warm_does_not_raise(self, monkeypatch):
         """A warm failure must never fail the plugin install."""
