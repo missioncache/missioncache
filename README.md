@@ -268,9 +268,10 @@ Everything MissionCache stores stays on your machine. There is no account, no te
 - The MCP server starts through `uvx` from the plugin directory. On first launch `uv` downloads its Python dependencies from PyPI.
 - The hooks start through `uv run`. If the machine has no Python 3.11 or newer, `uv` downloads one the first time.
 - The dashboard listens on `127.0.0.1:8787` only, never on an external interface.
-- The update check asks `pypi.org` for the latest MissionCache versions and caches the answer.
-- The statusline reads `status.claude.com` to show Claude incidents. You can turn it off in the dashboard's statusline settings.
+- The statusline, the update check and the dashboard page reach a few outside services: PyPI, Claude's status page, GitHub, font and chart CDNs, your own Claude and Codex usage, and a calendar feed if you add one. Your sign-in tokens go only to the company that issued them.
 - Hooks run on session start, before compaction, at the end of each turn, and on every prompt. They read and write only the paths above.
+
+Every destination, and what is sent to it, is listed in [docs/privacy.md](docs/privacy.md).
 
 ## Commands
 

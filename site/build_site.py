@@ -53,6 +53,7 @@ DOCS = [
     ("extension", "Editor extension"),
     ("comparison", "Comparison"),
     ("hooks", "Hooks"),
+    ("privacy", "Privacy"),
 ]
 DOC_SLUGS = {slug for slug, _ in DOCS}
 
