@@ -119,7 +119,7 @@ Do NOT read the full context file - call the digest tool instead:
 mcp__plugin_missioncache_pm__get_context_digest(project_name="<name>")
 ```
 
-It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name + line number), `file_size_bytes`, and `health_warnings`. On mcp-missioncache 1.0.18+ it also carries the PM layer: `due_date` (project target date or null) and `action_items_open` (open action items, each with an `overdue` flag), with PM warnings (overdue items, due-soon project) already merged into `health_warnings`.
+It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim) plus `waiting_on_rows` (each row with `age_days` and a `stale` flag), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name, line number and `size_bytes`), `file_size_bytes`, and `health_warnings`. On mcp-missioncache 1.0.18+ it also carries the PM layer: `due_date` (project target date or null) and `action_items_open` (open action items, each with an `overdue` flag), with PM warnings (overdue items, due-soon project) already merged into `health_warnings`.
 
 Checklist progress comes from `get_task`'s `progress` field (Step 1) - no need to read the tasks file either.
 
@@ -206,7 +206,7 @@ If the dashboard probe emits a line, include it as a **Dashboard** field. If `PR
 **Waiting on:** *(from digest waiting_on; omit if the table is empty)*
 | What | Who | Since | Gates |
 |------|-----|-------|-------|
-<rows - mark any row whose Since is older than 7 days with a trailing " (stale)">
+<rows - mark each row whose `stale` flag is true in the digest's `waiting_on_rows` with a trailing " (stale)">
 
 **Next Steps:** *(from digest next_steps)*
 1. <first item>
