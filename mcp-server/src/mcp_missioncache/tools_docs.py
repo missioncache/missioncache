@@ -412,7 +412,7 @@ async def update_context_file(
         ),
     ] = None,
     bullets_remove: Annotated[
-        list[dict[str, str]] | None,
+        list[dict[str, str | bool]] | None,
         Field(
             description=(
                 'Single items to delete, each {"section": <section name>, '
@@ -422,7 +422,10 @@ async def update_context_file(
                 "Architectural Decision or one Key Files row. Table header "
                 "rows are never matched. Recent Changes (prepend-only "
                 "history), Waiting on (use waiting_on_resolve) and the "
-                "database-rendered sections are refused. Entries matching "
+                "database-rendered sections are refused. Add "
+                '"archive": true to move the item to <name>-archive.md next '
+                "to the context file instead of dropping it - for old "
+                "Gotchas that may still be worth grepping. Entries matching "
                 "nothing come back in 'bullets_unmatched'."
             )
         ),
@@ -533,6 +536,8 @@ async def update_context_file(
             "sections_unmatched": result["sections_unmatched"],
             "bullets_removed": result["bullets_removed"],
             "bullets_unmatched": result["bullets_unmatched"],
+            "archived": result["archived"],
+            "archive_file": result["archive_file"],
         }
         if imported_event and not result["imported_event_applied"]:
             response["imported_event_duplicate"] = True

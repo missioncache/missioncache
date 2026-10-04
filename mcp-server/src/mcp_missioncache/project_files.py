@@ -55,18 +55,21 @@ def _unlocked_write_text(path: Path, new_content: str) -> None:
     replace_with_retry(tmp_path, path)
 
 
+def _unlocked_append_sibling(path: Path, text: str, header: str) -> None:
+    """Append ``text`` to a file next to the context file, creating it with
+    ``header``. Caller holds the context lock, which is the only lock these
+    files need: they are only ever written while it is held."""
+    existing = path.read_text(encoding="utf-8") if path.exists() else None
+    _unlocked_write_text(path, context_health.appended(existing, header, text))
+
+
 def _unlocked_append_journal(
     context_path: Path, journal_path: Path, journal_append: str
 ) -> None:
     """Append rolled-over entries to the journal. Caller holds the context lock."""
-    if journal_path.exists():
-        journal_content = journal_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n"
-    else:
-        journal_content = context_health.journal_header(context_path.parent.name) + "\n"
-    journal_content += journal_append
-    journal_tmp = journal_path.with_name(journal_path.name + ".tmp")
-    journal_tmp.write_text(journal_content, encoding="utf-8")
-    replace_with_retry(journal_tmp, journal_path)
+    _unlocked_append_sibling(
+        journal_path, journal_append, context_health.journal_header(context_path.parent.name)
+    )
 
 
 @contextlib.contextmanager
@@ -111,6 +114,7 @@ def _atomic_update_context_with_journal(
     context_path: Path,
     journal_path: Path,
     transform: Callable[[str], tuple[str, str | None]],
+    archive_text: Callable[[], str | None] | None = None,
 ) -> str:
     """Like ``_atomic_update_text`` but the transform may emit journal text.
 
@@ -121,12 +125,23 @@ def _atomic_update_context_with_journal(
     replaces duplicates the rolled-over entries into the journal (they are
     still in the context, so the next rollover re-moves them) rather than
     losing them. The window is one ``os.replace`` wide.
+
+    ``archive_text``, read after the transform ran, gives what the transform
+    moved to the archive file. It is written before the context too, for the
+    same reason.
     """
     with _file_lock(context_path):
         content = context_path.read_text(encoding="utf-8")
         new_content, journal_append = transform(content)
         if journal_append:
             _unlocked_append_journal(context_path, journal_path, journal_append)
+        archived = archive_text() if archive_text else None
+        if archived:
+            _unlocked_append_sibling(
+                context_health.derive_archive_path(context_path),
+                archived,
+                context_health.archive_header(context_path.parent.name),
+            )
         _unlocked_write_text(context_path, new_content)
         return new_content
 
@@ -601,7 +616,7 @@ def update_context_file(
     waiting_on_resolve: list[dict[str, str]] | None = None,
     imported_event: dict[str, str] | None = None,
     sections_remove: list[str] | None = None,
-    bullets_remove: list[dict[str, str]] | None = None,
+    bullets_remove: list[dict[str, Any]] | None = None,
     hub: str | None = None,
 ) -> dict[str, Any]:
     """Update sections in a context.md file atomically.
@@ -697,10 +712,11 @@ def update_context_file(
     rolled_over = 0
     # Carries results out of the transform, which runs under the lock and may be
     # retried; a plain closure variable would be rebound per attempt.
-    nonlocal_state: dict[str, Any] = {"imported_event_applied": False}
+    nonlocal_state: dict[str, Any] = {"imported_event_applied": False, "archive": []}
 
     def _transform(content: str) -> tuple[str, str | None]:
         nonlocal rolled_over
+        nonlocal_state["archive"] = []
         # Stamp inside the lock so serialized writers each get a fresh
         # timestamp instead of all sharing the function-entry value.
         timestamp = get_timestamp()
@@ -738,6 +754,8 @@ def update_context_file(
                 bullets_unmatched.append(f"{section}: {match_text}")
             else:
                 bullets_removed.append(removed_item)
+                if item.get("archive") is True:
+                    nonlocal_state["archive"].append((section, removed_item))
 
         # Update Next Steps section. (Replacement stops at the next `## `
         # heading, so a Waiting on section placed before Next Steps is
@@ -821,9 +839,17 @@ def update_context_file(
 
         return content, journal_append
 
+    def _archive_text() -> str | None:
+        if not nonlocal_state["archive"]:
+            return None
+        return "\n".join(
+            f"### {get_timestamp()} from ## {section}\n\n{text.rstrip()}\n"
+            for section, text in nonlocal_state["archive"]
+        )
+
     with _structured_ambiguity_error(path):
         new_content = _atomic_update_context_with_journal(
-            path, journal_path, _transform
+            path, journal_path, _transform, _archive_text
         )
     return {
         "content": new_content,
@@ -834,6 +860,8 @@ def update_context_file(
         "sections_unmatched": sections_unmatched,
         "bullets_removed": bullets_removed,
         "bullets_unmatched": bullets_unmatched,
+        "archived": len(nonlocal_state["archive"]),
+        "archive_file": context_health.derive_archive_path(path).name,
     }
 
 

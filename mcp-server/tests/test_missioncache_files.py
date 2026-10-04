@@ -1037,6 +1037,8 @@ class TestUpdateContextReturnContract:
             "sections_unmatched",
             "bullets_removed",
             "bullets_unmatched",
+            "archived",
+            "archive_file",
         }
         assert isinstance(result["content"], str)
         assert result["waiting_on_unmatched"] == []
@@ -1540,6 +1542,50 @@ class TestBulletsRemove:
         assert "- keep me" in result["content"]
         # The table survives its header.
         assert "| File | Purpose |" in result["content"]
+
+    def test_archive_moves_the_item_to_the_archive_file(self, tmp_path):
+        """An old Gotcha may still be worth grepping. With archive it leaves
+        the context file, which every load reads, for <name>-archive.md,
+        which nothing reads on resume."""
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        result = update_context_file(
+            str(ctx),
+            bullets_remove=[
+                {"section": "Gotchas", "match": "falsified", "archive": True},
+                {"section": "Gotchas", "match": "not there", "archive": True},
+            ],
+        )
+        assert result["archived"] == 1
+        assert result["archive_file"] == "p-archive.md"
+        assert result["bullets_unmatched"] == ["Gotchas: not there"]
+        assert "dead theory" not in ctx.read_text()
+        archive = (tmp_path / "p-archive.md").read_text()
+        assert archive.startswith("# ")
+        assert "from ## Gotchas" in archive
+        assert "dead theory" in archive
+
+    def test_without_archive_nothing_is_archived(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        result = update_context_file(
+            str(ctx), bullets_remove=[{"section": "Gotchas", "match": "falsified"}]
+        )
+        assert result["archived"] == 0
+        assert not (tmp_path / "p-archive.md").exists()
+
+    def test_a_second_archive_appends(self, tmp_path):
+        ctx = tmp_path / "p-context.md"
+        ctx.write_text(REMOVABLE_CONTEXT)
+        update_context_file(
+            str(ctx), bullets_remove=[{"section": "Gotchas", "match": "falsified", "archive": True}]
+        )
+        update_context_file(
+            str(ctx), bullets_remove=[{"section": "Gotchas", "match": "keep me", "archive": True}]
+        )
+        archive = (tmp_path / "p-archive.md").read_text()
+        assert "dead theory" in archive and "keep me" in archive
+        assert archive.count("from ## Gotchas") == 2
 
     @pytest.mark.parametrize("section", sorted(EXPECTED_BULLETS_FORBIDDEN))
     def test_forbidden_sections_are_refused(self, tmp_path, section):
