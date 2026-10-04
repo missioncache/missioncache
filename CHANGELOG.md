@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-04.5
+
+Published package versions: missioncache-install 1.0.22. Claude Code plugin 1.0.36. missioncache-db, mcp-missioncache, missioncache-auto and missioncache-dashboard are unchanged.
+
 - `/missioncache:lead-start` and `/missioncache:lead-stop` are now `/missioncache:lead`, its name before 2026-10-04.3, and `/missioncache:unlead`. Shorter names sit higher in the command menu. (plugin)
 
 ## 2026-10-04.4
