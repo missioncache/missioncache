@@ -181,6 +181,7 @@ This is there because Claude Code (the harness) periodically injects system remi
 
 - Steady state (same project, same peers) is silent, which is what lets a user's manual `/rename` survive day to day.
 - `/missioncache:load <project>` and `/missioncache:new <project>` retitle in the same prompt: the hook reads the name from the command, because the binding itself is written only while the command runs. It does so only for an exact active project (load) or a free name (new). A load without a name, or with a name it cannot match, retitles on the next prompt from the binding.
+- `/missioncache:lead-start` and `/missioncache:lead-stop` take or give back the `missioncache-lead` title in the same prompt, for the same reason. The prompt has to be the bare command. If the role was not recorded after all, the next prompt reads the database and gives the title back.
 - A stale suffix self-heals: a session left holding `<project>-2` after the plain-name holder died drops back to `<project>` on its next prompt. Without this, suffixes only accumulate (a real machine reached `-3` with zero live peers) and the recorded address stops matching any `ListAgents` row.
 - The accepted narrow cost: a manual `/rename` is overwritten when the peer set changes (a collision appears or a suffix frees up), not only on rebind. An unaddressable session fails every notify; a clobbered rename costs one repeated `/rename`.
 

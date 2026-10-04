@@ -50,6 +50,20 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
 # often given a description, and its first word is not the project.
 _BINDING_COMMAND_RE = re.compile(r"^/missioncache:(load|new)\s+(\S+)(?:\s+--jira\s+\S+)?$")
 
+# The lead commands have the same timing problem: `lead set` / `lead stop` run
+# after this hook, so the role change would only show on the next prompt.
+_LEAD_COMMAND_RE = re.compile(r"^/missioncache:lead-(start|stop)$")
+
+
+def lead_from_prompt(prompt: str) -> bool | None:
+    """True for a lead-start in ``prompt``, False for a lead-stop, else None.
+
+    Taken on trust: if the command then fails to record the role, the next
+    prompt reads the database again and gives the title back.
+    """
+    match = _LEAD_COMMAND_RE.match(prompt.strip())
+    return None if match is None else match.group(1) == "start"
+
 
 def project_from_prompt(prompt: str) -> str | None:
     """Project a load or new command in ``prompt`` is about to bind, or None.
@@ -80,7 +94,9 @@ def project_from_prompt(prompt: str) -> str | None:
     return None if taken else name
 
 
-def resolve_title(session_id: str, prompt_project: str | None = None) -> tuple[str, str] | None:
+def resolve_title(
+    session_id: str, prompt_project: str | None = None, prompt_lead: bool | None = None
+) -> tuple[str, str] | None:
     """``(title, project_name)`` to apply to ``session_id``, or None for nothing.
 
     The title is recomputed every prompt and emitted only when it DIFFERS from
@@ -116,7 +132,8 @@ def resolve_title(session_id: str, prompt_project: str | None = None) -> tuple[s
     # "project" is the title itself, which keeps the steady-state comparison
     # below meaningful for the lead too.
     applied = read_session_title(session_id) or {}
-    if lead_session_id() == session_id:
+    is_lead = lead_session_id() == session_id if prompt_lead is None else prompt_lead
+    if is_lead:
         if applied.get("title") == LEAD_SESSION_TITLE:
             return None
         return LEAD_SESSION_TITLE, LEAD_SESSION_TITLE
@@ -183,7 +200,7 @@ def main() -> None:
         if not isinstance(prompt, str):
             prompt = ""
 
-        resolved = resolve_title(session_id, project_from_prompt(prompt))
+        resolved = resolve_title(session_id, project_from_prompt(prompt), lead_from_prompt(prompt))
         if resolved is None:
             return
         title, project_name = resolved

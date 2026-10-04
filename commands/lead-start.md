@@ -43,7 +43,7 @@ Capture the printed `SESSION_ID`. An empty value means the role cannot be record
 missioncache-db lead set "<SESSION_ID from Step 1>"
 ```
 
-The output names the session and the title it now carries, `missioncache-lead`. That title is the address every working session sends change notices to. It is applied by the title hook on the next prompt and outranks any project binding.
+The output names the session and the title it now carries, `missioncache-lead`. That title is the address every working session sends change notices to. The title hook applies it as soon as you run this command, and it outranks any project binding.
 
 
 

@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- `/missioncache:lead-start` renames the session to `missioncache-lead` right away, and `/missioncache:lead-stop` gives the name back, without waiting for another prompt. (plugin)
+
 ## 2026-10-04.3
 
 Published package versions: missioncache-install 1.0.21. Claude Code plugin 1.0.34. missioncache-db, mcp-missioncache, missioncache-auto and missioncache-dashboard are unchanged.
