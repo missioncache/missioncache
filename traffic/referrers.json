@@ -853,5 +853,17 @@
       "referrer": "missioncache.dev",
       "uniques": 1
     }
+  ],
+  "2026-10-05": [
+    {
+      "count": 2,
+      "referrer": "pypi.org",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "referrer": "missioncache.dev",
+      "uniques": 1
+    }
   ]
 }
