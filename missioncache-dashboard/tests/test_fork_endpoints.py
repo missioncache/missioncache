@@ -70,6 +70,30 @@ class TestActiveTasksOrphanPromotion:
         parent_dict = next(t for t in result["tasks"] if t["name"] == "parent-proj")
         assert [c["name"] for c in parent_dict["subtasks"]] == ["child-proj"]
 
+    def test_fork_of_a_fork_nests_under_its_parent(self, api, monkeypatch):
+        """All active A -> B -> C: C must be listed under B, which sits
+        under A, and each level's combined time is its whole subtree. A flat
+        attach shows B, silently drops C, and leaves C's time out of A's."""
+        source, target = api
+        a = source.create_task("root-a")
+        b = source.create_task("mid-b")
+        c = source.create_task("leaf-c")
+        source.set_task_parent(b.id, a.id)
+        source.set_task_parent(c.id, b.id)
+        target.sync_from_sqlite()
+        own = {a.id: 10, b.id: 20, c.id: 40}
+        monkeypatch.setattr(server, "_get_jsonl_task_times", lambda ids: own)
+
+        result = asyncio.run(server.api_tasks_active())
+        assert _names(result) == {"root-a"}
+        root = result["tasks"][0]
+        mid = root["subtasks"][0]
+        assert mid["name"] == "mid-b"
+        leaf = mid["subtasks"][0]
+        assert leaf["name"] == "leaf-c"
+        assert (root["combined_time_seconds"], mid["combined_time_seconds"],
+                leaf["combined_time_seconds"]) == (70, 60, 40)
+
     def test_completed_grandparent_promotes_only_middle(self, api):
         """completed-P -> active-A -> active-B: A is promoted top-level and
         KEEPS B as its subtask (with combined time), B is not promoted."""

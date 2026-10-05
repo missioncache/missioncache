@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- A fork of a fork now works: reading its parent clears the update dot, the statusline shows the chain, and the dashboard lists it. (plugin, mcp-missioncache, missioncache-dashboard, missioncache-db)
+
 ## 2026-10-04.5
 
 Published package versions: missioncache-install 1.0.22. Claude Code plugin 1.0.36. missioncache-db, mcp-missioncache, missioncache-auto and missioncache-dashboard are unchanged.

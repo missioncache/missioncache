@@ -206,6 +206,102 @@ class TestGetProjectInfoFork:
         assert info.shared_stale_mtime == 0.0
 
 
+# ── fork chains: the parent is itself a fork ─────────────────────────────
+
+
+def _project(active, name, fork_of=""):
+    d = active / name
+    d.mkdir()
+    header = f"**Fork of:** {fork_of}\n" if fork_of else ""
+    ctx = d / f"{name}-context.md"
+    ctx.write_text(f"# {name} - Context\n{header}\n## Description\n")
+    (d / f"{name}-tasks.md").write_text("- [ ] a\n")
+    return ctx
+
+
+class TestForkChain:
+    """Spec: a fork of a fork shows its parent, then the parent's own parent
+    dim for orientation ("B ← A"). Reads stay one hop, so the "parent updated"
+    dot follows the direct parent only. Deeper chains end in "← …", and a
+    cycle never loops."""
+
+    def _info(self, monkeypatch, name):
+        monkeypatch.setattr(mod, "_get_hooks_db", lambda: _bound_conn(name))
+        return mod.get_project_info("sess-1", 60)
+
+    def test_fork_of_a_fork_shows_the_grandparent(self, fork_fs, monkeypatch):
+        active, _c, _s, _p = fork_fs
+        _project(active, "mid-proj", fork_of="parent-proj")
+        _project(active, "leaf-proj", fork_of="mid-proj")
+        info = self._info(monkeypatch, "leaf-proj")
+        assert info.fork_of == "mid-proj"
+        assert info.fork_ancestry == "parent-proj"
+
+    def test_plain_fork_has_no_ancestry(self, fork_fs, monkeypatch):
+        active, _c, _s, _p = fork_fs
+        _project(active, "mid-proj", fork_of="parent-proj")
+        info = self._info(monkeypatch, "mid-proj")
+        assert info.fork_of == "parent-proj"
+        assert info.fork_ancestry == ""
+
+    def test_three_levels_end_in_an_ellipsis(self, fork_fs, monkeypatch):
+        active, _c, _s, parent_ctx = fork_fs
+        parent_ctx.write_text("# P - Context\n**Fork of:** root-proj\n\n## Description\n")
+        _project(active, "mid-proj", fork_of="parent-proj")
+        _project(active, "leaf-proj", fork_of="mid-proj")
+        info = self._info(monkeypatch, "leaf-proj")
+        assert info.fork_ancestry == "parent-proj ← …"
+
+    def test_a_two_node_cycle_shows_no_ancestry(self, fork_fs, monkeypatch):
+        active, _c, _s, _p = fork_fs
+        _project(active, "x-proj", fork_of="y-proj")
+        _project(active, "y-proj", fork_of="x-proj")
+        info = self._info(monkeypatch, "x-proj")
+        assert info.fork_of == "y-proj"
+        assert info.fork_ancestry == ""
+
+    def test_a_three_node_cycle_does_not_claim_a_deeper_chain(self, fork_fs, monkeypatch):
+        """leaf -> mid -> top -> leaf: the grandparent is real, but its own
+        parent is the child itself, so there is no deeper chain to hint at."""
+        active, _c, _s, _p = fork_fs
+        _project(active, "leaf-proj", fork_of="mid-proj")
+        _project(active, "mid-proj", fork_of="top-proj")
+        _project(active, "top-proj", fork_of="leaf-proj")
+        info = self._info(monkeypatch, "leaf-proj")
+        assert info.fork_ancestry == "top-proj"
+
+    def test_the_dot_follows_the_direct_parent_only(self, fork_fs, monkeypatch):
+        """The grandparent changing must not light the dot: the child never
+        reads the grandparent, so there is nothing for it to re-read."""
+        active, _c, state, parent_ctx = fork_fs
+        mid_ctx = _project(active, "mid-proj", fork_of="parent-proj")
+        _project(active, "leaf-proj", fork_of="mid-proj")
+        (state / "shared-seen" / "sess-1.json").write_text(
+            json.dumps({"parent": "mid-proj", "seen_mtime": mid_ctx.stat().st_mtime})
+        )
+        later = time.time() + 60
+        os.utime(parent_ctx, (later, later))
+        info = self._info(monkeypatch, "leaf-proj")
+        assert info.shared_stale_mtime == 0.0
+
+        # Positive control: the same marker lights the dot once the DIRECT
+        # parent changes, so the zero above is not a mis-keyed marker.
+        os.utime(mid_ctx, (later, later))
+        info = self._info(monkeypatch, "leaf-proj")
+        assert info.shared_stale_mtime == later
+
+    def test_cell_renders_parent_then_ancestry_then_dot(self):
+        project = mod.ProjectInfo(
+            name="leaf-proj", fork_of="mid-proj", fork_ancestry="parent-proj",
+            shared_stale_mtime=time.time(),
+        )
+        value = mod._fork_value(project)
+        assert value.index("mid-proj") < value.index("← parent-proj") < value.index("● parent updated")
+        assert f"{mod.COLORS['dim']}← parent-proj" in value
+        # The grandparent is orientation only: the one link is the parent's.
+        assert value.count("\x1b]8;;http") == 1
+
+
 # ── cross-parser parity (the split-brain guard) ──────────────────────────
 
 

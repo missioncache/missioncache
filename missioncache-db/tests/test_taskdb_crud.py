@@ -556,6 +556,53 @@ class TestHierarchicalOrphans:
         assert [t.name for t in hierarchy["children"][parent.id]] == ["child-proj"]
 
 
+class TestRenderTaskTreeChains:
+    def test_fork_of_a_fork_is_listed_under_its_parent(self, db):
+        """All active A -> B -> C: the CLI list shows C under B, one level
+        deeper. A tree that stops at one level drops C entirely."""
+        from missioncache_db import render_task_tree
+
+        a = db.create_task("root-a")
+        b = db.create_task("mid-b")
+        c = db.create_task("leaf-c")
+        d = db.create_task("side-d")
+        db.set_task_parent(b.id, a.id)
+        db.set_task_parent(c.id, b.id)
+        db.set_task_parent(d.id, a.id)
+
+        lines = render_task_tree(db, db.get_active_tasks_hierarchical())
+        rows = {name: next(line for line in lines if f"] {name} " in line)
+                for name in ("root-a", "mid-b", "leaf-c", "side-d")}
+        order = [lines.index(rows[n]) for n in ("root-a", "mid-b", "leaf-c", "side-d")]
+        assert order == sorted(order)
+        assert rows["mid-b"].startswith("    ├── ")
+        # mid-b is not the last fork of root-a, so its spine runs past leaf-c.
+        assert rows["leaf-c"].startswith("    │   └── ")
+        assert rows["side-d"].startswith("    └── ")
+
+    def test_subtask_time_counts_every_depth(self, db):
+        """The root's subtask total is its whole subtree: a grandchild's
+        time counts too, or the listed tree and its total disagree."""
+        from datetime import datetime
+
+        a = db.create_task("root-a")
+        b = db.create_task("mid-b")
+        c = db.create_task("leaf-c")
+        db.set_task_parent(b.id, a.id)
+        db.set_task_parent(c.id, b.id)
+        with db.connection() as conn:
+            for task_id, seconds in ((a.id, 60), (b.id, 600), (c.id, 3600)):
+                conn.execute(
+                    "INSERT INTO sessions (task_id, start_time, duration_seconds) "
+                    "VALUES (?, ?, ?)",
+                    (task_id, datetime.now().isoformat(), seconds),
+                )
+            conn.commit()
+
+        assert db.get_subtask_time_total(a.id) == 600 + 3600
+        assert db.get_subtask_time_total(b.id) == 3600
+
+
 class TestSetTaskParentCycles:
     def test_two_node_cycle_rejected(self, db):
         """A -> B then B -> A must raise."""

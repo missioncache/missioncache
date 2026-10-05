@@ -4078,13 +4078,20 @@ class TaskDB:
             return row["total"] if row else 0
 
     def get_subtask_time_total(self, parent_task_id: int) -> int:
-        """Get total time spent on all subtasks of a parent task."""
+        """Get total time spent on every subtask of a parent task, at any
+        depth (a fork can itself have forks). UNION, not UNION ALL, so a
+        cycle in the parent links ends the walk instead of looping."""
         with self.connection() as conn:
             row = conn.execute(
-                """SELECT COALESCE(SUM(s.duration_seconds), 0) as total
-                   FROM sessions s
-                   JOIN tasks t ON s.task_id = t.id
-                   WHERE t.parent_id = ?""",
+                """WITH RECURSIVE descendants(id) AS (
+                       SELECT id FROM tasks WHERE parent_id = ?
+                       UNION
+                       SELECT t.id FROM tasks t
+                       JOIN descendants d ON t.parent_id = d.id
+                   )
+                   SELECT COALESCE(SUM(duration_seconds), 0) as total
+                   FROM sessions
+                   WHERE task_id IN (SELECT id FROM descendants)""",
                 (parent_task_id,),
             ).fetchone()
             return row["total"] if row else 0
@@ -5392,17 +5399,32 @@ def render_task_tree(db: TaskDB, hierarchy: Dict[str, Any]) -> List[str]:
             f"{db.format_time_ago(db.get_effective_last_updated(task))}"
         )
 
-        # Render children with tree connectors
-        for i, child in enumerate(child_tasks):
-            connector = "└──" if i == len(child_tasks) - 1 else "├──"
-            child_time = db.get_task_time(child.id, "all")
-            lines.append(
-                f"    {connector} [{child.id}] {child.name} - "
-                f"{db.format_duration(child_time)} - "
-                f"{db.format_time_ago(db.get_effective_last_updated(child))}"
-            )
+        _render_children(db, hierarchy["children"], child_tasks, "    ", lines)
 
     return lines
+
+
+def _render_children(
+    db: TaskDB,
+    children: Dict[int, List["Task"]],
+    child_tasks: List["Task"],
+    prefix: str,
+    lines: List[str],
+) -> None:
+    """Render ``child_tasks`` with tree connectors, then each one's own
+    children one level deeper (a fork can itself have forks)."""
+    for i, child in enumerate(child_tasks):
+        last = i == len(child_tasks) - 1
+        child_time = db.get_task_time(child.id, "all")
+        lines.append(
+            f"{prefix}{'└──' if last else '├──'} [{child.id}] {child.name} - "
+            f"{db.format_duration(child_time)} - "
+            f"{db.format_time_ago(db.get_effective_last_updated(child))}"
+        )
+        _render_children(
+            db, children, children.get(child.id, []),
+            prefix + ("    " if last else "│   "), lines,
+        )
 
 
 # =============================================================================

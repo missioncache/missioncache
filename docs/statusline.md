@@ -10,7 +10,7 @@ The full install turns it on. It refreshes on every Claude Code prompt.
 
 | Line | What you see |
 |---|---|
-| **Project** | The loaded project and its progress (`[3/8]`, or `[TBD]` with no real tasks yet), when its context was saved, `⤵ Fork of <parent>` on a fork, and your last prompt time. |
+| **Project** | The loaded project and its progress (`[3/8]`, or `[TBD]` with no real tasks yet), when its context was saved, `⤵ Fork of: <parent>` on a fork (with the parent's own parent in gray when the parent is a fork too), and your last prompt time. |
 | **Location** | The folder, the git branch (green when clean, yellow when there are changes), and the open PR for the branch. |
 | **Session** | How long this session has run, and how many edits Claude made. |
 | **Metrics** | The model, the effort level, and `Fast mode activated` when fast mode is on. |

@@ -103,4 +103,4 @@ Show the user:
 - **The parent's context file is the single shared layer.** Do not duplicate its content into children - link and reference.
 - **Completing the parent is allowed** while children are active; its context stays readable and shared from `completed/`. `/missioncache:done` warns so nobody is surprised.
 - **Renaming a parent breaks the children's `Fork of:` headers** - they keep their last link but stop re-healing. If you rename a parent, update each child's header line to the new name in the same breath.
-- **Fork chains** (grandparent -> parent -> child) are stored faithfully, but tooling resolves ONE level: a child sees its immediate parent's context as the shared layer.
+- **Forking a fork is allowed.** In a chain grandparent -> parent -> child, the child reads its immediate parent's context only. The statusline shows the chain as `⤵ Fork of: <parent> ← <grandparent>`, and the dashboard nests it.

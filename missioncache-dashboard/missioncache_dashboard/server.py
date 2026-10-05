@@ -1287,19 +1287,21 @@ async def api_tasks_active(repo_id: int = None):
             parents.extend(orphaned)
             del children_map[orphan_parent_id]
 
-    # Attach children to parents and calculate combined time
-    for parent in parents:
-        parent_id = parent["id"]
-        children = children_map.get(parent_id, [])
-        parent["subtasks"] = children
-        parent["subtask_count"] = len(children)
+    # Attach children at every depth (a fork can itself have forks) and roll
+    # each node's time up through its whole subtree. The walk starts at roots
+    # and every node has one parent, so a cycle is never reached from a root
+    # and the recursion ends at the leaves.
+    def attach(node: dict) -> int:
+        children = children_map.get(node["id"], [])
+        node["subtasks"] = children
+        node["subtask_count"] = len(children)
+        combined = node["time_spent_seconds"] + sum(attach(c) for c in children)
+        node["combined_time_seconds"] = combined
+        node["combined_time_formatted"] = db.format_duration(combined)
+        return combined
 
-        # Combined time
-        subtask_time = sum(c["time_spent_seconds"] for c in children)
-        parent["combined_time_seconds"] = parent["time_spent_seconds"] + subtask_time
-        parent["combined_time_formatted"] = db.format_duration(
-            parent["time_spent_seconds"] + subtask_time
-        )
+    for parent in parents:
+        attach(parent)
 
     return {
         "tasks": parents,

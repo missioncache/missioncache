@@ -1988,16 +1988,17 @@
         tr.fork-child > td { background: var(--fork-family-bg); }
         tr.fork-child.clickable-row:hover > td { background: var(--fork-family-bg-hover); }
 
-        tr.fork-child > td:first-child { position: relative; }
+        tr.fork-child > td:first-child { position: relative; background: var(--fork-rails, none), var(--fork-family-bg); }
+        tr.fork-child.clickable-row:hover > td:first-child { background: var(--fork-rails, none), var(--fork-family-bg-hover); }
 
         /* fork rows: indent name content to clear the elbow */
-        tr.fork-child .task-name-cell { padding-left: 20px; }
+        tr.fork-child .task-name-cell { padding-left: calc(20px + (var(--fork-depth, 1) - 1) * 16px); }
 
         /* vertical spine; consecutive forks connect edge to edge, and the first
            fork's spine touches the parent row's bottom edge, so the rail reads
            as flowing out of the parent without coloring the parent row */
         tr.fork-child > td:first-child::before {
-            content: ""; position: absolute; left: 9px; top: 0; bottom: 0;
+            content: ""; position: absolute; left: calc(9px + (var(--fork-depth, 1) - 1) * 16px); top: 0; bottom: 0;
             width: 2px; background: var(--fork-line);
         }
         /* last fork: spine stops at its elbow */
@@ -2005,7 +2006,7 @@
 
         /* horizontal elbow into the fork's name line */
         tr.fork-child > td:first-child::after {
-            content: ""; position: absolute; left: 9px; top: 24px;
+            content: ""; position: absolute; left: calc(9px + (var(--fork-depth, 1) - 1) * 16px); top: 24px;
             width: 16px; height: 2px; background: var(--fork-line);
         }
         /* parent of a fork family: a short rail stub so the tree visibly
@@ -7688,10 +7689,8 @@
             }
             const data = await response.json();
             for (const task of (data.tasks || [])) {
-                if (matches(task)) return task;
-                for (const sub of (task.subtasks || [])) {
-                    if (matches(sub)) return sub;
-                }
+                const hit = familyMembers(task).find(matches);
+                if (hit) return hit;
             }
             return null;
         }
@@ -10733,19 +10732,18 @@ function renderAttention(data) {
         }
 
         function taskMatchesProjectsFilters(task) {
-            const subtasks = task.subtasks || [];
             if (projectsFilter.repo && (task.repo_name || '') !== projectsFilter.repo) return false;
+            const members = familyMembers(task);
             if (projectsFilter.categories.size > 0) {
                 // Project-level match: a parent qualifies when it or any of
-                // its subtasks carries a selected category (the whole project
+                // its forks, at any depth, carries a selected category (the whole project
                 // stays visible rather than filtering individual rows).
-                const cats = [task, ...subtasks].map(getTaskCategory);
+                const cats = members.map(getTaskCategory);
                 if (!cats.some(c => projectsFilter.categories.has(c))) return false;
             }
             if (projectsFilter.search) {
                 const q = projectsFilter.search.toLowerCase();
-                const haystacks = [task.name, task.description,
-                                   ...subtasks.map(s => s.name), ...subtasks.map(s => s.description)];
+                const haystacks = members.flatMap(m => [m.name, m.description]);
                 if (!haystacks.some(h => (h || '').toLowerCase().includes(q))) return false;
             }
             return true;
@@ -10763,7 +10761,7 @@ function renderAttention(data) {
             const presentCats = new Set();
             const repos = new Set();
             for (const task of [...activeTasksCache, ...completedTasksCache]) {
-                for (const t of [task, ...(task.subtasks || [])]) presentCats.add(getTaskCategory(t));
+                for (const t of familyMembers(task)) presentCats.add(getTaskCategory(t));
                 if (task.repo_name) repos.add(task.repo_name);
             }
             // Taxonomy order for stability; unknown stored values (future
@@ -10868,16 +10866,21 @@ function renderAttention(data) {
             renderActiveTasks(activeTasksCache);
         }
 
-        // Most recent activity across a family (parent + forks). ISO strings
+        // A project and every fork under it, at any depth (a fork can itself
+        // have forks). The one walk all family lookups share.
+        function familyMembers(t) {
+            const out = [t];
+            for (const s of (t.subtasks || [])) out.push(...familyMembers(s));
+            return out;
+        }
+
+        // Most recent activity across a family (a project and its forks at
+        // every depth). ISO strings
         // compare lexically. This is what makes a save on ANY family member
         // bump the whole group to the top of the 'updated' sort.
         function familyUpdatedKey(t) {
-            let best = t.last_worked_on || t.created_at || '';
-            for (const s of (t.subtasks || [])) {
-                const v = s.last_worked_on || s.created_at || '';
-                if (v > best) best = v;
-            }
-            return best;
+            const m = familyMostRecent(t);
+            return m.last_worked_on || m.created_at || '';
         }
 
         // Project due date for the list sort: the /api/today join first (own
@@ -10902,6 +10905,8 @@ function renderAttention(data) {
                 });
             }
 
+            // Each family's key once, not on every comparison.
+            const updatedKeys = new Map(tasks.map(t => [t, familyUpdatedKey(t)]));
             const val = t => {
                 switch (key) {
                     case 'name': return (t.name || '').toLowerCase();
@@ -10909,7 +10914,7 @@ function renderAttention(data) {
                     case 'progress': return t.completion_pct || 0;
                     // family total (equals own time when there are no forks)
                     case 'time': return t.combined_time_seconds ?? t.time_spent_seconds ?? 0;
-                    default: return familyUpdatedKey(t);
+                    default: return updatedKeys.get(t);
                 }
             };
             return tasks.slice().sort((a, b) => {
@@ -10944,23 +10949,30 @@ function renderAttention(data) {
             }
 
             // Fork tree: every family renders as the parent's OWN row followed by
-            // its fork rows, connected by the cyan rail. Families were already
-            // sorted as units by sortProjects.
+            // its fork rows, connected by the cyan rail, each fork's own forks
+            // right under it. Families were already sorted as units by
+            // sortProjects.
             const rowsHTML = [];
+            // `rails` holds the shallower depths whose spine still runs past
+            // this row, because a later sibling up there has yet to render.
+            const pushForks = (parent, depth, rails) => {
+                const forks = parent.subtasks || [];
+                forks.forEach((fork, i) => {
+                    const isLast = i === forks.length - 1;
+                    rowsHTML.push(renderProjectRow(fork, {
+                        role: 'child',
+                        depth,
+                        rails,
+                        isLast,
+                        parentName: parent.name,
+                    }));
+                    pushForks(fork, depth + 1, isLast ? rails : [...rails, depth]);
+                });
+            };
             for (const parent of tasks) {
                 const forks = parent.subtasks || [];
-                if (forks.length > 0) {
-                    rowsHTML.push(renderProjectRow(parent, { role: 'parent', forkCount: forks.length }));
-                    forks.forEach((fork, i) => {
-                        rowsHTML.push(renderProjectRow(fork, {
-                            role: 'child',
-                            isLast: i === forks.length - 1,
-                            parentName: parent.name,
-                        }));
-                    });
-                } else {
-                    rowsHTML.push(renderProjectRow(parent, { role: 'standalone' }));
-                }
+                rowsHTML.push(renderProjectRow(parent, { role: forks.length ? 'parent' : 'standalone' }));
+                pushForks(parent, 1, []);
             }
             tbody.innerHTML = rowsHTML.join('');
         }
@@ -10969,12 +10981,30 @@ function renderAttention(data) {
         // family sits where it does under the 'updated' sort.
         function familyMostRecent(parent) {
             let best = parent;
-            let bestKey = parent.last_worked_on || parent.created_at || '';
-            for (const s of (parent.subtasks || [])) {
+            let bestKey = '';
+            for (const s of familyMembers(parent)) {
                 const k = s.last_worked_on || s.created_at || '';
                 if (k > bestKey) { best = s; bestKey = k; }
             }
             return best;
+        }
+
+        // Inline style for a fork row: its indent below the first level, the
+        // ancestor spines that pass through it, and, when the fork has forks
+        // of its own, the stub from its name line down to their spine. All
+        // drawn on the first cell at the CSS rails' 9px + 16px-per-level
+        // offsets. Every value is a number from the render walk, never task
+        // data.
+        function forkRowStyle(opts, hasForks) {
+            if (opts.role !== 'child') return '';
+            const depth = opts.depth || 1;
+            const line = 'linear-gradient(var(--fork-line), var(--fork-line))';
+            const layers = (opts.rails || []).map(d =>
+                `${line} ${9 + (d - 1) * 16}px 0 / 2px 100% no-repeat`);
+            if (hasForks) layers.push(`${line} ${9 + depth * 16}px 24px / 2px calc(100% - 24px) no-repeat`);
+            const css = (depth > 1 ? `--fork-depth: ${depth};` : '')
+                + (layers.length ? ` --fork-rails: ${layers.join(', ')};` : '');
+            return css ? ` style="${css.trim()}"` : '';
         }
 
         function renderProjectRow(task, opts) {
@@ -11000,19 +11030,23 @@ function renderAttention(data) {
             let metaBadge = '';
             let hiddenNote = '';
 
+            const forkCount = (task.subtasks || []).length;
+            const hasForks = forkCount > 0;
             if (opts.role === 'parent') {
-                const n = opts.forkCount;
-                const plural = n === 1 ? 'fork' : 'forks';
-                aria += `, ${n} ${plural}`;
                 trClass += ' fork-parent';
-                // On the NAME line, mirroring the children's pill placement, so
-                // "has forks" sits on the line the eye actually scans.
-                nameBadge = `<span class="fork-count-badge" title="${n} ${plural} share this project's context">&#x2442; ${n} ${plural}</span>`;
             } else if (opts.role === 'child') {
                 trClass += ' fork-child' + (opts.isLast ? ' fork-child-last' : '');
                 aria += `, fork of ${escapeHtml(opts.parentName)}`;
                 nameBadge = `<span class="fork-badge" title="Fork of ${escapeHtml(opts.parentName)} - shares its context, keeps its own tasks">&#x2935; fork</span>`;
                 hiddenNote = `<span class="visually-hidden">Fork of ${escapeHtml(opts.parentName)}</span>`;
+            }
+            if (hasForks) {
+                // On the NAME line, mirroring the fork pill placement, so "has
+                // forks" sits on the line the eye actually scans. A fork with
+                // forks of its own carries both pills.
+                const plural = forkCount === 1 ? 'fork' : 'forks';
+                aria += `, ${forkCount} ${plural}`;
+                nameBadge += `<span class="fork-count-badge" title="${forkCount} ${plural} share this project's context">&#x2442; ${forkCount} ${plural}</span>`;
             }
 
             // PM signals joined from /api/today (action-items badge + at-risk dot).
@@ -11053,7 +11087,7 @@ function renderAttention(data) {
             // Time cell: the parent shows the family total (equals own time when
             // there are no forks); its own share travels in the tooltip.
             let timeCell;
-            if (opts.role === 'parent') {
+            if (hasForks) {
                 timeCell = `<td title="family total (own: ${escapeHtml(task.time_spent_formatted || '0m')})">${escapeHtml(task.combined_time_formatted || task.time_spent_formatted || '0m')}</td>`;
             } else {
                 timeCell = `<td>${escapeHtml(task.time_spent_formatted || '0m')}</td>`;
@@ -11062,7 +11096,7 @@ function renderAttention(data) {
             // Updated cell: when a FORK is the most recent family member, the
             // parent row says so - it explains why the family bumped up.
             let updatedHTML = escapeHtml(task.last_worked_ago || '-');
-            if (opts.role === 'parent') {
+            if (hasForks) {
                 const recent = familyMostRecent(task);
                 if (recent !== task) {
                     updatedHTML = `${escapeHtml(recent.last_worked_ago || '-')}<span class="fork-updated-note">via fork</span>`;
@@ -11070,7 +11104,7 @@ function renderAttention(data) {
             }
 
             return `
-                <tr class="${trClass}" tabindex="0" role="button" aria-label="${aria}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
+                <tr class="${trClass}"${forkRowStyle(opts, hasForks)} tabindex="0" role="button" aria-label="${aria}" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" data-repo-name="${escapeHtml(task.repo_name || '')}">
                     <td>${taskNameHTML}</td>
                     <td class="description-cell" title="${escapeHtml(task.description || '')}"><div class="desc-clamp">${escapeHtml(description) || '-'}</div></td>
                     <td>
@@ -11899,10 +11933,8 @@ function renderAttention(data) {
         // =============================================================================
         function _findTaskInCaches(taskId) {
             for (const t of [...activeTasksCache, ...completedTasksCache]) {
-                if (t.id === taskId) return t;
-                for (const s of (t.subtasks || [])) {
-                    if (s.id === taskId) return s;
-                }
+                const hit = familyMembers(t).find(m => m.id === taskId);
+                if (hit) return hit;
             }
             return null;
         }

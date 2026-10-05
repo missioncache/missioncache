@@ -57,7 +57,7 @@ To write to the shared layer, ask Claude to update the parent's context. Do not 
 
 Two sessions on two forks can both write the parent's context. MissionCache does not block that. In Claude Code it tells you:
 
-- **The statusline** shows `⤵ Fork of <parent>` on the project line. When the parent's context changed since this session last read it, a cyan `● parent updated <time>` note follows.
+- **The statusline** shows `⤵ Fork of: <parent>` on the project line. When the parent is itself a fork, its own parent follows in gray: `⤵ Fork of: <parent> ← <grandparent>`, and `← …` marks a longer chain. When the parent's context changed since this session last read it, a cyan `● parent updated <time>` note follows.
 - **`/missioncache:load`** says either "shared context up to date" or "UPDATED by a parallel session since your last sync". On the second, it reads the parent before you continue.
 
 To clear the note, do any of these:
@@ -91,7 +91,7 @@ A session on `product-a-tests` finds that staging rotates its token every hour. 
 
 **Deleting.** A parent that still has forks cannot be deleted. Complete or delete the forks first, or remove the `**Fork of:**` line from each one so they unlink on the next scan.
 
-**Chains.** A fork of a fork sees only its direct parent's context.
+**Chains.** You can fork a fork. It sees only its direct parent's context, never the grandparent's. The dashboard and `missioncache-db list-active` show it nested under its parent.
 
 ## When something looks wrong
 

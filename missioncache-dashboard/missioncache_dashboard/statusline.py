@@ -118,6 +118,8 @@ COLORS = {
     "opus_usage": f"{ESC}[38;2;200;160;120m",
     "scoped_usage": f"{ESC}[38;2;190;140;220m",
     "reset_time": f"{ESC}[38;2;120;120;130m",
+    # Secondary text that is there for orientation only (a fork's grandparent).
+    "dim": f"{ESC}[38;2;120;120;130m",
     "mode_personal": f"{ESC}[38;2;80;200;120m",
     "mode_work": f"{ESC}[38;2;100;150;220m",
     "mode_free": f"{ESC}[38;2;140;140;150m",
@@ -733,6 +735,9 @@ class ProjectInfo(NamedTuple):
     # This project's own context file mtime; 0.0 = no context file (or
     # unstattable). Rendered as the "Saved" cell.
     context_saved_mtime: float = 0.0
+    # The parent's own parent when the parent is itself a fork, shown dim
+    # after it for orientation ("A", or "A ← …" deeper). Reads stay one hop.
+    fork_ancestry: str = ""
 
 
 # MUST stay byte-identical to context_health._FORK_NAME_RE (the db/MCP copy).
@@ -789,6 +794,58 @@ def _resolve_parent_context(parent: str) -> Optional[Path]:
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _fork_of_file(ctx_path: Path) -> str:
+    """The ``**Fork of:**`` parent named in a context file's head, or "" on
+    any read failure.
+
+    Bounded read: the header sits at the very top, so read at most 8 KB
+    instead of slurping the whole context (can be 100 KB+) on every render
+    inside the ~300 ms statusline budget. UnicodeDecodeError is caught too -
+    a non-UTF-8 file must drop only the fork annotation, not (via the main()
+    except) the entire project cell."""
+    try:
+        with open(ctx_path, "r", encoding="utf-8", errors="strict") as fh:
+            return _parse_fork_of(fh.read(8192))
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _fork_ancestry(child: str, parent: str, parent_ctx: Path) -> str:
+    """The grandparent of ``child`` for display, "A ← …" when the chain goes
+    deeper, or "" when the parent is not a fork. At most two extra head
+    reads, never a walk, and a name already in the chain ends it (a cycle,
+    which renders as the plain grandparent). The grandparent must resolve,
+    because its file is read next; the "…" only needs its header to name a
+    parent, because nothing past it is read."""
+    grandparent = _fork_of_file(parent_ctx)
+    if not grandparent or grandparent in (child, parent):
+        return ""
+    grandparent_ctx = _resolve_parent_context(grandparent)
+    if grandparent_ctx is None:
+        return ""
+    deeper = _fork_of_file(grandparent_ctx)
+    if deeper and deeper not in (child, parent, grandparent):
+        return f"{grandparent} ← …"
+    return grandparent
+
+
+def _fork_value(project: "ProjectInfo") -> str:
+    """The value of the "Fork of" cell: the parent (linked to its dashboard
+    modal), its own ancestry dim and unlinked, then the cyan "parent updated"
+    dot when the parent changed after this session last read it."""
+    parent_url = f"{_DASHBOARD_URL}/#projects?task={urllib.parse.quote(project.fork_of, safe='')}"
+    value = _osc8_link(parent_url, project.fork_of)
+    if project.fork_ancestry:
+        value += f" {COLORS['dim']}← {project.fork_ancestry}{RESET}{COLORS['project']}"
+    if project.shared_stale_mtime:
+        stamp = _format_wall_time(project.shared_stale_mtime)
+        value += (
+            f" {COLORS['fork_update']}● parent updated {stamp}"
+            f"{RESET}{COLORS['project']}"
+        )
+    return value
 
 
 def _shared_stale_mtime(
@@ -908,26 +965,18 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
 
     # Fork awareness: a "**Fork of:**" line in the child's context header
     # marks this project as a fork; the parent's context is its shared layer.
-    # Bounded read: the header sits at the very top, so read at most 8 KB
-    # instead of slurping the whole context (can be 100 KB+) on every render
-    # inside the ~300 ms statusline budget. UnicodeDecodeError is caught too -
-    # a non-UTF-8 file must drop only the fork annotation, not (via the
-    # main() except) the entire project cell.
     fork_of = ""
+    fork_ancestry = ""
     shared_stale_mtime = 0.0
     context_saved_mtime = 0.0
     for ctx_name in (f"{name}-context.md", "context.md"):
         ctx_path = project_dir / ctx_name
         if ctx_path.is_file():
             try:
-                # Stat before the read: a non-UTF-8 file drops only the fork
-                # annotation, not the Saved stamp.
                 context_saved_mtime = ctx_path.stat().st_mtime
-                with open(ctx_path, "r", encoding="utf-8", errors="strict") as fh:
-                    head = fh.read(8192)
-                fork_of = _parse_fork_of(head)
-            except (OSError, UnicodeDecodeError):
+            except OSError:
                 pass
+            fork_of = _fork_of_file(ctx_path)
             break
     if fork_of:
         parent_ctx = _resolve_parent_context(fork_of)
@@ -937,15 +986,18 @@ def get_project_info(session_id: str, duration_sec: int) -> ProjectInfo:
             shared_stale_mtime = (
                 _shared_stale_mtime(parent_ctx, session_id, fork_of) or 0.0
             )
+            fork_ancestry = _fork_ancestry(name, fork_of, parent_ctx)
 
     tasks_content = _read_tasks_content(project_dir, name)
     if not tasks_content:
         return ProjectInfo(
-            name, display, "", fork_of, shared_stale_mtime, context_saved_mtime
+            name, display, "", fork_of, shared_stale_mtime, context_saved_mtime,
+            fork_ancestry,
         )
     progress = f" {_parse_task_progress(tasks_content)}"
     return ProjectInfo(
-        name, display, progress, fork_of, shared_stale_mtime, context_saved_mtime
+        name, display, progress, fork_of, shared_stale_mtime, context_saved_mtime,
+        fork_ancestry,
     )
 
 
@@ -2109,21 +2161,12 @@ def _run() -> None:
                 )
             )
         if project.fork_of:
-            # Fork annotation: link to the parent's dashboard modal; a cyan dot
-            # (the fork-family accent, matching the dashboard's fork tree) means
-            # the shared (parent) context changed since this session's last sync
-            # - re-read it before building on stale knowledge. The timestamp is
-            # the parent change's local wall-clock time, absolute on purpose
-            # (see _format_wall_time).
-            parent_url = f"{_DASHBOARD_URL}/#projects?task={urllib.parse.quote(project.fork_of, safe='')}"
-            fork_value = _osc8_link(parent_url, project.fork_of)
-            if project.shared_stale_mtime:
-                stamp = _format_wall_time(project.shared_stale_mtime)
-                fork_value += (
-                    f" {COLORS['fork_update']}● parent updated {stamp}"
-                    f"{RESET}{COLORS['project']}"
-                )
-            line2.append(_item(COLORS["project"], "⤵", "Fork of", fork_value))
+            # Fork annotation. The cyan dot (the fork-family accent, matching
+            # the dashboard's fork tree) means the shared (parent) context
+            # changed since this session's last sync - re-read it before
+            # building on stale knowledge. The timestamp is absolute on
+            # purpose (see _format_wall_time).
+            line2.append(_item(COLORS["project"], "⤵", "Fork of", _fork_value(project)))
     if last_action_time:
         line2.append(_item(COLORS["datetime"], ICONS["datetime"], "Last Action", last_action_time))
 

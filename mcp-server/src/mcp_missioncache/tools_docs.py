@@ -722,14 +722,12 @@ async def get_context_digest(
         # and prompt a manual re-read, not silently downgrade to a plain resume.
         fork_name = context_health.parse_fork_parent(content)
         is_fork = bool(fork_name and fork_name != project_name)
-        # A fork is never itself a parent (chains are one level deep), so only
-        # a non-fork digest can be a shared-layer read. Gating here spares the
-        # stamp's DB connection and bound-context read on every fork digest.
-        shared_seen_stamped = False
-        if not is_fork:
-            shared_seen_stamped = _stamp_shared_seen_for_fork_reader(
-                project_name, files.context_file, own_mtime, session_id
-            )
+        # Any project can be a shared layer, a fork included: in a chain
+        # A <- B <- C, a C session reading B's digest is consuming its parent.
+        # The stamp itself decides, from the caller's own "**Fork of:**" line.
+        shared_seen_stamped = _stamp_shared_seen_for_fork_reader(
+            project_name, files.context_file, own_mtime, session_id
+        )
         fork_parent_error = None
         if is_fork:
             try:

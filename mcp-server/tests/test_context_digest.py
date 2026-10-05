@@ -286,6 +286,38 @@ class TestSharedSeenAutoStamp:
         assert result["shared_seen_stamped"] is False
         assert not (fork_reader / "sess-stamp-1.json").exists()
 
+    def test_fork_of_a_fork_digesting_its_parent_stamps_marker(
+        self, project, fork_reader, tmp_path
+    ):
+        """A chain demo-project <- fork-proj <- grandchild. The parent being
+        read is itself a fork, and the grandchild session must still have its
+        marker stamped, or its "parent updated" dot never clears on a read."""
+        import json
+        import sqlite3
+
+        import missioncache_db
+
+        child_dir = tmp_path / "mc" / "active" / "grandchild"
+        child_dir.mkdir(parents=True)
+        (child_dir / "grandchild-context.md").write_text(
+            "# Grandchild - Context\n**Fork of:** fork-proj\n\n## Description\n"
+        )
+        conn = sqlite3.connect(str(missioncache_db.HOOKS_STATE_DB_PATH))
+        conn.execute(
+            "UPDATE project_state SET project_name = 'grandchild' "
+            "WHERE session_id = 'sess-stamp-1'"
+        )
+        conn.commit()
+        conn.close()
+
+        result = asyncio.run(tools_docs.get_context_digest(project_name="fork-proj"))
+        assert result["is_fork"] is True
+        assert result["shared_seen_stamped"] is True
+        marker = json.loads((fork_reader / "sess-stamp-1.json").read_text())
+        assert marker["parent"] == "fork-proj"
+        fork_ctx = tmp_path / "mc" / "active" / "fork-proj" / "fork-proj-context.md"
+        assert marker["seen_mtime"] == fork_ctx.stat().st_mtime
+
     def test_explicit_session_id_param_stamps_without_env(
         self, project, fork_reader, monkeypatch
     ):
