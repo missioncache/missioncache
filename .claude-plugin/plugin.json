@@ -1,7 +1,7 @@
 {
   "name": "missioncache",
   "displayName": "MissionCache",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "description": "Project memory that survives compaction. The plan, decisions, gotchas and next steps live in markdown files and reload with one command. One lead session watches the rest.",
   "author": {
     "name": "Tomer Brami"
