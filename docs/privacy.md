@@ -6,11 +6,13 @@ MissionCache keeps everything on your machine. There is no account, no telemetry
 
 | Where | What |
 |-------|------|
-| `~/.missioncache/` | Your project files (plan, context, tasks), the SQLite database with projects and time tracking, and the dashboard's settings. |
+| `~/.missioncache/` | Your project files (plan, context, tasks), the SQLite database with projects, time tracking and a log of the changes MissionCache's tools made, and the dashboard's settings. |
 | `~/.claude/rules/` | The MissionCache rule file, copied there by the `SessionStart` hook. |
 | `~/.claude/hooks-state.db`, `~/.claude/hooks/state/` | Per-session state: which project a session is bound to, context use for the statusline. |
 
 Uninstalling MissionCache does not delete `~/.missioncache/`, so your projects survive a reinstall. Delete the folder yourself to remove them.
+
+The change log keeps a project's history after you complete, rename or delete the project. `missioncache-db events clear <project>` removes it, and `missioncache-db prune` drops anything older than 90 days.
 
 ## What it connects to
 

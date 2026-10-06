@@ -220,22 +220,48 @@ def attach_lead_session(response: dict) -> dict:
     return response
 
 
-def live_peer_sessions_for_context_file(context_file: str | Path) -> list[dict]:
-    """``live_peer_sessions_for_project`` with the project taken from the filename.
+def project_from_context_file(context_file: str | Path) -> str | None:
+    """The project a ``<name>-context.md`` path belongs to, or None.
 
-    ``<name>-context.md`` carries the project name, so a write into ANOTHER
-    project's context reports that project's sessions - the case the feature
-    exists for. The subtask layout's bare ``context.md`` carries no name; those
-    are nested under a parent and are not addressed as projects, so there is
-    nobody to notify and the answer is empty.
+    The subtask layout's bare ``context.md`` carries no name; those are
+    nested under a parent and are not addressed as projects.
     """
     try:
         name = Path(context_file).name
     except (TypeError, ValueError):
-        return []
+        return None
     if not name.endswith("-context.md"):
-        return []
-    return live_peer_sessions_for_project(name[: -len("-context.md")])
+        return None
+    return name[: -len("-context.md")] or None
+
+
+def live_peer_sessions_for_context_file(context_file: str | Path) -> list[dict]:
+    """``live_peer_sessions_for_project`` with the project taken from the filename.
+
+    A write into ANOTHER project's context reports that project's sessions -
+    the case the feature exists for. No project name means nobody to notify.
+    """
+    project = project_from_context_file(context_file)
+    return live_peer_sessions_for_project(project) if project else []
+
+
+def record_tool_events(
+    project: str | None, items: list[tuple[str, str, str | None]]
+) -> None:
+    """Record a write tool's ``(kind, what, section)`` items in the event log.
+
+    Best-effort with the same contract as ``attach_lead_session``: the write
+    already succeeded, so a failure here is logged and never surfaces. No
+    project (a nameless subtask file) records nothing.
+    """
+    if not project or not items:
+        return
+    try:
+        from missioncache_db import events
+
+        events.record_events(get_db(), project, items, _resolve_session_id(None))
+    except Exception:
+        logger.exception("Error recording events for %r", project)
 
 
 async def _notify_dashboard_task_created() -> None:

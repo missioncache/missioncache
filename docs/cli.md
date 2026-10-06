@@ -33,6 +33,7 @@ Daily work goes through the slash commands and the [MCP tools](mcp-tools.md). Us
 | `ticket add\|remove\|list ...` | Tickets linked to a project. |
 | `due-date <task> <YYYY-MM-DD\|none>` | Set or clear the project's due date. |
 | `lead set\|show\|stop` | Manage the lead session behind `/missioncache:lead` and `/missioncache:unlead`. |
+| `events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]` | What changed in your projects, newest first. `events prune [--days N]` deletes old rows, `events clear <project>` one project's history. |
 | `agenda [--date today\|tomorrow\|YYYY-MM-DD] [--json] [--source NAME] [--no-cache]` | Print one day of your configured calendar. |
 | **Time** | |
 | `heartbeat <task> [session_id]` | Record activity on a project. |
@@ -146,7 +147,7 @@ missioncache-db prune-sessions --dry-run     # show what would go
 missioncache-db cleanup --dry-run            # show what would change
 ```
 
-`prune` hides old completed projects from the completed lists. They stay in the database.
+`prune` hides old completed projects from the completed lists. They stay in the database. It also deletes events older than 90 days. Nothing runs it for you, so run it now and then.
 
 `prune-sessions` deletes state that closed sessions leave in `~/.claude/hooks/state/`. It keeps anything newer than `--days` (default 7) and any session that still runs.
 

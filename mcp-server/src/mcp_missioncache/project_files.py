@@ -712,7 +712,9 @@ def update_context_file(
     rolled_over = 0
     # Carries results out of the transform, which runs under the lock and may be
     # retried; a plain closure variable would be rebound per attempt.
-    nonlocal_state: dict[str, Any] = {"imported_event_applied": False, "archive": []}
+    nonlocal_state: dict[str, Any] = {
+        "imported_event_applied": False, "archive": [], "waiting_on_resolved": [],
+    }
 
     def _transform(content: str) -> tuple[str, str | None]:
         nonlocal rolled_over
@@ -773,6 +775,7 @@ def update_context_file(
             content, timestamp, waiting_on_add, waiting_on_resolve
         )
         waiting_on_unmatched.extend(unmatched)
+        nonlocal_state["waiting_on_resolved"] = resolved_changes
 
         # The Hub header line lives in the header region, untouched by the
         # section writers below, so its placement does not depend on them.
@@ -856,6 +859,9 @@ def update_context_file(
         "waiting_on_unmatched": waiting_on_unmatched,
         "journal_rolled_over": rolled_over,
         "imported_event_applied": nonlocal_state["imported_event_applied"],
+        # The note written for each row this call actually removed, with its
+        # kind (resolved / moved / dropped), for the event log.
+        "waiting_on_resolved": nonlocal_state["waiting_on_resolved"],
         "sections_removed": sections_removed,
         "sections_unmatched": sections_unmatched,
         "bullets_removed": bullets_removed,
@@ -1186,12 +1192,19 @@ def update_tasks_file(
 
     # Calculate progress from the just-written content
     progress = parse_task_progress(new_content)
+    text_by_number = {item.number: item.text for item in parse_tasks_md(new_content)}
 
     return {
         "file": str(path),
         "updates_made": updates_made,
         "progress": progress.model_dump() if progress else None,
         "completed_numbers": completed_numbers_seen,
+        # The full line of each just-ticked task, read from the content this
+        # call wrote (under its lock), for the event log.
+        "completed_texts": [
+            f"{n}. {text_by_number[n]}" if n in text_by_number else n
+            for n in completed_numbers_seen
+        ],
         "unmatched": unmatched,
         "removed_numbers": removed_numbers,
         "remove_unmatched": remove_unmatched,

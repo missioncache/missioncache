@@ -28,7 +28,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from . import context_health, filelock
+from . import context_health, events, filelock
 
 logger = logging.getLogger(__name__)
 
@@ -341,18 +341,16 @@ def add_action_item(
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (task_id, what, requested_by, assignee or "me", due_date, source, notes),
         )
-        conn.commit()
         item = _get_action_item(conn, cur.lastrowid)
-    if refresh_mirror:
         due_part = f", due {item.due_date}" if item.due_date else ""
-        refresh_context_mirror(
-            db,
-            task_id,
-            change_note=(
-                f"Action item added ({item.label}): {item.what} "
-                f"(owner: {item.assignee}{due_part})"
-            ),
+        note = (
+            f"Action item added ({item.label}): {item.what} "
+            f"(owner: {item.assignee}{due_part})"
         )
+        events.insert_events(conn, None, [("action_item", note, None)], task_id=task_id)
+        conn.commit()
+    if refresh_mirror:
+        refresh_context_mirror(db, task_id, change_note=note)
     return item
 
 
@@ -416,9 +414,7 @@ def update_action_item(
         conn.execute(
             f"UPDATE action_items SET {', '.join(sets)} WHERE id = ?", params
         )
-        conn.commit()
         item = _get_action_item(conn, item_id)
-    if refresh_mirror:
         if status is not _UNSET and status != current.status:
             verb = {"done": "done", "dropped": "dropped", "open": "reopened"}[status]
             note = f"Action item {verb} ({item.label}): {item.what}"
@@ -426,6 +422,9 @@ def update_action_item(
                 note += f" - {item.notes}"
         else:
             note = f"Action item updated ({item.label}): {item.what}"
+        events.insert_events(conn, None, [("action_item", note, None)], task_id=item.task_id)
+        conn.commit()
+    if refresh_mirror:
         refresh_context_mirror(db, item.task_id, change_note=note)
     return item
 
@@ -723,14 +722,16 @@ def set_project_due_date(
         cur = conn.execute(
             "UPDATE tasks SET due_date = ? WHERE id = ?", (due_date, task_id)
         )
-        conn.commit()
         if cur.rowcount == 0:
+            conn.rollback()
             raise ValueError(f"Task not found: {task_id}")
-    if refresh_mirror:
         note = (
             f"Project due date set: {due_date}" if due_date
             else "Project due date cleared"
         )
+        events.insert_events(conn, None, [("due_date", note, None)], task_id=task_id)
+        conn.commit()
+    if refresh_mirror:
         refresh_context_mirror(db, task_id, change_note=note)
     return due_date
 
@@ -800,6 +801,7 @@ def resolve_waiting_on_row(
         note = f"Resolved (was waiting on {row['who']}): {row['what']}"
         if outcome:
             note += f" - {outcome}"
+        removed["_note"] = note
         content = context_health.prepend_recent_changes(
             content, timestamp, f"- {_sanitize_note(note)}"
         )
@@ -811,6 +813,13 @@ def resolve_waiting_on_row(
     # A raise inside the transform happens BEFORE any write, so a conflict
     # leaves the file untouched and only releases the lock.
     _atomic_update_context_with_journal(context_path, journal_path, transform)
+    # After the file write, so best-effort: the row is already resolved. The
+    # event carries the same note the file got, the shape the MCP path uses.
+    note = removed.pop("_note", "")
+    try:
+        events.record_events(db, task.name, [("waiting_resolved", note, "Waiting on")], task_id=task.id)
+    except Exception:
+        logger.exception("Error recording the Waiting-on resolve for %s", task.name)
     return removed
 
 

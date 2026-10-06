@@ -588,8 +588,9 @@ def portfolio_watermark(db) -> str:
     and a 30-second dashboard stream both compare this before recomputing,
     and an unchanged token means the 200ms-plus rollup and pid scan are
     skipped entirely. It is a change DETECTOR, not a content hash: newest
-    ``tasks.updated_at``, newest action-item write, newest ``project_state``
-    activity, and the newest mtime among active context and tasks files.
+    ``tasks.updated_at``, newest action-item write, newest event, newest
+    ``project_state`` activity, and the newest mtime among active context and
+    tasks files.
     Any one of them moving is enough. Never raises; a missing store simply
     contributes nothing.
     """
@@ -613,6 +614,7 @@ def portfolio_watermark(db) -> str:
             parts.append(_scalar(conn, "SELECT MAX(created_at) FROM action_items"))
             parts.append(_scalar(conn, "SELECT MAX(completed_at) FROM action_items"))
             parts.append(_scalar(conn, "SELECT COUNT(*) FROM action_items WHERE status = 'open'"))
+            parts.append(_scalar(conn, "SELECT MAX(id) FROM events"))
     except Exception:  # noqa: BLE001 - detector only, must never raise
         pass
 

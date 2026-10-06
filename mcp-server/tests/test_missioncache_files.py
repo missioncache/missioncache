@@ -1033,6 +1033,7 @@ class TestUpdateContextReturnContract:
             "waiting_on_unmatched",
             "journal_rolled_over",
             "imported_event_applied",
+            "waiting_on_resolved",
             "sections_removed",
             "sections_unmatched",
             "bullets_removed",
@@ -1042,6 +1043,7 @@ class TestUpdateContextReturnContract:
         }
         assert isinstance(result["content"], str)
         assert result["waiting_on_unmatched"] == []
+        assert result["waiting_on_resolved"] == []
         assert result["journal_rolled_over"] == 0
         assert result["sections_removed"] == []
         assert result["sections_unmatched"] == []

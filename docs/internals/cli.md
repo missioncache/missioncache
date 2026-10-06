@@ -106,6 +106,23 @@ missioncache-db lead stop                            # end the role
 
 One session at a time can be the lead: the project manager that `/missioncache:lead` turns a session into, and `/missioncache:unlead` ends. `set` replaces any previous lead, and the replaced session finds out on its next delta brief, whether that comes from an opted-in loop or from a brief you ask for. The lead carries the fixed session title `missioncache-lead`, applied by the title hook, so every working session that saves context or a PM item can address it without a lookup (the write tools return a `lead_session` field saying whom to notify). `show` distinguishes a running lead from a designated row whose process is gone; the latter is dropped by `prune-sessions`. The role lives in `~/.claude/hooks-state.db`, so it survives compaction.
 
+## Event log
+
+```bash
+missioncache-db events list --since 2026-10-06 --json   # today's changes, every project
+missioncache-db events list --after-id 812              # exactly what is new since row 812
+missioncache-db events list --project my-proj --kind task_done,waiting_resolved
+missioncache-db events prune --days 90
+missioncache-db events clear my-proj                    # one project's history
+```
+
+The `events` table in `tasks.db` holds one row per change. Two layers write it:
+
+- **The database writes record inside missioncache-db,** in the same transaction as the change where there is one: action items (added, updated, done, dropped), the project due date, the dashboard's Waiting-on resolve, and complete / reopen / rename. So a session, the dashboard and the CLI all produce these.
+- **The markdown-only writes record from the MCP server's file layer:** each Recent Changes line, each Waiting-on row added or resolved through `update_context_file` (from the rows the write actually removed, so a match that hit nothing records nothing), an imported event's heading, each ticked task with its full line, and a move between projects (one row on each, and nothing when the move matched nothing). That recording is best-effort: a failure is logged and never fails the write.
+
+Each row carries the project name and its `task_id`, so history stays readable after a delete and follows a project across a rename. The ticket is the project's first `tickets` row, else its legacy `jira_key`, else the first `ABC-123`-shaped key in the text, else null. `source_session` is `CLAUDE_CODE_SESSION_ID` when a Claude Code session made the change, null otherwise. A new event moves `portfolio_watermark`, so the dashboard stream fires. `since` is normalized to the stored local-time shape (an ISO `T`, fractions and an offset are folded or dropped) and anything else is refused. Retention is manual: `prune` and `events prune` delete rows older than 90 days. The plan behind it is [`lead-dashboard-plan.md`](../lead-dashboard-plan.md).
+
 ## Calendar agenda
 
 ```bash

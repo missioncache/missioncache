@@ -13,7 +13,8 @@ from typing import Annotated
 
 from pydantic import Field
 
-from missioncache_db import pm_items
+from missioncache_db import events, pm_items
+from missioncache_db.events import EVENT_KINDS
 
 from .app import mcp
 from .db import get_db
@@ -498,4 +499,47 @@ async def get_portfolio(
         return e.to_dict()
     except Exception as e:
         logger.exception("Error in get_portfolio")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def get_events(
+    after_id: Annotated[
+        int | None,
+        Field(description="Only events newer than this id: pass the highest id you have "
+                          "already seen to read exactly what is new"),
+    ] = None,
+    since: Annotated[
+        str | None,
+        Field(description="Only events at or after this local time, 'YYYY-MM-DD' or "
+                          "'YYYY-MM-DD HH:MM[:SS]' (an ISO 'T' is accepted)"),
+    ] = None,
+    project: Annotated[str | None, Field(description="Only this project's events")] = None,
+    kinds: Annotated[
+        list[str] | None,
+        Field(description="Only these kinds: " + ", ".join(EVENT_KINDS)),
+    ] = None,
+    limit: Annotated[int, Field(description="Most events to return, newest first (max 1000)")] = 100,
+) -> dict:
+    """
+    The event log: what changed in MissionCache projects, newest first.
+
+    Recorded: each Recent Changes line, Waiting-on row added or resolved and
+    task ticked through update_context_file / update_tasks_file, a move
+    between projects, and every action-item, due-date, complete, reopen and
+    rename write, whether it came from a session, the dashboard or the CLI.
+    Next Steps, Gotchas, decisions, removals, stakeholders and tickets are not
+    recorded. Read-only.
+    """
+    try:
+        rows = events.list_events(
+            get_db(), since=since, project=project, kinds=kinds, limit=limit, after_id=after_id,
+        )
+        return {"success": True, "count": len(rows), "events": rows}
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except MissionCacheError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error in get_events")
         return {"error": True, "message": str(e)}

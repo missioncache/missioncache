@@ -32,6 +32,8 @@ from .helpers import (
     _validate_path,
     live_peer_sessions_for_context_file,
     live_peer_sessions_for_project,
+    project_from_context_file,
+    record_tool_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -542,6 +544,13 @@ async def update_context_file(
         if imported_event and not result["imported_event_applied"]:
             response["imported_event_duplicate"] = True
 
+        record_tool_events(
+            project_from_context_file(context_file),
+            _context_write_events(
+                recent_changes, waiting_on_add, result["waiting_on_resolved"],
+                imported_event if result["imported_event_applied"] else None,
+            ),
+        )
         peers = live_peer_sessions_for_context_file(context_file)
         if peers:
             response["live_sessions"] = peers
@@ -552,6 +561,31 @@ async def update_context_file(
     except Exception as e:
         logger.exception("Error updating context file")
         return {"error": True, "message": str(e)}
+
+
+def _context_write_events(
+    recent_changes: list[str] | None,
+    waiting_on_add: list[dict] | None,
+    waiting_on_resolved: list[str],
+    imported_event: dict | None,
+) -> list[tuple[str, str, str | None]]:
+    """One event per item an ``update_context_file`` call changed.
+
+    Resolutions come from the notes the write produced for the rows it
+    actually removed, never from the caller's match strings: a match that hit
+    nothing, or a second match for a row already gone, changed nothing."""
+    items: list[tuple[str, str, str | None]] = [
+        ("recent_change", line, "Recent Changes") for line in recent_changes or []
+    ]
+    for row in waiting_on_add or []:
+        who = (row.get("who") or "").strip()
+        what = (row.get("what") or "").strip()
+        items.append(("waiting_added", f"{what} ({who})" if who else what, "Waiting on"))
+    items.extend(("waiting_resolved", note, "Waiting on") for note in waiting_on_resolved)
+    if imported_event:
+        heading = (imported_event.get("heading") or "").strip()
+        items.append(("recent_change", heading, heading or None))
+    return items
 
 
 def _stamp_shared_seen_for_fork_reader(
@@ -883,6 +917,10 @@ async def update_tasks_file(
         # who to notify. Legacy unprefixed tasks.md yields project_name None
         # and skips, like the bare context.md case.
         if project_name:
+            record_tool_events(
+                project_name,
+                [("task_done", text, None) for text in result.get("completed_texts") or []],
+            )
             peers = live_peer_sessions_for_project(project_name)
             if peers:
                 response["live_sessions"] = peers
@@ -1043,6 +1081,13 @@ async def move_to_project(
             note=note,
         )
         response = {"success": True, **result}
+        # A move that matched nothing wrote no file, so it records nothing.
+        if any(result.get(k) for k in (
+            "sections_moved", "bullets_moved", "waiting_on_moved", "tasks_moved"
+        )):
+            summary = result.get("summary") or "content moved"
+            record_tool_events(source_project, [("moved", f"to {target_project}: {summary}", None)])
+            record_tool_events(target_project, [("moved", f"from {source_project}: {summary}", None)])
 
         # Merge both projects' peers, deduped by session id: one session can
         # legitimately be bound to only one of the two, and the caller has to

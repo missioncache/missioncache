@@ -17,7 +17,7 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 
 | Component | Directory | What it does | When it runs |
 |-----------|-----------|--------------|--------------|
-| MCP server | `mcp-server/` | Exposes 44 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
+| MCP server | `mcp-server/` | Exposes 45 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
 | missioncache-db | `missioncache-db/` | SQLite schema, data classes, and all direct DB operations. Every other component calls into this instead of opening the DB themselves | In-process library - embedded by MCP server, hooks, MissionCache Auto, and dashboard |
 | Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event. Six hooks on four events, each with a timeout budget between 5 and 30 seconds |
 | Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/missioncache:<name>` |
@@ -246,7 +246,7 @@ Pick the tool module that matches your use case:
 - MissionCache Auto iteration logging: `tools_iteration.py`
 - Multi-agent planning: `tools_planning.py`
 - Active-task pointer for the statusline: `tools_active.py`
-- Action items, stakeholders, tickets, due dates, and the cross-project portfolio: `tools_pm.py`
+- Action items, stakeholders, tickets, due dates, the cross-project portfolio, and the event log reader: `tools_pm.py`
 
 Then follow the pattern every existing tool uses:
 

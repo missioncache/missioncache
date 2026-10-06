@@ -16,7 +16,7 @@ Usage:
     python missioncache_db.py heartbeat-auto            # Auto-detect task from cwd
     python missioncache_db.py process-heartbeats        # Aggregate heartbeats into sessions
     python missioncache_db.py task-time <task_id> [period]  # Get time spent
-    python missioncache_db.py prune [days]              # Prune old completed tasks
+    python missioncache_db.py prune [days]              # Prune old completed tasks and events older than 90 days
     python missioncache_db.py prune-sessions [--days N] [--dry-run]  # Delete state of sessions that are gone
     python missioncache_db.py complete-task <task_id>   # Mark task as completed
     python missioncache_db.py reopen-task <task_id>     # Reopen a completed task
@@ -67,6 +67,11 @@ Lead session (the project-manager role):
     python missioncache_db.py lead set [<session_id>]   # Designate a session as the lead (replaces any previous)
     python missioncache_db.py lead stop [<session_id>]  # End the lead role
     python missioncache_db.py lead show [--json]        # Who the lead is, and whether it is still running
+
+Event log (what the write tools changed, newest first):
+    python missioncache_db.py events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]
+    python missioncache_db.py events prune [--days N]   # Delete events older than N days (default 90)
+    python missioncache_db.py events clear <project>    # Delete one project's event history
 
 Calendar / agenda:
     python missioncache_db.py agenda [--date today|tomorrow|YYYY-MM-DD] [--json] [--no-cache] [--source NAME]  # Today's calendar from the configured sources
@@ -1561,6 +1566,27 @@ CREATE INDEX IF NOT EXISTS idx_action_items_status_due ON action_items(status, d
 CREATE INDEX IF NOT EXISTS idx_stakeholders_task ON stakeholders(task_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_task ON tickets(task_id);
 
+-- Event log: one row per change MissionCache makes to a project
+-- (missioncache_db.events). It carries the project NAME as well as the task
+-- id, so a row stays readable after the project is completed, renamed or
+-- deleted.
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    -- Nullable, no foreign key: the row outlives the task, and task_id is
+    -- what follows a project across a rename.
+    task_id INTEGER,
+    kind TEXT NOT NULL,
+    what TEXT NOT NULL,
+    ticket TEXT,
+    section TEXT,
+    source_session TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_project ON events(project, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+
 -- Parallel agent execution plans (consumed by the MCP planning tools)
 CREATE TABLE IF NOT EXISTS plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2980,6 +3006,18 @@ class TaskDB:
             conn.commit()
         return self.get_task(task_id)
 
+    def _record_event(self, task_id: int, name: str, kind: str, what: str) -> None:
+        """Record a lifecycle event after the change itself has landed.
+
+        Best-effort: the status flip and the file move already happened, so a
+        failure here is logged and never reported as the write failing."""
+        try:
+            from missioncache_db import events
+
+            events.record_events(self, name, [(kind, what, None)], task_id=task_id)
+        except Exception:
+            logger.exception("Error recording a %s event for %s", kind, name)
+
     def complete_project(self, task_id: int, move_files: bool = True) -> Dict[str, Any]:
         """Complete a project: flip status, move its MissionCache directory to
         completed/, report totals and any still-active forks.
@@ -3046,6 +3084,9 @@ class TaskDB:
             "time_total_formatted": self.format_duration(time_total),
             "files_moved": files_moved,
         }
+        self._record_event(
+            task.id, task.name, "completed", f"completed after {result['time_total_formatted']}"
+        )
 
         # Fork awareness: completing a parent with active children is allowed
         # (the shared context stays readable from completed/), but callers
@@ -3104,6 +3145,7 @@ class TaskDB:
                     filelock.move_with_retry(source, dest)
 
         self.reopen_task(task_id)
+        self._record_event(task.id, task.name, "reopened", "reopened")
         return {
             "task_id": task.id,
             "task_name": task.name,
@@ -3379,6 +3421,7 @@ class TaskDB:
             raise
 
         sweep = self._sweep_session_pointers(old_name, new_name)
+        self._record_event(task_id, new_name, "renamed", f"{old_name} -> {new_name}")
 
         return {
             "success": True,
@@ -5820,6 +5863,9 @@ def main():
             days = int(sys.argv[2]) if len(sys.argv) > 2 else None
             count = db.prune_completed_tasks(days)
             print(f"Archived {count} completed tasks")
+            from missioncache_db import events
+
+            print(f"Deleted {events.prune_events(db)} events older than {events.DEFAULT_RETENTION_DAYS} days")
 
         elif command == "prune-sessions":
             usage = "Usage: missioncache_db.py prune-sessions [--days N] [--dry-run]"
@@ -5911,6 +5957,9 @@ def main():
 
             # Update status to completed
             updated_task = db.update_task_status(task_id, "completed")
+            db._record_event(
+                task_id, task.name, "completed", f"completed after {db.format_duration(total_time)}"
+            )
             repo = db.get_repo(task.repo_id)
 
             output = {
@@ -6182,6 +6231,7 @@ def main():
 
             # Reopen the task
             updated_task = db.reopen_task(task_id)
+            db._record_event(task_id, task.name, "reopened", "reopened")
             repo = db.get_repo(task.repo_id)
 
             output = {
@@ -6662,6 +6712,60 @@ def main():
                 f"\n{len(project_dirs)} projects checked, {changed} with findings"
                 + ("" if apply else " (re-run with --apply to write)")
             )
+
+        elif command == "events":
+            from missioncache_db import events
+
+            usage = (
+                "Usage: missioncache-db events list [--since ISO] [--after-id N] [--project NAME] "
+                "[--kind K[,K]] [--limit N] [--json]\n"
+                "       missioncache-db events prune [--days N]\n"
+                "       missioncache-db events clear <project>"
+            )
+            args = sys.argv[2:]
+            sub = args.pop(0) if args else "list"
+            try:
+                if sub == "list":
+                    as_json = "--json" in args
+                    if as_json:
+                        args.remove("--json")
+                    since = _pop_flag(args, "--since")
+                    after_id = _pop_flag(args, "--after-id")
+                    project = _pop_flag(args, "--project")
+                    kind = _pop_flag(args, "--kind")
+                    limit = _pop_flag(args, "--limit")
+                    if args:
+                        raise ValueError(f"unknown argument(s): {' '.join(args)}")
+                    rows = events.list_events(
+                        db, since=since, project=project,
+                        kinds=kind.split(",") if kind else None,
+                        limit=int(limit) if limit else 200,
+                        after_id=int(after_id) if after_id else None,
+                    )
+                    if as_json:
+                        print(json.dumps(rows, indent=2))
+                    elif not rows:
+                        print("No events")
+                    else:
+                        for r in rows:
+                            ticket = f" [{r['ticket']}]" if r["ticket"] else ""
+                            print(f"{r['created_at']}  {r['project']}  {r['kind']}{ticket}  {r['what']}")
+                elif sub == "prune":
+                    days = _pop_flag(args, "--days")
+                    if args:
+                        raise ValueError(f"unknown argument(s): {' '.join(args)}")
+                    count = events.prune_events(
+                        db, int(days) if days else events.DEFAULT_RETENTION_DAYS
+                    )
+                    print(f"Deleted {count} events")
+                elif sub == "clear" and len(args) == 1:
+                    print(f"Deleted {events.delete_project_events(db, args[0])} events for {args[0]}")
+                else:
+                    print(usage)
+                    sys.exit(1)
+            except ValueError as e:
+                print(f"Error: {e}\n{usage}")
+                sys.exit(1)
 
         elif command == "lead":
             sub = sys.argv[2] if len(sys.argv) > 2 else "show"

@@ -1,6 +1,6 @@
 # MCP Tools
 
-This document covers the MissionCache MCP server: the 44 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
+This document covers the MissionCache MCP server: the 45 tools that expose MissionCache's task database, MissionCache files, time tracking, and planning surfaces to Claude Code over the Model Context Protocol. It is the layer that makes `/missioncache:new`, `/missioncache:load`, and the rest of the slash commands work - the command files are thin wrappers that tell Claude which MCP tools to call in what order, and this doc is the reference for everything those tools do.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, `~/.missioncache/active/<project>/`, `full_path`, heartbeats and sessions, the repo model). If a term in this doc is not defined here, it is defined there.
 
@@ -61,9 +61,9 @@ The `dict` return is also a FastMCP quirk. Tools could return Pydantic models di
 | `tools_iteration.py` | 3 | Iteration log integration (used by missioncache-auto and the iteration loop) |
 | `tools_planning.py` | 7 | Parallel agent execution plans |
 | `tools_active.py` | 2 | Active-task pointer for the statusline: set/clear in-progress checklist tasks |
-| `tools_pm.py` | 7 | Project management: action items, stakeholders, tickets, project due date, cross-project portfolio |
+| `tools_pm.py` | 8 | Project management: action items, stakeholders, tickets, project due date, cross-project portfolio, event log |
 
-**Total: 44 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
+**Total: 45 tools.** The rest of this doc walks through them module by module. The style is reference-oriented: each tool gets a brief "when to use this", its parameter list with types and defaults, and what comes back on success. Error behavior is uniform across tools and covered in the [error handling](#error-handling) section instead of being repeated per tool.
 
 ## Task lifecycle tools (`tools_tasks.py`)
 
@@ -609,7 +609,7 @@ The pointer auto-clears when `update_tasks_file` marks the pointed-at items `[x]
 
 ## Project management tools (`tools_pm.py`)
 
-Thin wrappers over `missioncache_db.pm_items` - the single write path shared with the dashboard's REST endpoints and the `missioncache-db` CLI. Every mutation writes SQLite (the source of truth) and re-renders the read-only mirror sections in the project's context file under the sidecar lock, so a change made here is visible in the dashboard immediately and on the next `/missioncache:load`.
+Thin wrappers over `missioncache_db.pm_items` (and, for the read-only `get_events`, `missioncache_db.events`) - the single write path shared with the dashboard's REST endpoints and the `missioncache-db` CLI. Every mutation writes SQLite (the source of truth) and re-renders the read-only mirror sections in the project's context file under the sidecar lock, so a change made here is visible in the dashboard immediately and on the next `/missioncache:load`.
 
 Because every mutation rewrites the context file, each mutating tool here returns `live_sessions` when other live sessions are bound to the project (same contract as `update_context_file`, key present only when non-empty). `update_action_item` resolves the project from the item row, since it is addressed by `item_id`.
 
@@ -660,6 +660,16 @@ Parameters: `scope` (`"focus"` default - projects with a live session or worked 
 Returns `counts` (never clipped), `on_me` (three buckets, capped per bucket), `on_others` (grouped by project, rows capped), `projects` (sorted by urgency, display strings shortened), `live_sessions` (pid-alive sessions bound to a project, by `title`; the chat side cross-checks against `ListAgents`), `lead_session` (`{title, since}` or null), `scope`, and `watermark` (a change token; equal watermarks mean nothing worth recomputing changed).
 
 Read-only and session-neutral: unlike `get_task`, it never binds the calling session to a project. A project-manager session is not a project.
+
+### `get_events`
+
+**When to use:** A lead or tracking session wants to know what changed since its last look, without depending on peers' messages.
+
+**What is recorded:** each Recent Changes line, Waiting-on row added or resolved, and task ticked through `update_context_file` / `update_tasks_file`; a move between projects; and every action-item, due-date, complete, reopen and rename write, whether it came from a session, the dashboard or the CLI. Next Steps, Gotchas, decisions, removals, stakeholders and tickets are not recorded.
+
+**Parameters:** `after_id: int | None` (only events newer than this id: the exact cursor for "what is new"), `since: str | None` (local `YYYY-MM-DD` or `YYYY-MM-DD HH:MM[:SS]`, an ISO `T` accepted), `project: str | None`, `kinds: list[str] | None` (`recent_change`, `waiting_added`, `waiting_resolved`, `task_done`, `action_item`, `due_date`, `moved`, `renamed`, `completed`, `reopened`), `limit: int = 100` (at most 1000).
+
+**Returns:** `count` and `events`, newest first, each with `id`, `project`, `task_id`, `kind`, `what`, `ticket`, `section`, `source_session` and `created_at`. An unknown kind or a malformed `since` is a validation error.
 
 ## Error handling
 

@@ -180,6 +180,19 @@ class TestWatermark:
         db.close()
         assert before != after
 
+    def test_moves_on_a_recorded_event(self, rooted, monkeypatch):
+        """A write tool's event must wake the dashboard stream even when it
+        changed nothing else the watermark reads."""
+        from missioncache_db import events
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", rooted / "no-hooks.db")
+        db = missioncache_db.TaskDB(); db.initialize()
+        _project(rooted, db, "a")
+        before = portfolio.portfolio_watermark(db)
+        events.record_events(db, "a", [("recent_change", "something happened", None)])
+        after = portfolio.portfolio_watermark(db)
+        db.close()
+        assert before != after
+
     def test_moves_on_a_context_file_edit(self, rooted, monkeypatch):
         import os, time
         monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", rooted / "no-hooks.db")

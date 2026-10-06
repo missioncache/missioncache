@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- MissionCache now keeps a local log of project changes, from sessions and the dashboard. Read it with `missioncache-db events list` or `get_events`. (missioncache-db, mcp-missioncache, plugin)
+
 ## 2026-10-05
 
 Published package versions: missioncache-db 1.0.31, mcp-missioncache 1.0.37, missioncache-dashboard 1.0.24, missioncache-install 1.0.23. Claude Code plugin 1.0.37. missioncache-auto is unchanged.

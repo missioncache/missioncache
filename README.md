@@ -206,7 +206,7 @@ That is the full lifecycle. Everything else is optional depth.
 | Statusline | Project and progress, git, model, context use and usage limits, one glance up in Claude Code. | [statusline.md](docs/statusline.md) |
 | Autonomous runs | `missioncache-auto` runs tasks in parallel in dependency order and streams every step to the dashboard. | [missioncache-auto.md](docs/missioncache-auto.md) |
 | Editor extension | The active project in the VSCode status bar, and a sidebar with its tasks and next steps. | [extension.md](docs/extension.md) |
-| MCP tools | 44 tools any MCP agent can call, for tasks, files, time, planning and action items. | [mcp-tools.md](docs/mcp-tools.md) |
+| MCP tools | 45 tools any MCP agent can call, for tasks, files, time, planning, action items and the change log. | [mcp-tools.md](docs/mcp-tools.md) |
 
 ![The dashboard's Projects view](assets/dashboard_projects_screenshot.jpg)
 
