@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-09
+
+Published package versions: missioncache-db 1.0.33, mcp-missioncache 1.0.39, missioncache-install 1.0.24. Claude Code plugin 1.0.39. missioncache-auto and missioncache-dashboard are unchanged.
+
 - The lead's `--delta` tick now reports from the change log, with its cursor kept in the database instead of a hand-written snapshot file. (plugin, missioncache-db)
 - `get_events` with `after_id` pages from the cursor and reports `has_more`, so a long backlog is never skipped. (mcp-missioncache, missioncache-db)
 - `missioncache-db lead mark` stamps that cursor, and `lead show --json` returns it with `is_me`. (missioncache-db)
