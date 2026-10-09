@@ -255,7 +255,7 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
 | `~/.claude/hooks/state/session-title/<session-id>.json` | session_title | `missioncache_db.live_sessions_for_project`, `live_sessions_all` | JSON file |
-| `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `prune-sessions` | SQLite row |
+| `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `/missioncache:brief --delta` (the cursor, via `lead show` / `lead mark`), `prune-sessions` | SQLite row |
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
 | `~/.claude/rules/*.md` | session_start `install_bundled_rules` | Claude Code (auto-loaded) | Markdown files with ownership marker |
 

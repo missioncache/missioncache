@@ -231,6 +231,16 @@ def test_a_failed_record_never_fails_the_write(project, monkeypatch, caplog):
     caplog.clear()
 
 
+def test_get_events_pages_from_the_cursor_and_flags_more(project):
+    ctx, _ = project
+    asyncio.run(tools_docs.update_context_file(context_file=str(ctx), recent_changes=["a", "b", "c"]))
+    first = asyncio.run(tools_pm.get_events(limit=3))["events"][-1]["id"]
+    page = asyncio.run(tools_pm.get_events(after_id=first, limit=1))
+    assert [e["what"] for e in page["events"]] == ["b"] and page["has_more"] is True
+    rest = asyncio.run(tools_pm.get_events(after_id=page["events"][0]["id"], limit=1))
+    assert [e["what"] for e in rest["events"]] == ["c"] and rest["has_more"] is False
+
+
 def test_get_events_refuses_bad_input(project):
     result = asyncio.run(tools_pm.get_events(kinds=["recnet_change"]))
     assert result["error"] is True and "recnet_change" in result["message"]

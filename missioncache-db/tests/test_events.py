@@ -97,6 +97,20 @@ class TestRecordAndList:
         cursor = events.list_events(db, limit=3)[1]["id"]
         assert [r["what"] for r in events.list_events(db, after_id=cursor)] == ["c2"]
 
+    def test_a_backlog_is_read_oldest_first_so_the_cursor_never_skips(self, db):
+        """More rows than the page since the cursor: the page is the oldest
+        ones, so stamping the newest id returned leaves nothing behind, and
+        has_more says to come back."""
+        events.record_events(db, "alpha", [("recent_change", f"c{i}", None) for i in range(5)])
+        ids = {r["what"]: r["id"] for r in events.list_events(db)}
+        page, more = events.list_events_page(db, after_id=ids["c0"], limit=2)
+        assert [r["what"] for r in page] == ["c2", "c1"] and more is True
+        page, more = events.list_events_page(db, after_id=page[0]["id"], limit=2)
+        assert [r["what"] for r in page] == ["c4", "c3"] and more is False
+        # Without a cursor the page is the newest rows, as before.
+        page, more = events.list_events_page(db, limit=2)
+        assert [r["what"] for r in page] == ["c4", "c3"] and more is True
+
     def test_limit_is_clamped(self, db):
         events.record_events(db, "alpha", [("recent_change", f"c{i}", None) for i in range(3)])
         assert len(events.list_events(db, limit=0)) == 1
@@ -225,6 +239,15 @@ class TestEventsCLI:
         )
         assert r.returncode == 0, r.stderr
         assert [row["what"] for row in json.loads(r.stdout)] == ["from alpha"]
+
+        # --after-id is the cursor the lead tick passes.
+        first_id = json.loads(r.stdout)[0]["id"]
+        r = subprocess.run(
+            [sys.executable, "-c", "from missioncache_db import main; main()",
+             "events", "list", "--after-id", str(first_id), "--json"],
+            capture_output=True, text=True, env=env,
+        )
+        assert [row["what"] for row in json.loads(r.stdout)] == ["from beta"]
 
         # The CLI's own complete-task / reopen-task record too.
         db = TaskDB(db_path=root / "tasks.db")

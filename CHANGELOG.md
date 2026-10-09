@@ -8,6 +8,10 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- The lead's `--delta` tick now reports from the change log, with its cursor kept in the database instead of a hand-written snapshot file. (plugin, missioncache-db)
+- `get_events` with `after_id` pages from the cursor and reports `has_more`, so a long backlog is never skipped. (mcp-missioncache, missioncache-db)
+- `missioncache-db lead mark` stamps that cursor, and `lead show --json` returns it with `is_me`. (missioncache-db)
+- Sessions save off-MissionCache actions as a recent change and drafts for you as action items, so the lead's log sees them. (plugin, missioncache-install)
 - `/missioncache:fork` and `/missioncache:rename` now rename the session in the same prompt, so peers can reach it under the new name at once. (plugin)
 - Renaming a project now points its forks at the new name, so they keep reading its shared context. (missioncache-db, mcp-missioncache, plugin)
 

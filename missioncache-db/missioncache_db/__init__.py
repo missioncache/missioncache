@@ -66,7 +66,8 @@ Diagnostics:
 Lead session (the project-manager role):
     python missioncache_db.py lead set [<session_id>]   # Designate a session as the lead (replaces any previous)
     python missioncache_db.py lead stop [<session_id>]  # End the lead role
-    python missioncache_db.py lead show [--json]        # Who the lead is, and whether it is still running
+    python missioncache_db.py lead mark [<session_id>] [--event-id N | --latest]  # Stamp the lead's delta cursor
+    python missioncache_db.py lead show [--json]        # Who the lead is, whether it is running, and its delta cursor
 
 Event log (what the write tools changed, newest first):
     python missioncache_db.py events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]
@@ -668,13 +669,38 @@ def clear_lead_session(session_id: Optional[str] = None) -> bool:
         return False
 
 
-def lead_session_id() -> Optional[str]:
-    """The raw designated lead session id, with NO liveness gate.
-
-    For a session asking about ITSELF (the title hook, the start hook): the
-    asker is running, so a pid check would only add a fork. Everyone else
-    asking "who do I notify" must use ``live_lead_session``.
+def mark_lead_tick(session_id: str, event_id: Optional[int] = None) -> bool:
+    """Stamp the lead's delta cursor: the time of this tick and, when given,
+    the newest event id it reported. Only the designated row can be stamped,
+    so a replaced lead cannot move the new lead's cursor, and the id only
+    moves forward, so two ticks that overlap cannot wind it back and re-report
+    a page. Returns True when a row was updated.
     """
+    if not _is_valid_session_id(session_id):
+        return False
+    try:
+        conn = sqlite3.connect(HOOKS_STATE_DB_PATH, timeout=2.0)
+        try:
+            init_hooks_state_db_schema(conn)
+            cur = conn.execute(
+                "UPDATE lead_session SET last_tick_at = datetime('now', 'localtime'), "
+                "last_event_id = MAX(COALESCE(last_event_id, 0), COALESCE(?, 0)) "
+                "WHERE session_id = ?",
+                (event_id, session_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("mark_lead_tick: hooks-state.db write failed: %s", e)
+        return False
+
+
+def lead_cursor() -> Optional[Dict[str, Any]]:
+    """The designated lead's delta cursor, ``{session_id, last_event_id,
+    last_tick_at}``, or None when nobody is designated. No liveness gate: the
+    tick asking is the lead itself."""
     if not HOOKS_STATE_DB_PATH.exists():
         return None
     try:
@@ -682,13 +708,27 @@ def lead_session_id() -> Optional[str]:
         try:
             init_hooks_state_db_schema(conn)
             row = conn.execute(
-                "SELECT session_id FROM lead_session ORDER BY since DESC LIMIT 1"
+                "SELECT session_id, last_event_id, last_tick_at FROM lead_session "
+                "ORDER BY since DESC LIMIT 1"
             ).fetchone()
         finally:
             conn.close()
     except sqlite3.Error:
         return None
-    return row[0] if row and _is_valid_session_id(row[0]) else None
+    if not row or not _is_valid_session_id(row[0]):
+        return None
+    return {"session_id": row[0], "last_event_id": row[1], "last_tick_at": row[2]}
+
+
+def lead_session_id() -> Optional[str]:
+    """The raw designated lead session id, with NO liveness gate.
+
+    For a session asking about ITSELF (the title hook, the start hook): the
+    asker is running, so a pid check would only add a fork. Everyone else
+    asking "who do I notify" must use ``live_lead_session``.
+    """
+    cursor = lead_cursor()
+    return cursor["session_id"] if cursor else None
 
 
 def live_lead_session() -> Optional[Dict[str, Any]]:
@@ -1012,7 +1052,9 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS lead_session (
             session_id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
-            since TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            since TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            last_event_id INTEGER,
+            last_tick_at TEXT
         );
         CREATE TABLE IF NOT EXISTS term_sessions (
             term_session_id TEXT PRIMARY KEY,
@@ -1030,6 +1072,13 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    # CREATE TABLE IF NOT EXISTS is a no-op on an existing DB, so the delta
+    # cursor columns are added to a lead_session table created before them.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(lead_session)")}
+    if "last_event_id" not in cols:
+        conn.execute("ALTER TABLE lead_session ADD COLUMN last_event_id INTEGER")
+    if "last_tick_at" not in cols:
+        conn.execute("ALTER TABLE lead_session ADD COLUMN last_tick_at TEXT")
 
 
 class MissionCacheMigrationRequired(RuntimeError):
@@ -6853,11 +6902,43 @@ def main():
                 sid = sys.argv[3] if len(sys.argv) > 3 else None
                 removed = clear_lead_session(sid)
                 print("lead role ended" if removed else "no lead session to stop")
+            elif sub == "mark":
+                from missioncache_db import events
+
+                args = sys.argv[3:]
+                event_id = _pop_flag(args, "--event-id")
+                latest = "--latest" in args
+                if latest:
+                    args.remove("--latest")
+                sid = args[0] if args else os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+                if not sid or len(args) > 1 or (latest and event_id is not None):
+                    print("Usage: missioncache-db lead mark [<session_id>] [--event-id N | --latest]")
+                    sys.exit(1)
+                try:
+                    event_id = events.latest_event_id(db) if latest else (
+                        int(event_id) if event_id is not None else None
+                    )
+                except ValueError:
+                    print("Usage: missioncache-db lead mark [<session_id>] [--event-id N | --latest]")
+                    sys.exit(1)
+                if mark_lead_tick(sid, event_id):
+                    cursor = lead_cursor() or {}
+                    print(f"lead cursor: event {cursor.get('last_event_id')} at {cursor.get('last_tick_at')}")
+                else:
+                    print(f"{sid} is not the designated lead")
+                    sys.exit(1)
             elif sub == "show":
                 live = live_lead_session()
-                raw = lead_session_id()
+                cursor = lead_cursor()
+                raw = cursor["session_id"] if cursor else None
                 if "--json" in sys.argv:
-                    print(json.dumps({"lead": live, "designated": raw}))
+                    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+                    print(json.dumps({
+                        "lead": live,
+                        "designated": raw,
+                        "is_me": bool(raw) and raw == me,
+                        "cursor": cursor,
+                    }))
                 elif live:
                     print(f"lead session: {live['session_id']} since {live['since']}")
                 elif raw:
@@ -6865,7 +6946,7 @@ def main():
                 else:
                     print("no lead session")
             else:
-                print("Usage: missioncache-db lead <set [sid]|stop [sid]|show [--json]>")
+                print("Usage: missioncache-db lead <set [sid]|mark [sid] [--event-id N|--latest]|stop [sid]|show [--json]>")
                 sys.exit(1)
 
         elif command == "agenda":

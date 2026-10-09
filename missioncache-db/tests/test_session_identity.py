@@ -749,3 +749,147 @@ class TestLeadSession:
         counts = m.prune_session_state()
         assert counts["lead_session_rows"] == 1
         assert m.live_lead_session()["session_id"] == "sid-live"
+
+
+class TestLeadCursor:
+    """Spec: docs/lead-dashboard-plan.md Phase 1b. The lead's delta tick keeps
+    its place in the change log on the lead row itself: `lead mark` stamps the
+    newest event id it reported and the time, only the designated session can
+    stamp, and a new lead starts with no cursor."""
+
+    def test_mark_stamps_the_designated_row(self, home):
+        m.set_lead_session("sid-lead")
+        assert m.mark_lead_tick("sid-lead", 812) is True
+        cursor = m.lead_cursor()
+        assert cursor["session_id"] == "sid-lead"
+        assert cursor["last_event_id"] == 812
+        assert cursor["last_tick_at"] is not None
+
+    def test_mark_without_an_event_id_moves_only_the_time(self, home):
+        m.set_lead_session("sid-lead")
+        m.mark_lead_tick("sid-lead", 812)
+        assert m.mark_lead_tick("sid-lead") is True
+        assert m.lead_cursor()["last_event_id"] == 812
+
+    def test_the_cursor_only_moves_forward(self, home):
+        """Two overlapping ticks finish out of order: the lower id must not
+        wind the cursor back and make the next tick re-report a page."""
+        m.set_lead_session("sid-lead")
+        m.mark_lead_tick("sid-lead", 812)
+        assert m.mark_lead_tick("sid-lead", 5) is True
+        assert m.lead_cursor()["last_event_id"] == 812
+
+    def test_mark_refuses_a_session_that_is_not_the_lead(self, home):
+        m.set_lead_session("sid-lead")
+        m.mark_lead_tick("sid-lead", 812)
+        assert m.mark_lead_tick("sid-other", 999) is False
+        assert m.lead_cursor()["last_event_id"] == 812
+
+    def test_cursor_survives_re_designating_the_same_session(self, home):
+        m.set_lead_session("sid-lead")
+        m.mark_lead_tick("sid-lead", 812)
+        m.set_lead_session("sid-lead")
+        assert m.lead_cursor()["last_event_id"] == 812
+
+    def test_a_new_lead_starts_with_no_cursor(self, home):
+        m.set_lead_session("sid-first")
+        m.mark_lead_tick("sid-first", 812)
+        m.set_lead_session("sid-second")
+        cursor = m.lead_cursor()
+        assert cursor["session_id"] == "sid-second"
+        assert cursor["last_event_id"] is None and cursor["last_tick_at"] is None
+
+    def test_no_cursor_without_a_lead(self, home):
+        assert m.lead_cursor() is None
+
+    def test_schema_migration_adds_the_cursor_columns_to_an_old_db(self, home):
+        conn = sqlite3.connect(home / ".claude" / "hooks-state.db")
+        conn.execute(
+            "CREATE TABLE lead_session (session_id TEXT PRIMARY KEY, title TEXT NOT NULL, "
+            "since TEXT NOT NULL DEFAULT (datetime('now', 'localtime')))"
+        )
+        conn.execute("INSERT INTO lead_session (session_id, title) VALUES ('sid-old', 't')")
+        conn.commit()
+        m.init_hooks_state_db_schema(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(lead_session)")}
+        conn.close()
+        assert {"last_event_id", "last_tick_at"} <= cols
+        assert m.mark_lead_tick("sid-old", 5) is True
+        assert m.lead_cursor()["last_event_id"] == 5
+
+    @pytest.fixture
+    def cli(self, home, tmp_path, monkeypatch, capsys):
+        """Run ``missioncache-db lead ...`` in-process; returns (exit code, stdout)."""
+        root = tmp_path / ".missioncache"
+        (root / "active").mkdir(parents=True)
+        monkeypatch.setattr(m, "MISSIONCACHE_ROOT", root)
+        monkeypatch.setattr(m, "DB_PATH", root / "tasks.db")
+        for name in ("_LEGACY_CLAUDE_DB", "_LEGACY_CLAUDE_ORBIT_ROOT", "_LEGACY_ORBIT_DB", "_LEGACY_ORBIT_ROOT"):
+            monkeypatch.setattr(m, name, tmp_path / "no-legacy")
+
+        def run(*args, session=""):
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session)
+            monkeypatch.setattr(sys, "argv", ["missioncache-db", "lead", *args])
+            try:
+                m.main()
+                code = 0
+            except SystemExit as e:
+                code = int(e.code or 0)
+            return code, capsys.readouterr().out
+
+        return run
+
+    def test_lead_cli_mark_and_show_round_trip(self, cli):
+        assert cli("set", "sid-lead")[0] == 0
+        code, out = cli("mark", "sid-lead", "--event-id", "5")
+        assert code == 0, out
+        shown = json.loads(cli("show", "--json", session="sid-lead")[1])
+        assert shown["designated"] == "sid-lead"
+        assert shown["is_me"] is True
+        assert shown["cursor"]["last_event_id"] == 5
+        assert json.loads(cli("show", "--json", session="sid-other")[1])["is_me"] is False
+        # Only the designated lead can stamp.
+        code, out = cli("mark", "sid-other", "--event-id", "6")
+        assert code == 1 and "not the designated lead" in out
+        assert json.loads(cli("show", "--json")[1])["cursor"]["last_event_id"] == 5
+        # The sid defaults to the session running the command, as `lead set` does.
+        assert cli("mark", "--event-id", "7", session="sid-lead")[0] == 0
+        assert json.loads(cli("show", "--json")[1])["cursor"]["last_event_id"] == 7
+
+    def test_lead_cli_mark_latest_reads_the_events_table(self, cli):
+        from missioncache_db import TaskDB, events
+
+        cli("set", "sid-lead")
+        # An empty log stamps 0, so the first tick reports everything.
+        assert cli("mark", "sid-lead", "--latest")[0] == 0
+        assert json.loads(cli("show", "--json")[1])["cursor"]["last_event_id"] == 0
+
+        db = TaskDB(db_path=m.DB_PATH)
+        db.initialize()
+        events.record_events(db, "alpha", [("recent_change", "one", None), ("recent_change", "two", None)])
+        newest = events.list_events(db, limit=1)[0]["id"]
+        db.close()
+        assert cli("mark", "sid-lead", "--latest")[0] == 0
+        assert json.loads(cli("show", "--json")[1])["cursor"]["last_event_id"] == newest
+        # --latest and --event-id together, or a non-number, is a usage error.
+        assert cli("mark", "sid-lead", "--latest", "--event-id", "1")[0] == 1
+        assert cli("mark", "sid-lead", "--event-id", "soon")[0] == 1
+
+    def test_lead_cli_resolves_its_paths_in_a_real_process(self, home, tmp_path):
+        """One real subprocess: HOME and MISSIONCACHE_ROOT resolve at import."""
+        root = tmp_path / ".missioncache"
+        (root / "active").mkdir(parents=True)
+        env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+               "MISSIONCACHE_ROOT": str(root), "CLAUDE_CODE_SESSION_ID": "sid-lead"}
+        for args in (["set"], ["mark", "--latest"]):
+            r = subprocess.run(
+                [sys.executable, "-c", "from missioncache_db import main; main()", "lead", *args],
+                capture_output=True, text=True, env=env,
+            )
+            assert r.returncode == 0, r.stdout + r.stderr
+        r = subprocess.run(
+            [sys.executable, "-c", "from missioncache_db import main; main()", "lead", "show", "--json"],
+            capture_output=True, text=True, env=env,
+        )
+        shown = json.loads(r.stdout)
+        assert shown["is_me"] is True and shown["cursor"]["last_event_id"] == 0

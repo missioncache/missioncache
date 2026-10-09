@@ -4,7 +4,7 @@
 Three phases that turn the lead from a relay into a reader of a shared event log. Phase 1 ships in two steps:
 
 - **1a:** the `events` table, recording from the write tools, `missioncache-db events list`, the `get_events` MCP tool, the watermark and the 90-day prune. It changes no session's behavior.
-- **1b:** `lead_notice` in write responses, the rule that peers send it verbatim, and `--delta` reading events instead of a snapshot file. It comes after 1a has run for a few days.
+- **1b:** `--delta` reading events from a cursor stored on the lead row instead of diffing a snapshot file. Shipped 2026-10. The `lead_notice` field and the verbatim-forwarding rule were dropped: a Claude Code mod in the lead session reads the log itself (see the mod plan), and peer-to-lead messages stay for questions and requests only. Two things the notices used to carry became rules: an off-MissionCache action worth tracking is saved as a `recent_change`, and a draft saved for the user is an action item assigned to `me`.
 
 What shipped in 1a differs from the Phase 1 text below in these ways:
 
@@ -34,7 +34,7 @@ Event text is work data in practice. It lives only in the local `tasks.db`, neve
 - No event or change-log table exists. Recent Changes lives only in markdown. `task_updates` is the user-notes table with its own tool.
 - `portfolio_watermark()` (`missioncache_db/portfolio.py`) hashes task and action-item timestamps, `project_state`, and file mtimes.
 - The dashboard is FastAPI plus one `index.html` with hash-routed views. `/api/today` calls `build_portfolio`. `/api/stream` sends a `portfolio` SSE event when the watermark moves. It binds `127.0.0.1` with no auth.
-- `/missioncache:brief --delta` keeps its snapshot as a JSON file under `$MISSIONCACHE_ROOT/brief-state/`.
+- `/missioncache:brief --delta` kept its snapshot as a JSON file under `$MISSIONCACHE_ROOT/brief-state/`, written by hand at the end of each tick. Nothing in code wrote it.
 
 ## Core decision
 
@@ -50,13 +50,13 @@ The write tools record events. Peers keep messaging the lead, but the record no 
 6. **Ready-made notice.** Write responses carry `lead_notice`: the one-line text the peer sends to the lead (`<project>: <what>. Ticket <key or none>.`). Update `rules/missioncache.md` so peers send it verbatim. This ends free-text notices.
 7. **CLI.** `missioncache-db events list [--since ISO] [--project NAME] [--kind K] [--json]`.
 8. **MCP.** `get_events(since, project, kinds)` so any session can read the log.
-9. **Brief.** `--delta` reads events since the last tick instead of diffing a snapshot file. Row clipping stops mattering. Step 5 of `commands/lead.md` ("record what changed") goes away.
+9. **Brief.** `--delta` reads events after the cursor stored on the lead row (`missioncache-db lead mark`, `lead show --json`) instead of diffing a snapshot file. Row clipping stops mattering for the change pass; the clock pass still reads `get_portfolio` with a high row cap. Step 5 of `commands/lead.md` ("record what changed") goes away.
 10. **Retention.** `prune` drops events older than 90 days.
 11. **Tests.** Writer and kinds in `mcp-server/tests`, watermark in `missioncache-db/tests/test_portfolio.py`, CLI in `missioncache-db/tests`.
 
 Done when (1a): a write through any recording path produces one event row per item it changed, with the right kind, the watermark moves, and `events list --after-id` returns it.
 
-Done when (1b): a `--delta` tick reports it with no snapshot file.
+Done when (1b): a `--delta` tick reports it with no snapshot file, and the next tick is silent. Done 2026-10.
 
 ## Phase 2 - Lead page in the dashboard
 
@@ -89,7 +89,7 @@ Each item is independent. Suggested order.
 - `who` parsing in the waiting-on table produced a truncated token from a row naming an `@group` handle, and `Name'S` from a possessive (`Name's`). Check the title-casing and the token split.
 - After a fork or a move, a session bound to the new project still carried the old project's title in `live_sessions`, so the brief showed project and title that did not match. The title hook should follow the binding.
 - A project's due date stayed stale after its real date moved, because the date lived in prose. Not a code bug. A `due_date` event from another project's `imported_event` could prompt for it.
-- The brief skill should always call `get_portfolio` with a row cap high enough for the delta, until the delta reads events.
+- The brief skill's clock pass still calls `get_portfolio` with a row cap of 50: the change pass reads events, the clock pass still reads rows.
 
 ## Deferred, needs its own decision
 

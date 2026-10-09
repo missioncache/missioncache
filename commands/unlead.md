@@ -22,4 +22,4 @@ If this session scheduled a delta-brief loop, end it. A loop that is still runni
 
 ### Step 3: Report
 
-Tell the user in one line that the role ended. Nothing else: no brief, no snapshot.
+Tell the user in one line that the role ended. Nothing else: no brief, no cursor stamp.

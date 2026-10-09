@@ -25,7 +25,7 @@ One report across every project you are working on in parallel: what is on fire,
 |------|--------|
 | `--all` | Every project with something outstanding, not only the live-or-recent set |
 | `--ask` | Also message each live peer session for a one-line status. Async: see Step 5 |
-| `--delta` | Report only what changed since the previous run in this session (the lead loop uses this) |
+| `--delta` | Report only the changes logged since this lead session's previous tick (the lead loop uses this) |
 | `--lang he\|en` | Force the output language. Without it, follow the conversation's language, defaulting to English |
 | `--until <ISO>` | Used with `--delta` by the lead loop. Past this local time the tick ends the loop instead of reporting |
 
@@ -39,7 +39,7 @@ mcp__plugin_missioncache_pm__get_portfolio(scope="focus", recent_days=7)
 
 `focus` is the default: projects with a live session **union** projects worked in the last 7 days. It is a union, not an intersection. A project with a live session but no activity for a week still belongs, because someone has it open right now. Pass `scope="all"` for `--all`.
 
-The response carries `counts`, `on_me` (your open items bucketed overdue / due_soon / other_open), `on_others` (grouped by project, each row with `who`, `mine`, `days_past_line`, `age_days`), `projects` (already sorted by urgency), `live_sessions` (pid-alive sessions bound to a project, with `title`), `lead_session` (the designated manager session, or null) and `watermark` (a change token, used by `--delta`).
+The response carries `counts`, `on_me` (your open items bucketed overdue / due_soon / other_open), `on_others` (grouped by project, each row with `who`, `mine`, `days_past_line`, `age_days`), `projects` (already sorted by urgency), `live_sessions` (pid-alive sessions bound to a project, with `title`), `lead_session` (the designated manager session, or null) and `watermark` (a change token).
 
 Display strings are clipped for a chat turn; the ranking and every count were computed before clipping, so they match the dashboard exactly.
 
@@ -135,39 +135,40 @@ Omit any block whose data is empty. Never render an empty calendar or an empty "
 
 ### Step 7: `--delta`
 
-**Before anything else, the window.** When `--until <ISO timestamp>` is present and the local time is now past it, the loop's window is over: say in one line that the lead loop ended and offer to restart it, end the loop, and do nothing else. No rollup, no snapshot write. The timestamp is absolute rather than a duration on purpose, because the loop re-sends this same prompt every tick and a duration would restart its own countdown each time, so the loop would never end.
+**Before anything else, the window.** When `--until <ISO timestamp>` is present and the local time is now past it, the loop's window is over: say in one line that the lead loop ended and offer to restart it, end the loop, and do nothing else. No rollup, no cursor stamp. The timestamp is absolute rather than a duration on purpose, because the loop re-sends this same prompt every tick and a duration would restart its own countdown each time, so the loop would never end.
 
-Compare this run against the previous one in this session and print only what changed. The previous snapshot is a file, so it survives compaction:
+<!-- claude-code-only -->
+A delta is what the change log recorded since this session's previous tick. Read the cursor first:
 
 ```bash
-# MISSIONCACHE_ROOT, never a hardcoded ~/.missioncache: every other data
-# path in MissionCache honours that override and a test class enforces it.
-ROOT="${MISSIONCACHE_ROOT:-$HOME/.missioncache}"
-mkdir -p "$ROOT/brief-state"
-SNAP="$ROOT/brief-state/${CLAUDE_CODE_SESSION_ID:-default}.json"
-cat "$SNAP" 2>/dev/null || echo '{}'
+missioncache-db lead show --json
 ```
 
-Read it before the rollup, and compare in two independent passes.
+- `is_me` false: this session is not the designated lead, so `--delta` has no cursor to keep. Say so in one line and stop.
+- `cursor.last_event_id` null: the role was set without a baseline. Run `missioncache-db lead mark <designated> --latest`, print `Baseline set at <time>; changes show from the next tick.` and stop.
 
-**Pass one, the clock. Always runs, even on an unchanged watermark.** The watermark is built from database and file state and carries nothing time-shaped, so nothing below it can notice that time passed. Two triggers live here:
+Otherwise keep `cursor.last_event_id` and `cursor.last_tick_at` and run two independent passes.
 
-- the next meeting starting within 15 minutes, from the agenda in Step 3
-- an item that crossed into overdue, or a waiting-on row that crossed the 7-day stale line, since the snapshot's `date` and `today`
+**Pass one, the log.** Call `get_events(after_id=<last_event_id>, limit=1000)`. With a cursor the page is the oldest events after it, so stamping the newest id it returned skips nothing; when `has_more` is true, add one line that more changes are queued for the next tick. Drop rows whose `source_session` equals `designated`: those are this session's own writes. Group the rest by project. Each row is bullet material: `kind` says what happened (`waiting_added`, `waiting_resolved`, `task_done`, `completed`, `reopened`, `due_date`, `moved`, `renamed`, `action_item`, `recent_change`) and `what` is the line to show. The log does not carry Next Steps, Gotchas, decisions, removals, stakeholders, tickets, sessions opening or closing, or a project entering `at_risk`, so never claim one of those changed.
 
-**Pass two, the state.** If the `watermark` equals the new response's, skip this pass. Otherwise report only:
+**Pass two, the clock.** The log carries nothing time-shaped, so nothing in it can notice that time passed. Call `get_portfolio(scope="focus", max_rows_per_project=50)` (the default row cap would hide a crossing) and read the agenda from Step 3. Three triggers, all measured against `last_tick_at`:
 
-- a project entering or leaving `at_risk`
-- a new overdue item of yours, or one that got resolved
-- a waiting-on row added, or answered, matched by row key
-- a live session opening or closing
-- the top-ranked project changing
+- the next meeting starts within 15 minutes now and did not at `last_tick_at`
+- an item whose `due_date` is on or after the day of `last_tick_at` and before today crossed into overdue
+- a waiting-on row with `age_days` of 7 or more that was below 7 at `last_tick_at` crossed the stale line
 
-Report one to three bullets from both passes together, never the whole brief. Both passes silent is a silent tick, and the one-line `Nothing changed since <time>.` is for that case alone.
+Report one to three bullets from both passes together, never the whole brief. More than three changes: fold by project (`3 changes on billing-migration, newest: Robin answered on the schema`). Both passes silent is a silent tick, and the one-line `Nothing changed since <last_tick_at>.` is for that case alone. Never invent a bullet to justify a tick.
 
-A moved watermark with nothing on either list is normal and prints nothing: the token also moves on ordinary activity such as a heartbeat, so "the token moved" is not by itself a change worth reporting. Never invent a bullet to justify a tick.
+Then stamp the cursor, on a silent tick too, so the clock's window moves:
 
-Then write the new snapshot: `watermark`, the date it was taken, the ordered project names with their `at_risk` flag, `counts`, the set of live project names, the keys of open waiting-on and overdue rows (project plus the first 40 characters of `what`, which is what lets "Robin answered" name a row instead of a count), and the next meeting's start time.
+```bash
+missioncache-db lead mark <designated> --event-id <id of the newest event the page returned>
+missioncache-db lead mark <designated>                    # when the page was empty: time only
+```
+<!-- /claude-code-only -->
+<!-- non-claude-only
+Outside Claude Code there is no lead role and no cursor, so `--delta` has nothing to compare against. Say so in one line and render the read-only brief instead.
+-->
 
 ## Example Output
 
@@ -252,7 +253,7 @@ As of 17:42. 9 projects in scope, 5 with a live session.
 ### `--delta` tick with one change
 
 ```
-Since 17:42: api-release-check is no longer at risk, Robin answered on billing-migration.
+Since 17:42: billing-migration: Robin answered on the schema signoff. api-release-check: due date moved to 2026-10-14.
 ```
 
 ## MCP Tools Used
@@ -260,3 +261,4 @@ Since 17:42: api-release-check is no longer at risk, Robin answered on billing-m
 | Tool | Purpose |
 |------|---------|
 | `mcp__plugin_missioncache_pm__get_portfolio` | The cross-project rollup, live sessions and lead session in one call |
+| `mcp__plugin_missioncache_pm__get_events` | The change log since the lead's cursor, for `--delta` |

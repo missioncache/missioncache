@@ -166,13 +166,32 @@ def list_events(
     after_id: Optional[int] = None,
     task_id: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Events newest first.
+    """Events newest first. ``list_events_page`` with the overflow flag dropped."""
+    return list_events_page(
+        db, since=since, project=project, kinds=kinds, limit=limit, after_id=after_id, task_id=task_id
+    )[0]
+
+
+def list_events_page(
+    db,
+    since: Optional[str] = None,
+    project: Optional[str] = None,
+    kinds: Optional[Iterable[str]] = None,
+    limit: int = 200,
+    after_id: Optional[int] = None,
+    task_id: Optional[int] = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """``(events newest first, has_more)``.
 
     ``after_id`` is the exact cursor for "what is new since I last looked":
-    pass the highest ``id`` already seen. ``since`` is a local timestamp
-    (see ``normalize_since``) for a human window. ``project`` matches the
-    name the event was recorded under; ``task_id`` follows the project
-    across a rename. ``limit`` is clamped to 1..1000.
+    pass the highest ``id`` already seen. With a cursor the page is the OLDEST
+    rows after it, so a reader that stamps the newest id it got never skips a
+    row when more than ``limit`` accumulated; ``has_more`` says the log holds
+    rows past this page. Without a cursor the page is the newest rows.
+    ``since`` is a local timestamp (see ``normalize_since``) for a human
+    window. ``project`` matches the name the event was recorded under;
+    ``task_id`` follows the project across a rename. ``limit`` is clamped to
+    1..1000.
     """
     where, args = [], []
     since = normalize_since(since)
@@ -201,12 +220,24 @@ def list_events(
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY id DESC LIMIT ?"
-    args.append(min(MAX_LIMIT, max(1, int(limit))))
+    limit = min(MAX_LIMIT, max(1, int(limit)))
+    sql += f" ORDER BY id {'ASC' if after_id is not None else 'DESC'} LIMIT ?"
+    args.append(limit + 1)  # one extra row tells whether the log goes on
     with db.connection() as conn:
         cursor = conn.execute(sql, args)
         columns = [c[0] for c in cursor.description]
-        return [dict(zip(columns, r)) for r in cursor.fetchall()]
+        rows = [dict(zip(columns, r)) for r in cursor.fetchall()]
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    if after_id is not None:
+        rows.reverse()
+    return rows, has_more
+
+
+def latest_event_id(db) -> int:
+    """The newest event id, or 0 on an empty log. The lead's baseline cursor."""
+    with db.connection() as conn:
+        return conn.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
 
 
 def prune_events(db, days: int = DEFAULT_RETENTION_DAYS) -> int:

@@ -519,7 +519,10 @@ async def get_events(
         list[str] | None,
         Field(description="Only these kinds: " + ", ".join(EVENT_KINDS)),
     ] = None,
-    limit: Annotated[int, Field(description="Most events to return, newest first (max 1000)")] = 100,
+    limit: Annotated[int, Field(description="Most events to return (max 1000). With after_id the "
+                                            "page is the oldest events after the cursor, so stamping "
+                                            "the newest id returned never skips one; has_more says "
+                                            "the log goes on")] = 100,
 ) -> dict:
     """
     The event log: what changed in MissionCache projects, newest first.
@@ -532,10 +535,10 @@ async def get_events(
     recorded. Read-only.
     """
     try:
-        rows = events.list_events(
+        rows, has_more = events.list_events_page(
             get_db(), since=since, project=project, kinds=kinds, limit=limit, after_id=after_id,
         )
-        return {"success": True, "count": len(rows), "events": rows}
+        return {"success": True, "count": len(rows), "has_more": has_more, "events": rows}
     except ValueError as e:
         return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
     except MissionCacheError as e:

@@ -232,7 +232,7 @@ _CLAUDE_MACHINERY = (
 @pytest.mark.skipif(
     not REPO_COMMANDS_DIR.is_dir(), reason="repo command sources not available"
 )
-@pytest.mark.parametrize("name", ["fork", "rename"])
+@pytest.mark.parametrize("name", ["fork", "rename", "brief"])
 def test_real_command_source_renders_without_claude_machinery(name: str) -> None:
     """Renders the REAL command file, not a fixture.
 

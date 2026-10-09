@@ -32,7 +32,7 @@ Daily work goes through the slash commands and the [MCP tools](mcp-tools.md). Us
 | `stakeholder add\|remove\|list ...` | People on a project. |
 | `ticket add\|remove\|list ...` | Tickets linked to a project. |
 | `due-date <task> <YYYY-MM-DD\|none>` | Set or clear the project's due date. |
-| `lead set\|show\|stop` | Manage the lead session behind `/missioncache:lead` and `/missioncache:unlead`. |
+| `lead set\|mark\|show\|stop` | Manage the lead session behind `/missioncache:lead` and `/missioncache:unlead`. `mark` stamps the delta cursor the lead's `--delta` tick reads from. |
 | `events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]` | What changed in your projects, newest first. `events prune [--days N]` deletes old rows, `events clear <project>` one project's history. |
 | `agenda [--date today\|tomorrow\|YYYY-MM-DD] [--json] [--source NAME] [--no-cache]` | Print one day of your configured calendar. |
 | **Time** | |

@@ -100,17 +100,21 @@ SQLite is the source of truth; every mutation also re-renders the read-only `## 
 
 ```bash
 missioncache-db lead set "$CLAUDE_CODE_SESSION_ID"   # designate this session
-missioncache-db lead show [--json]                   # who the lead is, and whether it still runs
+missioncache-db lead mark --latest                   # baseline the delta cursor at the newest event
+missioncache-db lead mark --event-id 812             # stamp the cursor after a tick (no id: time only)
+missioncache-db lead show [--json]                   # who the lead is, whether it still runs, and the cursor
 missioncache-db lead stop                            # end the role
 ```
 
 One session at a time can be the lead: the project manager that `/missioncache:lead` turns a session into, and `/missioncache:unlead` ends. `set` replaces any previous lead, and the replaced session finds out on its next delta brief, whether that comes from an opted-in loop or from a brief you ask for. The lead carries the fixed session title `missioncache-lead`, applied by the title hook, so every working session that saves context or a PM item can address it without a lookup (the write tools return a `lead_session` field saying whom to notify). `show` distinguishes a running lead from a designated row whose process is gone; the latter is dropped by `prune-sessions`. The role lives in `~/.claude/hooks-state.db`, so it survives compaction.
 
+The same row carries the delta cursor: `last_event_id`, the newest change-log event the lead's `--delta` tick reported, and `last_tick_at`, when it ran. `mark` stamps both (`--latest` reads the newest event id from `tasks.db`, `--event-id` takes one, neither moves only the time) and only the designated session can stamp, so a replaced lead cannot move the new lead's cursor. `set` on the same session keeps the cursor; a new lead starts with none, and its first tick baselines itself. `show --json` returns the cursor and `is_me`, whether the designated session is the one running the command.
+
 ## Event log
 
 ```bash
 missioncache-db events list --since 2026-10-06 --json   # today's changes, every project
-missioncache-db events list --after-id 812              # exactly what is new since row 812
+missioncache-db events list --after-id 812              # what is new since row 812, oldest page first
 missioncache-db events list --project my-proj --kind task_done,waiting_resolved
 missioncache-db events prune --days 90
 missioncache-db events clear my-proj                    # one project's history
