@@ -3020,6 +3020,30 @@ class TestSessionTitleHook:
         )
         assert out["hookSpecificOutput"]["sessionTitle"] == "fresh-proj"
 
+    def test_fork_titles_after_the_child_in_the_same_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The fork binds the session to the child, so the address moves there."""
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "demo-proj")
+        self._bind(db, "sid-a", "demo-proj")
+        out = self._run(
+            monkeypatch, capsys,
+            {"session_id": "sid-a", "prompt": "/missioncache:fork demo-proj demo-lane --jira PROJ-1"},
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-lane"
+
+    def test_rename_titles_after_the_new_name_in_the_same_prompt(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        db = self._redirect_state(monkeypatch, tmp_path)
+        self._project_dir(tmp_path, "demo-proj")
+        self._bind(db, "sid-a", "demo-proj")
+        out = self._run(
+            monkeypatch, capsys, {"session_id": "sid-a", "prompt": "/missioncache:rename demo-core"}
+        )
+        assert out["hookSpecificOutput"]["sessionTitle"] == "demo-core"
+
     @pytest.mark.parametrize(
         "prompt",
         [
@@ -3029,6 +3053,11 @@ class TestSessionTitleHook:
             "/missioncache:new add caching layer",  # a description, not a name
             "/missioncache:new Bad_Name",  # a name the command rejects
             "load demo-proj",  # not the command
+            "/missioncache:fork missing-proj lane",  # no such parent
+            "/missioncache:fork done-proj done-proj",  # child name taken
+            "/missioncache:fork done-proj",  # no child: the command asks
+            "/missioncache:rename done-proj",  # taken: the rename refuses
+            "/missioncache:rename",  # no name: the command shows usage
         ],
     )
     def test_no_title_from_a_name_the_command_will_not_bind(
@@ -3039,6 +3068,14 @@ class TestSessionTitleHook:
         self._redirect_state(monkeypatch, tmp_path)
         self._project_dir(tmp_path, "done-proj", where="completed")
         assert self._run(monkeypatch, capsys, {"session_id": "sid-a", "prompt": prompt}) is None
+
+    def test_rename_in_an_unbound_session_does_not_title(self, tmp_path, monkeypatch, capsys):
+        """The command renames the bound project and stops when there is none."""
+        self._redirect_state(monkeypatch, tmp_path)
+        out = self._run(
+            monkeypatch, capsys, {"session_id": "sid-a", "prompt": "/missioncache:rename demo-core"}
+        )
+        assert out is None
 
     def test_second_live_session_on_one_project_gets_a_suffix(
         self, tmp_path, monkeypatch, capsys

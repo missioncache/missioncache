@@ -42,13 +42,17 @@ if _BUNDLED_MISSIONCACHE_DB.is_dir() and str(_BUNDLED_MISSIONCACHE_DB) not in sy
     sys.path.insert(0, str(_BUNDLED_MISSIONCACHE_DB))
 
 
-# `/missioncache:load <name>` and `/missioncache:new <name>` name their project in
-# the prompt. The binding they create is written while the command runs, after
-# this hook has already fired, so without reading the argument the title would
-# only follow on the next prompt.
-# The whole argument has to be the name (new may add `--jira <key>`): new is
-# often given a description, and its first word is not the project.
+# `/missioncache:load <name>`, `/missioncache:new <name>`, `/missioncache:fork
+# <parent> <child>` and `/missioncache:rename <new-name>` name the project the
+# session is about to be bound to in the prompt. The binding they create is
+# written while the command runs, after this hook has already fired, and Claude
+# Code honours `sessionTitle` only from SessionStart and UserPromptSubmit, so
+# without reading the argument the title would only follow on the next prompt.
+# The whole argument has to be the name (new and fork may add `--jira <key>`):
+# new is often given a description, and its first word is not the project.
 _BINDING_COMMAND_RE = re.compile(r"^/missioncache:(load|new)\s+(\S+)(?:\s+--jira\s+\S+)?$")
+_FORK_COMMAND_RE = re.compile(r"^/missioncache:fork\s+(\S+)\s+(\S+)(?:\s+--jira\s+\S+)?$")
+_RENAME_COMMAND_RE = re.compile(r"^/missioncache:rename\s+(\S+)$")
 
 # The lead commands have the same timing problem: `lead set` / `lead stop` run
 # after this hook, so the role change would only show on the next prompt.
@@ -65,33 +69,53 @@ def lead_from_prompt(prompt: str) -> bool | None:
     return None if match is None else match.group(1) == "lead"
 
 
-def project_from_prompt(prompt: str) -> str | None:
-    """Project a load or new command in ``prompt`` is about to bind, or None.
+def project_from_prompt(prompt: str, session_id: str | None = None) -> str | None:
+    """Project a load, new, fork or rename command in ``prompt`` is about to
+    bind, or None.
 
-    Only an exact name counts. A load needs the project to be active, and a new
-    needs the name to be free, since an existing one makes the command stop and
-    ask. Anything else (a picker, a fuzzy name, a description) falls back to
-    titling from the binding on the next prompt.
+    Only an exact name counts. A load needs the project to be active. A new, a
+    fork's child and a rename's new name need the name to be free, since an
+    existing one makes the command stop. A fork also needs its parent to exist,
+    and a rename needs ``session_id`` to be bound already, because the command
+    renames the bound project and stops when there is none. Anything else (a
+    picker, a fuzzy name, a description) falls back to titling from the
+    binding on the next prompt.
     """
-    match = _BINDING_COMMAND_RE.match(prompt.strip())
-    if not match:
-        return None
-    command, name = match.groups()
+    prompt = prompt.strip()
     from missioncache_db import (  # type: ignore[import-not-found]
         MISSIONCACHE_ROOT,
+        bound_project_for_session,
         validate_task_name,
     )
 
-    try:
-        validate_task_name(name)
-    except ValueError:
-        return None
+    def valid(name: str) -> bool:
+        try:
+            validate_task_name(name)
+        except ValueError:
+            return False
+        return True
 
-    active = (MISSIONCACHE_ROOT / "active" / name).is_dir()
-    if command == "load":
-        return name if active else None
-    taken = active or (MISSIONCACHE_ROOT / "completed" / name).is_dir()
-    return None if taken else name
+    def exists(name: str, where: tuple[str, ...] = ("active", "completed")) -> bool:
+        return any((MISSIONCACHE_ROOT / w / name).is_dir() for w in where)
+
+    if match := _BINDING_COMMAND_RE.match(prompt):
+        command, name = match.groups()
+        if not valid(name):
+            return None
+        if command == "load":
+            return name if exists(name, ("active",)) else None
+        return None if exists(name) else name
+    if match := _FORK_COMMAND_RE.match(prompt):
+        parent, child = match.groups()
+        if valid(parent) and valid(child) and exists(parent) and not exists(child):
+            return child
+        return None
+    if match := _RENAME_COMMAND_RE.match(prompt):
+        name = match.group(1)
+        if not (session_id and valid(name)) or exists(name):
+            return None
+        return name if bound_project_for_session(session_id) else None
+    return None
 
 
 def resolve_title(
@@ -200,7 +224,9 @@ def main() -> None:
         if not isinstance(prompt, str):
             prompt = ""
 
-        resolved = resolve_title(session_id, project_from_prompt(prompt), lead_from_prompt(prompt))
+        resolved = resolve_title(
+            session_id, project_from_prompt(prompt, session_id), lead_from_prompt(prompt)
+        )
         if resolved is None:
             return
         title, project_name = resolved

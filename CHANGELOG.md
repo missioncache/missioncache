@@ -8,6 +8,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- `/missioncache:fork` and `/missioncache:rename` now rename the session in the same prompt, so peers can reach it under the new name at once. (plugin)
 - Renaming a project now points its forks at the new name, so they keep reading its shared context. (missioncache-db, mcp-missioncache, plugin)
 
 ## 2026-10-06
