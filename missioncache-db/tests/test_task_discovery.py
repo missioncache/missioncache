@@ -664,6 +664,110 @@ class TestForkRenameInteractions:
         db.scan_repo(repo_id)
         assert db._resolve_task_by_name("renamed-child").parent_id == parent.id
 
+    def _chain(self, db, orbit_root, tmp_path):
+        """top <- middle <- leaf, plus a sibling fork of middle written as a wikilink."""
+        root = orbit_root / "active"
+        (root / "top").mkdir(parents=True)
+        (root / "top" / "top-context.md").write_text("# Top - Context\n\n## Description\n")
+        for name, header in (
+            ("middle", "**Fork of:** top"),
+            ("leaf", "**Fork of:** middle"),
+            ("sibling", "**Fork of:** [[middle]]"),
+        ):
+            (root / name).mkdir(parents=True)
+            (root / name / f"{name}-context.md").write_text(
+                f"# {name} - Context\n{header}\n\n## Description\n\nForks of middle share this.\n"
+            )
+        repo_id = self._repo(db, tmp_path)
+        db.scan_repo(repo_id)
+        return root, repo_id
+
+    def test_renaming_a_middle_fork_points_its_forks_at_the_new_name(
+        self, db, orbit_root, tmp_path
+    ):
+        root, repo_id = self._chain(db, orbit_root, tmp_path)
+        middle = db._resolve_task_by_name("middle")
+
+        result = db.rename_task(middle.id, "core")
+
+        assert result["forks_relinked"] == ["leaf", "sibling"]
+        assert result["warnings"] == []
+        leaf = (root / "leaf" / "leaf-context.md").read_text()
+        assert "**Fork of:** core\n" in leaf
+        assert "Forks of middle share this." in leaf  # only the header changed
+        assert "**Fork of:** [[core]]\n" in (root / "sibling" / "sibling-context.md").read_text()
+        # Its own link up the chain is untouched.
+        assert "**Fork of:** top\n" in (root / "core" / "core-context.md").read_text()
+        # A re-scan reads the rewritten headers and keeps every link.
+        db.scan_repo(repo_id)
+        core = db._resolve_task_by_name("core")
+        assert db._resolve_task_by_name("leaf").parent_id == core.id
+        assert db._resolve_task_by_name("sibling").parent_id == core.id
+
+    def test_a_fork_with_only_a_legacy_context_file_is_relinked(
+        self, db, orbit_root, tmp_path
+    ):
+        """The scan reads a legacy unprefixed context.md, so the rename must too."""
+        root, _ = self._chain(db, orbit_root, tmp_path)
+        (root / "leaf" / "leaf-context.md").rename(root / "leaf" / "context.md")
+        middle = db._resolve_task_by_name("middle")
+
+        result = db.rename_task(middle.id, "core")
+
+        assert result["forks_relinked"] == ["leaf", "sibling"]
+        assert "**Fork of:** core\n" in (root / "leaf" / "context.md").read_text()
+
+    def test_a_fork_whose_link_is_not_reconciled_yet_still_follows(
+        self, db, orbit_root, tmp_path
+    ):
+        """The header is the source of truth: a fork whose parent_id was lost
+        (an import, say) is relinked from its header and heals on the next scan."""
+        root, repo_id = self._chain(db, orbit_root, tmp_path)
+        leaf = db._resolve_task_by_name("leaf")
+        db.set_task_parent(leaf.id, None)
+        middle = db._resolve_task_by_name("middle")
+
+        result = db.rename_task(middle.id, "core")
+
+        assert "leaf" in result["forks_relinked"]
+        db.scan_repo(repo_id)
+        assert db._resolve_task_by_name("leaf").parent_id == db._resolve_task_by_name("core").id
+
+    def test_a_fork_whose_header_names_another_parent_is_left_alone(
+        self, db, orbit_root, tmp_path
+    ):
+        root, _ = self._chain(db, orbit_root, tmp_path)
+        middle = db._resolve_task_by_name("middle")
+        leaf_ctx = root / "leaf" / "leaf-context.md"
+        leaf_ctx.write_text("# leaf - Context\n**Fork of:** elsewhere\n\n## Description\n")
+
+        result = db.rename_task(middle.id, "core")
+
+        assert result["forks_relinked"] == ["sibling"]
+        assert "**Fork of:** elsewhere\n" in leaf_ctx.read_text()
+
+    def test_a_fork_that_cannot_be_rewritten_warns_and_the_rename_stands(
+        self, db, orbit_root, tmp_path, monkeypatch
+    ):
+        root, _ = self._chain(db, orbit_root, tmp_path)
+        middle = db._resolve_task_by_name("middle")
+        real_write = pathlib.Path.write_text
+
+        def boom(self, *a, **k):
+            if self.name == "leaf-context.md.tmp":
+                raise OSError("disk full")
+            return real_write(self, *a, **k)
+
+        monkeypatch.setattr(pathlib.Path, "write_text", boom)
+        result = db.rename_task(middle.id, "core")
+        monkeypatch.undo()
+
+        assert result["success"] is True and result["name"] == "core"
+        assert result["forks_relinked"] == ["sibling"]
+        assert len(result["warnings"]) == 1
+        assert "leaf" in result["warnings"][0] and "core" in result["warnings"][0]
+        assert "**Fork of:** middle\n" in (root / "leaf" / "leaf-context.md").read_text()
+
 
 class TestForkReconcilePreservesOnUnreadable:
     """The 'absence of evidence is not evidence' contract: an unreadable

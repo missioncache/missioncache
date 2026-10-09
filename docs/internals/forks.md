@@ -146,9 +146,9 @@ Note this is the grammar for **parsing the header line**, not the rule for namin
 
 ### "I renamed the parent and the fork went plain"
 
-**Cause:** Renaming a parent does not rewrite its children's headers. Each child still says `**Fork of:** <old-name>`, which now resolves to nothing, so the statusline drops the fork cell and the child renders as a plain project.
+**Cause:** A rename rewrites every `**Fork of:**` header that names the old name, under that fork's context-file lock, and lists those forks in `forks_relinked`. It finds them by the header in each project under `active/` and `completed/`, not by `parent_id`, so a fork whose link the scan has not restored yet follows too. A fork it could not write (a read-only file, a full disk) keeps `**Fork of:** <old-name>`, which resolves to nothing, so the statusline drops the fork cell. The rename names each such fork in `warnings`. A fork whose header already named some other parent is left alone. The forks' `parent_id` rows are keyed by id and stay correct either way.
 
-**Fix:** Edit each child's context header and put the new parent name in the `**Fork of:**` line. The next scan re-links it. Do this in the same breath as the rename, not later.
+**Fix:** Put the new parent name in that fork's `**Fork of:**` line. The next scan reads it.
 
 ### "A sibling changed the shared context and I never saw it"
 

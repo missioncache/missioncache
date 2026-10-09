@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- Renaming a project now points its forks at the new name, so they keep reading its shared context. (missioncache-db, mcp-missioncache, plugin)
+
 ## 2026-10-06
 
 Published package versions: missioncache-db 1.0.32, mcp-missioncache 1.0.38. Claude Code plugin 1.0.38. missioncache-auto, missioncache-dashboard and missioncache-install are unchanged.

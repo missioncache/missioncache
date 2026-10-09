@@ -3177,7 +3177,7 @@ class TaskDB:
         Returns:
             Dict with keys: success, changed, name, old_name, normalized,
             full_path, files_renamed, h1_rewritten, h1_skipped,
-            sessions_updated, warnings.
+            sessions_updated, forks_relinked, warnings.
 
         Raises:
             ValueError: invalid name (after normalization), missing task,
@@ -3215,6 +3215,7 @@ class TaskDB:
                 "h1_rewritten": [],
                 "h1_skipped": [],
                 "sessions_updated": 0,
+                "forks_relinked": [],
                 "warnings": [],
             }
 
@@ -3422,6 +3423,7 @@ class TaskDB:
 
         sweep = self._sweep_session_pointers(old_name, new_name)
         self._record_event(task_id, new_name, "renamed", f"{old_name} -> {new_name}")
+        forks_relinked, fork_warnings = self._relink_fork_children(old_name, new_name)
 
         return {
             "success": True,
@@ -3434,8 +3436,72 @@ class TaskDB:
             "h1_rewritten": h1_rewritten,
             "h1_skipped": h1_skipped,
             "sessions_updated": sweep["updated"],
-            "warnings": sweep["warnings"],
+            "forks_relinked": forks_relinked,
+            "warnings": sweep["warnings"] + fork_warnings,
         }
+
+    def _relink_fork_children(self, old_name: str, new_name: str) -> Tuple[List[str], List[str]]:
+        """Point every fork of a renamed project at its new name.
+
+        A fork finds its parent through the ``**Fork of:**`` header in its own
+        context file, so after a rename that header still names a project that
+        no longer exists, and no scan can resolve it again. The header is the
+        source of truth here too, not ``parent_id``: a fork whose link has not
+        been reconciled yet (after an import, say) still has to follow. So
+        every flat project directory is checked, reading the same file
+        ``_reconcile_fork_link`` reads, and a header naming ``old_name`` is
+        rewritten under that file's sidecar lock.
+
+        Best-effort: the rename is already committed, so a fork that cannot be
+        read or rewritten is reported in the warnings rather than failing it.
+
+        Returns (names of the forks rewritten, warnings).
+        """
+        from missioncache_db import context_health
+
+        relinked: List[str] = []
+        warnings: List[str] = []
+        project_dirs = sorted(
+            d
+            for where in ("active", "completed")
+            if (MISSIONCACHE_ROOT / where).is_dir()
+            for d in (MISSIONCACHE_ROOT / where).iterdir()
+            if d.is_dir()
+        )
+        for project_dir in project_dirs:
+            name = project_dir.name
+            context_path = next(
+                (
+                    project_dir / f
+                    for f in (f"{name}-context.md", "context.md")
+                    if (project_dir / f).exists()
+                ),
+                None,
+            )
+            if context_path is None:
+                continue
+            try:
+                if context_health.parse_fork_parent(
+                    context_path.read_text(encoding="utf-8")
+                ) != old_name:
+                    continue
+                with filelock.sidecar_lock(context_path):
+                    # Re-read under the lock: another writer may have changed it.
+                    content = context_path.read_text(encoding="utf-8")
+                    updated = context_health.replace_fork_parent(content, old_name, new_name)
+                    if updated is None:
+                        continue
+                    tmp_path = context_path.with_name(context_path.name + ".tmp")
+                    tmp_path.write_text(updated, encoding="utf-8")
+                    filelock.replace_with_retry(tmp_path, context_path)
+                relinked.append(name)
+            except OSError as e:
+                logger.warning("rename: could not relink fork %s", name, exc_info=True)
+                warnings.append(
+                    f"Could not check or update '{name}' ({e}). If it is a fork, "
+                    f"change its '**Fork of:** {old_name}' line to '{new_name}'."
+                )
+        return relinked, warnings
 
     def delete_task(
         self, task_id: int, *, delete_files: bool = False
@@ -6288,6 +6354,10 @@ def main():
                 print(
                     f"  Updated {result['sessions_updated']} session pointer(s)."
                 )
+            if result["forks_relinked"]:
+                print("  Pointed forks at the new name: " + ", ".join(result["forks_relinked"]))
+            for warning in result["warnings"]:
+                print(f"  Warning: {warning}")
 
         elif command == "get-task-by-name":
             if len(sys.argv) < 3:

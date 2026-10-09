@@ -160,6 +160,7 @@ class RenameTaskResult(BaseModel):
     h1_rewritten: list[str] = []
     h1_skipped: list[str] = []
     sessions_updated: int = 0
+    forks_relinked: list[str] = []
     warnings: list[str] = []
 
 

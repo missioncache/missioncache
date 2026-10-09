@@ -1159,6 +1159,19 @@ def parse_fork_parent(content: str) -> Optional[str]:
     return match.group(1) or match.group(2)
 
 
+def replace_fork_parent(content: str, old_name: str, new_name: str) -> Optional[str]:
+    """``content`` with its ``**Fork of:** <old_name>`` header pointed at
+    ``new_name``, keeping the plain or ``[[wikilink]]`` form. None when the
+    header does not name ``old_name``, so a caller never rewrites a file whose
+    header says something else."""
+    line = _header_line(content, "**Fork of:**")
+    match = _FORK_NAME_RE.match(line) if line else None
+    if not match or (match.group(1) or match.group(2)) != old_name:
+        return None
+    new_line = f"**Fork of:** [[{new_name}]]" if match.group(1) else f"**Fork of:** {new_name}"
+    return content.replace(line, new_line, 1)
+
+
 def waiting_on_rows(content: str, now: Optional[datetime] = None) -> list[dict[str, Any]]:
     """Waiting-on rows with ``age_days`` and ``stale`` added.
 

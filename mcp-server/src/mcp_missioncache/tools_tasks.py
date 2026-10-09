@@ -726,6 +726,7 @@ async def rename_task(
             h1_rewritten=result["h1_rewritten"],
             h1_skipped=result["h1_skipped"],
             sessions_updated=result["sessions_updated"],
+            forks_relinked=result.get("forks_relinked", []),
             warnings=result.get("warnings", []),
         ).model_dump()
         # A rename moves the context file out from under any live peer session,

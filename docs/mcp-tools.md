@@ -192,7 +192,7 @@ Updates are stored in the `task_updates` table (one row per call) and surfaced v
 - `new_name: str` - Target name, kebab-case. Trimmed + lowercased before validation.
 - `task_id: int | None = None` or `project_name: str | None = None` - Provide one to identify the project.
 
-**Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, and `warnings`. On a real rename (`changed: true`) it also carries `live_sessions` under the NEW name - a rename moves the context file out from under any live peer session, which then needs to reload its paths.
+**Returns:** `RenameTaskResult` with `name` (the canonical stored name - display this, not the typed input), `old_name`, `normalized` (whether trim/lowercase changed the input), `full_path`, `files_renamed`, `h1_rewritten`, `sessions_updated`, `forks_relinked` (the forks whose `**Fork of:**` header now names the new name), and `warnings`. On a real rename (`changed: true`) it also carries `live_sessions` under the NEW name - a rename moves the context file out from under any live peer session, which then needs to reload its paths.
 
 Refuses with `ALREADY_EXISTS` when another project holds the target name (in the DB or on disk), with `INVALID_STATE` while a missioncache-auto run is in progress, and with `VALIDATION_ERROR` for legacy nested subtasks (rename the parent instead). Fork children are full projects and rename normally - only nested `active/<parent>/<subtask>/` directories are refused.
 

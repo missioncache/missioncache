@@ -87,7 +87,7 @@ A session on `product-a-tests` finds that staging rotates its token every hour. 
 
 **Completing.** `/missioncache:done` on a parent with active forks warns you and completes it. The forks keep reading its context from the completed folder.
 
-**Renaming.** `/missioncache:rename` does not update the forks. Each fork still says `**Fork of:** <old-name>` and stops linking. Edit that line in every fork to the new name right after you rename.
+**Renaming.** `/missioncache:rename` points every fork at the new name. A fork whose file could not be updated is listed in a warning. Change its `**Fork of:**` line by hand.
 
 **Deleting.** A parent that still has forks cannot be deleted. Complete or delete the forks first, or remove the `**Fork of:**` line from each one so they unlink on the next scan.
 
