@@ -446,6 +446,7 @@ class TestPruneSessionState:
             "project_pointers": 0,
             "project_state_rows": 0,
             "lead_session_rows": 0,
+            "agent_status_rows": 0,
         }
         assert m.session_pid_path("live-sid").exists()
         assert m.session_binding_path("live-sid").exists()
@@ -466,6 +467,7 @@ class TestPruneSessionState:
             "project_pointers": 1,
             "project_state_rows": 1,
             "lead_session_rows": 0,
+            "agent_status_rows": 0,
         }
         assert not m.session_pid_path("dead-sid").exists()
         assert not m.session_binding_path("dead-sid").exists()
@@ -529,6 +531,7 @@ class TestPruneSessionState:
             "project_pointers": 1,
             "project_state_rows": 1,
             "lead_session_rows": 0,
+            "agent_status_rows": 0,
         }
         assert m.session_pid_path("dead-sid").exists()
         assert m.session_binding_path("dead-sid").exists()
@@ -641,6 +644,7 @@ class TestPruneSessionState:
             "project_pointers": 0,
             "project_state_rows": 0,
             "lead_session_rows": 0,
+            "agent_status_rows": 0,
         }
         assert _state_rows(home) == {"just-died"}
 

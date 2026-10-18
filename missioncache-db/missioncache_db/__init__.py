@@ -412,6 +412,17 @@ def session_pid_path(session_id: str) -> Path:
     return Path.home() / ".claude" / "hooks" / "state" / "session-pids" / f"{session_id}.json"
 
 
+def active_task_pointer_dir() -> Path:
+    """Directory of the per-session active-task pointers.
+
+    Single owner of the ``~/.claude/hooks/state/active-missioncache-task/``
+    convention: the MCP server writes the pointers (``active_task.py``) and the
+    lead board reads them, from two packages. ``Path.home()`` is resolved per
+    call, as in ``session_pid_path``.
+    """
+    return Path.home() / ".claude" / "hooks" / "state" / "active-missioncache-task"
+
+
 def session_is_alive(session_id: str) -> Optional[bool]:
     """Liveness of ``session_id`` from its recorded process pid.
 
@@ -807,6 +818,9 @@ def prune_session_state(
     install - a real machine reached 2,318 pid files at 9 MB, against 16
     bindings touched in the preceding week.
 
+    The ``lead_session`` and ``agent_status`` rows of gone sessions go too,
+    each under the rule its block below states.
+
     Three guards, each covering a different failure:
 
     * **Liveness.** Only a session that is not *proven* alive is pruned, so a
@@ -851,6 +865,7 @@ def prune_session_state(
         "project_pointers": 0,
         "project_state_rows": 0,
         "lead_session_rows": 0,
+        "agent_status_rows": 0,
         "max_age_days": max_age_days,
     }
 
@@ -958,6 +973,26 @@ def prune_session_state(
                 )
                 conn.commit()
             counts["lead_session_rows"] = len(dead_leads)
+
+            # The lead board's per-session state follows the binding rule
+            # above: old AND not proven alive. A live session's row survives
+            # however long it has idled.
+            status_rows = conn.execute(
+                "SELECT session_id FROM agent_status WHERE updated_at < ?",
+                (cutoff_local,),
+            ).fetchall()
+            dead_status = [
+                sid
+                for (sid,) in status_rows
+                if _is_valid_session_id(sid) and not _proven_alive(sid)
+            ]
+            if dead_status and not dry_run:
+                conn.executemany(
+                    "DELETE FROM agent_status WHERE session_id = ?",
+                    [(sid,) for sid in dead_status],
+                )
+                conn.commit()
+            counts["agent_status_rows"] = len(dead_status)
         finally:
             conn.close()
     except sqlite3.Error as e:
@@ -1056,6 +1091,23 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
             last_event_id INTEGER,
             last_tick_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS agent_status (
+            session_id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            state_since TEXT NOT NULL,
+            needs_reason TEXT,
+            prompt TEXT,
+            now TEXT,
+            context_pct INTEGER,
+            cost_usd REAL,
+            turns_today INTEGER,
+            last_turn_at TEXT,
+            last_answer TEXT,
+            last_turn_ms INTEGER,
+            compacted_at TEXT,
+            version INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
         CREATE TABLE IF NOT EXISTS term_sessions (
             term_session_id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -1079,6 +1131,10 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE lead_session ADD COLUMN last_event_id INTEGER")
     if "last_tick_at" not in cols:
         conn.execute("ALTER TABLE lead_session ADD COLUMN last_tick_at TEXT")
+    # The lead board's change counter, for an agent_status table created
+    # before it.
+    if "version" not in {r[1] for r in conn.execute("PRAGMA table_info(agent_status)")}:
+        conn.execute("ALTER TABLE agent_status ADD COLUMN version INTEGER NOT NULL DEFAULT 0")
 
 
 class MissionCacheMigrationRequired(RuntimeError):

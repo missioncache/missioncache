@@ -234,6 +234,17 @@ def list_events_page(
     return rows, has_more
 
 
+def latest_event_per_project(db) -> dict[str, dict[str, Any]]:
+    """``{project: {kind, what, created_at}}`` of each project's newest event,
+    in one query rather than one per project."""
+    with db.connection() as conn:
+        rows = conn.execute(
+            "SELECT project, kind, what, created_at FROM events "
+            "WHERE id IN (SELECT MAX(id) FROM events GROUP BY project)"
+        ).fetchall()
+    return {r[0]: {"kind": r[1], "what": r[2], "created_at": r[3]} for r in rows}
+
+
 def latest_event_id(db) -> int:
     """The newest event id, or 0 on an empty log. The lead's baseline cursor."""
     with db.connection() as conn:
