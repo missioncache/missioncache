@@ -269,8 +269,13 @@ def focus_terminal(session_id: str) -> dict[str, Any]:
 
     The UUID goes to osascript as an argument, never into the script text.
     On failure ``reason`` carries osascript's own words, so a first-run
-    Automation refusal is visible rather than swallowed.
+    Automation refusal is visible rather than swallowed. Every caller (the MCP
+    tool, the dashboard) gets the session id checked here.
     """
+    import missioncache_db
+
+    if not missioncache_db._is_valid_session_id(session_id):
+        return {"success": False, "reason": "not a session id"}
     if not focus_available():
         return {"success": False, "reason": "jumping to a tab works only with iTerm2 on macOS"}
     try:

@@ -6526,6 +6526,10 @@
         .lb-alert { color: var(--lb-needs); font-weight: 650; }
         .lb-exp { margin-inline-start: auto; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 15px/1 var(--font-sans); cursor: pointer; }
         .lb-exp:hover { color: var(--lb-ink); border-color: var(--lb-dim); }
+        .lb-go { margin-inline-start: auto; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 12px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+        .lb-go:hover { color: var(--lb-ink); border-color: var(--lb-amber); }
+        .lb-go:disabled { cursor: default; opacity: .8; }
+        .lb-go + .lb-exp { margin-inline-start: 0; }
         .lb-st { --c: var(--lb-dim); display: inline-flex; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--c); }
         .lb-st > i { font-style: normal; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--c) 14%, transparent); }
         .lb-st > i::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
@@ -8090,6 +8094,28 @@
             if (ld.board) ldRenderDay();
         }
 
+        // Moves a window, never a record: the one action the read-only view takes.
+        async function ldGo(button) {
+            const label = button.textContent;
+            button.disabled = true;
+            let reason = '';
+            try {
+                const res = await fetch(API_BASE + '/api/lead/focus', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: button.dataset.sid }),
+                });
+                const out = await res.json();
+                if (!res.ok || !out.success) reason = out.reason || (out.detail && out.detail.message) || `HTTP ${res.status}`;
+            } catch (e) {
+                reason = String(e && e.message || e);
+            }
+            button.textContent = reason ? 'no tab' : 'opened';
+            button.title = reason || "Bring this session's terminal tab to the front";
+            if (reason) ldAnnounce(`Could not open the tab: ${reason}`);
+            setTimeout(() => { button.textContent = label; button.disabled = false; }, 2500);
+        }
+
         function ldToggle(name) {
             if (ldSelecting()) return;
             ld.open.has(name) ? ld.open.delete(name) : ld.open.add(name);
@@ -8301,6 +8327,7 @@
             return `<div class="lb-row${state === 'needs_you' ? ' needs' : ''}${more ? ' has-more' : ''}${open ? ' open' : ''}${ld.changed.has(p.name) ? ' changed' : ''}" data-name="${name}"${more ? ` onclick="if (!event.target.closest('a, button')) ldToggle(this.dataset.name)"` : ''}>
                 <div class="lb-proj">
                     <div class="lb-proj-top"><span class="lb-st ${stateCls}"><i>${stateLabel}</i></span>${timer}
+                        ${s && ld.board.focus_available ? `<button class="lb-go" data-focus="go:${name}" data-sid="${escapeHtml(s.session_id)}" title="Bring this session's terminal tab to the front" onclick="ldGo(this)">go to tab</button>` : ''}
                         ${more ? `<button class="lb-exp" data-focus="exp:${name}" data-name="${name}" aria-expanded="${open}" aria-controls="ld-more-${i}" aria-label="Details for ${name}" onclick="ldToggle(this.dataset.name)">${open ? '−' : '+'}</button>` : ''}</div>
                     <span class="lb-name-row">${ldProjectLink(p.name, 'lb-name')}${ldSpark(p.name)}</span>
                     <span class="lb-sub">${sub}</span>

@@ -3817,6 +3817,25 @@ def get_lead(
     return board
 
 
+class LeadFocusPayload(BaseModel):
+    session_id: str
+
+
+@app.post("/api/lead/focus")
+def focus_lead_session(payload: LeadFocusPayload):
+    """Bring a live session's iTerm2 tab to the front (macOS). The Lead view's
+    "go to tab" button: it moves a window, never a record, so the view stays
+    read-only. A JSON body, so a page on another origin cannot send it without
+    a CORS preflight the allow-list refuses.
+
+    Sync ``def``: it runs osascript. The answer is ``{success}`` or
+    ``{success: false, reason}``, never an HTTP error, so the button can say why.
+    """
+    from missioncache_db import lead_board
+
+    return lead_board.focus_terminal(payload.session_id)
+
+
 @app.get("/api/agenda")
 def get_agenda(date: str | None = None):
     """Today's calendar, or ``date`` (YYYY-MM-DD). Never 500s.

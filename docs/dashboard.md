@@ -9,7 +9,7 @@ Open **http://localhost:8787**. The full install starts it for you and keeps it 
 | View | Use it to |
 |---|---|
 | **Attention** | See what needs you today. It opens here. |
-| **Lead** | Follow every session as it works: who needs you, what each project did last, what blocks it and what is next, today's meetings and free time, and the lead session's picks for the day. Read-only. |
+| **Lead** | Follow every session as it works: who needs you, what each project did last, what blocks it and what is next, today's meetings and free time, and the lead session's picks for the day. A live session's "go to tab" brings its iTerm2 tab to the front on macOS. Nothing else is changed from here. |
 | **Projects** | Find any project, active or done, and open its files. |
 | **Activity** | See how much time you spent, per day, per project, per repo. |
 | **Auto** | Watch a `missioncache-auto` run as it happens. |

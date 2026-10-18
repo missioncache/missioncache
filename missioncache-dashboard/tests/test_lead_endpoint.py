@@ -57,3 +57,22 @@ def test_picks_written_by_the_lead_reach_the_view(sandboxed):
     lead_board.set_lead_picks("aaaaaaaa-1111-2222-3333-444444444444", [{"what": "Publish the docs site", "why": "one task left"}])
     assert server.get_lead()["picks"]["items"] == [
         {"what": "Publish the docs site", "project": None, "why": "one task left"}]
+
+
+def test_go_to_tab_brings_the_sessions_tab_forward(sandboxed, monkeypatch):
+    from missioncache_db import lead_board
+
+    asked = []
+    monkeypatch.setattr(lead_board, "focus_terminal", lambda sid: asked.append(sid) or {"success": True})
+    sid = "aaaaaaaa-1111-2222-3333-444444444444"
+    assert server.focus_lead_session(server.LeadFocusPayload(session_id=sid)) == {"success": True}
+    assert asked == [sid]
+
+
+def test_go_to_tab_refuses_what_is_not_a_session_id(sandboxed, monkeypatch):
+    from missioncache_db import lead_board
+
+    monkeypatch.setattr(lead_board, "focus_available", lambda: True)
+    monkeypatch.setattr(lead_board.subprocess, "run", lambda *a, **k: pytest.fail("osascript ran"))
+    out = server.focus_lead_session(server.LeadFocusPayload(session_id="x'; tell application"))
+    assert out == {"success": False, "reason": "not a session id"}
