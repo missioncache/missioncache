@@ -117,6 +117,8 @@ One session can be designated the portfolio lead: the session that watches every
 
 `/missioncache:lead` runs `lead set`, stamps the delta cursor with `lead mark --latest`, then runs a full brief and offers to keep it live with a recurring `/missioncache:brief --delta` loop that starts only when the user picks a pace. Each tick reads `get_events` after the cursor on the lead row and stamps it again, so nothing about the delta lives in the conversation. `session_title.py` gives the lead session the constant title `missioncache-lead`, which is the address every working session sends its change notices to (the write tools return `lead_session` next to `live_sessions`). `/missioncache:lead` and `/missioncache:unlead` are Claude Code only, because it needs a session title, cross-session messaging and a pid record.
 
+The lead board reads the same data per project. Each session reports its state (working, needs you, idle, compacting) into the `agent_status` table of `hooks-state.db`, and `missioncache_db/lead_board.py` joins it with the portfolio rollup, the tasks files and the event log into one card per project. The MCP tools `report_session_status`, `get_lead_board` and `focus_terminal` wrap it. Details: [internals/mod.md](internals/mod.md).
+
 `/missioncache:brief` works from any session and any client. It calls the `get_portfolio` tool (`tools_pm.py`), which wraps `build_portfolio` in `missioncache_db/portfolio.py`. The dashboard's `/api/today` calls the same function, so the chat brief and the Attention view carry the same ranking and counts.
 
 ## Storage

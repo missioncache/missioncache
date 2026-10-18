@@ -671,6 +671,34 @@ Read-only and session-neutral: unlike `get_task`, it never binds the calling ses
 
 **Returns:** `count`, `has_more` and `events`, newest first, each with `id`, `project`, `task_id`, `kind`, `what`, `ticket`, `section`, `source_session` and `created_at`. With `after_id` the page is the oldest events after the cursor, so a reader that stamps the newest `id` it got never skips one, and `has_more` says the log holds rows past the page. An unknown kind or a malformed `since` is a validation error.
 
+## Lead board tools (`tools_pm.py`)
+
+Thin wrappers over `missioncache_db.lead_board`. The MissionCache mod calls them from inside Claude Code: every session reports its own state, and the lead session polls the board. None of them writes an event or a context file. Internals: [internals/mod.md](internals/mod.md).
+
+### `report_session_status`
+
+**When to use:** Never by hand. The mod calls it in every session when the session's state changes.
+
+**Parameters:** `state: str` (`working`, `idle`, `needs_you`, `compacting`), then optional `needs_reason`, `prompt`, `now`, `context_pct`, `cost_usd`, `turns_today`, `last_answer`, `last_turn_ms`, and `compacted: bool = False`. The session is the caller's own, resolved from `CLAUDE_CODE_SESSION_ID`.
+
+**Returns:** `{"success": True}`. Free text is cleaned of control and format characters and clipped before it is stored, in the local `hooks-state.db` only. A bad state or a cost that is not a finite number is a validation error.
+
+### `get_lead_board`
+
+**When to use:** The lead board's poll. Pass back the previous `watermark`, and when nothing changed the answer is only `{"changed": false, "watermark"}`.
+
+**Parameters:** `after_id: int | None` (the feed cursor, the previous answer's `last_event_id`), `watermark: str | None`, `scope: str = "focus"` (`focus`: projects with a live session, a change today or a risk; `all`: every active project).
+
+**Returns:** `projects` (one card per project: progress, `active_task`, `left_off`, `last_event`, `last_save`, `waiting`, `next_up`, and `session` with the live session's reported state, or null), `needs_you` (every session waiting on you, then your overdue and due-soon action items), `events` (the change feed after the cursor, without the lead's own writes), `has_more`, `last_event_id` (the next cursor), `live_count`, `lead` (`{session_id, is_me}`), `focus_available`, `status_error` (why session states could not be read, or null), `watermark`. No string carries a control or format character. Read-only.
+
+### `focus_terminal`
+
+**When to use:** The board's Enter key. Brings the iTerm2 tab of a live session to the front on macOS. Only the lead session may call it.
+
+**Parameters:** `session_id: str`.
+
+**Returns:** `{"success": True}`, or `{"success": False, "reason"}` when the caller is not the lead, there is no recorded terminal, the platform is not macOS, or osascript refused.
+
 ## Error handling
 
 Every tool in the server follows the same error-handling pattern, which is worth memorizing because it is the contract for the entire MCP surface.
