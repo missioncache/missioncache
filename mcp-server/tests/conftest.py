@@ -40,6 +40,27 @@ def isolated_orbit(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_databases(tmp_path_factory, monkeypatch):
+    """Point every database a test could reach at a throwaway folder.
+
+    A fixture that sandboxes only the project files still reaches the real
+    ``tasks.db`` through ``get_db()``, and the write tools record events there:
+    the move tests left their src/dst events in a real change log, run after
+    run. With this in place no test can touch the person's own databases,
+    whatever its fixture forgot. ``isolated_orbit`` still sets its own paths.
+    """
+    import missioncache_db
+
+    from mcp_missioncache import config, db as db_module
+
+    base = tmp_path_factory.mktemp("databases")
+    monkeypatch.setattr(config.settings, "db_path", base / "tasks.db")
+    monkeypatch.setattr(missioncache_db, "DB_PATH", base / "tasks.db")
+    monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", base / "hooks-state.db")
+    monkeypatch.setattr(db_module, "_db", None)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_session(monkeypatch):
     """Strip CLAUDE_CODE_SESSION_ID from the test environment.
 
