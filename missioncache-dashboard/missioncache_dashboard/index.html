@@ -15,7 +15,7 @@
          every load and rendered nothing. `wght@400..800` serves one variable
          file per unicode subset covering every weight in between, so the list
          cannot drift out of step with the CSS again. -->
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400..800&family=JetBrains+Mono:wght@400..700&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Rubik:wght@400..700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
@@ -6425,6 +6425,184 @@
 
 /* The global rule at the top of this stylesheet already kills transitions
    under prefers-reduced-motion for every element, .bd included. */
+
+        /* ===== Lead view (.lb-*): read-only, polled from /api/lead =====
+           A departures board and a front page, not a card grid: one line per
+           active project, color only for state and always with a word, one
+           accent, type carries the hierarchy. */
+        .lb {
+            --lb-ink: #ebe7df; --lb-dim: #a29e95; --lb-faint: #807c73; --lb-rule: rgba(235, 231, 223, 0.10);
+            --lb-amber: #ff7b54; --lb-needs: #ffb347; --lb-ok: #4ade80; --lb-late: #ff5c5c; --lb-calm: #9aa3b5;
+            --lb-wash: rgba(255, 123, 84, 0.07); --lb-on-accent: #1a0d07;
+            --lb-display: 'Bricolage Grotesque', 'Rubik', var(--font-sans);
+            color: var(--lb-ink); font-family: var(--font-sans); padding: 6px 28px 40px 4px; max-width: 1500px; box-sizing: border-box;
+        }
+        /* Light tokens clear 4.5:1 on the page and on a 14% tint of themselves. */
+        [data-theme="light"] .lb {
+            --lb-ink: #1f1d1a; --lb-dim: #5c574e; --lb-faint: #66625a; --lb-rule: rgba(31, 29, 26, 0.12);
+            --lb-amber: #b03507; --lb-needs: #9a4508; --lb-ok: #126b33; --lb-late: #b71c1c; --lb-calm: #4a5363;
+            --lb-wash: rgba(176, 53, 7, 0.06); --lb-on-accent: #ffffff;
+        }
+        body.lead-mode .dashboard-toolbar { display: none; }
+        body.lead-mode .bg-gradient { animation: none; }
+        .lb :focus-visible { outline: 2px solid var(--lb-amber); outline-offset: 2px; }
+        .lb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        .lb-btn { margin-inline-start: 8px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--lb-rule); background: var(--lb-wash); color: var(--lb-ink); font: inherit; cursor: pointer; }
+        .lb a { color: inherit; }
+        /* Free text in a single-line box: the ellipsis follows the text's own direction. */
+        .lb-clip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+        /* Header and the one-sentence summary. */
+        .lb-top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+        .lb-top h1 { font-family: var(--lb-display); font-weight: 750; font-size: 38px; line-height: 1; margin: 0; letter-spacing: -0.03em; }
+        .lb-top .date { font-family: var(--font-mono); font-size: 13px; color: var(--lb-dim); }
+        .lb-top .lead { font-size: 13px; color: var(--lb-dim); }
+        .lb-top .lead.on { color: var(--lb-ok); }
+        .lb-top .right { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--lb-faint); display: inline-flex; align-items: center; }
+        .lb-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--lb-ok); margin-inline-end: 7px; vertical-align: 1px; }
+        .lb-live.beat { animation: lb-beat .9s ease-out; }
+        .lb-live.lost { background: var(--lb-late); }
+        @keyframes lb-beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lb-ok) 60%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+        .lb-offline { margin-top: 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--lb-late); background: color-mix(in srgb, var(--lb-late) 10%, transparent); }
+        .lb.stale .lb-board, .lb.stale .lb-feed, .lb.stale .lb-day { opacity: .5; }
+        .lb-deck { font-family: var(--lb-display); font-size: 19px; font-weight: 450; line-height: 1.45; color: var(--lb-dim); margin: 12px 0 0; max-width: 1100px; letter-spacing: -0.01em; }
+        .lb-deck b { font-weight: 650; color: var(--lb-ink); }
+        .lb-deck .needs { font-weight: 650; color: var(--lb-needs); }
+        .lb-sect { display: flex; align-items: baseline; gap: 12px; margin: 30px 0 10px; }
+        .lb-sect h2 { font-family: var(--lb-display); font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: var(--lb-ink); margin: 0; }
+        .lb-sect .n { font-size: 12px; font-weight: 600; color: var(--lb-dim); background: var(--lb-rule); padding: 1px 8px; border-radius: 999px; }
+        .lb-empty { font-size: 14px; color: var(--lb-dim); padding: 12px 10px; }
+
+        /* The day: meetings on an hour axis in lanes, free windows hatched,
+           today's changes as ticks, and "now" walking along it. */
+        .lb-day { position: relative; margin-top: 22px; overflow-x: clip; }
+        .lb-hours { position: absolute; inset: 0 0 auto 0; height: 16px; font-family: var(--font-mono); font-size: 11px; color: var(--lb-faint); }
+        .lb-hours span { position: absolute; transform: translateX(-50%); }
+        .lb-hours span:first-child { transform: none; }
+        .lb-hours span:last-child { transform: translateX(-100%); }
+        .lb-axis { position: absolute; left: 0; right: 0; border-top: 1px solid var(--lb-rule); }
+        .lb-axis i { position: absolute; top: -4px; height: 8px; border-left: 1px solid var(--lb-rule); }
+        .lb-meet { position: absolute; height: 10px; border-radius: 4px; background: var(--lb-calm); opacity: 0.7; min-width: 4px; }
+        .lb-meet.past { opacity: 0.3; }
+        .lb-meet.next { background: var(--lb-amber); opacity: 1; }
+        .lb-meet.now { opacity: 1; background: linear-gradient(90deg, var(--lb-ok) var(--p, 0%), color-mix(in srgb, var(--lb-ok) 35%, transparent) var(--p, 0%)); }
+        .lb-meet-label { position: absolute; font-size: 12px; color: var(--lb-ink); font-weight: 600; max-width: 200px; }
+        .lb-free { position: absolute; border-radius: 5px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--lb-ok) 10%, transparent) 0 4px, transparent 4px 8px); }
+        .lb-more-lane { position: absolute; font-size: 12px; font-weight: 650; color: var(--lb-needs); white-space: nowrap; }
+        .lb-tick { position: absolute; width: 2px; height: 12px; border-radius: 1px; background: var(--lb-faint); }
+        .lb-tick.done { background: var(--lb-ok); }
+        .lb-tick.wait { background: var(--lb-amber); }
+        .lb-now { position: absolute; top: 14px; bottom: 0; border-left: 2px solid var(--lb-amber); pointer-events: none; }
+        .lb-now span { position: absolute; bottom: -2px; left: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--lb-amber); white-space: nowrap; }
+        .lb-dayline { font-size: 13.5px; color: var(--lb-dim); margin-top: 6px; }
+        .lb-dayline b { color: var(--lb-ink); font-weight: 650; }
+        .lb-dayline .busy { color: var(--lb-needs); font-weight: 600; }
+        .lb-dayline .soon { color: var(--lb-amber); font-weight: 650; }
+
+        .lb-cols { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 0 44px; }
+        @media (max-width: 1200px) { .lb-cols { grid-template-columns: minmax(0, 1fr); } }
+
+        /* NOW: the board. It splits by its own width, not the window's. */
+        .lb-board { display: flex; flex-direction: column; container-type: inline-size; }
+        .lb-head, .lb-row { display: grid; grid-template-columns: minmax(180px, .9fr) minmax(0, 1.25fr) minmax(0, .9fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+        .lb-head { font-size: 12px; font-weight: 600; color: var(--lb-faint); padding: 0 10px 6px; }
+        .lb-row { padding: 14px 10px; border-top: 1px solid var(--lb-rule); border-radius: 10px; transition: background .15s; }
+        .lb-row.has-more { cursor: pointer; }
+        .lb-row:hover { background: var(--lb-wash); }
+        .lb-row.needs { background: linear-gradient(90deg, color-mix(in srgb, var(--lb-needs) 10%, transparent), transparent 60%); }
+        .lb-row.changed { animation: lb-in 2.4s ease-out; }
+        .lb-proj { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .lb-proj-top { display: flex; align-items: center; gap: 8px; }
+        .lb-proj .since { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--lb-dim); }
+        .lb-name-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 2px; }
+        .lb-name { font-weight: 650; font-size: 15px; color: var(--lb-ink); text-decoration: none; overflow-wrap: anywhere; }
+        .lb-name:hover { text-decoration: underline; text-decoration-color: var(--lb-amber); }
+        .lb-spark { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; margin-inline-start: 10px; white-space: nowrap; }
+        .lb-spark i { width: 3px; border-radius: 1px; background: var(--lb-ok); opacity: .8; }
+        .lb-spark i.z { background: var(--lb-faint); opacity: .4; }
+        .lb-sub { display: block; font-size: 12px; color: var(--lb-dim); margin-top: 3px; }
+        .lb-sub .bar { display: inline-block; width: 46px; height: 3px; background: var(--lb-rule); vertical-align: middle; margin-right: 6px; border-radius: 2px; overflow: hidden; }
+        .lb-sub .bar i { display: block; height: 100%; background: var(--lb-dim); }
+        .lb-alert { color: var(--lb-needs); font-weight: 650; }
+        .lb-exp { margin-inline-start: auto; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 15px/1 var(--font-sans); cursor: pointer; }
+        .lb-exp:hover { color: var(--lb-ink); border-color: var(--lb-dim); }
+        .lb-st { --c: var(--lb-dim); display: inline-flex; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--c); }
+        .lb-st > i { font-style: normal; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--c) 14%, transparent); }
+        .lb-st > i::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+        .lb-st.needs_you { --c: var(--lb-needs); }
+        .lb-st.working { --c: var(--lb-ok); }
+        .lb-st.working > i::before { animation: lb-pulse 1.4s ease-in-out infinite; }
+        .lb-st.compacting { --c: var(--lb-calm); }
+        @keyframes lb-pulse { 50% { opacity: 0.25; transform: scale(0.7); } }
+        /* A cell is a label (screen readers always, eyes on a narrow board) and
+           a clamped text, so the label never eats a line of the clamp. */
+        .lb-cell { font-size: 13.5px; line-height: 1.45; color: var(--lb-ink); min-width: 0; }
+        .lb-cell .lb-lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+        .lb-txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .lb-row.open .lb-txt { -webkit-line-clamp: unset; display: block; }
+        .lb-cell.dim .lb-txt { color: var(--lb-faint); }
+        .lb-cell .t { font-family: var(--font-mono); font-size: 12px; color: var(--lb-amber); margin-inline-end: 6px; }
+        .lb-cell .who { font-weight: 650; }
+        .lb-cell .age { font-family: var(--font-mono); font-size: 12px; color: var(--lb-dim); }
+        .lb-cell .late { color: var(--lb-late); font-weight: 650; }
+        .lb-more { grid-column: 2 / -1; display: none; flex-direction: column; gap: 4px; font-size: 13px; color: var(--lb-dim); padding-top: 6px; }
+        .lb-row.open .lb-more { display: flex; }
+        .lb-more b { font-size: 12px; font-weight: 650; color: var(--lb-faint); margin-inline-end: 8px; }
+        @container (max-width: 760px) {
+            .lb-head { display: none; }
+            .lb-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 20px; }
+            .lb-proj, .lb-more { grid-column: 1 / -1; }
+            .lb-cell .lb-lbl { position: static; width: auto; height: auto; clip: auto; display: block; font-size: 12px; font-weight: 600; color: var(--lb-faint); }
+        }
+
+        /* PICKS: the lead's suggestions. */
+        .lb-picks { display: flex; flex-direction: column; }
+        .lb-picks.stale { opacity: .6; }
+        .lb-pick { display: grid; grid-template-columns: 30px 1fr; gap: 3px 12px; padding: 12px 0; border-top: 1px solid var(--lb-rule); }
+        .lb-pick:first-child { border-top: 0; padding-top: 2px; }
+        .lb-pick .num { grid-row: span 3; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-family: var(--lb-display); font-size: 14px; font-weight: 700; color: var(--lb-on-accent); background: var(--lb-amber); margin-top: 1px; }
+        .lb-pick .eyebrow { font-size: 12px; font-weight: 650; color: var(--lb-amber); text-decoration: none; }
+        .lb-pick .eyebrow:hover { text-decoration: underline; }
+        .lb-pick .what { font-family: var(--lb-display); font-size: 17px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; color: var(--lb-ink); }
+        .lb-pick .why { font-size: 13px; color: var(--lb-dim); line-height: 1.45; }
+        .lb-pickmeta { font-size: 12px; color: var(--lb-faint); margin-top: 6px; }
+        .lb-pickmeta .late { color: var(--lb-late); }
+
+        /* FEED and the side lists. */
+        .lb-ev { display: grid; grid-template-columns: 46px 210px minmax(0, 1fr) 90px; gap: 12px; align-items: baseline; padding: 5px 0; font-size: 13px; }
+        .lb-ev.hour { border-top: 1px solid var(--lb-rule); margin-top: 6px; padding-top: 10px; }
+        .lb-ev.fresh { animation: lb-slide .5s cubic-bezier(.2, .8, .2, 1), lb-in 2.4s ease-out; }
+        .lb-ev .t { font-family: var(--font-mono); font-size: 12px; color: var(--lb-dim); }
+        .lb-ev .p { font-weight: 600; text-decoration: none; min-width: 0; }
+        .lb-ev .p:hover { text-decoration: underline; }
+        .lb-ev .w { color: var(--lb-ink); min-width: 0; display: flex; gap: 6px; align-items: baseline; }
+        .lb-ev .x { font-size: 12px; color: var(--lb-dim); flex: none; }
+        .lb-ev .k { font-size: 12px; font-weight: 600; color: var(--lb-faint); text-align: end; }
+        .lb-ev .k.task_done, .lb-ev .k.completed { color: var(--lb-ok); }
+        .lb-ev .k.waiting_added { color: var(--lb-amber); }
+        @media (max-width: 600px) {
+            .lb-ev { grid-template-columns: 46px minmax(0, 1fr); }
+            .lb-ev .w { grid-column: 2; grid-row: 2; }
+            .lb-ev .k { grid-column: 2; text-align: start; }
+        }
+        @keyframes lb-in { from { background: color-mix(in srgb, var(--lb-amber) 16%, transparent); } to { background: transparent; } }
+        @keyframes lb-slide { from { opacity: 0; transform: translateY(-8px); } }
+        .lb-list div { display: grid; grid-template-columns: 52px 1fr; gap: 10px; padding: 6px 0; font-size: 13px; border-top: 1px solid var(--lb-rule); }
+        .lb-list div:first-child { border-top: 0; }
+        .lb-list .t { font-family: var(--font-mono); font-size: 12px; color: var(--lb-dim); }
+        .lb-list .x small { display: block; color: var(--lb-faint); font-size: 12px; }
+        .lb-list .needs .x { color: var(--lb-needs); }
+        .lb-list .late .x { color: var(--lb-late); }
+        .lb-older summary, .lb-quiet summary { cursor: pointer; font-size: 13px; color: var(--lb-dim); padding: 8px 0; list-style: none; }
+        .lb-older summary::-webkit-details-marker, .lb-quiet summary::-webkit-details-marker { display: none; }
+        .lb-older summary::before, .lb-quiet summary::before { content: '▸ '; color: var(--lb-faint); }
+        .lb-older[open] summary::before, .lb-quiet[open] summary::before { content: '▾ '; }
+        .lb-quiet a { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 13px; color: var(--lb-dim); text-decoration: none; }
+        .lb-quiet a:hover { color: var(--lb-ink); }
+        .lb-quiet a span { font-family: var(--font-mono); font-size: 12px; color: var(--lb-faint); }
+        @media (prefers-reduced-motion: reduce) {
+            .lb *, .lb *::before { animation: none !important; transition: none !important; }
+        }
         </style>
 </head>
 <body>
@@ -6455,6 +6633,15 @@
                         <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
                     </svg>
                     Attention
+                </a>
+                <a class="nav-item" data-view="lead" href="#lead">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="9" rx="1"/>
+                        <rect x="14" y="3" width="7" height="5" rx="1"/>
+                        <rect x="14" y="12" width="7" height="9" rx="1"/>
+                        <rect x="3" y="16" width="7" height="5" rx="1"/>
+                    </svg>
+                    Lead
                 </a>
                 <a class="nav-item" data-view="projects" href="#projects">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -6552,6 +6739,14 @@
                      can reach another view or be reached by one. -->
                 <div class="bd" id="attnRoot"></div>
             </div><!-- End Attention View -->
+
+            <!-- Lead View: every project and its live session, what needs you,
+                 today's calendar and the feed. Read-only: changes are made from
+                 the lead session in Claude Code. Filled by ldRender. -->
+            <div class="view" id="leadView">
+                <span class="lb-sr" id="ldSyncSr" role="status"></span>
+                <div class="lb" id="ldRoot"><div class="lb-empty">Loading the lead board...</div></div>
+            </div><!-- End Lead View -->
 
             <!-- Projects View -->
             <div class="view" id="projectsView">
@@ -6980,7 +7175,7 @@
 
                             <div class="settings-section">
                                 <h3>Calendar sources</h3>
-                                <p class="settings-hint">Feeds the Attention view's calendar line and <code>/missioncache:brief</code>. An <b>ICS</b> source is a URL, a file path, or a glob (Google, Outlook and iCloud all export ICS). A <b>command</b> is any program that prints JSON events on stdout - the way to wire a tool MissionCache must not depend on. The command runs without a shell, its first word must be an absolute path that exists, and <code>{date}</code> in any argument becomes the day being asked for. Separate arguments with spaces.</p>
+                                <p class="settings-hint">Feeds the Attention view's calendar line, the Lead view's day and <code>/missioncache:brief</code>. An <b>ICS</b> source is a URL, a file path, or a glob (Google, Outlook and iCloud all export ICS). A <b>command</b> is any program that prints JSON events on stdout - the way to wire a tool MissionCache must not depend on. The command runs without a shell, its first word must be an absolute path that exists, and <code>{date}</code> in any argument becomes the day being asked for. Separate arguments with spaces.</p>
                                 <div id="calendarRowsContainer" class="settings-rows"></div>
                                 <div class="settings-row-actions">
                                     <button class="settings-btn-secondary" onclick="addCalendarRow()">+ Add source</button>
@@ -7705,6 +7900,554 @@
         const findTaskById = (taskId, endpoint) =>
             findTask(t => String(t.id) === String(taskId), endpoint);
 
+        // =============================================================================
+        // Lead view: read-only. Polls /api/lead every 5 s while it is on screen
+        // and the tab is visible. An unchanged watermark answers {changed: false}
+        // in a few milliseconds, and every twelfth poll goes without one, so a
+        // session that died without a last report still drops off within a minute.
+        // =============================================================================
+        const LD_POLL_MS = 5000;
+        const LD_FULL_EVERY = 12;
+        const LD_FEED_MAX = 200;
+        const LD_FEED_SHOWN = 12;
+        const LD_AGENDA_MS = 5 * 60 * 1000;
+        const LD_OFFLINE_S = 30;
+        const LD_LANES = 6;
+        const LD_FREE_MIN = 30;
+        const LD_TITLE = document.title;
+        const LD_STATES = { needs_you: 'needs you', working: 'working', compacting: 'compacting', idle: 'idle', live: 'open' };
+        const LD_KINDS = { recent_change: 'update', task_done: 'done', waiting_added: 'waiting', waiting_resolved: 'unblocked', action_item: 'action item', due_date: 'due date', moved: 'moved', renamed: 'renamed', completed: 'completed', reopened: 'reopened' };
+        const ld = {
+            board: null, feed: [], cursor: null, polls: 0, inflight: false,
+            timer: null, ticker: null, agenda: null, agendaAt: 0, agendaError: false,
+            fresh: new Set(), changed: new Set(), sigs: new Map(), open: new Set(),
+            syncedAt: 0, online: null, renderedAt: 0, dirty: false, needsSeen: new Set(),
+            quietOpen: false, olderOpen: false, failed: null,
+        };
+
+        function ldOpen() {
+            if (ld.timer) return;
+            ldPoll(true);
+            ld.timer = setInterval(() => { if (!document.hidden) ldPoll(false); }, LD_POLL_MS);
+            ld.ticker = setInterval(ldTick, 1000);
+            document.addEventListener('visibilitychange', ldOnVisible);
+            ldNarrow.addEventListener('change', ldRender);
+        }
+
+        function ldClose() {
+            clearInterval(ld.timer);
+            clearInterval(ld.ticker);
+            ld.timer = ld.ticker = null;
+            document.removeEventListener('visibilitychange', ldOnVisible);
+            ldNarrow.removeEventListener('change', ldRender);
+            document.title = LD_TITLE;
+        }
+
+        // A tab brought back to the front catches up at once.
+        function ldOnVisible() {
+            if (!document.hidden) ldPoll(true);
+        }
+
+        const ldNarrow = window.matchMedia('(max-width: 1200px)');
+
+        // What makes the page feel alive is real time passing, not decoration:
+        // every second the elapsed timers and the sync stamp move; every minute
+        // the summary and the day axis redraw so "now" walks along it. The rest
+        // of the page is redrawn only when the data changed.
+        function ldTick() {
+            if (!ld.board || document.hidden) return;
+            if (ld.dirty && !ldSelecting()) { ldRender(); return; }
+            const online = ldSyncText();
+            if (online) {
+                document.querySelectorAll('#ldRoot [data-elapsed]').forEach(el => {
+                    el.textContent = ldElapsed(ldTime(el.dataset.elapsed));
+                });
+                document.querySelectorAll('#ldRoot [data-ago]').forEach(el => {
+                    el.textContent = ldAgo(el.dataset.ago);
+                });
+            }
+            if (Date.now() - ld.renderedAt > 60000) ldRenderDay();
+        }
+
+        // Text the reader is selecting must not vanish under a redraw.
+        function ldSelecting() {
+            const sel = window.getSelection();
+            const root = document.getElementById('ldRoot');
+            return !!(sel && sel.toString() && root && root.contains(sel.anchorNode));
+        }
+
+        function ldElapsed(t) {
+            if (!t) return '';
+            const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+            if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+            return `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, '0')}m`;
+        }
+
+        // A poll lands every 5 s, so more than 30 s without one means the page
+        // lost the server: say so, dim the data and stop the clocks, instead of
+        // ticking on numbers that are no longer true. Returns whether online.
+        function ldSyncText() {
+            const s = Math.round((Date.now() - ld.syncedAt) / 1000);
+            const online = s <= LD_OFFLINE_S;
+            const sync = document.getElementById('ldSync');
+            if (sync) sync.textContent = `${online ? 'live · synced' : 'offline · last sync'} ${formatRefreshAge(Date.now() - ld.syncedAt)}`;
+            const live = document.getElementById('ldLive');
+            if (live) live.classList.toggle('lost', !online);
+            const root = document.getElementById('ldRoot');
+            if (root) root.classList.toggle('stale', !online);
+            const banner = document.getElementById('ldOffline');
+            if (banner) banner.hidden = online;
+            if (online !== ld.online && ld.online !== null) ldAnnounce(online ? 'Lead board is live again' : 'Lead board is offline');
+            ld.online = online;
+            return online;
+        }
+
+        function ldAnnounce(text) {
+            const sr = document.getElementById('ldSyncSr');
+            if (sr) sr.textContent = text;
+        }
+
+        // A row flashes when something a reader would notice moved: its
+        // state, its newest change, or the tool it is running.
+        function ldMarkChanged(projects) {
+            const first = ld.sigs.size === 0;
+            ld.changed = new Set();
+            for (const p of projects) {
+                const sig = [ldStateOf(p), p.last_event && p.last_event.created_at, p.session && p.session.now].join('|');
+                if (!first && ld.sigs.get(p.name) !== sig) ld.changed.add(p.name);
+                ld.sigs.set(p.name, sig);
+            }
+        }
+
+        // Single flight: a slow answer can never land after a newer one and
+        // roll the board or the cursor back, and the feed keeps each id once.
+        async function ldPoll(full) {
+            if (ld.inflight) return;
+            ld.inflight = true;
+            // The server decides what is active, in what order, and the counts.
+            const q = new URLSearchParams({ scope: 'focus' });
+            if (ld.cursor !== null) q.set('after_id', ld.cursor);
+            if (++ld.polls % LD_FULL_EVERY !== 0 && !full && ld.board) q.set('watermark', ld.board.watermark);
+            if (Date.now() - ld.agendaAt > LD_AGENDA_MS) ldLoadAgenda();
+            try {
+                const res = await fetch(API_BASE + '/api/lead?' + q);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const b = await res.json();
+                ld.syncedAt = Date.now();
+                ld.failed = null;
+                const live = document.getElementById('ldLive');
+                if (live) { live.classList.remove('beat'); void live.offsetWidth; live.classList.add('beat'); }
+                if (!b.changed) return;
+                // Flash only rows that arrived after the first paint.
+                ld.fresh = new Set(ld.board ? b.events.map(e => e.id) : []);
+                ld.feed = [...b.events, ...ld.feed].slice(0, LD_FEED_MAX);
+                ld.cursor = Math.max(ld.cursor ?? 0, b.last_event_id ?? 0);
+                ld.board = b;
+                ldMarkChanged(b.projects);
+                ldAnnounceNeeds(b.needs_you);
+                ldRender();
+            } catch (e) {
+                console.warn('Lead board unavailable:', e);
+                if (!ld.board) ldRenderFailure(e);
+            } finally {
+                ld.inflight = false;
+                // Opened straight on #lead, this view ends the initial overlay.
+                if (LoadingManager.isInitialLoad) LoadingManager.hide();
+            }
+        }
+
+        // Written once per distinct error, so Retry keeps its focus between polls.
+        function ldRenderFailure(e) {
+            const msg = String(e && e.message || e);
+            if (ld.failed === msg) return;
+            ld.failed = msg;
+            document.getElementById('ldRoot').innerHTML =
+                `<div class="lb-empty">Could not load the lead board (${escapeHtml(msg)}). <button class="lb-btn" data-focus="retry" onclick="ldPoll(true)">Retry</button></div>`;
+        }
+
+        // A session that starts needing the person is said out loud once.
+        function ldAnnounceNeeds(items) {
+            const now = new Set(items.map(n => `${n.kind}|${n.project_name}|${n.what}`));
+            const added = items.filter(n => !ld.needsSeen.has(`${n.kind}|${n.project_name}|${n.what}`));
+            if (ld.needsSeen.size && added.length) ldAnnounce(`${added[0].project_name || 'A session'} needs you: ${added[0].what}`);
+            ld.needsSeen = now;
+            const n = items.length;
+            document.title = n ? `(${n}) Lead · ${LD_TITLE}` : `Lead · ${LD_TITLE}`;
+        }
+
+        async function ldLoadAgenda() {
+            ld.agendaAt = Date.now();
+            try {
+                const res = await fetch(API_BASE + '/api/agenda');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                ld.agenda = await res.json();
+                ld.agendaError = false;
+            } catch (e) {
+                // Keep the last good agenda: a failed fetch is not "no calendar".
+                console.warn('Agenda unavailable:', e);
+                ld.agendaError = true;
+            }
+            if (ld.board) ldRenderDay();
+        }
+
+        function ldToggle(name) {
+            if (ldSelecting()) return;
+            ld.open.has(name) ? ld.open.delete(name) : ld.open.add(name);
+            ldRender();
+        }
+
+        // tasks.db stamps local time as "YYYY-MM-DD HH:MM[:SS]".
+        function ldTime(stamp) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(stamp || '');
+            return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : null;
+        }
+        function ldHHMM(stamp) {
+            const m = /[ T](\d{2}:\d{2})/.exec(stamp || '');
+            return m ? m[1] : '';
+        }
+        // Today's time alone; an older one says which day, so yesterday's 14:49
+        // never reads as this afternoon.
+        function ldWhen(stamp) {
+            const t = ldTime(stamp);
+            if (!t) return '';
+            const days = Math.round((new Date(new Date().toDateString()) - new Date(t.toDateString())) / 86400000);
+            if (days === 0) return ldHHMM(stamp);
+            if (days === 1) return `yesterday ${ldHHMM(stamp)}`;
+            return t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        }
+        function ldAgo(stamp) {
+            const t = ldTime(stamp);
+            if (!t) return '';
+            const min = Math.max(0, Math.floor((Date.now() - t) / 60000));
+            if (min < 1) return 'now';
+            if (min < 60) return min + 'm';
+            if (min < 48 * 60) return Math.floor(min / 60) + 'h';
+            return Math.floor(min / 1440) + 'd';
+        }
+        const ldToday = () => formatDate(new Date());
+        const ldKind = k => LD_KINDS[k] || String(k || '').replace(/_/g, ' ');
+        const ldNum = v => Number(v) || 0;
+        // Free text is isolated, so a Hebrew run never drags a time or a
+        // separator next to it to the other end of the line.
+        const ldBidi = (t, clip) => `<bdi dir="auto"${clip ? ' class="lb-clip"' : ''}>${escapeHtml(t ?? '')}</bdi>`;
+        const ldProjectLink = (name, cls) => `<a class="${cls}" href="#project/${encodeURIComponent(name)}" data-focus="${cls}:${escapeHtml(name)}">${ldBidi(name)}</a>`;
+        const ldStateOf = p => p.session ? (p.session.state || 'live') : null;
+
+        // The day: meetings on an hour axis, today's changes as ticks below,
+        // and a line that answers "what is next and when am I free". A busy
+        // day stacks overlapping meetings in lanes and labels only the current
+        // and next one. The axis is a picture; the day line is what a screen
+        // reader reads, so the axis is hidden from it.
+        function ldDay() {
+            const known = !!(ld.agenda && ld.agenda.configured);
+            const ev = (known ? ld.agenda.events : [])
+                .filter(e => !e.all_day)
+                .map(e => ({ ...e, s: new Date(e.start), f: new Date(e.end) }))
+                .sort((a, z) => a.s - z.s);
+            const today = ld.feed.filter(e => e.created_at.startsWith(ldToday()));
+            const now = new Date();
+            const hourOf = d => d.getHours() + d.getMinutes() / 60;
+            // The working day, stretched only by meetings: a midnight "now"
+            // or a late change must not squash the hours that matter.
+            const hours = ev.flatMap(e => [e.s, e.f]).map(hourOf);
+            const from = Math.min(8, Math.floor(Math.min(24, ...hours)));
+            const to = Math.max(19, Math.ceil(Math.max(0, ...hours)));
+            const inDay = h => h >= from && h <= to;
+            const x = h => ((h - from) / (to - from) * 100).toFixed(2) + '%';
+
+            // Lanes: each meeting takes the first lane free at its start.
+            const laneEnd = [];
+            let hidden = 0;
+            for (const e of ev) {
+                let lane = laneEnd.findIndex(end => end <= e.s);
+                if (lane === -1) lane = laneEnd.length;
+                if (lane >= LD_LANES) { e.lane = -1; hidden++; continue; }
+                laneEnd[lane] = e.f;
+                e.lane = lane;
+            }
+            const lanes = Math.max(1, laneEnd.length) + (hidden ? 1 : 0);
+            const current = ev.filter(e => e.s <= now && e.f > now);
+            const next = ev.find(e => e.s > now);
+            const labelled = new Set([...current, next].filter(Boolean));
+            const top = 22, laneH = 13;
+            const ticksTop = top + lanes * laneH + 22;
+
+            let out = `<div class="lb-day" aria-hidden="true" style="height:${ticksTop + 18}px"><div class="lb-hours">`;
+            for (let h = from; h <= to; h++) out += `<span style="left:${x(h)}">${String(h).padStart(2, '0')}</span>`;
+            out += `</div><div class="lb-axis" style="top:${top - 4}px">`;
+            for (let h = from; h <= to; h++) out += `<i style="left:${x(h)}"></i>`;
+            out += '</div>';
+            // Free time is drawn only from a calendar we could read: no calendar
+            // means unknown, never "free all day".
+            if (known) {
+                for (const [a, z] of ldFree(ev, now, from, to)) {
+                    out += `<div class="lb-free" style="left:${x(hourOf(a))};width:calc(${x(hourOf(z))} - ${x(hourOf(a))});top:${top - 2}px;height:${lanes * laneH}px"></div>`;
+                }
+            }
+            if (hidden) {
+                const first = ev.find(e => e.lane < 0);
+                out += `<div class="lb-more-lane" style="left:${x(hourOf(first.s))};top:${top + (lanes - 1) * laneH - 2}px">+${hidden} concurrent</div>`;
+            }
+            let labelEnd = -1;
+            for (const e of ev) {
+                if (e.lane < 0) continue;
+                const s = hourOf(e.s), f = hourOf(e.f);
+                const cls = e.f <= now ? ' past' : current.includes(e) ? ' now' : e === next ? ' next' : '';
+                const fill = current.includes(e) ? `;--p:${Math.round((now - e.s) / (e.f - e.s) * 100)}%` : '';
+                out += `<div class="lb-meet${cls}" style="left:${x(s)};width:calc(${x(f)} - ${x(s)} - 2px);top:${top + e.lane * laneH}px${fill}"></div>`;
+                const at = (s - from) / (to - from) * 100;
+                if (!labelled.has(e) || at < labelEnd) continue;
+                labelEnd = at + 14;
+                out += `<div class="lb-meet-label" style="left:${x(s)};top:${top + lanes * laneH + 3}px">${escapeHtml(String(e.start).slice(11, 16))} ${ldBidi(e.title, true)}</div>`;
+            }
+            for (const e of today.filter(e => inDay(hourOf(ldTime(e.created_at))))) {
+                const cls = e.kind === 'task_done' || e.kind === 'completed' ? ' done' : e.kind === 'waiting_added' ? ' wait' : '';
+                out += `<i class="lb-tick${cls}" style="left:${x(hourOf(ldTime(e.created_at)))};top:${ticksTop}px"></i>`;
+            }
+            if (inDay(hourOf(now))) out += `<div class="lb-now" style="left:${x(hourOf(now))}"><span>${now.toTimeString().slice(0, 5)}</span></div>`;
+            out += '</div>';
+            let note = '';
+            if (ld.agendaError && !ld.agenda) note = 'Calendar temporarily unavailable.';
+            else if (!known) note = 'No calendar connected. <a href="#settings?tab=calendar" data-focus="nocal">Add an ICS feed in Settings</a> to see your meetings and free time here.';
+            return out + (note ? `<div class="lb-dayline">${note}</div>` : ldDayLine(ev, now));
+        }
+
+        // Gaps of 30 minutes or more inside the working day, from now on: a
+        // night-time "now" must not report the hours before the day starts.
+        function ldFree(ev, now, fromHour, toHour) {
+            const start = new Date(now); start.setHours(fromHour, 0, 0, 0);
+            const end = new Date(now); end.setHours(toHour, 0, 0, 0);
+            let cursor = now > start ? now : start;
+            const free = [];
+            for (const e of ev) {
+                if (e.f <= cursor) continue;
+                if (e.s > cursor && (e.s - cursor) / 60000 >= LD_FREE_MIN) free.push([new Date(cursor), e.s]);
+                if (e.f > cursor) cursor = e.f;
+            }
+            if (end > cursor && (end - cursor) / 60000 >= LD_FREE_MIN) free.push([new Date(cursor), end]);
+            return free;
+        }
+
+        // "Busy until 12:00 · Next 12:30 in 50m 1:1 · Free 13:00-15:30".
+        function ldDayLine(ev, now) {
+            if (!ev.length) return '<div class="lb-dayline">No meetings today.</div>';
+            const hm = d => d.toTimeString().slice(0, 5);
+            const parts = [];
+            const current = ev.filter(e => e.s <= now && e.f > now);
+            const until = current.length ? new Date(Math.max(...current.map(e => e.f))) : null;
+            if (until) parts.push(`<span class="busy">Busy until ${hm(until)}</span> <span class="soon">${Math.ceil((until - now) / 60000)}m left</span>`);
+            const upcoming = ev.filter(e => e.s > now);
+            if (upcoming.length) {
+                const mins = Math.ceil((upcoming[0].s - now) / 60000);
+                const overlaps = until && upcoming[0].s < until ? ' (overlaps)' : '';
+                parts.push(`Next <b>${hm(upcoming[0].s)}</b>${mins <= 90 ? ` <span class="soon">in ${mins}m</span>` : ''} ${ldBidi(upcoming[0].title)}${overlaps}`);
+            } else if (!current.length) {
+                parts.push('No more meetings today');
+            }
+            const end = Math.max(...ev.map(e => e.f));
+            const free = ldFree(ev, now, Math.min(8, ...ev.map(e => e.s.getHours())), 24).filter(([a]) => a < end);
+            if (free.length) parts.push('Free ' + free.slice(0, 3).map(([a, z]) => `<b>${hm(a)}-${hm(new Date(Math.min(z, end)))}</b>`).join(', '));
+            else if (upcoming.length) parts.push('<span class="busy">No free half hour before the last meeting</span>');
+            return `<div class="lb-dayline">${parts.join(' · ')}</div>`;
+        }
+
+        // The last 12 hours of a project's changes, one bar per hour.
+        function ldSpark(name) {
+            const now = Date.now();
+            const bins = new Array(12).fill(0);
+            for (const e of ld.feed) {
+                if (e.project !== name) continue;
+                const h = Math.floor((now - ldTime(e.created_at)) / 3600000);
+                if (h >= 0 && h < 12) bins[11 - h]++;
+            }
+            const max = Math.max(...bins);
+            if (!max) return '';
+            return `<span class="lb-spark" title="changes per hour, last 12 hours" aria-hidden="true">${bins.map(n =>
+                `<i style="height:${n ? 3 + Math.round(n / max * 9) : 1}px"${n ? '' : ' class="z"'}></i>`).join('')}</span>`;
+        }
+
+        const ldCell = (label, html, empty = '-') => `<div class="lb-cell${html ? '' : ' dim'}"><span class="lb-lbl">${label}</span><div class="lb-txt">${html || empty}</div></div>`;
+
+        function ldRow(p, i) {
+            const state = ldStateOf(p);
+            const s = p.session;
+            const pct = Math.max(0, Math.min(100, ldNum(p.completion_pct)));
+            const w = p.waiting && p.waiting.oldest;
+            const overdue = ldNum(p.overdue_count);
+            const latest = p.last_event
+                ? `<span class="t">${escapeHtml(ldWhen(p.last_event.created_at))}</span>${ldBidi(p.last_event.what)}`
+                : p.left_off ? ldBidi(p.left_off) : '';
+            const waitText = w ? `<span class="who">${ldBidi(w.who || '?')}</span> <span class="age">${ldNum(w.age_days)}d</span> · ${ldBidi(w.what)}` : '';
+            const blocked = overdue
+                ? `<span class="late">${overdue} overdue</span>${waitText ? ` · ${waitText}` : ` item${overdue > 1 ? 's' : ''}`}`
+                : waitText;
+            const sub = state === 'needs_you' && s.needs_reason ? `<span class="lb-alert">${ldBidi(s.needs_reason)}</span>`
+                : s && s.now ? `running ${ldBidi(s.now)}`
+                : `<span class="bar"><i style="width:${pct}%"></i></span>${ldNum(p.completed_count)}/${ldNum(p.total_count)}`;
+            const timer = s && s.state_since && (state === 'working' || state === 'needs_you')
+                ? `<span class="since" data-elapsed="${escapeHtml(s.state_since)}">${ldElapsed(ldTime(s.state_since))}</span>` : '';
+            const more = [
+                s && s.prompt ? `<div><b>asked</b>${ldBidi(s.prompt)}</div>` : '',
+                s && s.now ? `<div><b>running</b>${ldBidi(s.now)}</div>` : '',
+                s && s.last_answer ? `<div><b>answered</b>${ldBidi(s.last_answer)}</div>` : '',
+                p.active_task ? `<div><b>task</b>#${ldNum(p.active_task.number)} ${ldBidi(p.active_task.title)}</div>` : '',
+                p.left_off ? `<div><b>left off</b>${ldBidi(p.left_off)}</div>` : '',
+                p.last_save ? `<div><b>saved</b>${escapeHtml(ldAgo(p.last_save))} ago</div>` : '',
+            ].join('');
+            const open = !!more && ld.open.has(p.name);
+            const name = escapeHtml(p.name);
+            const stateCls = escapeHtml(state || 'recent');
+            const stateLabel = escapeHtml(state ? LD_STATES[state] || state : 'recent');
+            return `<div class="lb-row${state === 'needs_you' ? ' needs' : ''}${more ? ' has-more' : ''}${open ? ' open' : ''}${ld.changed.has(p.name) ? ' changed' : ''}" data-name="${name}"${more ? ` onclick="if (!event.target.closest('a, button')) ldToggle(this.dataset.name)"` : ''}>
+                <div class="lb-proj">
+                    <div class="lb-proj-top"><span class="lb-st ${stateCls}"><i>${stateLabel}</i></span>${timer}
+                        ${more ? `<button class="lb-exp" data-focus="exp:${name}" data-name="${name}" aria-expanded="${open}" aria-controls="ld-more-${i}" aria-label="Details for ${name}" onclick="ldToggle(this.dataset.name)">${open ? '−' : '+'}</button>` : ''}</div>
+                    <span class="lb-name-row">${ldProjectLink(p.name, 'lb-name')}${ldSpark(p.name)}</span>
+                    <span class="lb-sub">${sub}</span>
+                </div>
+                ${ldCell('Latest', latest)}
+                ${ldCell('Blocked by', blocked, 'nothing')}
+                ${ldCell('Next', p.next_up ? ldBidi(p.next_up) : '')}
+                ${more ? `<div class="lb-more" id="ld-more-${i}">${more}</div>` : ''}
+            </div>`;
+        }
+
+        function ldPicks(b) {
+            const picks = b.picks;
+            if (!picks || !picks.items || !picks.items.length) {
+                return b.lead && b.lead.session_id
+                    ? '<div class="lb-empty">The lead writes today\'s picks at its next full brief.</div>'
+                    : '<div class="lb-empty">Run /missioncache:lead in Claude Code to get daily picks.</div>';
+            }
+            const stale = !picks.is_today;
+            return `<div class="lb-picks${stale ? ' stale' : ''}">` + picks.items.map((x, i) => `<div class="lb-pick">
+                <span class="num" aria-hidden="true">${i + 1}</span>
+                ${x.project ? ldProjectLink(x.project, 'eyebrow') : ''}
+                <span class="what">${ldBidi(x.what)}</span>
+                ${x.why ? `<span class="why">${ldBidi(x.why)}</span>` : ''}
+            </div>`).join('') + `</div><div class="lb-pickmeta">${stale
+                ? `<span class="late">from ${escapeHtml(String(picks.written_at).slice(0, 10))}, ask the lead for a new brief</span>`
+                : `prepared <span data-ago="${escapeHtml(picks.written_at)}">${escapeHtml(ldAgo(picks.written_at))}</span> ago`}</div>`;
+        }
+
+        function ldFeedRow(e, n, newHour) {
+            return `<div class="lb-ev${newHour ? ' hour' : ''}${ld.fresh.has(e.id) ? ' fresh' : ''}">
+                <span class="t">${escapeHtml(ldWhen(e.created_at))}</span>
+                ${ldProjectLink(e.project, 'p')}
+                <span class="w" title="${escapeHtml(e.what)}">${ldBidi(e.what, true)}${n > 1 ? `<span class="x">×${n}</span>` : ''}</span>
+                <span class="k ${escapeHtml(e.kind)}">${escapeHtml(ldKind(e.kind))}</span></div>`;
+        }
+
+        function ldFeed() {
+            if (!ld.feed.length) return '<div class="lb-empty">No changes yet today.</div>';
+            // Fold a run of the same project and kind within a minute into one row.
+            const rows = [];
+            for (const e of ld.feed) {
+                const prev = rows[rows.length - 1];
+                if (prev && prev.e.project === e.project && prev.e.kind === e.kind
+                    && Math.abs(ldTime(prev.e.created_at) - ldTime(e.created_at)) < 60000) { prev.n++; continue; }
+                rows.push({ e, n: 1 });
+            }
+            let hour = '';
+            const html = rows.map(({ e, n }) => {
+                const h = ldHHMM(e.created_at).slice(0, 2);
+                const newHour = hour !== '' && h !== hour;
+                hour = h;
+                return ldFeedRow(e, n, newHour);
+            });
+            const older = html.slice(LD_FEED_SHOWN);
+            return html.slice(0, LD_FEED_SHOWN).join('') + (older.length
+                ? `<details class="lb-older"${ld.olderOpen ? ' open' : ''} ontoggle="ld.olderOpen = this.open"><summary data-focus="older">${older.length} earlier</summary>${older.join('')}</details>` : '');
+        }
+
+        function ldNeeds(items) {
+            if (!items.length) return '<div class="lb-empty">Nothing is waiting on you.</div>';
+            return '<div class="lb-list">' + items.map(n => n.kind === 'session'
+                ? `<div class="needs"><span class="t">${escapeHtml(ldAgo(n.since))}</span><span class="x">${ldBidi(n.what)}<small>${ldBidi(n.project_name || n.title || '')}</small></span></div>`
+                : `<div class="${n.kind === 'overdue' ? 'late' : ''}"><span class="t">${escapeHtml((n.due_date || '').slice(5))}</span><span class="x">${ldBidi(n.what)}<small>${ldBidi(n.project_name || '')} · ${n.kind === 'overdue' ? 'overdue' : 'due soon'}</small></span></div>`
+            ).join('') + '</div>';
+        }
+
+        // One sentence that answers "how is it going" before any detail.
+        function ldDeck() {
+            const c = ld.board.counts;
+            const parts = [];
+            parts.push(c.needs_you ? `<span class="needs">${c.needs_you} thing${c.needs_you > 1 ? 's' : ''} wait${c.needs_you > 1 ? '' : 's'} on you</span>` : 'Nothing waits on you');
+            parts.push(c.working ? `<b>${c.working}</b> session${c.working > 1 ? 's' : ''} working` : 'no session is working');
+            parts.push(`<b>${c.changes}</b> change${c.changes === 1 ? '' : 's'} in the last 12 hours`);
+            return parts.join(' · ') + '.';
+        }
+
+        // The minute redraw: the summary and the day only, so focus, selection
+        // and the screen reader's place in the rest of the page survive.
+        function ldRenderDay() {
+            if (!ld.board) return;
+            ld.renderedAt = Date.now();
+            const deck = document.getElementById('ldDeck');
+            const day = document.getElementById('ldDayBox');
+            if (deck) deck.innerHTML = ldDeck();
+            if (day) day.innerHTML = ldDay();
+        }
+
+        function ldRender() {
+            const root = document.getElementById('ldRoot');
+            const b = ld.board;
+            if (!root || !b) return;
+            if (ldSelecting()) { ld.dirty = true; return; }
+            ld.dirty = false;
+            ld.renderedAt = Date.now();
+            const active = b.projects;
+            const quiet = b.quiet || [];
+            const lead = b.lead || {};
+            const leadText = lead.live ? `● lead on since ${escapeHtml(ldHHMM(lead.since))}`
+                : lead.session_id ? '○ lead session not running' : '○ no lead · run /missioncache:lead';
+            const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            const sessions = ldNum(b.counts.sessions);
+            const needs = `<div class="lb-sect"><h2>Waiting on you</h2><span class="n">${b.needs_you.length}</span></div>${ldNeeds(b.needs_you)}`;
+            const picks = `<div class="lb-sect"><h2>Today's picks</h2></div>${ldPicks(b)}`;
+            // On one column, what waits on the person comes before the board.
+            const narrow = ldNarrow.matches;
+            const side = narrow ? picks : (b.needs_you.length ? needs + picks : picks + needs);
+            // A redraw must not throw a keyboard user out of the page.
+            const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null;
+            root.innerHTML = `
+                <div class="lb-top">
+                    <h1>Lead</h1>
+                    <span class="date">${escapeHtml(date)}</span>
+                    <span class="lead${lead.live ? ' on' : ''}">${leadText}</span>
+                    <span class="right"><span class="lb-live" id="ldLive"></span><span id="ldSync" aria-hidden="true"></span>${b.status_error ? ' · session status unreadable' : ''}</span>
+                </div>
+                <div class="lb-offline" id="ldOffline" hidden>Offline. The board shows the last data it received and is reconnecting.</div>
+                <p class="lb-deck" id="ldDeck">${ldDeck()}</p>
+                <div id="ldDayBox">${ldDay()}</div>
+                <div class="lb-cols">
+                    <div>
+                        ${narrow ? needs : ''}
+                        <div class="lb-sect"><h2>Now</h2><span class="n">${active.length} active · ${sessions} session${sessions === 1 ? '' : 's'}</span></div>
+                        <div class="lb-board">
+                            <div class="lb-head" aria-hidden="true"><span>Project</span><span>Latest</span><span>Blocked by</span><span>Next</span></div>
+                            ${active.length ? active.map(ldRow).join('') : '<div class="lb-empty">Quiet now. No live sessions and no project changes in 12 hours.</div>'}
+                        </div>
+                        <div class="lb-sect"><h2>Feed</h2><span class="n">${ld.feed.length}</span></div>
+                        <div class="lb-feed">${ldFeed()}</div>
+                    </div>
+                    <div>
+                        ${side}
+                        <div class="lb-sect"><h2>Quiet</h2><span class="n">${quiet.length}</span></div>
+                        <details class="lb-quiet"${ld.quietOpen ? ' open' : ''} ontoggle="ld.quietOpen = this.open"><summary data-focus="quiet">${quiet.length} projects with no session and no change in 12 hours</summary>
+                            ${quiet.map(p => `<a href="#project/${encodeURIComponent(p.name)}" data-focus="quiet:${escapeHtml(p.name)}">${ldBidi(p.name)}<span>${p.last_change ? escapeHtml(ldWhen(p.last_change)) : '-'}</span></a>`).join('')}
+                        </details>
+                    </div>
+                </div>`;
+            ldSyncText();
+            if (focusKey) {
+                const again = [...root.querySelectorAll('[data-focus]')].find(el => el.dataset.focus === focusKey);
+                if (again) again.focus();
+            }
+            ld.fresh = new Set();
+            ld.changed = new Set();
+        }
+
         function switchView(viewId) {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -7716,6 +8459,10 @@
             if (nav) nav.classList.add('active');
 
             // Lazy load data for each view
+            // The Lead view polls only while it is on screen, and brings its own
+            // sync status, so the shared toolbar and the drifting background go.
+            viewId === 'lead' ? ldOpen() : ldClose();
+            document.body.classList.toggle('lead-mode', viewId === 'lead');
             if (viewId === 'attention') {
                 // Always refetch on entry - action items change from other
                 // sessions and the MCP tools; a stale view misleads.

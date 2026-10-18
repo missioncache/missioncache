@@ -9,6 +9,7 @@ Open **http://localhost:8787**. The full install starts it for you and keeps it 
 | View | Use it to |
 |---|---|
 | **Attention** | See what needs you today. It opens here. |
+| **Lead** | Follow every session as it works: who needs you, what each project did last, what blocks it and what is next, today's meetings and free time, and the lead session's picks for the day. Read-only. |
 | **Projects** | Find any project, active or done, and open its files. |
 | **Activity** | See how much time you spent, per day, per project, per repo. |
 | **Auto** | Watch a `missioncache-auto` run as it happens. |
@@ -48,7 +49,7 @@ Click **Settings** in the side bar. It has four tabs.
 | Statusline | Which lines the Claude Code statusline shows, and your own extra fields. |
 | Repos & commits | A display name per repo, and which repos count toward stats. |
 | Projects | Links for ticket keys like `PROJ-123` (one entry per prefix), and your own project categories with an emoji and a colour. |
-| Calendar | Where your calendar comes from, for the day's schedule in `/missioncache:brief`. |
+| Calendar | Where your calendar comes from, for the day's schedule in `/missioncache:brief` and the Lead view. |
 
 The theme switch is at the top right.
 
@@ -71,6 +72,7 @@ If you move it to another port, set `MISSIONCACHE_DASHBOARD_URL` in your shell s
 | Link | Opens |
 |---|---|
 | `http://localhost:8787/#attention` | Attention |
+| `http://localhost:8787/#lead` | Lead |
 | `http://localhost:8787/#projects` | Projects |
 | `http://localhost:8787/#project/<name>` | One project's page |
 | `http://localhost:8787/#activity` | Activity |

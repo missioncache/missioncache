@@ -3781,6 +3781,42 @@ def get_live_sessions():
     }
 
 
+@app.get("/api/lead")
+def get_lead(
+    after_id: int | None = None,
+    watermark: str | None = None,
+    scope: Literal["focus", "all"] = "focus",
+):
+    """The Lead view: every project with its live session, what needs you and
+    today's feed, from the same ``build_lead_board`` the MCP tool serves.
+
+    Read-only, and served with or without a lead session: ``lead`` says
+    whether one is designated and alive. The page polls with the previous
+    ``watermark`` and ``last_event_id``, and an unchanged watermark answers
+    ``{changed: false}`` in a few milliseconds.
+
+    Sync ``def``: the build reads files and forks ``ps`` for the pid check.
+    """
+    from missioncache_db import lead_board
+
+    designated = missioncache_db.lead_session_id()
+    board = lead_board.build_lead_board(
+        get_sqlite_db(),
+        after_id=after_id,
+        watermark=watermark,
+        scope=scope,
+        lead_session_id=designated,
+    )
+    if board["changed"]:
+        live = missioncache_db.live_lead_session()
+        board["lead"] = {
+            "session_id": designated,
+            "live": live is not None,
+            "since": live["since"] if live else None,
+        }
+    return board
+
+
 @app.get("/api/agenda")
 def get_agenda(date: str | None = None):
     """Today's calendar, or ``date`` (YYYY-MM-DD). Never 500s.
