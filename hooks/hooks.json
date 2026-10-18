@@ -1,5 +1,6 @@
 {
   "description": "MissionCache plugin hooks for context preservation and task detection",
+  "modules": ["./mod/missioncache.tsx"],
   "hooks": {
     "UserPromptSubmit": [
       {

@@ -5,7 +5,8 @@ name: Plugin validate
 # current Claude Code would refuse to load fails here instead of on install.
 # Uses the latest Claude Code on purpose: the check is only useful against the
 # rules users will meet. Warnings (e.g. CLAUDE.md at the plugin root, which is
-# maintainer context) do not fail the job.
+# maintainer context) do not fail the job. The mod's tests (hooks/mod/tests)
+# run here too, with `claude plugin test`.
 
 on:
   pull_request:
@@ -43,3 +44,5 @@ jobs:
           node-version: "22"
       - name: Validate the plugin
         run: npx --yes @anthropic-ai/claude-code@latest plugin validate .
+      - name: Test the mod
+        run: npx --yes @anthropic-ai/claude-code@latest plugin test .

@@ -18,7 +18,8 @@ For maintainers. This covers the lead board's data layer and what the Claude Cod
 
 The unit is the project, not the session. A terminal already shows whether an agent is working. What the board adds is where each project stands: progress from the tasks file, the item a session marked active, the last significant change, the last save, the oldest thing waiting on someone else, and what is next.
 
-- **Which projects.** `focus` keeps projects with a live session, an event today, or `at_risk` from the portfolio rollup. `all` keeps every active project. `build_portfolio` alone is not enough: it lists only projects with action items, Waiting-on rows or a due date, so a project with a live session and none of those would be missing.
+- **Which projects.** `focus` keeps projects with a live session or an event in the last 12 hours, and lists the rest under `quiet` with their newest change. Hours rather than "today", so a day that runs past midnight stays one day. `at_risk` alone no longer brings a project in: on a real install it marked 17 of 18 projects. `all` keeps every active project.
+- **Counts.** `counts` carries the numbers every reader shows (needs you, working, sessions, changes in the window), so the band and the Lead view never disagree. `build_portfolio` alone is not enough: it lists only projects with action items, Waiting-on rows or a due date, so a project with a live session and none of those would be missing.
 - **Last save.** Read from the context file's `**Last Updated:**` header, which every `update_context_file` call stamps. There is no `saved` event: one per write would bury the change log the lead's `--delta` tick and the feed read.
 - **Last significant change.** The project's newest event. Every event kind counts.
 - **The lead.** The designated lead session is never a project's session, and its own writes are left out of the feed.
@@ -34,6 +35,10 @@ A session that dies without a last report changes no stored value, so the waterm
 
 The status table is kept out of `portfolio_watermark` itself. The dashboard's stream compares that token, and a table written on every turn of every session would make it rebuild the Attention view each time anyone typed.
 
+### Today's picks
+
+The lead session writes up to three picks at the end of each full brief through `set_lead_picks`. The lead check sits inside the write statement, so a lead replaced while its brief was finishing cannot overwrite its successor's picks. They are one row in `hooks-state.db`, replaced on every write, and `build_lead_board` returns them as `picks` with the time they were written. The watermark reads the row's items as well as its time, so two writes in the same second still move it. The dashboard shows picks from an earlier day as stale rather than hiding them.
+
 ### Free text
 
 `prompt`, `now`, `last_answer` and `needs_reason` are reduced to one line without control characters (C0, DEL, C1, ESC included) or format characters (bidi overrides and isolates, zero-width marks), and clipped server-side to 80, 60, 60 and 80 characters. They live only in the local `hooks-state.db`. Every string the board returns goes through the same cleaning, because context files and the event log can carry these characters too, and iTerm2 draws an isolate as a replacement glyph that scrambles the row.
@@ -45,6 +50,19 @@ The statusline records each session's `TERM_SESSION_ID` in `term_sessions`. In i
 ### Pruning
 
 `prune_session_state` sweeps `agent_status` by the same rule as `project_state`: older than the cutoff and not proven alive. The counts dict has an `agent_status_rows` key.
+
+## The mod
+
+`hooks/mod/missioncache.tsx` is listed under `modules` in `hooks/hooks.json`, beside the Python hooks. It has two jobs.
+
+- **The reporter**, in every session. `turn.start` writes `working` with the prompt, a permission prompt or an `AskUserQuestion` writes `needs_you`, the next tool call clears it, a tool that runs past 5 seconds writes `now`, and `turn.complete` writes `idle` with context, cost, turns today and the start of the answer. Between a turn's start and end, a write goes out only when the state or its reason changed. Subagent turns are skipped, and so are the mod's own MCP calls, which raise `tool.call` under their `mcp__plugin_missioncache_pm__*` names.
+- **The band**, in the lead session only. `/missioncache:lead` starts it, `/missioncache:unlead` stops it, and `session.start` starts it again after a resume when `get_lead_board` says this session is the lead. It polls every 5 seconds with the previous watermark, and every twelfth poll without one. `/missioncache:lead` returns before the model has run `lead set`, so the band waits up to two minutes for the role and closes only when another session takes it.
+
+`board.tsx` draws two rows: the counts (needs you, working, sessions), the first project that needs you, and a link to the dashboard's Lead view. The board itself lives in the dashboard: a band capped at half the terminal could not hold seventeen projects readably, and the first build, a table in the band, wrapped names and folded most projects away. `parse.ts` holds the pure helpers. `0` hides the band until the next poll that finds a change.
+
+**Tests.** `claude plugin test .` runs `hooks/mod/tests`, and CI runs it beside `plugin validate`. The tests mount the band on the terminal surface, so a prop the surface does not take fails a test. In a live session the same mistake draws nothing at all: the engine drops a tree with an unknown prop as a whole, while the command that asked for it still reported success. Beneath the mod, a test answers each event the mod calls down to. `mcp.call` and `session.usage` answer `{ value }`, `tool.call` answers `{ result }`, and `turn.start`, `turn.complete` and `ui.render` answer their result directly.
+
+**Managed installs.** `classic.PermissionRequest` and `session.compact` do not reach a plugin a person installed where an organization manages Claude Code. There the board never shows `needs_you` for a permission prompt, or `compacting`.
 
 ## What the mod API was measured to do
 
@@ -76,6 +94,7 @@ Measured on Claude Code 2.1.302 in iTerm2 3.7, fullscreen TUI, 230 by 53 cells, 
 - `turn.complete` carries `answer` and `durationMs`. `$.session.usage()` gives `context.percent`.
 - `$.ui.ask` works from a command handler and from inside a `tool.call` hook mid-turn. The tool waits for the answer.
 - After a resume, `$.mcp.call` in `session.start` can fail because the MCP server is not up yet. Retry it.
+- A `$.mcp.call` result stays out of the model's context. Ten `get_portfolio` calls returned 177,830 characters and the session's token estimate stayed at 141,675 before and after.
 - The MCP server's name for `$.mcp.call` is `plugin:missioncache:pm`. Results carry a text block, not `structuredContent`, and the mod's own call raises a `tool.call` event the reporter must ignore.
 
 **Messages between sessions**

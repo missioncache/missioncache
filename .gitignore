@@ -20,3 +20,7 @@ missioncache-install/missioncache_install/bundled/
 uv.lock
 .coverage
 .coverage.*
+
+# Written by Claude Code when it loads the mod from this folder
+/tsconfig.json
+/.claude-plugin/types/

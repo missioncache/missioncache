@@ -53,6 +53,8 @@ missioncache-db lead mark "<SESSION_ID from Step 1>" --latest
 
 This stamps the newest change-log event and the time on the lead row, so the first `--delta` tick reports only what came after. Stamp before the brief: an event written during it then repeats once on the first tick instead of being lost.
 
+The full board is the dashboard's Lead view, `http://localhost:8787/#lead`: every session's state, what each project did last and what blocks it, today's meetings and the picks this session writes. In Claude Code a two-line band above the prompt carries the counts and the link. Tell the user in one line that the Lead view is there.
+
 
 ### Step 3: The First Brief
 
