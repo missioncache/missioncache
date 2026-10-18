@@ -7,8 +7,10 @@ decided with Tomer 2026-10-17/18). The contract:
 * A session reports its state only when it changes, and ``state_since``
   moves only on a change, so the board can say how long one has needed you.
 * Free text a session reports is one clean line, clipped server-side.
-* The board's unit is the project. It shows projects with a live session, a
-  change today, or a risk; ``scope="all"`` shows every active project.
+* The board's unit is the project. It shows projects with a live session or
+  a change in the last 12 hours, and lists the rest as quiet (Tomer's call,
+  2026-10-18: a risk flag alone brought in 17 of 18 projects);
+  ``scope="all"`` shows every active project.
 * A project's session carries that session's reported state.
 * The lead's own session is never a project's session, and its writes stay
   out of the feed.
@@ -201,8 +203,27 @@ class TestBuildLeadBoard:
 
     def test_a_quiet_project_shows_only_under_all(self, env):
         _project(env, "quiet")
-        assert _board(env)["projects"] == []
+        board = _board(env)
+        assert board["projects"] == []
+        assert board["quiet"] == [{"name": "quiet", "last_change": None}]
         assert [p["name"] for p in _board(env, scope="all")["projects"]] == ["quiet"]
+
+    def test_a_change_older_than_the_window_is_quiet(self, env):
+        _project(env, "yesterday")
+        events.record_events(env["db"], "yesterday", [("recent_change", "old note", None)])
+        with env["db"].connection() as conn:
+            conn.execute("UPDATE events SET created_at = datetime('now', 'localtime', '-13 hours')")
+            conn.commit()
+        board = _board(env)
+        assert board["projects"] == []
+        assert [q["name"] for q in board["quiet"]] == ["yesterday"]
+
+    def test_the_counts_are_the_boards_own(self, env):
+        _project(env, "api-gateway")
+        _live(env, SID_A, "api-gateway")
+        lead_board.report_agent_status(SID_A, "working")
+        events.record_events(env["db"], "api-gateway", [("task_done", "task 3 done", None)])
+        assert _board(env)["counts"] == {"needs_you": 0, "working": 1, "sessions": 1, "changes": 1}
 
     def test_the_active_task_comes_from_the_sessions_pointer(self, env):
         _project(env, "api-gateway")
@@ -449,3 +470,60 @@ class TestPrune:
         assert counts["agent_status_rows"] == 1
         assert _status(SID_A) is None
         assert _status(SID_B) is not None
+
+
+# --- today's picks -----------------------------------------------------------
+
+
+def test_picks_round_trip_clean_and_reach_the_board(env):
+    missioncache_db.set_lead_session(SID_A)
+    written = lead_board.set_lead_picks(SID_A, [
+        {"what": "Close the\x1b[31m schema note", "project": "api-gateway", "why": "overdue 2d"},
+        {"what": "Publish the docs site"},
+    ])
+    assert written == [
+        {"what": "Close the [31m schema note", "project": "api-gateway", "why": "overdue 2d"},
+        {"what": "Publish the docs site", "project": None, "why": None},
+    ]
+    board = lead_board.build_lead_board(env["db"])
+    assert board["picks"]["items"] == written
+    assert board["picks"]["is_today"] is True
+
+
+def test_new_picks_replace_the_old_and_move_the_watermark(env):
+    missioncache_db.set_lead_session(SID_A)
+    lead_board.set_lead_picks(SID_A, [{"what": "first"}])
+    mark = _board(env)["watermark"]
+    lead_board.set_lead_picks(SID_A, [{"what": "second"}])
+    board = _board(env, watermark=mark)
+    assert board["changed"] is True
+    assert [p["what"] for p in board["picks"]["items"]] == ["second"]
+
+
+def test_no_picks_yet_reads_none(env):
+    assert _board(env)["picks"] is None
+
+
+@pytest.mark.parametrize("items", [
+    [{"what": "a"}, {"what": "b"}, {"what": "c"}, {"what": "d"}],
+    [{"project": "api-gateway"}],
+    ["not an object"],
+    {"what": "not a list"},
+])
+def test_malformed_picks_are_refused_and_write_nothing(env, items):
+    missioncache_db.set_lead_session(SID_A)
+    with pytest.raises(ValueError):
+        lead_board.set_lead_picks(SID_A, items)
+    assert lead_board.lead_picks() is None
+
+
+def test_lead_only_picks_need_the_caller_to_be_the_lead(env):
+    missioncache_db.set_lead_session(SID_A)
+    assert lead_board.set_lead_picks(SID_B, [{"what": "not mine"}]) is None
+    assert lead_board.lead_picks() is None
+    assert lead_board.set_lead_picks(SID_A, [{"what": "mine"}]) == [
+        {"what": "mine", "project": None, "why": None}]
+    # A new lead takes over: the old lead's late write no longer lands.
+    missioncache_db.set_lead_session(SID_B)
+    assert lead_board.set_lead_picks(SID_A, [{"what": "late"}]) is None
+    assert [p["what"] for p in lead_board.lead_picks()["items"]] == ["mine"]

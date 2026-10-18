@@ -131,6 +131,8 @@ Outside Claude Code `--ask` is unavailable; say so in one line and render the re
 
 **The suggested order is not a scheduler.** List today's meetings, compute the free windows between them, then assign the top-ranked items to those windows in rank order. Nothing more.
 
+**In the lead session, publish the top three.** When this session holds the role `/missioncache:lead` gave it, end the brief by calling `set_lead_picks` with the first three items of the suggested order, each `{what, project, why}`: `what` is the action in a few words, `why` the reason the order already gave. The dashboard's Lead view shows them with the time they were written. Only a full brief writes them: a `--delta` tick never computes the whole order, so it leaves them alone. Any other session skips this step, and the tool refuses it anyway.
+
 Omit any block whose data is empty. Never render an empty calendar or an empty "stuck" section.
 
 ### Step 7: `--delta`
@@ -262,3 +264,4 @@ Since 17:42: billing-migration: Robin answered on the schema signoff. api-releas
 |------|---------|
 | `mcp__plugin_missioncache_pm__get_portfolio` | The cross-project rollup, live sessions and lead session in one call |
 | `mcp__plugin_missioncache_pm__get_events` | The change log since the lead's cursor, for `--delta` |
+| `mcp__plugin_missioncache_pm__set_lead_picks` | The lead session's top three for the dashboard's Lead view |

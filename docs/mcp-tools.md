@@ -687,9 +687,9 @@ Thin wrappers over `missioncache_db.lead_board`. The MissionCache mod calls them
 
 **When to use:** The lead board's poll. Pass back the previous `watermark`, and when nothing changed the answer is only `{"changed": false, "watermark"}`.
 
-**Parameters:** `after_id: int | None` (the feed cursor, the previous answer's `last_event_id`), `watermark: str | None`, `scope: str = "focus"` (`focus`: projects with a live session, a change today or a risk; `all`: every active project).
+**Parameters:** `after_id: int | None` (the feed cursor, the previous answer's `last_event_id`), `watermark: str | None`, `scope: str = "focus"` (`focus`: projects with a live session or a change in the last 12 hours, the rest listed under `quiet`; `all`: every active project).
 
-**Returns:** `projects` (one card per project: progress, `active_task`, `left_off`, `last_event`, `last_save`, `waiting`, `next_up`, and `session` with the live session's reported state, or null), `needs_you` (every session waiting on you, then your overdue and due-soon action items), `events` (the change feed after the cursor, without the lead's own writes), `has_more`, `last_event_id` (the next cursor), `live_count`, `lead` (`{session_id, is_me}`), `focus_available`, `status_error` (why session states could not be read, or null), `watermark`. No string carries a control or format character. Read-only.
+**Returns:** `projects` (one card per project: progress, `active_task`, `left_off`, `last_event`, `last_save`, `waiting`, `next_up`, and `session` with the live session's reported state, or null), `needs_you` (every session waiting on you, then your overdue and due-soon action items), `events` (the change feed after the cursor, without the lead's own writes), `has_more`, `last_event_id` (the next cursor), `live_count`, `lead` (`{session_id, is_me}`), `quiet` (under `focus`: `{name, last_change}` of each project left out), `counts` (`{needs_you, working, sessions, changes}`), `picks` (`{written_at, is_today, items}` from `set_lead_picks`, or null), `dashboard_url` (the Lead view, from `MISSIONCACHE_DASHBOARD_URL`), `focus_available`, `status_error` (why session states could not be read, or null), `watermark`. No string carries a control or format character. Read-only.
 
 ### `focus_terminal`
 
@@ -698,6 +698,14 @@ Thin wrappers over `missioncache_db.lead_board`. The MissionCache mod calls them
 **Parameters:** `session_id: str`.
 
 **Returns:** `{"success": True}`, or `{"success": False, "reason"}` when the caller is not the lead, there is no recorded terminal, the platform is not macOS, or osascript refused.
+
+### `set_lead_picks`
+
+**When to use:** At the end of a full brief in the lead session, to publish the top three items of the suggested order to the dashboard's Lead view. Only the lead session may call it.
+
+**Parameters:** `picks: list[dict]`, at most 3, each `{what, project, why}`. `what` is required. An empty list clears them.
+
+**Returns:** `{"success": True, "picks"}` with the cleaned items, `{"success": False, "reason"}` when the caller is not the lead, or a validation error for a malformed list. The picks replace the previous ones and live in the local `hooks-state.db`.
 
 ## Error handling
 

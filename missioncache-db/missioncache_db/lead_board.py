@@ -22,6 +22,7 @@ Root and DB paths are read through a late ``import missioncache_db`` at call
 time, as in ``portfolio``, so tests that redirect them are honoured.
 """
 
+import json
 import logging
 import math
 import re
@@ -29,7 +30,7 @@ import sqlite3
 import subprocess
 import sys
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,13 @@ ANSWER_MAX_CHARS = 60
 REASON_MAX_CHARS = 80
 
 NEEDS_YOU_MAX = 8
+# A project is active while a session is live on it or it changed this recently.
+# Hours, not "today", so a day that runs past midnight stays one day.
+ACTIVE_HOURS = 12
+PICKS_MAX = 3
+PICK_WHAT_MAX_CHARS = 120
+PICK_PROJECT_MAX_CHARS = 80
+PICK_WHY_MAX_CHARS = 160
 EVENTS_PAGE = 200
 
 # iTerm2's TERM_SESSION_ID is "w0t1p0:<UUID>", and the UUID is the session's
@@ -289,6 +297,82 @@ def focus_terminal(session_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Today's picks (written by the lead session at each brief)
+# ---------------------------------------------------------------------------
+
+
+def set_lead_picks(session_id: str, items: list) -> list[dict] | None:
+    """Replace today's picks with ``items``, at most three, and return them clean.
+
+    Each item is ``{what, project?, why?}``. An empty list clears the picks.
+    Raises ValueError on a malformed list, an item without ``what``, or a bad
+    session id. A DB error propagates.
+
+    Only the designated lead writes them, checked inside the same statement:
+    a lead replaced while its brief was finishing cannot overwrite its
+    successor's picks. Returns None when ``session_id`` is not the lead.
+
+    One row, overwritten: the board shows the newest picks and their time, and
+    a reader decides from that time whether they are stale.
+    """
+    import missioncache_db
+
+    if not missioncache_db._is_valid_session_id(session_id):
+        raise ValueError(f"not a session id: {session_id!r}")
+    if not isinstance(items, list) or len(items) > PICKS_MAX:
+        raise ValueError(f"picks must be a list of at most {PICKS_MAX} items")
+    clean = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("every pick must be an object with a 'what'")  # noqa: TRY004 - one error type for every bad input
+        what = clean_text(item.get("what"), PICK_WHAT_MAX_CHARS)
+        if not what:
+            raise ValueError("every pick needs a 'what'")
+        clean.append({
+            "what": what,
+            "project": clean_text(item.get("project"), PICK_PROJECT_MAX_CHARS),
+            "why": clean_text(item.get("why"), PICK_WHY_MAX_CHARS),
+        })
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _state_conn()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO lead_picks (id, items, written_at) SELECT 1, ?, ? "
+            "WHERE EXISTS (SELECT 1 FROM lead_session WHERE session_id = ?) "
+            "ON CONFLICT(id) DO UPDATE SET items = excluded.items, written_at = excluded.written_at",
+            (json.dumps(clean), stamp, session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return clean if cursor.rowcount else None
+
+
+def lead_picks() -> dict[str, Any] | None:
+    """``{written_at, items}`` of the newest picks, or None before the first.
+
+    A DB error propagates. A row whose items do not parse reads as None.
+    """
+    import missioncache_db
+
+    if not missioncache_db.HOOKS_STATE_DB_PATH.exists():
+        return None
+    conn = _state_conn()
+    try:
+        row = conn.execute("SELECT items, written_at FROM lead_picks WHERE id = 1").fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        items = json.loads(row[0])
+    except ValueError:
+        logger.warning("lead_picks: stored items do not parse")
+        return None
+    return {"written_at": row[1], "items": items if isinstance(items, list) else []}
+
+
 def lead_board_watermark(db, lead_session_id: str | None = None) -> str:
     """``portfolio_watermark`` plus the session-state writes, the active-task
     pointers and the lead, which decides whose session and events are hidden.
@@ -314,6 +398,9 @@ def lead_board_watermark(db, lead_session_id: str | None = None) -> str:
                         "SELECT SUM(version), COUNT(*), MAX(updated_at) FROM agent_status"
                     ).fetchone()
                 )
+                # The items as well as the time: two writes in one second differ.
+                picked = conn.execute("SELECT written_at, items FROM lead_picks WHERE id = 1").fetchone()
+                status += f"|{picked}"
             finally:
                 conn.close()
         except sqlite3.Error as e:
@@ -487,8 +574,9 @@ def build_lead_board(
     and the answer is ``{"changed": False, "watermark": ...}`` without building
     anything. That is what makes polling every few seconds cheap.
 
-    ``scope="focus"`` keeps projects with a live session, a change today or a
-    risk; ``"all"`` keeps every active project. The lead's own session is never
+    ``scope="focus"`` keeps projects with a live session or a change in the
+    last ``ACTIVE_HOURS`` and lists the rest under ``quiet``; ``"all"`` keeps
+    every active project. The lead's own session is never
     a project's session, and its own writes are left out of ``events``.
     """
     import missioncache_db
@@ -514,9 +602,10 @@ def build_lead_board(
     status_error = None
     try:
         statuses = agent_status_rows(s["session_id"] for s in live)
+        picks = lead_picks()
     except sqlite3.Error as e:
-        logger.warning("lead board: agent_status read failed: %s", e)
-        statuses, status_error = {}, str(e)
+        logger.warning("lead board: hooks-state.db read failed: %s", e)
+        statuses, picks, status_error = {}, None, str(e)
     live_by_project: dict[str, list[dict]] = {}
     for session in live:  # already most recently active first
         live_by_project.setdefault(session["project_name"], []).append(session)
@@ -528,14 +617,18 @@ def build_lead_board(
         db, since=today.isoformat(), limit=events_mod.MAX_LIMIT
     )
     tasks = {t.name: t for t in db.get_active_tasks()}
-    if scope == "all":
-        names = set(tasks)
-    else:
-        names = (set(live_by_project) | {e["project"] for e in todays}
-                 | {n for n, p in rollup.items() if p["at_risk"]}) & set(tasks)
+    latest = events_mod.latest_event_per_project(db)
+    recent_since = (datetime.now() - timedelta(hours=ACTIVE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    active = {n for n in tasks if n in live_by_project or (latest.get(n) or {}).get("created_at", "") >= recent_since}
+    names = set(tasks) if scope == "all" else active
+    # What the focus view leaves out, newest change first, so a reader can
+    # still find it without the cost of a card per project.
+    quiet = sorted(
+        ({"name": n, "last_change": (latest.get(n) or {}).get("created_at")} for n in set(tasks) - active),
+        key=lambda q: q["last_change"] or "", reverse=True,
+    ) if scope == "focus" else []
 
     repos = {r.id: r for r in db.get_repos()}
-    latest = events_mod.latest_event_per_project(db)
     projects = [
         _project_card(
             tasks[name], root=missioncache_db.MISSIONCACHE_ROOT, repo=repos.get(tasks[name].repo_id),
@@ -568,13 +661,25 @@ def build_lead_board(
         for e in page
         if not lead_session_id or e["source_session"] != lead_session_id
     ]
+    needs_you = _needs_you(live, statuses, full["on_me"])
+    recent, _ = events_mod.list_events_page(db, since=recent_since, limit=events_mod.MAX_LIMIT)
+    if picks is not None:
+        picks["is_today"] = picks["written_at"].startswith(today.isoformat())
 
     return _scrub({
         "changed": True,
         "watermark": mark,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "projects": projects,
-        "needs_you": _needs_you(live, statuses, full["on_me"]),
+        "quiet": quiet,
+        "needs_you": needs_you,
+        # One set of numbers for every reader: the band and the Lead view show these.
+        "counts": {
+            "needs_you": len(needs_you),
+            "working": sum(1 for s in statuses.values() if s.get("state") == "working"),
+            "sessions": len(live),
+            "changes": sum(1 for e in recent if not lead_session_id or e["source_session"] != lead_session_id),
+        },
         "events": feed,
         "has_more": has_more,
         "last_event_id": cursor,
@@ -584,5 +689,6 @@ def build_lead_board(
             "is_me": bool(lead_session_id) and lead_session_id == caller_session_id,
         },
         "focus_available": focus_available(),
+        "picks": picks,
         "status_error": status_error,
     })

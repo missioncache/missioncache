@@ -8,6 +8,7 @@ the next /missioncache:load digest.
 """
 
 import logging
+import os
 from dataclasses import asdict
 from typing import Annotated
 
@@ -605,7 +606,7 @@ async def get_lead_board(
         Field(description="The watermark of the previous answer; unchanged means changed=false"),
     ] = None,
     scope: Annotated[
-        str, Field(description="'focus': live, changed today or at risk. 'all': every active project")
+        str, Field(description="'focus': a live session or a change in the last 12 hours. 'all': every active project")
     ] = "focus",
 ) -> dict:
     """
@@ -626,6 +627,11 @@ async def get_lead_board(
             lead_session_id=missioncache_db.lead_session_id(),
             caller_session_id=_resolve_session_id(None),
         )
+        if board["changed"]:
+            # Where the full board lives, for the band's link; the same setting
+            # the statusline reads.
+            base = os.environ.get("MISSIONCACHE_DASHBOARD_URL", "http://localhost:8787").rstrip("/")
+            board["dashboard_url"] = f"{base}/#lead"
         return {"success": True, **board}
     except ValueError as e:
         return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
@@ -658,3 +664,37 @@ async def focus_terminal(
     except Exception as e:
         logger.exception("Error in focus_terminal")
         return {"success": False, "reason": str(e)}
+
+
+@mcp.tool()
+async def set_lead_picks(
+    picks: Annotated[
+        list[dict],
+        Field(
+            description=(
+                "Up to 3 suggestions for what to work on today, most important first. "
+                "Each is {what, project, why}: 'what' is the action, 'why' the one reason. "
+                "An empty list clears them."
+            )
+        ),
+    ],
+) -> dict:
+    """
+    Write today's picks for the dashboard's Lead view. Only the lead session
+    may call it, at the end of each brief. They replace the previous picks.
+    """
+    try:
+        from missioncache_db import lead_board
+
+        # The lead check runs inside the write, so a lead replaced mid-brief
+        # cannot overwrite its successor's picks.
+        caller = _resolve_session_id(None)
+        written = lead_board.set_lead_picks(caller, picks) if caller else None
+        if written is None:
+            return {"success": False, "reason": "only the lead session writes today's picks"}
+        return {"success": True, "picks": written}
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except Exception as e:
+        logger.exception("Error in set_lead_picks")
+        return {"error": True, "message": str(e)}

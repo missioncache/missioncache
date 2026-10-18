@@ -1108,6 +1108,11 @@ def init_hooks_state_db_schema(conn: sqlite3.Connection) -> None:
             version INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
+        CREATE TABLE IF NOT EXISTS lead_picks (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            items TEXT NOT NULL,
+            written_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS term_sessions (
             term_session_id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,

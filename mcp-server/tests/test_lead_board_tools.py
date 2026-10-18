@@ -82,3 +82,23 @@ def test_only_the_lead_can_jump_to_a_tab(isolated_orbit, monkeypatch):
     monkeypatch.setattr(lead_board, "focus_terminal", lambda sid: pytest.fail("focus ran"))
     result = _run(tools_pm.focus_terminal(session_id=SID))
     assert result == {"success": False, "reason": "only the lead session can jump to a tab"}
+
+
+def test_only_the_lead_writes_picks(isolated_orbit, monkeypatch):
+    _make_lead(monkeypatch, OTHER)
+    result = _run(tools_pm.set_lead_picks(picks=[{"what": "x"}]))
+    assert result == {"success": False, "reason": "only the lead session writes today's picks"}
+    assert lead_board.lead_picks() is None
+
+
+def test_the_lead_writes_picks(isolated_orbit, monkeypatch):
+    _make_lead(monkeypatch, SID)
+    result = _run(tools_pm.set_lead_picks(picks=[{"what": "Publish the docs site", "why": "one task left"}]))
+    assert result["success"] is True
+    assert lead_board.lead_picks()["items"] == [{"what": "Publish the docs site", "project": None, "why": "one task left"}]
+
+
+def test_a_malformed_pick_is_a_validation_error(isolated_orbit, monkeypatch):
+    _make_lead(monkeypatch, SID)
+    result = _run(tools_pm.set_lead_picks(picks=[{"why": "no action"}]))
+    assert result["code"] == "VALIDATION_ERROR"
