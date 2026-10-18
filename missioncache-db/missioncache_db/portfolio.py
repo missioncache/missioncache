@@ -166,19 +166,11 @@ def left_off(content: Optional[str]) -> Optional[str]:
     return None
 
 
-def _checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict:
-    """``{completed_count, total_count, completion_pct, next_up}`` for one project.
-
-    Reproduces exactly the two behaviors of the dashboard's full progress
-    parser that these four fields depend on, and nothing else. It is NOT
-    ``TaskDB.parse_missioncache_progress``: that one returns ``has_docs: False``
-    rather than zeros, and has no notion of numbered items, so it cannot produce
-    ``next_up``. Zeros on any miss.
-    """
-    zeros = {"completed_count": 0, "total_count": 0, "completion_pct": 0, "next_up": None}
+def tasks_file_for(root: Path, repo_path: str, task_full_path: str) -> Optional[Path]:
+    """The project's tasks file, or None. The one lookup every reader of the
+    checklist shares, so progress and an item's title come from the same file."""
     if not task_full_path:
-        return zeros
-
+        return None
     task_name = Path(task_full_path).name
     candidates = [root / "active" / task_name, root / "completed" / task_name]
     if repo_path:
@@ -191,9 +183,8 @@ def _checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict
 
     task_dir = next((c for c in candidates if c.exists()), None)
     if task_dir is None:
-        return zeros
-
-    tasks_file = next(
+        return None
+    return next(
         (
             c
             for c in (task_dir / f"{task_dir.name}-tasks.md", task_dir / "tasks.md")
@@ -201,6 +192,40 @@ def _checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict
         ),
         None,
     )
+
+
+def _item_title(match: "re.Match[str]") -> str:
+    rest = match.group(3).strip()
+    marker = _MODE_MARKER_RE.search(rest)
+    return (rest[: marker.start()] if marker else rest).strip()
+
+
+def checklist_item_title(
+    root: Path, repo_path: str, task_full_path: str, number: str
+) -> Optional[str]:
+    """The title of numbered checklist item ``number``, or None."""
+    tasks_file = tasks_file_for(root, repo_path, task_full_path)
+    try:
+        content = tasks_file.read_text(encoding="utf-8") if tasks_file else ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    for match in _NUMBERED_ITEM_RE.finditer(content):
+        if match.group(2) == number:
+            return _item_title(match) or None
+    return None
+
+
+def checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict:
+    """``{completed_count, total_count, completion_pct, next_up}`` for one project.
+
+    Reproduces exactly the two behaviors of the dashboard's full progress
+    parser that these four fields depend on, and nothing else. It is NOT
+    ``TaskDB.parse_missioncache_progress``: that one returns ``has_docs: False``
+    rather than zeros, and has no notion of numbered items, so it cannot produce
+    ``next_up``. Zeros on any miss.
+    """
+    zeros = {"completed_count": 0, "total_count": 0, "completion_pct": 0, "next_up": None}
+    tasks_file = tasks_file_for(root, repo_path, task_full_path)
     if tasks_file is None:
         return zeros
     try:
@@ -217,9 +242,7 @@ def _checklist_progress(root: Path, repo_path: str, task_full_path: str) -> dict
     for match in _NUMBERED_ITEM_RE.finditer(content):
         if match.group(1).lower() == "x":
             continue
-        rest = match.group(3).strip()
-        marker = _MODE_MARKER_RE.search(rest)
-        title = (rest[: marker.start()] if marker else rest).strip()
+        title = _item_title(match)
         if title:
             next_up = title
             break
@@ -360,19 +383,17 @@ def build_portfolio(
         # take both the display rows and the staleness count from it.
         content = None
         is_duplicate = False
-        for candidate in (root / "active" / task.name, root / task.full_path):
-            ctx = candidate / f"{task.name}-context.md"
-            if ctx.exists():
-                key = str(ctx.resolve())
-                if key in seen_context:
-                    is_duplicate = True
-                    break
+        ctx = pm_items.context_path_for_task(task)
+        if ctx is not None:
+            key = str(ctx.resolve())
+            if key in seen_context:
+                is_duplicate = True
+            else:
                 seen_context[key] = task.name
                 try:
                     content = ctx.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     content = None
-                break
         if content:
             for row_index, row in enumerate(context_health.parse_waiting_on(content)):
                 # A row with no What has no identity: it cannot be resolved and
@@ -427,7 +448,7 @@ def build_portfolio(
         )
         if not is_duplicate and (stats["open_count"] or stats["on_others_count"] or due_date):
             repo = repos_by_id.get(task.repo_id)
-            progress = _checklist_progress(root, repo.path if repo else "", task.full_path or "")
+            progress = checklist_progress(root, repo.path if repo else "", task.full_path or "")
             # First ticket only. A row has space for one reference, and tickets
             # are ordered by insertion so the first is the project's primary.
             tickets = pm_items.list_tickets(db, task.id)

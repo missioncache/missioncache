@@ -3,7 +3,7 @@
 The rollup itself is pinned by missioncache-dashboard/tests/test_pm_endpoints.py
 through ``get_today`` (48 tests, zero edits across the extraction). What lives
 here is the db-side layer on top: ``scope_portfolio`` must keep ``counts`` equal
-to the rows that survive, and ``_checklist_progress`` must keep the two quirks
+to the rows that survive, and ``checklist_progress`` must keep the two quirks
 its four fields depend on.
 """
 
@@ -124,19 +124,19 @@ class TestChecklistProgress:
     def test_unnumbered_items_count_but_never_become_next_up(self, rooted):
         (rooted / "active" / "p").mkdir(parents=True)
         (rooted / "active" / "p" / "p-tasks.md").write_text(self.TASKS)
-        got = portfolio._checklist_progress(rooted, "", "manual/p")
+        got = portfolio.checklist_progress(rooted, "", "manual/p")
         assert got["total_count"] == 4
         assert got["completed_count"] == 1
         assert got["completion_pct"] == 25
         assert got["next_up"] == "Next one"  # mode marker stripped
 
     def test_missing_file_is_zeros_not_an_error(self, rooted):
-        assert portfolio._checklist_progress(rooted, "", "manual/nope") == {
+        assert portfolio.checklist_progress(rooted, "", "manual/nope") == {
             "completed_count": 0, "total_count": 0, "completion_pct": 0, "next_up": None,
         }
 
     def test_empty_full_path_is_zeros(self, rooted):
-        assert portfolio._checklist_progress(rooted, "", "")["total_count"] == 0
+        assert portfolio.checklist_progress(rooted, "", "")["total_count"] == 0
 
 
 class TestOwnerNames:

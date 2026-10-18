@@ -769,7 +769,7 @@ def resolve_waiting_on_row(
     task = db.get_task(task_id)
     if task is None:
         raise ValueError(f"Task not found: {task_id}")
-    context_path = _context_path_for_task(task)
+    context_path = context_path_for_task(task)
     if context_path is None:
         raise ValueError("project has no context file")
 
@@ -876,7 +876,7 @@ def pm_health_warnings(db, task_id: int, now: Optional[date] = None) -> list[str
 # =============================================================================
 
 
-def _context_path_for_task(task) -> Optional[Path]:
+def context_path_for_task(task) -> Optional[Path]:
     """The project's context file, or None (non-coding task, moved dir).
 
     Same candidate order the rest of the codebase uses: canonical
@@ -1077,7 +1077,7 @@ def refresh_context_mirror(
     task = db.get_task(task_id)
     if task is None:
         return {"updated": False, "reason": f"task {task_id} not found", "warnings": []}
-    context_path = _context_path_for_task(task)
+    context_path = context_path_for_task(task)
     if context_path is None:
         reason = (
             "no context file (non-coding task)"
