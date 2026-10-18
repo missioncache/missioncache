@@ -19,7 +19,7 @@ from missioncache_db.events import EVENT_KINDS
 from .app import mcp
 from .db import get_db
 from .errors import MissionCacheError, TaskNotFoundError
-from .helpers import attach_lead_session, live_peer_sessions_for_project
+from .helpers import _resolve_session_id, attach_lead_session, live_peer_sessions_for_project
 
 logger = logging.getLogger(__name__)
 
@@ -546,3 +546,115 @@ async def get_events(
     except Exception as e:
         logger.exception("Error in get_events")
         return {"error": True, "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# The lead board. The MissionCache mod calls these from inside Claude Code: every
+# session reports its own state, and the lead session polls the board.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def report_session_status(
+    state: Annotated[str, Field(description="working, idle, needs_you or compacting")],
+    needs_reason: Annotated[
+        str | None, Field(description="Why the session needs the person, e.g. 'permission: Bash'")
+    ] = None,
+    prompt: Annotated[str | None, Field(description="What the person asked this turn")] = None,
+    now: Annotated[str | None, Field(description="The tool running long right now")] = None,
+    context_pct: Annotated[int | None, Field(description="Context window used, 0-100")] = None,
+    cost_usd: Annotated[float | None, Field(description="Session cost so far")] = None,
+    turns_today: Annotated[int | None, Field(description="Turns this session ran today")] = None,
+    last_answer: Annotated[str | None, Field(description="Start of the last answer")] = None,
+    last_turn_ms: Annotated[int | None, Field(description="How long the last turn took")] = None,
+    compacted: Annotated[bool, Field(description="The context was compacted this turn")] = False,
+) -> dict:
+    """
+    Record this session's state for the lead board. The MissionCache mod calls
+    it on each state change; there is no reason to call it by hand.
+
+    Writes only the local hooks-state.db: no event, no context file, and no
+    live_sessions in the response.
+    """
+    try:
+        from missioncache_db import lead_board
+
+        session_id = _resolve_session_id(None)
+        if not session_id:
+            return {"error": True, "message": "no session id: CLAUDE_CODE_SESSION_ID is not set"}
+        lead_board.report_agent_status(
+            session_id, state, needs_reason=needs_reason, prompt=prompt, now=now,
+            context_pct=context_pct, cost_usd=cost_usd, turns_today=turns_today,
+            last_answer=last_answer, last_turn_ms=last_turn_ms, compacted=compacted,
+        )
+        return {"success": True}
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except Exception as e:
+        logger.exception("Error in report_session_status")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def get_lead_board(
+    after_id: Annotated[
+        int | None, Field(description="Feed cursor: the last_event_id of the previous answer")
+    ] = None,
+    watermark: Annotated[
+        str | None,
+        Field(description="The watermark of the previous answer; unchanged means changed=false"),
+    ] = None,
+    scope: Annotated[
+        str, Field(description="'focus': live, changed today or at risk. 'all': every active project")
+    ] = "focus",
+) -> dict:
+    """
+    Where every project stands, for the lead board: progress, the active task,
+    the last significant change, the last save, what waits on others, what is
+    next, and the live session's state. Plus what needs the person and the
+    change feed since the cursor.
+
+    Pass back the previous watermark to poll cheaply: when nothing changed the
+    answer is only {changed: false, watermark}. Read-only.
+    """
+    try:
+        import missioncache_db
+        from missioncache_db import lead_board
+
+        board = lead_board.build_lead_board(
+            get_db(), after_id=after_id, watermark=watermark, scope=scope,
+            lead_session_id=missioncache_db.lead_session_id(),
+            caller_session_id=_resolve_session_id(None),
+        )
+        return {"success": True, **board}
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except MissionCacheError as e:
+        return e.to_dict()
+    except Exception as e:
+        logger.exception("Error in get_lead_board")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def focus_terminal(
+    session_id: Annotated[str, Field(description="The session whose terminal tab to bring forward")],
+) -> dict:
+    """
+    Bring the iTerm2 tab of a live session to the front (macOS). Only the lead
+    session may call it. On failure the answer says why, and the caller can
+    fall back to copying a resume command.
+    """
+    try:
+        import missioncache_db
+        from missioncache_db import lead_board
+
+        # Raising another app's window is the lead board's action. A worker
+        # session, or a model told to by text it read, has no reason to.
+        lead = missioncache_db.lead_session_id()
+        if not lead or _resolve_session_id(None) != lead:
+            return {"success": False, "reason": "only the lead session can jump to a tab"}
+        return lead_board.focus_terminal(session_id)
+    except Exception as e:
+        logger.exception("Error in focus_terminal")
+        return {"success": False, "reason": str(e)}

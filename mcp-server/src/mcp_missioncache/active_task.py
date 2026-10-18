@@ -34,7 +34,7 @@ import missioncache_db  # type: ignore[import-not-found]
 # Lives under ``~/.claude/`` (Claude Code's state dir), not ``~/.missioncache/``,
 # because session-scoped state is keyed by Claude Code session ids and
 # parallels the existing hook pointers.
-STATE_DIR = Path.home() / ".claude" / "hooks" / "state" / "active-missioncache-task"
+STATE_DIR = missioncache_db.active_task_pointer_dir()
 
 # Conservative session-id shape: alphanumeric + ``._-`` only, bounded length.
 # Covers Claude Code's UUIDs and Codex/OpenCode-style ids; rejects path
