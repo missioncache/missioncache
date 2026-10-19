@@ -8,6 +8,13 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- The dashboard has a Lead view: every project's live session in plain sentences, what waits on you, today's meetings and a live feed. (missioncache-dashboard, missioncache-db)
+- In Claude Code, a band above the lead's prompt shows who needs you and links to the Lead view. (plugin)
+- Each Claude Code session now reports whether it is working, idle or waiting for you, without a model call. (plugin, mcp-missioncache, missioncache-db)
+- `/missioncache:relay <project> <instruction>` sends one instruction from the lead. It runs there only after you pick Run. (plugin, mcp-missioncache, missioncache-db)
+- The Lead view's go to tab button brings a session's iTerm2 tab to the front on macOS. (missioncache-dashboard, mcp-missioncache)
+- Every dashboard page title now sits in the same place, and Refresh moved to the sidebar. (missioncache-dashboard)
+
 ## 2026-10-09
 
 Published package versions: missioncache-db 1.0.33, mcp-missioncache 1.0.39, missioncache-install 1.0.24. Claude Code plugin 1.0.39. missioncache-auto and missioncache-dashboard are unchanged.
