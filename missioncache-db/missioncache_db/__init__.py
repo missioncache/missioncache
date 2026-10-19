@@ -6993,12 +6993,16 @@ def main():
                 cursor = lead_cursor()
                 raw = cursor["session_id"] if cursor else None
                 if "--json" in sys.argv:
+                    from . import lead_board
+
                     me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
                     print(json.dumps({
                         "lead": live,
                         "designated": raw,
                         "is_me": bool(raw) and raw == me,
                         "cursor": cursor,
+                        # The delta tick compares its ranking with these.
+                        "picks": lead_board.lead_picks(),
                     }))
                 elif live:
                     print(f"lead session: {live['session_id']} since {live['since']}")

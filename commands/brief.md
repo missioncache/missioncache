@@ -131,7 +131,7 @@ Outside Claude Code `--ask` is unavailable; say so in one line and render the re
 
 **The suggested order is not a scheduler.** List today's meetings, compute the free windows between them, then assign the top-ranked items to those windows in rank order. Nothing more.
 
-**In the lead session, publish the top three.** When this session holds the role `/missioncache:lead` gave it, end the brief by calling `set_lead_picks` with the first three items of the suggested order, each `{what, project, why}`: `what` is the action in a few words, `why` the reason the order already gave. The dashboard's Lead view shows them with the time they were written. Only a full brief writes them: a `--delta` tick never computes the whole order, so it leaves them alone. Any other session skips this step, and the tool refuses it anyway.
+**In the lead session, publish the top three.** When this session holds the role `/missioncache:lead` gave it, end the brief by calling `set_lead_picks` with the first three items of the suggested order, each `{what, project, why}`: `what` is the action in a few words, `why` the reason the order already gave. The dashboard's Lead view shows them with the time they were written. A `--delta` tick rewrites them only when they changed (Step 7). Any other session skips this step, and the tool refuses it anyway.
 
 Omit any block whose data is empty. Never render an empty calendar or an empty "stuck" section.
 
@@ -160,6 +160,8 @@ Otherwise keep `cursor.last_event_id` and `cursor.last_tick_at` and run two inde
 - a waiting-on row with `age_days` of 7 or more that was below 7 at `last_tick_at` crossed the stale line
 
 Report one to three bullets from both passes together, never the whole brief. More than three changes: fold by project (`3 changes on billing-migration, newest: Robin answered on the schema`). Both passes silent is a silent tick, and the one-line `Nothing changed since <last_tick_at>.` is for that case alone. Never invent a bullet to justify a tick.
+
+**Then the picks.** Rank the portfolio Pass two read the way Step 4 does and take the first three. Compare them with `picks.items` from `lead show`: a different project in any of the three places, a different reason for one of them, `picks` null, or `picks.written_at` on an earlier day means they changed, so publish them as Step 6 does. Otherwise leave them alone, so their time keeps saying when the order last moved. Publishing them is not a change to report.
 
 Then stamp the cursor, on a silent tick too, so the clock's window moves:
 

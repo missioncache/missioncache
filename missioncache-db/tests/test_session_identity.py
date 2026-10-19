@@ -851,6 +851,12 @@ class TestLeadCursor:
         assert shown["designated"] == "sid-lead"
         assert shown["is_me"] is True
         assert shown["cursor"]["last_event_id"] == 5
+        assert shown["picks"] is None
+        from missioncache_db import lead_board
+
+        lead_board.set_lead_picks("sid-lead", [{"what": "ship it", "project": "alpha"}])
+        picks = json.loads(cli("show", "--json")[1])["picks"]
+        assert [(p["what"], p["project"]) for p in picks["items"]] == [("ship it", "alpha")]
         assert json.loads(cli("show", "--json", session="sid-other")[1])["is_me"] is False
         # Only the designated lead can stamp.
         code, out = cli("mark", "sid-other", "--event-id", "6")
