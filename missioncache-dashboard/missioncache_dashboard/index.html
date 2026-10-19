@@ -919,24 +919,19 @@
         .last-refresh {
             font-size: 10px;
             color: var(--text-muted);
-            margin-top: 4px;
-            text-align: right;
         }
 
         .last-refresh.stale {
             color: var(--accent-yellow);
         }
 
+        /* In the sidebar footer, so no view loses a row to it and every
+           page title starts at the same height. */
         .dashboard-toolbar {
             display: flex;
-            justify-content: flex-end;
             align-items: center;
-            margin-bottom: 0;
-            padding: 16px 24px 0;
-            gap: 12px;
-            max-width: 1800px;
-            margin-left: auto;
-            margin-right: auto;
+            justify-content: space-between;
+            gap: 8px;
         }
 
         @media (max-width: 1200px) {
@@ -4677,7 +4672,7 @@
             margin-bottom: 24px;
         }
 
-        .page-header h2 {
+        .page-header h2, .lb-top h1 {
             font-size: 24px;
             font-weight: 600;
             margin-bottom: 8px;
@@ -4699,7 +4694,7 @@
            shorthand also resets background-clip to border-box, which outranks
            the text value set above and paints the heading as a solid block with
            invisible text. */
-        [data-theme="light"] .page-header h2 {
+        [data-theme="light"] .page-header h2, [data-theme="light"] .lb-top h1 {
             background-image: linear-gradient(135deg, #0b7a50 0%, #0a7575 100%);
         }
 
@@ -5996,8 +5991,9 @@
   background: var(--bg);
   color: var(--ink);
   font: 500 13px/1.45 var(--font-sans);
-  padding: 14px;
-  height: calc(100vh - var(--bd-top, 48px));
+  /* The top and left match .container, so every view's first line sits in one place. */
+  padding: 24px 14px 14px 22px;
+  height: calc(100vh - var(--bd-top, 0px));
   display: flex; flex-direction: column; gap: 12px;
 }
 
@@ -6435,7 +6431,7 @@
             --lb-amber: #ff7b54; --lb-needs: #ffb347; --lb-ok: #4ade80; --lb-late: #ff5c5c; --lb-calm: #9aa3b5;
             --lb-wash: rgba(255, 123, 84, 0.07); --lb-on-accent: #1a0d07;
             --lb-display: 'Bricolage Grotesque', 'Rubik', var(--font-sans);
-            color: var(--lb-ink); font-family: var(--font-sans); padding: 6px 28px 40px 4px; max-width: 1500px; box-sizing: border-box;
+            color: var(--lb-ink); font-family: var(--font-sans); padding: 24px 28px 40px 24px; box-sizing: border-box;
         }
         /* Light tokens clear 4.5:1 on the page and on a 14% tint of themselves. */
         [data-theme="light"] .lb {
@@ -6454,7 +6450,7 @@
 
         /* Header and the one-sentence summary. */
         .lb-top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
-        .lb-top h1 { font-family: var(--lb-display); font-weight: 750; font-size: 38px; line-height: 1; margin: 0; letter-spacing: -0.03em; }
+        .lb-top h1 { margin: 0; }
         .lb-top .date { font-family: var(--font-mono); font-size: 13px; color: var(--lb-dim); }
         .lb-top .lead { font-size: 13px; color: var(--lb-dim); }
         .lb-top .lead.on { color: var(--lb-ok); }
@@ -6523,13 +6519,13 @@
         .lb-sub { display: block; font-size: 12px; color: var(--lb-dim); margin-top: 3px; }
         .lb-sub .bar { display: inline-block; width: 46px; height: 3px; background: var(--lb-rule); vertical-align: middle; margin-right: 6px; border-radius: 2px; overflow: hidden; }
         .lb-sub .bar i { display: block; height: 100%; background: var(--lb-dim); }
-        .lb-alert { color: var(--lb-needs); font-weight: 650; }
-        .lb-exp { margin-inline-start: auto; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 15px/1 var(--font-sans); cursor: pointer; }
+        .lb-say { grid-column: 1 / -1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; color: var(--lb-ink); }
+        .lb-row.needs .lb-say > span { color: var(--lb-needs); font-weight: 650; }
+        .lb-exp { height: 24px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 12px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
         .lb-exp:hover { color: var(--lb-ink); border-color: var(--lb-dim); }
         .lb-go { margin-inline-start: auto; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--lb-rule); background: transparent; color: var(--lb-dim); font: 600 12px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
         .lb-go:hover { color: var(--lb-ink); border-color: var(--lb-amber); }
         .lb-go:disabled { cursor: default; opacity: .8; }
-        .lb-go + .lb-exp { margin-inline-start: 0; }
         .lb-st { --c: var(--lb-dim); display: inline-flex; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--c); }
         .lb-st > i { font-style: normal; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--c) 14%, transparent); }
         .lb-st > i::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
@@ -6549,13 +6545,12 @@
         .lb-cell .who { font-weight: 650; }
         .lb-cell .age { font-family: var(--font-mono); font-size: 12px; color: var(--lb-dim); }
         .lb-cell .late { color: var(--lb-late); font-weight: 650; }
-        .lb-more { grid-column: 2 / -1; display: none; flex-direction: column; gap: 4px; font-size: 13px; color: var(--lb-dim); padding-top: 6px; }
+        .lb-more { grid-column: 1 / -1; display: none; flex-direction: column; gap: 4px; font-size: 13px; color: var(--lb-dim); }
         .lb-row.open .lb-more { display: flex; }
-        .lb-more b { font-size: 12px; font-weight: 650; color: var(--lb-faint); margin-inline-end: 8px; }
         @container (max-width: 760px) {
             .lb-head { display: none; }
             .lb-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 20px; }
-            .lb-proj, .lb-more { grid-column: 1 / -1; }
+            .lb-proj { grid-column: 1 / -1; }
             .lb-cell .lb-lbl { position: static; width: auto; height: auto; clip: auto; display: block; font-size: 12px; font-weight: 600; color: var(--lb-faint); }
         }
 
@@ -6676,6 +6671,16 @@
                 </a>
             </div>
             <div class="sidebar-footer">
+                <div class="dashboard-toolbar">
+                    <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
+                        <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 4v6h6M23 20v-6h-6"/>
+                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                        </svg>
+                        Refresh
+                    </button>
+                    <div class="last-refresh" id="lastRefresh">Last updated: --</div>
+                </div>
                 <div class="sidebar-links">
                     <a class="sidebar-link" href="https://missioncache.dev" target="_blank" rel="noopener noreferrer">Website</a>
                     <span class="sidebar-link-sep" aria-hidden="true">·</span>
@@ -6715,18 +6720,6 @@
                 <code id="updateBannerCmd"></code>
                 <button id="updateBannerCopy" title="Copy the update command">Copy</button>
                 <button class="update-banner-dismiss" id="updateBannerDismiss" title="Dismiss until the next release">&times;</button>
-            </div>
-
-            <!-- Dashboard Toolbar (shared) -->
-            <div class="dashboard-toolbar">
-                <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
-                    <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M1 4v6h6M23 20v-6h-6"/>
-                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-                    </svg>
-                    Refresh
-                </button>
-                <div class="last-refresh" id="lastRefresh">Last updated: --</div>
             </div>
 
             <!-- Attention View (DEFAULT). Renamed from "Today": nothing in
@@ -7920,7 +7913,7 @@
         const LD_FREE_MIN = 30;
         const LD_TITLE = document.title;
         const LD_STATES = { needs_you: 'needs you', working: 'working', compacting: 'compacting', idle: 'idle', live: 'open' };
-        const LD_KINDS = { recent_change: 'update', task_done: 'done', waiting_added: 'waiting', waiting_resolved: 'unblocked', action_item: 'action item', due_date: 'due date', moved: 'moved', renamed: 'renamed', completed: 'completed', reopened: 'reopened' };
+        const LD_KINDS = { recent_change: 'update', task_done: 'done', waiting_added: 'waiting', waiting_resolved: 'unblocked', action_item: 'action item', due_date: 'due date', moved: 'moved', renamed: 'renamed', completed: 'completed', reopened: 'reopened', relayed: 'relay' };
         const ld = {
             board: null, feed: [], cursor: null, polls: 0, inflight: false,
             timer: null, ticker: null, agenda: null, agendaAt: 0, agendaError: false,
@@ -7967,7 +7960,7 @@
                     el.textContent = ldElapsed(ldTime(el.dataset.elapsed));
                 });
                 document.querySelectorAll('#ldRoot [data-ago]').forEach(el => {
-                    el.textContent = ldAgo(el.dataset.ago);
+                    el.textContent = ldAgoText(el.dataset.ago);
                 });
             }
             if (Date.now() - ld.renderedAt > 60000) ldRenderDay();
@@ -8151,6 +8144,7 @@
             return Math.floor(min / 1440) + 'd';
         }
         const ldToday = () => formatDate(new Date());
+        const ldAgoText = stamp => { const a = ldAgo(stamp); return a === 'now' ? 'just now' : `${a} ago`; };
         const ldKind = k => LD_KINDS[k] || String(k || '').replace(/_/g, ' ');
         const ldNum = v => Number(v) || 0;
         // Free text is isolated, so a Hebrew run never drags a time or a
@@ -8294,6 +8288,32 @@
 
         const ldCell = (label, html, empty = '-') => `<div class="lb-cell${html ? '' : ' dim'}"><span class="lb-lbl">${label}</span><div class="lb-txt">${html || empty}</div></div>`;
 
+        // A session told in sentences: what its state means for you, not which
+        // field holds it. The first is always shown, the rest sit behind "more".
+        function ldSay(p) {
+            const s = p.session;
+            let head;
+            if (!s) head = 'No session is open.';
+            else if (s.state === 'needs_you') head = `Waiting for you to ${ldBidi(s.needs_reason || 'look at it')}.`;
+            else if (s.state === 'working') head = `Working.${s.now ? ` Now: ${ldBidi(s.now.replace(/\.+$/, ''))}.` : ''}`;
+            else if (s.state === 'compacting') head = 'Compacting its context.';
+            else if (s.state === 'idle') {
+                const idle = s.state_since ? ldAgo(s.state_since) : '';
+                head = idle === 'now' ? 'Just went idle.' : idle ? `Idle for ${escapeHtml(idle)}.` : 'Idle.';
+            }
+            else head = 'A session is open. It has not reported what it is doing.';
+            const rest = [];
+            if (s && s.prompt) rest.push(/^\/[\w-]+(:[\w-]+)?(\s|$)/.test(s.prompt)
+                ? `${s.state === 'working' ? 'Running' : 'Ran'} ${ldBidi(s.prompt)}.`
+                : `${s.state === 'working' || s.state === 'needs_you' ? 'On what you asked' : 'Last request'}: "${ldBidi(s.prompt)}".`);
+            if (p.active_task) rest.push(`On task ${ldNum(p.active_task.number)}: ${ldBidi(p.active_task.title)}.`);
+            // Without an event, Latest already shows left_off.
+            if (p.left_off && p.last_event) rest.push(`Last note: ${ldBidi(p.left_off)}`);
+            const saved = ldTime(p.last_save);
+            if (saved) rest.push(`Saved ${escapeHtml(ldAgoText(p.last_save))}${Date.now() - saved > 86400000 ? ', so its notes may be behind' : ''}.`);
+            return { head, rest };
+        }
+
         function ldRow(p, i) {
             const state = ldStateOf(p);
             const s = p.session;
@@ -8307,19 +8327,11 @@
             const blocked = overdue
                 ? `<span class="late">${overdue} overdue</span>${waitText ? ` · ${waitText}` : ` item${overdue > 1 ? 's' : ''}`}`
                 : waitText;
-            const sub = state === 'needs_you' && s.needs_reason ? `<span class="lb-alert">${ldBidi(s.needs_reason)}</span>`
-                : s && s.now ? `running ${ldBidi(s.now)}`
-                : `<span class="bar"><i style="width:${pct}%"></i></span>${ldNum(p.completed_count)}/${ldNum(p.total_count)}`;
+            const sub = `<span class="bar"><i style="width:${pct}%"></i></span>${ldNum(p.completed_count)}/${ldNum(p.total_count)} tasks`;
             const timer = s && s.state_since && (state === 'working' || state === 'needs_you')
                 ? `<span class="since" data-elapsed="${escapeHtml(s.state_since)}">${ldElapsed(ldTime(s.state_since))}</span>` : '';
-            const more = [
-                s && s.prompt ? `<div><b>asked</b>${ldBidi(s.prompt)}</div>` : '',
-                s && s.now ? `<div><b>running</b>${ldBidi(s.now)}</div>` : '',
-                s && s.last_answer ? `<div><b>answered</b>${ldBidi(s.last_answer)}</div>` : '',
-                p.active_task ? `<div><b>task</b>#${ldNum(p.active_task.number)} ${ldBidi(p.active_task.title)}</div>` : '',
-                p.left_off ? `<div><b>left off</b>${ldBidi(p.left_off)}</div>` : '',
-                p.last_save ? `<div><b>saved</b>${escapeHtml(ldAgo(p.last_save))} ago</div>` : '',
-            ].join('');
+            const say = ldSay(p);
+            const more = say.rest.map(r => `<div>${r}</div>`).join('');
             const open = !!more && ld.open.has(p.name);
             const name = escapeHtml(p.name);
             const stateCls = escapeHtml(state || 'recent');
@@ -8328,13 +8340,14 @@
                 <div class="lb-proj">
                     <div class="lb-proj-top"><span class="lb-st ${stateCls}"><i>${stateLabel}</i></span>${timer}
                         ${s && ld.board.focus_available ? `<button class="lb-go" data-focus="go:${name}" data-sid="${escapeHtml(s.session_id)}" title="Bring this session's terminal tab to the front" onclick="ldGo(this)">go to tab</button>` : ''}
-                        ${more ? `<button class="lb-exp" data-focus="exp:${name}" data-name="${name}" aria-expanded="${open}" aria-controls="ld-more-${i}" aria-label="Details for ${name}" onclick="ldToggle(this.dataset.name)">${open ? '−' : '+'}</button>` : ''}</div>
+                        </div>
                     <span class="lb-name-row">${ldProjectLink(p.name, 'lb-name')}${ldSpark(p.name)}</span>
                     <span class="lb-sub">${sub}</span>
                 </div>
                 ${ldCell('Latest', latest)}
                 ${ldCell('Blocked by', blocked, 'nothing')}
                 ${ldCell('Next', p.next_up ? ldBidi(p.next_up) : '')}
+                <div class="lb-say"><span>${say.head}</span>${more ? `<button class="lb-exp" data-focus="exp:${name}" data-name="${name}" aria-expanded="${open}" aria-controls="ld-more-${i}" aria-label="More about ${name}" onclick="ldToggle(this.dataset.name)">${open ? 'less ▴' : 'more ▾'}</button>` : ''}</div>
                 ${more ? `<div class="lb-more" id="ld-more-${i}">${more}</div>` : ''}
             </div>`;
         }
@@ -8354,7 +8367,7 @@
                 ${x.why ? `<span class="why">${ldBidi(x.why)}</span>` : ''}
             </div>`).join('') + `</div><div class="lb-pickmeta">${stale
                 ? `<span class="late">from ${escapeHtml(String(picks.written_at).slice(0, 10))}, ask the lead for a new brief</span>`
-                : `prepared <span data-ago="${escapeHtml(picks.written_at)}">${escapeHtml(ldAgo(picks.written_at))}</span> ago`}</div>`;
+                : `prepared <span data-ago="${escapeHtml(picks.written_at)}">${escapeHtml(ldAgoText(picks.written_at))}</span>`}</div>`;
         }
 
         function ldFeedRow(e, n, newHour) {
@@ -8391,7 +8404,7 @@
             if (!items.length) return '<div class="lb-empty">Nothing is waiting on you.</div>';
             return '<div class="lb-list">' + items.map(n => n.kind === 'session'
                 ? `<div class="needs"><span class="t">${escapeHtml(ldAgo(n.since))}</span><span class="x">${ldBidi(n.what)}<small>${ldBidi(n.project_name || n.title || '')}</small></span></div>`
-                : `<div class="${n.kind === 'overdue' ? 'late' : ''}"><span class="t">${escapeHtml((n.due_date || '').slice(5))}</span><span class="x">${ldBidi(n.what)}<small>${ldBidi(n.project_name || '')} · ${n.kind === 'overdue' ? 'overdue' : 'due soon'}</small></span></div>`
+                : `<div class="${n.kind === 'overdue' ? 'late' : ''}"><span class="t">${escapeHtml((n.due_date || '').slice(5))}</span><span class="x">${ldBidi(n.what)}<small>${ldBidi(n.project_name || '')} · ${n.kind === 'overdue' ? 'overdue' : n.due_date === ldToday() ? 'due today' : 'due soon'}</small></span></div>`
             ).join('') + '</div>';
         }
 
@@ -8439,7 +8452,7 @@
             const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null;
             root.innerHTML = `
                 <div class="lb-top">
-                    <h1>Lead</h1>
+                    <h1>MissionCache Lead Dashboard</h1>
                     <span class="date">${escapeHtml(date)}</span>
                     <span class="lead${lead.live ? ' on' : ''}">${leadText}</span>
                     <span class="right"><span class="lb-live" id="ldLive"></span><span id="ldSync" aria-hidden="true"></span>${b.status_error ? ' · session status unreadable' : ''}</span>
@@ -9235,14 +9248,13 @@ function bdMeasureTop(root) {
 let bdChromeObserver = null;
 function bdWatchChrome(root) {
   if (bdChromeObserver || typeof ResizeObserver === 'undefined') return;
-  const chrome = [document.querySelector('.dashboard-toolbar'),
-                  document.getElementById('updateBanner')].filter(Boolean);
-  if (!chrome.length) return;
+  const banner = document.getElementById('updateBanner');
+  if (!banner) return;
   bdChromeObserver = new ResizeObserver(() => {
     const r = document.getElementById('attnRoot');
     if (r && r.isConnected) bdMeasureTop(r);
   });
-  chrome.forEach(el => bdChromeObserver.observe(el));
+  bdChromeObserver.observe(banner);
 }
 
 function renderAttention(data) {
