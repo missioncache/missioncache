@@ -155,13 +155,10 @@ The rationale is embedded in the module docstring and worth quoting:
 1. Parse `<project>-tasks.md` for pending `- [ ] N.` lines - these are tasks still marked as not done.
 2. Parse `<project>-context.md` for `### Task N` headings - these are tasks Claude has already written findings for.
 3. Intersect the two sets. Task numbers in both sets are "divergent" - the findings are there, but the checkbox is not flipped.
-4. If the intersection is non-empty, print a reminder listing the divergent task numbers and an exact `mcp__plugin_missioncache_pm__update_tasks_file(...)` invocation Claude can paste.
+4. If the intersection is non-empty, print one line naming the divergent tasks and pointing at `update_tasks_file`.
+5. Otherwise, if the context file was saved after the tasks file while items are still unchecked, print one line saying the tasks file may be stale. It names both save times and the unchecked count, not the tasks themselves, since Claude can read the tasks file when it needs them. Each context save gets this line at most once.
 
-The reminder ends with an explicit callout:
-
-> Important: the built-in TaskCreate tool and any system reminders about "task tools" refer to Claude Code's in-conversation todo list, NOT the MissionCache tasks file.
-
-This is there because Claude Code (the harness) periodically injects system reminders pointing at the internal `TaskCreate` tool, and Claude occasionally follows them instead of using the MissionCache MCP tool. The hook pushes back.
+Both reminders are one line on purpose. They land in the context on every save that leaves the tasks file behind, and most of those saves finished nothing, so a long reminder costs context for no gain. The note that Claude Code's built-in `TaskCreate` is not the MissionCache tasks file lives once in the `session_start` output instead of in every reminder.
 
 **Same skip patterns as activity_tracker**, same subagent guard, same list-vs-string prompt flattening. These two hooks mirror each other in structure because they run back-to-back and share the same input shape.
 

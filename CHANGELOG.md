@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- The reminder to tick finished tasks is one line now, instead of a block listing every unchecked task. (plugin)
+
 ## 2026-10-19
 
 - The dashboard has a Lead view: every project's live session in plain sentences, what waits on you, today's meetings and a live feed. (missioncache-dashboard, missioncache-db)

@@ -1347,7 +1347,7 @@ class TestTaskTracker:
         )
 
         out = capsys.readouterr().out
-        assert "MissionCache task tracking divergence" in out
+        assert "records work on tasks still unchecked" in out
         assert "Task 2: Framework wiring review" in out
         assert "update_tasks_file" in out
 
@@ -1663,7 +1663,7 @@ class TestTaskTracker:
         self, tmp_path, monkeypatch, capsys
     ):
         """Context header newer than tasks header + pending items = staleness
-        reminder listing the pending tasks and both timestamps."""
+        reminder naming both timestamps and the pending count."""
         task = self._setup_project(
             tmp_path,
             monkeypatch,
@@ -1683,10 +1683,11 @@ class TestTaskTracker:
         assert "tasks file may be stale" in out
         assert "2026-07-21 12:30" in out
         assert "2026-07-21 10:00" in out
-        assert "Task 1: First thing" in out
-        assert "Task 2: Second thing" in out
-        assert "and 1 more unchecked item(s)" in out
+        assert "3 item(s) unchecked" in out
         assert "update_tasks_file" in out
+        # One line: the pending tasks are not listed, the tasks file has them.
+        assert "First thing" not in out
+        assert out.strip().count("\n") == 0
 
     def test_stale_silent_when_tasks_header_newer(
         self, tmp_path, monkeypatch, capsys
@@ -1790,7 +1791,7 @@ class TestTaskTracker:
 
         out = capsys.readouterr().out
         assert "tasks file may be stale" in out
-        assert "Task 1: Only pending thing" in out
+        assert "1 item(s) unchecked" in out
 
     def test_precise_divergence_wins_over_staleness(
         self, tmp_path, monkeypatch, capsys
@@ -1813,7 +1814,7 @@ class TestTaskTracker:
         )
 
         out = capsys.readouterr().out
-        assert "task tracking divergence" in out
+        assert "records work on tasks still unchecked" in out
         assert "tasks file may be stale" not in out
 
     def test_stale_equal_headers_tiebreak_on_mtime(
@@ -1903,7 +1904,7 @@ class TestTaskTracker:
         # First prompt: precise block only (it stamps this save generation).
         self._run_tracker(monkeypatch, dict(stdin), mock_db)
         out = capsys.readouterr().out
-        assert "task tracking divergence" in out
+        assert "records work on tasks still unchecked" in out
         assert "tasks file may be stale" not in out
 
         # Same state again: fully silent.
@@ -1918,7 +1919,7 @@ class TestTaskTracker:
         self._run_tracker(monkeypatch, dict(stdin), mock_db)
         out = capsys.readouterr().out
         assert "tasks file may be stale" in out
-        assert "task tracking divergence" not in out
+        assert "records work on tasks still unchecked" not in out
 
     def test_legacy_list_state_file_still_dedups(
         self, tmp_path, monkeypatch, capsys
@@ -2024,8 +2025,8 @@ class TestSessionStartTaskDiscipline:
     ):
         """The 'ignore built-in TaskCreate/task tools' note fires whenever a
         task is active, even when the task's files dir does not resolve (so
-        the MissionCache-files Tip block is skipped). The divergence hook only
-        nudges this on divergence, so session_start must state it proactively.
+        the MissionCache-files Tip block is skipped). The task_tracker reminders
+        do not repeat it, so session_start is the one place it is stated.
         """
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 

@@ -743,8 +743,8 @@ def main():
 **Tip:** Run `/missioncache:load` for full context. Mark items complete in the tasks file as you finish them via `mcp__plugin_missioncache_pm__update_tasks_file` - the tasks file is the source of truth for progress (see the MissionCache rules).
 """
 
-            # Always-on task-tracking pointer: the divergence hook only nudges
-            # this on divergence, so nothing states it proactively otherwise.
+            # Always-on task-tracking pointer: the task_tracker reminders do not
+            # repeat it, so this is the one place it is stated.
             output += "\n**Note:** Ignore Claude Code's built-in `TaskCreate` and \"task tools\" reminders while on a MissionCache project - they drive an in-conversation todo list, not this project's tasks. Use `mcp__plugin_missioncache_pm__update_tasks_file` instead.\n"
 
             # Output context (stdout goes to Claude's context)

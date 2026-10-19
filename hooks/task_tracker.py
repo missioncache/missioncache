@@ -79,11 +79,6 @@ _LAST_UPDATED_RE = re.compile(
 # at 128. Do not assume the three are interchangeable.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
-# Cap the pending-task listing in the staleness reminder so a large backlog
-# does not flood the prompt context.
-_STALE_LIST_CAP = 10
-
-
 def should_skip(prompt: str) -> bool:
     """Return True if this prompt shouldn't trigger divergence checks."""
     trimmed = prompt.strip()
@@ -206,91 +201,34 @@ def _clear_divergence_state(state_file) -> None:
         pass
 
 
-_TASKCREATE_NOTE = (
-    "Important: the built-in TaskCreate tool and any system reminders "
-    'about "task tools" refer to Claude Code\'s in-conversation todo '
-    "list, NOT the MissionCache tasks file. Use "
-    "`mcp__plugin_missioncache_pm__update_tasks_file` for MissionCache work."
-)
-
-
 def build_reminder(
     divergent_tasks: dict[str, str], tasks_file_path: str
 ) -> str:
-    """Format the precise-divergence reminder for stdout injection."""
-    lines = [
-        "",
-        "## ⚠️ MissionCache task tracking divergence",
-        "",
-        "The context file has findings recorded for tasks that are still "
-        "unchecked in the tasks file:",
-        "",
-    ]
-    for num in sorted(divergent_tasks, key=_num_sort_key):
-        lines.append(f"- Task {num}: {divergent_tasks[num]}")
-    lines += [
-        "",
-        "If any of these are actually complete, mark them NOW before continuing:",
-        "",
-        "  mcp__plugin_missioncache_pm__update_tasks_file(",
-        f'    tasks_file="{tasks_file_path}",',
-        '    completed_tasks=["task description", ...]',
-        "  )",
-        "",
-        "Or run /missioncache:save to update both files in one step.",
-        "",
-        "If a task is still in progress, ignore this warning and continue - "
-        "it will clear once the checkbox flips or the heading is removed from "
-        "the context file.",
-        "",
-        _TASKCREATE_NOTE,
-        "",
-    ]
-    return "\n".join(lines)
+    """One line naming the unchecked tasks the context file records work on."""
+    tasks = "; ".join(
+        f"Task {num}: {divergent_tasks[num]}"
+        for num in sorted(divergent_tasks, key=_num_sort_key)
+    )
+    return (
+        f"MissionCache: the context file records work on tasks still unchecked "
+        f"in {tasks_file_path} ({tasks}). If one is done, mark it with "
+        "update_tasks_file."
+    )
 
 
 def build_stale_reminder(
-    pending: dict[str, str],
     total_pending: int,
     ctx_display: str,
     tasks_display: str,
     tasks_file_path: str,
 ) -> str:
-    """Format the tasks-file-staleness reminder for stdout injection."""
-    lines = [
-        "",
-        "## ⚠️ MissionCache tasks file may be stale",
-        "",
-        f"The context file was saved at {ctx_display} but the tasks file has "
-        f"not changed since {tasks_display}, and {total_pending} checklist "
-        "item(s) are still unchecked. The statusline progress counter reads "
-        "the tasks file, so it stays stale until the boxes flip.",
-        "",
-        "If any of these were completed, mark them NOW before continuing:",
-        "",
-    ]
-    numbered = sorted(pending, key=_num_sort_key)
-    for num in numbered[:_STALE_LIST_CAP]:
-        lines.append(f"- Task {num}: {pending[num]}")
-    unlisted = total_pending - len(numbered[:_STALE_LIST_CAP])
-    if unlisted > 0:
-        lines.append(f"- ... and {unlisted} more unchecked item(s)")
-    lines += [
-        "",
-        "  mcp__plugin_missioncache_pm__update_tasks_file(",
-        f'    tasks_file="{tasks_file_path}",',
-        '    completed_tasks=["task description", ...]',
-        "  )",
-        "",
-        "Or run /missioncache:save to update both files in one step.",
-        "",
-        "If nothing on the checklist is actually finished yet, ignore this "
-        "and continue - it re-fires only after the next context save.",
-        "",
-        _TASKCREATE_NOTE,
-        "",
-    ]
-    return "\n".join(lines)
+    """One line saying the context was saved after the tasks file."""
+    return (
+        f"MissionCache: the tasks file may be stale. The context was saved at "
+        f"{ctx_display}, after {tasks_file_path} ({tasks_display}), with "
+        f"{total_pending} item(s) unchecked. If one is done, mark it with "
+        "update_tasks_file. Otherwise ignore this."
+    )
 
 
 def main() -> None:
@@ -441,7 +379,6 @@ def main() -> None:
             if save_marker and state.get("stale_marker") != save_marker:
                 print(
                     build_stale_reminder(
-                        pending,
                         total_pending,
                         ctx_fresh[1],
                         tasks_fresh[1],
