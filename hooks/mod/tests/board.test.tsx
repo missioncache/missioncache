@@ -54,10 +54,10 @@ const mountBand = ($: any) => $.ui.mount({ plugin: 'missioncache', surface: 'ter
 describe('lead band', () => {
   test('draws the counts, the project that needs you and the Lead view link', async ($, on) => {
     await asLead($, on, board([
-      project('api-gateway', { session: session('needs_you', { needs_reason: 'permission: Bash' }) }),
+      project('api-gateway', { session: session('needs_you', { needs_reason: 'approve a command' }) }),
       project('docs-site', { session: session('working') }),
     ], {
-      needs_you: [{ kind: 'session', project_name: 'api-gateway', what: 'permission: Bash' }],
+      needs_you: [{ kind: 'session', project_name: 'api-gateway', what: 'approve a command' }],
       counts: { needs_you: 1, working: 1, sessions: 2, changes: 3 },
     }))
     const ui = await $.ui.mount({ plugin: 'missioncache', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
@@ -160,8 +160,43 @@ describe('reporter', () => {
     await $.tool.call({ tool: 'Bash', command: 'pytest -q' })
     await $.turn.complete(DONE)
     expect(written.map(w => w.state)).toEqual(['working', 'needs_you', 'working', 'idle'])
-    expect(written[1]!.needs_reason).toBe('permission: Bash')
+    expect(written[1]!.needs_reason).toBe('approve a command')
     expect(written[3]).toEqual(expect.objectContaining({ context_pct: 41, cost_usd: 1.5, turns_today: 1, last_answer: 'Done, the tests pass.', last_turn_ms: 4_000 }))
+  })
+
+  test('a permission prompt is described in words, an unknown tool by its short name', async ($, on) => {
+    const written = reports(on)
+    await $.turn.start({ text: 'deploy it', ...TURN })
+    await $.classic.PermissionRequest({ tool_name: 'mcp__ops__deploy', tool_input: {} })
+    expect(written[1]!.needs_reason).toBe('approve the deploy tool')
+  })
+
+  test('a slash command and a markdown answer reach the board as plain text', async ($, on) => {
+    const written = reports(on)
+    await $.turn.start({ text: '<command-message>missioncache:load</command-message>\n<command-name>/missioncache:load</command-name>\n<command-args>api-gateway</command-args>', ...TURN })
+    await $.turn.complete({ ...DONE, answer: '## Project: api-gateway\n**Progress:** 6 of 9 done, `retry_path` next' })
+    expect(written[0]!.prompt).toBe('/missioncache:load api-gateway')
+    expect(written[1]!.last_answer).toBe('Project: api-gateway Progress: 6 of 9 done, retry_path next')
+  })
+
+  test('a slow tool is reported in words, not as a raw command', async ($, on) => {
+    const written: Record<string, unknown>[] = []
+    on('mcp.call', (_$: unknown, e: { tool: string; args: Record<string, unknown> }) => {
+      if (e.tool === 'report_session_status') written.push(e.args)
+      return { value: text({ success: true }) }
+    })
+    on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
+    const clock = mock.clock(on)
+    on('tool.call', async () => { await clock.sleep(6_000); return { result: { text: 'ok' } } })
+    bottom(on)
+    await $.turn.start({ text: 'run it', ...TURN })
+    const bash = $.tool.call({ tool: 'Bash', command: 'pytest -q tests/', description: 'Run the test suite' })
+    await clock.advance(6_000)
+    await bash
+    const edit = $.tool.call({ tool: 'Edit', file_path: '/repo/src/client.py' })
+    await clock.advance(6_000)
+    await edit
+    expect(written.map(w => w.now).filter(Boolean)).toEqual(['Run the test suite', 'Edit client.py'])
   })
 
   test('the lead\'s own polling never marks the idle session working', async ($, on) => {

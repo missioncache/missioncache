@@ -102,3 +102,39 @@ def test_a_malformed_pick_is_a_validation_error(isolated_orbit, monkeypatch):
     _make_lead(monkeypatch, SID)
     result = _run(tools_pm.set_lead_picks(picks=[{"why": "no action"}]))
     assert result["code"] == "VALIDATION_ERROR"
+
+
+def test_only_the_lead_prepares_a_relay(isolated_orbit, monkeypatch):
+    _make_lead(monkeypatch, OTHER)
+    monkeypatch.setattr(lead_board, "prepare_relay", lambda *a: pytest.fail("relay built"))
+    assert _run(tools_pm.prepare_relay(project_name="api-gateway", text="hi")) == {
+        "success": False, "reason": "only the lead session sends relays"}
+
+
+def test_the_lead_prepares_a_relay_for_the_live_session(isolated_orbit, monkeypatch):
+    _make_lead(monkeypatch, SID)
+    monkeypatch.setattr(missioncache_db, "live_sessions_for_project", lambda project_name, exclude_session_id=None: [
+        {"session_id": OTHER, "title": "api-gateway", "last_active": "x"}] if project_name == "api-gateway" else [])
+    result = _run(tools_pm.prepare_relay(project_name="api-gateway", text="run the e2e suite"))
+    assert (result["success"], result["session_id"]) == (True, OTHER)
+    assert result["envelope"].startswith("mc-relay/1 {")
+
+
+def test_record_relay_needs_a_bound_session(isolated_orbit, monkeypatch):
+    db_module.get_db()
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    assert _run(tools_pm.record_relay(outcome="ran", text="x")) == {
+        "success": False, "reason": "this session is bound to no project"}
+    assert _run(tools_pm.record_relay(outcome="later", text="x"))["code"] == "VALIDATION_ERROR"
+
+
+def test_record_relay_logs_the_outcome_on_the_sessions_project(isolated_orbit, monkeypatch):
+    from missioncache_db import events
+
+    db = db_module.get_db()
+    db.create_task("api-gateway", task_type="coding", repo_id=None)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    monkeypatch.setattr(missioncache_db, "bound_project_for_session", lambda sid: "api-gateway" if sid == SID else None)
+    assert _run(tools_pm.record_relay(outcome="failed", text="print the date")) == {"success": True}
+    rows = events.list_events(db, project="api-gateway", kinds=["relayed"])
+    assert [(r["what"], r["source_session"]) for r in rows] == [("relay failed: print the date", SID)]

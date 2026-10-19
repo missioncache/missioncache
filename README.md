@@ -288,6 +288,7 @@ Every destination, and what is sent to it, is listed in [docs/privacy.md](docs/p
 | `/missioncache:brief` | Cross-project brief: what is urgent, what is waiting, which sessions are live, and a schedule for today |
 | `/missioncache:lead` | Make this session the lead that keeps the brief live across every project |
 | `/missioncache:unlead` | End the lead role and its update loop |
+| `/missioncache:relay` | Send one instruction from the lead to a project's session, which runs it after you confirm there |
 
 ## Documentation
 

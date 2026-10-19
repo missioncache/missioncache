@@ -105,7 +105,17 @@ Working sessions that save context or PM items see a `lead_session` field in the
 
 A brief status request from this session to a peer is the one message a peer answers directly, with one line and no tool calls.
 
-### Step 6: After Compaction or Resume
+### Step 6: Sending an Instruction to a Session
+
+When the user asks you to have a project's session do something ("tell api-gateway to run the e2e suite"), relay it. Nothing runs on arrival: that session shows the instruction to the person there, and it runs only when they pick Run.
+
+1. `mcp__plugin_missioncache_pm__prepare_relay(project_name="<project>", text="<the instruction, one line>")`. Write the text as the command the person there will run, in the imperative: "Run the e2e suite", not "to run the e2e suite" or "tell it to run the e2e suite". It runs as if they typed it. On `success: false`, show the `reason` and stop.
+2. `SendMessage` to the returned `title` with the returned `envelope` as the whole message, unchanged.
+3. Say in one line where it went. The lead's feed shows whether it ran.
+
+`/missioncache:relay <project> <instruction>` does the same without a model turn.
+
+### Step 7: After Compaction or Resume
 
 The role and the delta cursor live in the database, not in this conversation. A scheduled loop does not: a compaction or a resume ends it, and the next tick picks up from the cursor. After either, the session-start hook prints a `## Lead session` reminder. When you see it, say in one line that the role is still active and that the delta loop is not running, and offer to restart it, asking again how often and for how long. Do not reschedule it yourself, do not assume the pace or the window it ran with before, and do not run a brief unasked.
 
@@ -125,5 +135,6 @@ How often should I check the projects, and for how long? Every 15 minutes, half 
 | Tool | Purpose |
 |------|---------|
 | `mcp__plugin_missioncache_pm__get_portfolio` | The rollup behind every brief and delta |
+| `mcp__plugin_missioncache_pm__prepare_relay` | The envelope for an instruction to a project's session |
 
 The role itself is set and cleared through the `missioncache-db lead` CLI so it works identically in every client.

@@ -559,7 +559,7 @@ async def get_events(
 async def report_session_status(
     state: Annotated[str, Field(description="working, idle, needs_you or compacting")],
     needs_reason: Annotated[
-        str | None, Field(description="Why the session needs the person, e.g. 'permission: Bash'")
+        str | None, Field(description="Why the session needs the person, in words, e.g. 'approve a command'")
     ] = None,
     prompt: Annotated[str | None, Field(description="What the person asked this turn")] = None,
     now: Annotated[str | None, Field(description="The tool running long right now")] = None,
@@ -697,4 +697,60 @@ async def set_lead_picks(
         return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
     except Exception as e:
         logger.exception("Error in set_lead_picks")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def prepare_relay(
+    project_name: Annotated[str, Field(description="The project whose live session gets the instruction")],
+    text: Annotated[str, Field(description="The instruction as a command, as the person would type it there: one line, up to 500 characters, not starting with '!'. A longer text is refused, never cut")],
+) -> dict:
+    """
+    Build a relay to a project's live session. Only the lead session may call it.
+
+    Send the returned 'envelope' unchanged with SendMessage to 'title'. Nothing
+    runs on arrival: the session there shows the text to the person, and it
+    runs only when they pick Run.
+    """
+    try:
+        import missioncache_db
+        from missioncache_db import lead_board
+
+        caller = _resolve_session_id(None)
+        if not caller:
+            return {"error": True, "message": "no session id: CLAUDE_CODE_SESSION_ID is not set"}
+        lead = missioncache_db.lead_session_id()
+        if not lead or caller != lead:
+            return {"success": False, "reason": "only the lead session sends relays"}
+        return lead_board.prepare_relay(caller, project_name, text)
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except Exception as e:
+        logger.exception("Error in prepare_relay")
+        return {"error": True, "message": str(e)}
+
+
+@mcp.tool()
+async def record_relay(
+    outcome: Annotated[str, Field(description="'ran', 'dropped', or 'failed' (Run was picked but the prompt could not be submitted)")],
+    text: Annotated[str, Field(description="The relayed instruction")],
+) -> dict:
+    """
+    Log what became of a relay in this session, as a 'relayed' event on this
+    session's project. The MissionCache mod calls it. There is no reason to
+    call it by hand.
+    """
+    try:
+        from missioncache_db import lead_board
+
+        session_id = _resolve_session_id(None)
+        if not session_id:
+            return {"error": True, "message": "no session id: CLAUDE_CODE_SESSION_ID is not set"}
+        if not lead_board.record_relay(get_db(), session_id, outcome, text):
+            return {"success": False, "reason": "this session is bound to no project"}
+        return {"success": True}
+    except ValueError as e:
+        return {"error": True, "code": "VALIDATION_ERROR", "message": str(e)}
+    except Exception as e:
+        logger.exception("Error in record_relay")
         return {"error": True, "message": str(e)}

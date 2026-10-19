@@ -80,6 +80,8 @@ def env(tmp_path, monkeypatch):
     live: list[dict] = []
     monkeypatch.setattr(missioncache_db, "live_sessions_all", lambda exclude_session_id=None: [
         s for s in live if s["session_id"] != exclude_session_id])
+    monkeypatch.setattr(missioncache_db, "live_sessions_for_project", lambda project_name, exclude_session_id=None: [
+        s for s in live if s["project_name"] == project_name and s["session_id"] != exclude_session_id])
     db = missioncache_db.TaskDB()
     db.initialize()
     yield {"root": root, "home": home, "db": db, "live": live}
@@ -527,3 +529,58 @@ def test_lead_only_picks_need_the_caller_to_be_the_lead(env):
     missioncache_db.set_lead_session(SID_B)
     assert lead_board.set_lead_picks(SID_A, [{"what": "late"}]) is None
     assert [p["what"] for p in lead_board.lead_picks()["items"]] == ["mine"]
+
+
+# --- relay -----------------------------------------------------------------
+# Spec: B3 of the lead-board plan, decided with Tomer 2026-10-19. The lead
+# builds one envelope line for a project's live session; the receiving side
+# logs whether the person there ran it or dropped it.
+
+
+def _envelope(result):
+    prefix, _, body = result["envelope"].partition(" ")
+    assert prefix == lead_board.RELAY_PREFIX
+    return json.loads(body)
+
+
+def test_relay_goes_to_the_live_session_the_lookup_ranks_first_as_one_clean_line(env):
+    _live(env, SID_A, "api-gateway")
+    _live(env, SID_B, "api-gateway")
+    result = lead_board.prepare_relay(LEAD, "api-gateway", "run the e2e\nsuite \x1b[31mnow")
+    assert (result["success"], result["session_id"], result["title"]) == (True, SID_A, "api-gateway")
+    body = _envelope(result)
+    assert (body["to"], body["from"], body["project"], body["text"]) == (
+        SID_A, "missioncache-lead", "api-gateway", "run the e2e suite [31mnow")
+    assert body["id"] and body["ts"].endswith("+00:00")
+    assert "\n" not in result["envelope"]
+
+
+def test_relay_never_goes_to_the_sender(env):
+    _live(env, LEAD, "api-gateway")
+    assert lead_board.prepare_relay(LEAD, "api-gateway", "hi") == {
+        "success": False, "reason": "api-gateway has no live session"}
+
+
+def test_relay_text_runs_as_typed_or_is_refused(env):
+    # Cutting a relay could drop the part that changes its meaning, and a
+    # leading "!" would run a shell command outside the permission prompts.
+    _live(env, SID_A, "api-gateway")
+    longest = "x" * lead_board.RELAY_TEXT_MAX_CHARS
+    assert _envelope(lead_board.prepare_relay(LEAD, "api-gateway", longest))["text"] == longest
+    for refused in (longest + "x", " \n ", "!rm -rf build"):
+        with pytest.raises(ValueError):
+            lead_board.prepare_relay(LEAD, "api-gateway", refused)
+
+
+def test_record_relay_logs_on_the_receivers_project(env, monkeypatch):
+    _project(env, "api-gateway")
+    monkeypatch.setattr(missioncache_db, "bound_project_for_session",
+                        lambda sid: "api-gateway" if sid == SID_A else None)
+    assert lead_board.record_relay(env["db"], SID_A, "ran", "run the e2e suite") is True
+    assert lead_board.record_relay(env["db"], SID_A, "failed", "print the date") is True
+    assert lead_board.record_relay(env["db"], SID_B, "ran", "x") is False
+    rows = events.list_events(env["db"], project="api-gateway", kinds=["relayed"])
+    assert sorted((r["what"], r["source_session"]) for r in rows) == [
+        ("relay failed: print the date", SID_A), ("relay ran: run the e2e suite", SID_A)]
+    with pytest.raises(ValueError):
+        lead_board.record_relay(env["db"], SID_A, "maybe", "x")

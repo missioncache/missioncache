@@ -667,7 +667,7 @@ Read-only and session-neutral: unlike `get_task`, it never binds the calling ses
 
 **What is recorded:** each Recent Changes line, Waiting-on row added or resolved, and task ticked through `update_context_file` / `update_tasks_file`; a move between projects; and every action-item, due-date, complete, reopen and rename write, whether it came from a session, the dashboard or the CLI. Next Steps, Gotchas, decisions, removals, stakeholders and tickets are not recorded.
 
-**Parameters:** `after_id: int | None` (only events newer than this id: the exact cursor for "what is new"), `since: str | None` (local `YYYY-MM-DD` or `YYYY-MM-DD HH:MM[:SS]`, an ISO `T` accepted), `project: str | None`, `kinds: list[str] | None` (`recent_change`, `waiting_added`, `waiting_resolved`, `task_done`, `action_item`, `due_date`, `moved`, `renamed`, `completed`, `reopened`), `limit: int = 100` (at most 1000).
+**Parameters:** `after_id: int | None` (only events newer than this id: the exact cursor for "what is new"), `since: str | None` (local `YYYY-MM-DD` or `YYYY-MM-DD HH:MM[:SS]`, an ISO `T` accepted), `project: str | None`, `kinds: list[str] | None` (`recent_change`, `waiting_added`, `waiting_resolved`, `task_done`, `action_item`, `due_date`, `moved`, `renamed`, `completed`, `reopened`, `relayed`), `limit: int = 100` (at most 1000).
 
 **Returns:** `count`, `has_more` and `events`, newest first, each with `id`, `project`, `task_id`, `kind`, `what`, `ticket`, `section`, `source_session` and `created_at`. With `after_id` the page is the oldest events after the cursor, so a reader that stamps the newest `id` it got never skips one, and `has_more` says the log holds rows past the page. An unknown kind or a malformed `since` is a validation error.
 
@@ -706,6 +706,22 @@ Thin wrappers over `missioncache_db.lead_board`. The MissionCache mod calls them
 **Parameters:** `picks: list[dict]`, at most 3, each `{what, project, why}`. `what` is required. An empty list clears them.
 
 **Returns:** `{"success": True, "picks"}` with the cleaned items, `{"success": False, "reason"}` when the caller is not the lead, or a validation error for a malformed list. The picks replace the previous ones and live in the local `hooks-state.db`.
+
+### `prepare_relay`
+
+**When to use:** In the lead session, to send one instruction to a project's live session. Send the returned `envelope` unchanged with SendMessage to `title`. `/missioncache:relay` does both. Only the lead session may call it.
+
+**Parameters:** `project_name: str`, `text: str` (one line, the command as the person would type it, up to 500 characters and not starting with `!`: a longer one is refused, not cut).
+
+**Returns:** `{"success": True, "session_id", "title", "envelope"}`, or `{"success": False, "reason"}` when the caller is not the lead or the project has no live session. Nothing runs on arrival: the MissionCache mod in that session shows the text and runs it only when the person picks Run.
+
+### `record_relay`
+
+**When to use:** Called by the MissionCache mod after the person in a session answers a relay. There is no reason to call it by hand.
+
+**Parameters:** `outcome: str` (`ran`, `dropped`, or `failed` when Run was picked but the prompt could not be submitted), `text: str`.
+
+**Returns:** `{"success": True}` after logging a `relayed` event on the session's project, or `{"success": False, "reason"}` when the session is bound to no project.
 
 ## Error handling
 

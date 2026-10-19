@@ -255,7 +255,7 @@ def test_real_command_source_renders_without_claude_machinery(name: str) -> None
 )
 def test_every_command_is_either_shipped_or_claude_only() -> None:
     """Each file in commands/ is a decision: it ships to the other tools, or it
-    is Claude Code only, like the two lead commands, which need session titles,
+    is Claude Code only, like the lead commands, which need session titles,
     messaging and a loop. A new command that is neither fails here until someone
     decides, and so does a file left behind by a rename."""
     claude_only = set(command_clients.CLAUDE_ONLY_COMMANDS)

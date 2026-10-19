@@ -34,6 +34,7 @@ EVENT_KINDS = (
     "renamed",
     "completed",
     "reopened",
+    "relayed",
 )
 
 # Long enough for a Recent Changes line, short enough that a pasted block

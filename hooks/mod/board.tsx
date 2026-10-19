@@ -32,7 +32,7 @@ export function drawBand(el: any, below: unknown, board: Board, hide: (surface: 
         {first?.project_name ? <Text wrap="truncate-end" color="warning">{`▸ ${first.project_name}`}</Text> : null}
       </Box>
       <Box key="band-link" paddingX={1} columnGap={2}>
-        <Text dimColor>Everything else is on the Lead view:</Text>
+        <Text dimColor>Projects, live feed and today's agenda:</Text>
         <Box key="lead-link"><Text><Link href={url} label={url} /></Text></Box>
         <Button key="band-hide" plain hotkey="0" onPress={(press: { surface: RenderSurface }) => hide(press.surface)}><Text dimColor>hide</Text></Button>
       </Box>

@@ -30,7 +30,8 @@ import sqlite3
 import subprocess
 import sys
 import unicodedata
-from datetime import date, datetime, timedelta
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,11 @@ PICK_WHAT_MAX_CHARS = 120
 PICK_PROJECT_MAX_CHARS = 80
 PICK_WHY_MAX_CHARS = 160
 EVENTS_PAGE = 200
+# A relay is one instruction from the lead to another session, sent as one line
+# that the receiving session's mod recognises and shows the person to confirm.
+RELAY_PREFIX = "mc-relay/1"
+RELAY_TEXT_MAX_CHARS = 500
+RELAY_OUTCOMES = ("ran", "dropped", "failed")
 
 # iTerm2's TERM_SESSION_ID is "w0t1p0:<UUID>", and the UUID is the session's
 # AppleScript `unique id`.
@@ -697,3 +703,63 @@ def build_lead_board(
         "picks": picks,
         "status_error": status_error,
     })
+
+
+def prepare_relay(sender_session_id: str, project_name: str, text: str) -> dict[str, Any]:
+    """The relay envelope for ``project_name``'s live session.
+
+    The caller sends ``envelope`` to ``session_id`` (the mod with
+    ``$.session.send``, a model with SendMessage to ``title``). Nothing runs on
+    arrival: the receiving mod shows the text and runs it only when the person
+    there picks Run. With several live sessions the most recently active wins.
+
+    The text runs as typed, so it is refused rather than cut short (a cut can
+    drop the "but not prod" that changes its meaning), and a leading ``!``,
+    which would run a shell command outside the permission prompts, is refused.
+    """
+    import missioncache_db
+
+    clean = _one_line(str(text))
+    if not clean:
+        raise ValueError("nothing to relay: the text is empty")
+    if len(clean) > RELAY_TEXT_MAX_CHARS:
+        raise ValueError(f"a relay is at most {RELAY_TEXT_MAX_CHARS} characters, this one is longer")
+    if clean.startswith("!"):
+        raise ValueError("a relay cannot start with '!', which runs a shell command")
+    live = missioncache_db.live_sessions_for_project(project_name, exclude_session_id=sender_session_id)
+    if not live:
+        return {"success": False, "reason": f"{project_name} has no live session"}
+    target = live[0]
+    envelope = {
+        "id": uuid.uuid4().hex[:12],
+        "from": missioncache_db.LEAD_SESSION_TITLE,
+        "to": target["session_id"],
+        "project": project_name,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "text": clean,
+    }
+    return {
+        "success": True,
+        "session_id": target["session_id"],
+        "title": target["title"],
+        "envelope": f"{RELAY_PREFIX} {json.dumps(envelope, ensure_ascii=False)}",
+    }
+
+
+def record_relay(db, session_id: str, outcome: str, text: str) -> bool:
+    """Log a relay the person in ``session_id`` ran, dropped, or could not run.
+
+    Written by the receiving side, so the lead's feed (which leaves out the
+    lead's own rows) shows it. False when the session is bound to no project.
+    """
+    import missioncache_db
+    from missioncache_db import events
+
+    if outcome not in RELAY_OUTCOMES:
+        raise ValueError(f"outcome must be one of {', '.join(RELAY_OUTCOMES)}, got {outcome!r}")
+    project = missioncache_db.bound_project_for_session(session_id)
+    if not project:
+        return False
+    line = clean_text(text, RELAY_TEXT_MAX_CHARS) or ""
+    events.record_events(db, project, [("relayed", f"relay {outcome}: {line}", None)], session_id)
+    return True

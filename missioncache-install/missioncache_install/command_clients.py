@@ -76,11 +76,12 @@ if TYPE_CHECKING:
 # even see it. Rendering it for the other clients also produced a document that
 # contradicted itself, because the region resolving the session id is stripped
 # and the step below it still referred to the value that region computed.
+# `relay` sends from the lead through SendMessage, so it stays with them.
 # `brief` ships: every one of its steps carries a stated fallback.
 CANONICAL_COMMANDS: tuple[str, ...] = (
     "load", "save", "new", "done", "prompts", "mode", "fork", "rename", "brief",
 )
-CLAUDE_ONLY_COMMANDS: tuple[str, ...] = ("lead", "unlead")
+CLAUDE_ONLY_COMMANDS: tuple[str, ...] = ("lead", "unlead", "relay")
 
 # Per-tool destination paths. Module-level so tests can monkeypatch.
 OPENCODE_COMMANDS_DIR = Path.home() / ".config" / "opencode" / "commands"
