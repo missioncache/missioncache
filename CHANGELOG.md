@@ -9,6 +9,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 ## Unreleased
 
 - The reminder to tick finished tasks is one line now, instead of a block listing every unchecked task. (plugin)
+- The Lead view shows the newest thing a project waits on and the first of its Next Steps, instead of rows from months ago. (missioncache-db, missioncache-dashboard)
 
 ## 2026-10-19
 

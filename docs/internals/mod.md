@@ -16,7 +16,7 @@ For maintainers. This covers the lead board's data layer and what the Claude Cod
 
 ## The board
 
-The unit is the project, not the session. A terminal already shows whether an agent is working. What the board adds is where each project stands: progress from the tasks file, the item a session marked active, the last significant change, the last save, the oldest thing waiting on someone else, and what is next.
+The unit is the project, not the session. A terminal already shows whether an agent is working. What the board adds is where each project stands: progress from the tasks file, the item a session marked active, the last significant change, the last save, the newest thing waiting on someone else, and the first of the Next Steps.
 
 - **Which projects.** `focus` keeps projects with a live session or an event in the last 12 hours, and lists the rest under `quiet` with their newest change. Hours rather than "today", so a day that runs past midnight stays one day. `at_risk` alone no longer brings a project in: on a real install it marked 17 of 18 projects. `all` keeps every active project.
 - **Counts.** `counts` carries the numbers every reader shows (needs you, working, sessions, changes in the window), so the band and the Lead view never disagree. `build_portfolio` alone is not enough: it lists only projects with action items, Waiting-on rows or a due date, so a project with a live session and none of those would be missing.

@@ -166,6 +166,24 @@ def left_off(content: Optional[str]) -> Optional[str]:
     return None
 
 
+def next_step(content: Optional[str]) -> Optional[str]:
+    """The first item under Next Steps: what the last save said comes next.
+
+    Every save rewrites Next Steps, so it is fresher than the first unchecked
+    box in the tasks file, which can sit there for months.
+    """
+    from missioncache_db import context_health
+
+    section = context_health.extract_section(content, "Next Steps") if content else None
+    for line in (section or "").splitlines():
+        match = re.match(r"\s*(?:[-*]|\d+[.)])\s+(.*)", line)
+        if match:
+            text = match.group(1).replace("**", "").replace("__", "").strip()
+            if text:
+                return text
+    return None
+
+
 def tasks_file_for(root: Path, repo_path: str, task_full_path: str) -> Optional[Path]:
     """The project's tasks file, or None. The one lookup every reader of the
     checklist shares, so progress and an item's title come from the same file."""

@@ -237,14 +237,25 @@ class TestBuildLeadBoard:
         [card] = _board(env)["projects"]
         assert card["active_task"] == {"number": "2", "title": "Add the retry path"}
 
-    def test_the_oldest_waiting_row_is_named(self, env):
-        # The oldest row is listed second, so taking the first row fails.
+    def test_the_newest_waiting_row_is_named(self, env):
+        # The newest row is listed second, so taking the first row fails.
         _project(env, "api-gateway", waiting_rows=(
-            "| schema signoff | Robin | 2026-10-15 | merge |\n| design reply | Dana | 2026-10-01 | rollout |"))
+            "| design reply | Dana | 2026-08-01 | rollout |\n| schema signoff | Robin | 2026-10-15 | merge |"))
         _live(env, SID_A, "api-gateway")
         [card] = _board(env)["projects"]
         assert card["waiting"]["count"] == 2
-        assert card["waiting"]["oldest"]["what"] == "design reply"
+        assert card["waiting"]["latest"]["what"] == "schema signoff"
+
+    def test_next_step_is_the_first_of_the_next_steps(self, env):
+        task = _project(env, "api-gateway")
+        ctx = env["root"] / "active" / "api-gateway" / "api-gateway-context.md"
+        ctx.write_text(ctx.read_text().replace(
+            "1. TBD", "1. **Ship the retry path** to staging\n2. Run the e2e suite"))
+        _live(env, SID_A, "api-gateway")
+        [card] = _board(env)["projects"]
+        # The tasks file still has an older unchecked item first.
+        assert card["next_up"] == "Add the retry path"
+        assert card["next_step"] == "Ship the retry path to staging"
 
     def test_a_project_that_needs_you_sorts_first(self, env):
         _project(env, "alpha")

@@ -12,7 +12,7 @@ const project = (name: string, extra: Record<string, unknown> = {}) => ({
   name, completed_count: 12, total_count: 20, completion_pct: 60, next_up: 'run the e2e suite', due_date: null,
   days_to_due: null, at_risk: false, overdue_count: 0, open_count: 0, active_task: { number: 14, title: 'wire the retry path' },
   left_off: 'retry path wired', last_event: { kind: 'task_done', what: 'task 12 done', created_at: '2026-10-18 14:28:00' },
-  last_save: '2026-10-18 14:02', waiting: { count: 0, oldest: null }, session: null, session_count: 0, ...extra,
+  last_save: '2026-10-18 14:02', waiting: { count: 0, latest: null }, session: null, session_count: 0, ...extra,
 })
 const board = (projects: unknown[], extra: Record<string, unknown> = {}) => ({
   success: true, changed: true, watermark: 'w1', generated_at: '2026-10-18T14:32:00', projects,

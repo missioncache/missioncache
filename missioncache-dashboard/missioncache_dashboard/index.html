@@ -8318,7 +8318,7 @@
             const state = ldStateOf(p);
             const s = p.session;
             const pct = Math.max(0, Math.min(100, ldNum(p.completion_pct)));
-            const w = p.waiting && p.waiting.oldest;
+            const w = p.waiting && p.waiting.latest;
             const overdue = ldNum(p.overdue_count);
             const latest = p.last_event
                 ? `<span class="t">${escapeHtml(ldWhen(p.last_event.created_at))}</span>${ldBidi(p.last_event.what)}`
@@ -8346,7 +8346,7 @@
                 </div>
                 ${ldCell('Latest', latest)}
                 ${ldCell('Blocked by', blocked, 'nothing')}
-                ${ldCell('Next', p.next_up ? ldBidi(p.next_up) : '')}
+                ${ldCell('Next', p.next_step || p.next_up ? ldBidi(p.next_step || p.next_up) : '')}
                 <div class="lb-say"><span>${say.head}</span>${more ? `<button class="lb-exp" data-focus="exp:${name}" data-name="${name}" aria-expanded="${open}" aria-controls="ld-more-${i}" aria-label="More about ${name}" onclick="ldToggle(this.dataset.name)">${open ? 'less ▴' : 'more ▾'}</button>` : ''}</div>
                 ${more ? `<div class="lb-more" id="ld-more-${i}">${more}</div>` : ''}
             </div>`;

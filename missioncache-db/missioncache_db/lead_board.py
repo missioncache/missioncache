@@ -493,7 +493,8 @@ def _project_card(task, *, root, repo, stats, waiting, sessions, statuses, last_
     content = _read_context(task)
     progress = portfolio.checklist_progress(root, repo_path, full_path)
     parsed = context_health.parse_last_updated(content) if content else None
-    oldest = max(waiting, key=lambda r: r["age_days"] or 0) if waiting else None
+    # The newest row: an old one is usually forgotten, not what blocks today.
+    latest = min(waiting, key=lambda r: r["age_days"] or 0) if waiting else None
     # The session that most needs the person speaks for the project; among
     # equals, the most recently active (the order ``sessions`` arrives in).
     session = (
@@ -507,6 +508,7 @@ def _project_card(task, *, root, repo, stats, waiting, sessions, statuses, last_
         "total_count": progress["total_count"],
         "completion_pct": progress["completion_pct"],
         "next_up": progress["next_up"],
+        "next_step": portfolio.next_step(content),
         "due_date": task.due_date,
         "days_to_due": stats.get("days_to_due"),
         "at_risk": bool(stats.get("at_risk")),
@@ -522,9 +524,9 @@ def _project_card(task, *, root, repo, stats, waiting, sessions, statuses, last_
         "last_save": parsed.strftime("%Y-%m-%d %H:%M") if parsed else None,
         "waiting": {
             "count": len(waiting),
-            "oldest": (
-                {"what": oldest["what"], "who": oldest["who_primary"], "age_days": oldest["age_days"]}
-                if oldest else None
+            "latest": (
+                {"what": latest["what"], "who": latest["who_primary"], "age_days": latest["age_days"]}
+                if latest else None
             ),
         },
         "session": _session_view(session, statuses.get(session["session_id"])) if session else None,
