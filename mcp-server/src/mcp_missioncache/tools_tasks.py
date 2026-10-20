@@ -369,9 +369,7 @@ async def find_task_for_directory(
             description=(
                 "Claude session ID. Strongly recommended: without it, matching "
                 "falls through to cwd-pattern only, which fails when cwd is the "
-                "repo root. Resolve via the filesystem (most-recently-modified "
-                "transcript in ~/.claude/projects/<sanitized-cwd>/); see "
-                "commands/save.md for the canonical pattern."
+                "repo root. In Claude Code, pass $CLAUDE_CODE_SESSION_ID."
             )
         ),
     ] = None,
@@ -384,15 +382,14 @@ async def find_task_for_directory(
     2. projects/<session_id>.json - requires session_id arg
     3. cwd under ~/.missioncache/active/<task>/
 
-    Callers that invoke this from arbitrary cwds (e.g. the repo root) MUST
-    pass session_id for priority 2 to fire. The 4 MissionCache slash commands all
-    do this; copy their pattern rather than omitting the arg.
+    Priority 2 needs a session id. Without the arg, the server's own
+    CLAUDE_CODE_SESSION_ID is used, as get_task does.
     """
     db = get_db()
 
     try:
         _validate_path(directory, "directory")
-        task = db.find_task_for_cwd(directory, session_id)
+        task = db.find_task_for_cwd(directory, _resolve_session_id(session_id))
 
         if not task:
             return {"found": False, "task": None}

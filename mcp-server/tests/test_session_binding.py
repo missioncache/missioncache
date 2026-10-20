@@ -557,3 +557,27 @@ class TestBindSessionToProject:
         sid = "00000000-0000-0000-0000-000000000000"
         assert _bind_session_to_project(sid, "valid-project") is True
         assert _read_project_state(hooks_db, sid) == "valid-project"
+
+
+class TestFindTaskForDirectoryBinding:
+    """/missioncache:save finds its project through find_task_for_directory,
+    and the session's binding is what lets it work from the repo root."""
+
+    def test_finds_bound_project_from_env_session_id(self, isolated_orbit, monkeypatch):
+        """With session_id omitted, the tool uses CLAUDE_CODE_SESSION_ID, as
+        get_task does, so a save from the repo root still finds the project
+        this session loaded."""
+        tmp_path, _root_dir, _fake_home, _hooks_db = isolated_orbit
+        repo_path = tmp_path / "myrepo"
+        repo_path.mkdir()
+        sid = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        asyncio.run(
+            tools_tasks.create_task(name="bound-project", task_type="coding", repo_path=str(repo_path))
+        )
+        assert asyncio.run(tools_tasks.get_task(project_name="bound-project", session_id=sid))["session_bound"]
+
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", sid)
+        result = asyncio.run(tools_tasks.find_task_for_directory(directory=str(repo_path)))
+
+        assert result["found"] is True
+        assert result["task"]["name"] == "bound-project"
