@@ -50,6 +50,20 @@ It works in Claude Code, Codex, OpenCode and VSCode. Claude Code also gets time 
 
 No other single tool does all four. [docs/comparison.md](docs/comparison.md) has the honest comparison.
 
+### MissionCache and Claude Code's auto memory
+
+Claude Code already keeps its own memory: notes about you and your codebase, saved per directory. MissionCache does not replace it. It keeps the state of one piece of work.
+
+| | Auto memory | MissionCache |
+|---|---|---|
+| Holds | Facts about you and the codebase | A project's plan, tasks, decisions and next step |
+| Tied to | The directory you started in | The project, in whatever repo it runs |
+| Loaded | Its index, into every session there | When you run `/missioncache:load` |
+| Tools | Claude Code | Claude Code, Codex, OpenCode, VSCode |
+| Other sessions | Not told about a change | Told when the project changes |
+
+Use both. A preference goes in auto memory, and where this project stands goes in MissionCache.
+
 ## Supported tools
 
 The installer detects the AI tools you have and asks, per tool, whether to register MissionCache. The project files, the MCP server and the commands are the same everywhere. Only the way you type a command differs.
