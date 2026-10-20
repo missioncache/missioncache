@@ -366,5 +366,5 @@ The stderr suppression block at the top of the file (`os.dup2(_devnull_fd, 2)`) 
 
 - [`architecture.md`](../architecture.md) - for the shared context on `hooks-state.db`, the storage model, and where the statusline sits relative to the rest of MissionCache.
 - [`hooks.md`](../hooks.md) - for `session_start.py` and how it writes the state the statusline reads.
-- [`dashboard.md`](dashboard.md) - for the `/api/hooks/project` endpoint used by `/missioncache:load` and the OSC 8 link targets.
+- [`dashboard.md`](dashboard.md) - for the `/api/hooks/project` endpoint and the OSC 8 link targets.
 - `missioncache-dashboard/missioncache_dashboard/statusline.py` - the source. Single file, flat structure, labeled with `# ============ SECTION ============` dividers. Grep for a section name to jump. The `missioncache-statusline` entry point declared in `missioncache-dashboard/pyproject.toml` resolves here.

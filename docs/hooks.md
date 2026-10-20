@@ -247,9 +247,9 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.missioncache/tasks.db:sessions` | missioncache_db `process_heartbeats` (called by pre_compact) | dashboard, MissionCache MCP `get_task_time` | SQLite row |
 | `~/.claude/hooks-state.db:term_sessions` | session_start | statusline | SQLite row |
 | `~/.claude/hooks-state.db:session_state` | statusline (not hooks) | statusline | SQLite row |
-| `~/.claude/hooks-state.db:project_state` | `/missioncache:load`, dashboard `/api/hooks/project`, `get_task` (when called with session_id) | statusline, `bound_project_for_session` (session_title hook), `live_sessions_for_project` | SQLite row |
+| `~/.claude/hooks-state.db:project_state` | `get_task` and `create_missioncache_files` (with a session id), dashboard `/api/hooks/project` | statusline, `bound_project_for_session` (session_title hook), `live_sessions_for_project` | SQLite row |
 | `~/.claude/hooks/state/term-sessions/<term-id>` | session_start | statusline fallback path | Plain text |
-| `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `/missioncache:load`, `get_task` (when called with session_id) | statusline, `find_task_for_cwd` | JSON file |
+| `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `get_task` (with a session id) | statusline, `find_task_for_cwd` | JSON file |
 | `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
 | `~/.claude/hooks/state/session-title/<session-id>.json` | session_title | `missioncache_db.live_sessions_for_project`, `live_sessions_all` | JSON file |
 | `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `/missioncache:brief --delta` (the cursor, via `lead show` / `lead mark`), `prune-sessions` | SQLite row |

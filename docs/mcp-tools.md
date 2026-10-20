@@ -292,7 +292,7 @@ A session is listed only when its recorded pid **proves** it is still running. `
 
 ### `get_context_digest`
 
-**When to use:** Resuming a project (`/missioncache:load` Step 2). This is the read path for context files - it replaces reading the whole file, and it is the ONLY way to read a context file past the 256KB Read-tool cap (parsing happens server-side via plain file I/O).
+**When to use:** Resuming a project (`/missioncache:load`). This is the read path for context files - it replaces reading the whole file, and it is the ONLY way to read a context file past the 256KB Read-tool cap (parsing happens server-side via plain file I/O).
 
 **Parameters:**
 - `project_name: str` - Resolved via `get_missioncache_files` (active first, then completed).
@@ -587,7 +587,7 @@ These two tools drive the statusline's `Task:` field: a per-session pointer file
 
 ### `set_active_missioncache_tasks`
 
-**When to use:** The user signals which checklist task they are working on ("let's do 54a") - `/missioncache:load` Step 5 calls this so the statusline reflects the focus.
+**When to use:** The user signals which checklist task they are working on ("let's do 54a") - `/missioncache:load` calls this so the statusline reflects the focus.
 
 **Parameters:**
 - `project_name: str` - MissionCache project name (kebab-case, validated).

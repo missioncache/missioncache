@@ -331,7 +331,7 @@ argument-hint: "[optional args]"
 
 The frontmatter is parsed by Claude Code for the help menu. The body is prose instructions that Claude follows when the user types `/missioncache:<name>`. You can reference MCP tools by their `mcp__plugin_missioncache_pm__*` names and Claude will call them in order.
 
-If your command needs to be explicit about when to call which tool, write a numbered workflow with MCP tool names inline. See `commands/load.md` for a good example of a multi-step workflow with conditional branches.
+State what done looks like and the criteria that matter, then name the MCP tools inline where the command needs them. See `commands/load.md`: a goal, three tool calls, and the rules for the summary, with no numbered workflow to follow step by step.
 
 Reinstall the plugin (or use `/reload-plugins` for command-only changes) to pick up new commands.
 

@@ -58,7 +58,7 @@ The full board is the dashboard's Lead view, `http://localhost:8787/#lead`: ever
 
 ### Step 3: The First Brief
 
-Run the full brief once, exactly as `/missioncache:brief` describes (Steps 1 through 6 there). The deltas start from the cursor stamped in Step 2, so nothing has to be written at the end of the brief.
+Run the full brief once, exactly as `/missioncache:brief` describes, without `--delta`. The deltas start from the cursor stamped in Step 2, so nothing has to be written at the end of the brief.
 
 ### Step 4: Offer to Keep It Live
 
@@ -91,7 +91,7 @@ missioncache-db lead show --json
 
 Read `designated`, NOT `lead`. `lead` is pid-gated and goes null for a session the pid check cannot vouch for, which is every session outside Claude Code and any session whose pid record was lost, so a lead reading `lead` would conclude it had been replaced and end its own loop while both hooks still tell it that it is the lead. `designated` is the row itself, and since designating a new lead deletes every other row first, `designated != this session` is the exact replacement test.
 
-If `designated` is not this session, another session was designated. Print one line saying so, end the loop, and do not render. The same response carries `cursor`, the stamp the tick reads from (`/missioncache:brief` Step 7).
+If `designated` is not this session, another session was designated. Print one line saying so, end the loop, and do not render. The same response carries `cursor`, the stamp the tick reads from (see `--delta` in `/missioncache:brief`).
 <!-- /claude-code-only -->
 
 Outside Claude Code there is no loop machinery: run `/missioncache-brief --delta` by hand whenever you want a refresh.

@@ -322,7 +322,7 @@ The MissionCache Auto endpoints read from the `auto_executions` and `auto_execut
 
 MissionCache hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three callers use these:
 
-- The MissionCache plugin's own slash commands (`/missioncache:new`, `/missioncache:load`, `/missioncache:save`) POST to `/api/hooks/project` to register active projects, and resolve terminal session IDs via `/api/hooks/term-session/...`.
+- `/api/hooks/project` sets a session's project. No slash command calls it any more, because the MCP server writes the binding itself. It stays for scripts and older installs.
 - The MissionCache MCP server fires `/api/hooks/task-created` internally whenever a task-creation tool runs, so the dashboard syncs immediately instead of waiting up to 60s.
 - `missioncache-install` wires `/api/hooks/edit-count` into `~/.claude/settings.json` as a `PostToolUse` HTTP hook with matcher `Edit|Write|NotebookEdit` whenever the dashboard component is installed. That is what populates the statusline edit counter.
 
@@ -334,14 +334,14 @@ MissionCache hooks can talk to the dashboard via `/api/hooks/*` endpoints. Three
 | POST | `/api/hooks/edit-count` | Increment per-session edit count. Wired by `missioncache-install` as a `PostToolUse` HTTP hook (matcher `Edit\|Write\|NotebookEdit`) when the dashboard is installed. Feeds the statusline edit counter. |
 | POST | `/api/hooks/task-created` | Trigger an immediate SQLite → DuckDB sync. Called internally by the MissionCache MCP server after `create_task` and `create_missioncache_files`. |
 | POST | `/api/hooks/action` | Record current tool action for tab title display. |
-| POST | `/api/hooks/project` | Set the active project for a session. Called by `/missioncache:new`, `/missioncache:load`, `/missioncache:save`. |
+| POST | `/api/hooks/project` | Set the active project for a session. Kept for scripts and older installs. The MCP server now writes the binding itself. |
 | POST | `/api/hooks/qa-review` | Mark QA review as suggested for a session. |
 | GET | `/api/hooks/term-session/{term_session_id}` | Resolve a terminal-emulator session ID to a Claude session ID. |
 | GET | `/api/hooks/session/{session_id}` | Read session state row (edit count, action, last prompt time, etc.). |
 
 All of these write to (or read from) `~/.claude/hooks-state.db`, a separate SQLite file from `tasks.db`. That file holds ephemeral per-session state that has a shorter lifetime than task tracking: `session_state`, `project_state`, `term_sessions`, `validation_state`, `guard_warned`. The statusline reads from it, the hooks write to it, and neither interacts with the main MissionCache task database.
 
-The fallback flow for writing project state is instructive: `/missioncache:load` first tries to POST to `/api/hooks/project` (which handles JSON escaping correctly), and if the dashboard is down it falls back to a direct SQLite write against `hooks-state.db`. See Step 4 of `commands/load.md` for the exact bash snippet. This is the only case where MissionCache writes to `hooks-state.db` from outside the dashboard process.
+Binding a session to a project is written by the MCP server itself: `get_task` and `create_missioncache_files` take a `session_id` and write the `project_state` row in `hooks-state.db` directly, so the binding works whether or not the dashboard is running.
 
 ### Sync and health
 

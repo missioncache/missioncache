@@ -598,10 +598,9 @@ def _stamp_shared_seen_for_fork_reader(
     ``parent_name`` - reading the parent's digest IS consuming the shared
     layer, so the statusline's "parent updated" indicator clears immediately
     instead of waiting for the next /missioncache:load. When this stamp fires,
-    the digest response carries ``shared_seen_stamped: true`` and the
-    /missioncache:load fork flow skips its own bash stamp (which would
-    otherwise overwrite this bytes-coupled value with an older mtime from an
-    earlier response). Best-effort on every branch: no session id, no binding,
+    the digest response carries ``shared_seen_stamped: true``. This is the
+    only stamp: /missioncache:load and /missioncache:save rely on it rather
+    than writing the marker themselves. Best-effort on every branch: no session id, no binding,
     non-fork caller, or an IO failure all mean "no stamp", never an error."""
     session_id = _resolve_session_id(session_id)
     if not session_id:

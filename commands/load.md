@@ -5,406 +5,83 @@ argument-hint: "[project-name]"
 
 # Continue Project
 
-Resume work on an active project via the context digest.
+Resume a project so the user can pick up where the last session stopped, without reading the whole context file.
 
-## Quick Start
+## Goal
 
-1. **If project name provided:** Jump to Step 2 (Get Project Details)
+The load is done when:
 
-2. **If no project name, list active projects:**
-   ```
-   mcp__plugin_missioncache_pm__list_active_tasks(repo_path="<cwd>", prioritize_by_repo=True, include_time=True)
-   ```
-   Then display the selection table (see below) and ask user to select one.
+- The session is bound to the project, so the statusline, time tracking and `/missioncache:save` all find it.
+- The user sees a short resume summary built from the context digest: where things stand, what is open, and what comes next.
+- Nothing was read that the summary did not need.
 
-## Selection Table Format
+## Picking the Project
 
-Display projects as a markdown table sorted in two groups:
+With a project name in the arguments, use it. Without one, call:
 
-**Group 1 - This Repo** (projects whose `repo_path` matches current working directory):
-
-**Group 2 - Other Repos** (all other projects, already sorted by last_worked_on from MCP):
-
-Table columns:
-
-| # | Project | Repo | JIRA | Last Worked | Time |
-|---|---------|------|------|-------------|------|
-| 1 | project-name | repo-short-name | PROJ-12345 | 2h ago | 4h 30m |
-
-- `#` - sequential number for easy selection
-- `Project` - task name
-- `Repo` - `repo_name` from TaskSummary
-- `JIRA` - `jira_key` (show `-` if none)
-- `Last Worked` - `last_worked_ago` (e.g., "2h ago", "3d ago")
-- `Time` - `time_formatted` (total time invested)
-
-Add a visual separator between the two groups (e.g., a row with "--- Other repos ---" or a blank line with header).
-
-Ask the user to pick a project by number or name.
-
-## Repo Mismatch Check
-
-**CRITICAL:** After the user selects a project, compare the project's `repo_path` with the current working directory (use `git rev-parse --show-toplevel` to get the cwd's git root).
-
-If they differ, ask the user how to handle the mismatch and wait for their reply. Present these three options:
-
-> This project is recorded as belonging to **<repo_name>** (`<repo_path>`), but you're currently in **<cwd_repo>**. How should I handle this?
->
-> 1. **Continue here for this session only** - Resume the project without changing the recorded repo. The mismatch warning will fire again next time.
-> 2. **Update the project's repo to match my current location** - Rewrite the task's repo association in the database so future `/missioncache:load` calls work cleanly. Use this when the project was created with the wrong repo (e.g. `/missioncache:new` captured the wrong cwd) or when the project's source of truth has moved.
-> 3. **Cancel** - Abort `/missioncache:load` without resuming.
-
-If your tool supports a structured option picker (Claude Code's `AskUserQuestion`), use it. Otherwise present the options as prose and wait for the user to reply with a number or label.
-
-**If the user picks option 2 ("Update the project's repo to match my current location"):**
-
-Call the `set_task_repo` MCP tool with the current repo path:
 ```
-mcp__plugin_missioncache_pm__set_task_repo(
-    task_id=<task_id>,
-    repo_path="<cwd git root from git rev-parse --show-toplevel>"
-)
+mcp__plugin_missioncache_pm__list_active_tasks(repo_path="<cwd>", prioritize_by_repo=True, include_time=True)
 ```
 
-If the response has `error: True` with `code: REPO_NOT_FOUND`, register the repo first via `add_repo`, then retry. Otherwise proceed with the resume flow as if there was no mismatch.
+Show the projects as a numbered table: the ones whose `repo_path` matches the current repo first, then the rest, already sorted by last worked. Columns: `#`, Project, Repo (omit it for this repo's group), JIRA (`-` when none), Last Worked, Time. Ask for a number or a name.
 
-**If the user picks option 3 ("Cancel"):** stop and do nothing.
+When the chosen project's `repo_path` differs from the current git root (`git rev-parse --show-toplevel`), ask before going on. Offer three choices: continue here for this session only, move the project to this repo, or cancel. Moving it is `mcp__plugin_missioncache_pm__set_task_repo(task_id=..., repo_path="<git root>")`. On `REPO_NOT_FOUND`, register the repo with `add_repo` and retry. Use a structured picker (`AskUserQuestion`) when the client has one.
 
-**If the user picks option 1 ("Continue here for this session only"):** proceed with the resume flow without touching the database.
+## Loading It
 
-## Workflow
+Run the first two in parallel, then the third with the id from the first.
 
-### Step 1: Get Project Details
+1. **Bind and fetch the project:** `mcp__plugin_missioncache_pm__get_task(project_name="<name>")`. It returns the id, time invested, progress and file paths.
+<!-- claude-code-only -->
+   Also pass `session_id="$CLAUDE_CODE_SESSION_ID"` (read it with `echo`). The server writes the binding itself and reports `session_bound`. When the variable is empty, omit the argument: the server falls back to its own copy of the id.
+<!-- /claude-code-only -->
+2. **Read the digest, not the file:** `mcp__plugin_missioncache_pm__get_context_digest(project_name="<name>")`. It carries the header lines (hub, related projects, due date), Waiting on with each row's age and `stale` flag, open action items with an `overdue` flag, Next Steps, the last three Recent Changes, a section index with sizes, and health warnings. Progress comes from `get_task`, so the tasks file stays closed too. If the digest tool is missing (a very old server), read the context and tasks files directly.
+3. **Start time tracking:** `mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")`.
+
+### Forks
+
+A digest with a non-null `parent_digest` belongs to a fork. The parent's context is its shared layer, so fold the parent's Next Steps and newest Recent Changes into the summary. Read one hop only, never the grandparent, even when the parent is itself a fork.
 
 <!-- claude-code-only -->
-First resolve the current Claude session id so `get_task` can atomically bind the session to this project (server-side, mirroring the create_missioncache_files binding pattern). Without this, the binding falls back to the bash step in Step 4, which Claude can stream past silently.
-
-```bash
-# Probe-run each python candidate (catches Windows' Store-stub python, which resolves on PATH but does not run); the result is a single path so it stays quotable, with uv's pre-warmed interpreter as the last fallback.
-PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
-[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
-# Claude Code's projects-dir encoding (every non-alphanumeric -> "-"). The sed fallback is POSIX-correct only: on Windows Git Bash `pwd` prints the MSYS form (/c/Users/...), which encodes to a key that matches nothing - there the CLI is the only correct source.
-CWD_KEY=$(missioncache-db encode-cwd 2>/dev/null || pwd | sed 's|[^A-Za-z0-9]|-|g')
-POINTER_FILE="$HOME/.claude/hooks/state/cwd-session/${CWD_KEY}.json"
-# Primary: env var set by Claude Code 2.1.132+ in every Bash subprocess.
-SESSION_ID="$CLAUDE_CODE_SESSION_ID"
-# Fallbacks for older Claude Code: cwd-session pointer (SessionStart hook), then transcript-mtime walk.
-if [ -z "$SESSION_ID" ]; then
-  [ -r "$POINTER_FILE" ] && SESSION_ID=$("$PY" -c "import json,sys; print(json.load(sys.stdin)['sessionId'])" < "$POINTER_FILE" 2>/dev/null)
-  [ -z "$SESSION_ID" ] && SESSION_ID=$(ls -t "$HOME/.claude/projects/${CWD_KEY}"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
-fi
-echo "SESSION_ID=$SESSION_ID"
-```
-
-Capture the printed `SESSION_ID`.
+Read the parent only when it may have changed. Before the digest call, read this session's marker at `~/.claude/hooks/state/shared-seen/<session id>.json` and pass its `seen_mtime`. Then call `get_context_digest(project_name="<parent>", session_id=...)` when `parent_digest.changed_since_seen` is true or there was no marker. That call stamps the marker itself, so write nothing to it by hand.
 <!-- /claude-code-only -->
 
-Then call `mcp__plugin_missioncache_pm__get_task(project_name="<name>")` - in Claude Code, also pass `session_id="<SESSION_ID>"` so the session binds server-side. It returns:
-- Project ID and status
-- Time invested (formatted)
-- Progress (completion %)
-- JIRA key (if any)
-- File paths
-- `session_bound: true | false | <omitted>` indicating whether the session-to-project binding succeeded server-side. If the response includes `session_bound: true`, the statusline will reflect this project immediately - the Step 4 bash binding is still run as defense-in-depth and to refresh the dashboard list view, but it is no longer load-bearing.
+## The Resume Summary
 
-<!-- claude-code-only -->
-If `$SESSION_ID` is empty (extremely rare on Claude Code 2.1.132+), omit the `session_id` arg from `get_task`; Step 4 reuses this same value, so its binding is skipped too and the user can populate the statusline later by re-running `/missioncache:load`.
-<!-- /claude-code-only -->
-
-### Step 2: Get the Context Digest
-
-Do NOT read the full context file - call the digest tool instead:
-
-```
-mcp__plugin_missioncache_pm__get_context_digest(project_name="<name>")
-```
-
-It returns the resume-critical slices parsed server-side (so it works on context files past the 256KB Read-tool cap): `last_updated`, `hub` / `related_projects` header lines, `waiting_on` (verbatim) plus `waiting_on_rows` (each row with `age_days` and a `stale` flag), `next_steps` (verbatim), `recent_changes_last3`, a `section_index` (name, line number and `size_bytes`), `file_size_bytes`, and `health_warnings`. On mcp-missioncache 1.0.18+ it also carries the PM layer: `due_date` (project target date or null) and `action_items_open` (open action items, each with an `overdue` flag), with PM warnings (overdue items, due-soon project) already merged into `health_warnings`.
-
-Checklist progress comes from `get_task`'s `progress` field (Step 1) - no need to read the tasks file either.
-
-Read the FULL context file (or a specific section via the `section_index` line numbers with Read offset/limit) only when the user asks for it or the digest is not enough for the task at hand. Older Recent Changes history lives in `<project-name>-journal.md` - grep it on demand, never load it on resume.
-
-If `get_context_digest` returns an error (older MCP server without the tool), fall back to reading `<project-name>-context.md` and `<project-name>-tasks.md` directly.
-
-**Fork branch (when the digest returns a non-null `parent_digest`):** this project is a fork and the parent's context file is its shared knowledge layer.
-
-Read the shared layer: call `get_context_digest(project_name="<parent>")` and fold its Next Steps / newest Recent Changes into the resume summary. One hop only: when the parent is itself a fork, its digest carries a `parent_digest` of its own. Ignore it, and any `fork_parent_error` in it, because a fork never reads its grandparent's context.
-
-<!-- claude-code-only -->
-Freshness tracking refines that read via this session's shared-seen marker:
-
-1. BEFORE calling the digest, read this session's shared-seen marker if it exists (`~/.claude/hooks/state/shared-seen/<SESSION_ID>.json`) and pass its `seen_mtime` to the digest call: `get_context_digest(project_name="<name>", seen_mtime=<marker seen_mtime>)`. No marker -> call without `seen_mtime`.
-2. Read the parent digest (pass `session_id="<SESSION_ID from Step 1>"`) only when `parent_digest.changed_since_seen` is `true` OR there was no marker (first fork resume in this session). The marker means "this session consumed the shared layer at this version" - never stamp what was not read. On mcp-missioncache 1.0.15+ this parent read AUTO-STAMPS the marker server-side (the response carries `shared_seen_stamped: true`), baselined to the exact bytes it read - when you see that flag, SKIP Step 4's manual stamp entirely (its mtime comes from the earlier Step 2 response and can be older; overwriting the auto-stamp with it would re-light the statusline note over content you already read).
-3. Step 4's bash block then stamps the marker with `parent_digest.context_mtime` FROM THIS PROJECT'S OWN DIGEST RESPONSE in Step 2 (the snapshot-coupled value), never a fresh stat of the file - a sibling write between the digest read and the stamp must not be silently baselined.
-<!-- /claude-code-only -->
-
-### Step 3: Display Resume Summary
-
-Before rendering the summary, probe the dashboard so the output can include a deep link, and check for a sticky PreCompact error from a previous session that needs surfacing. The PreCompact hook writes `~/.claude/hooks/state/last-precompact-error.json` when its snapshot run fails (e.g. SQLite lock contention); /missioncache:load is the natural place to tell the user since they are about to act on stale context.
-
-Replace `<project-name>` with the resumed project name, then run:
-
-```bash
-PROJECT_NAME='<project-name>'
-DASHBOARD_URL="${MISSIONCACHE_DASHBOARD_URL:-http://localhost:8787}"
-if curl -sf -o /dev/null --max-time 1 "${DASHBOARD_URL}/health" 2>/dev/null; then
-  echo "Dashboard: ${DASHBOARD_URL}/#projects?task=$PROJECT_NAME"
-fi
-
-# Sticky PreCompact error from previous session, if any. Surface in the
-# summary if it matches the resumed project, then clear it so we do not
-# re-warn on later resumes.
-ERROR_FILE="$HOME/.claude/hooks/state/last-precompact-error.json"
-if [ -f "$ERROR_FILE" ]; then
-  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
-  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
-  PROJECT_NAME="$PROJECT_NAME" "$PY" - <<'PYEOF' 2>/dev/null
-import json, os, pathlib, sys
-project = os.environ["PROJECT_NAME"]
-err_path = pathlib.Path.home() / ".claude" / "hooks" / "state" / "last-precompact-error.json"
-try:
-    data = json.loads(err_path.read_text())
-except Exception:
-    sys.exit(0)
-task = data.get("task_name")
-# Surface only when the failure was on THIS project (or had no task at all).
-if task and task != project:
-    sys.exit(0)
-ts = data.get("timestamp", "unknown time")
-reason = data.get("reason", "unknown reason")
-print(f"PRECOMPACT_WARNING: {ts}: {reason}")
-try:
-    err_path.unlink()
-except Exception:
-    pass
-PYEOF
-fi
-```
-
-If the dashboard probe emits a line, include it as a **Dashboard** field. If `PRECOMPACT_WARNING:` is emitted, surface it as a `**PreCompact warning:**` line near the top of the resume summary so the user knows the previous session's auto-snapshot did not land. If neither is emitted, omit those fields.
+Lead with the project line, then only the fields that have something in them:
 
 ```
 ## Project: <name> (active, <time>)
 
-**PreCompact warning:** <from PRECOMPACT_WARNING line> *(only if surfaced)*
+**Hub:** / **Fork of:** / **Related projects:**   <header lines>
+**Progress:** X/Y tasks complete (Z%)
+**Due:** <date> (in N days | OVERDUE by N days)
+**Dashboard:** <deep link>
 
-**Hub:** <digest hub line, if any>
-**Fork of:** <parent name> - shared context [up to date | UPDATED by a parallel session since your last sync - re-read before continuing] *(only when parent_digest is non-null)*
-**Related projects:** <digest related_projects line, if any>
-
-**Progress:** <X/Y tasks complete (Z%)>
-**Due:** <digest due_date - append "(in N days)" or "(OVERDUE by N days)"> *(only when due_date is set)*
-
-**Dashboard:** http://localhost:8787/#projects?task=<name> *(only if probe emitted a line)*
-
-**Action items:** <N> open<, M overdue> *(from digest action_items_open; omit the whole block when empty)*
-| ID | What | From | Owner | Due |
-|----|------|------|-------|-----|
-<rows - append " (overdue)" to the Due cell of items whose overdue flag is true>
-
-**Waiting on:** *(from digest waiting_on; omit if the table is empty)*
-| What | Who | Since | Gates |
-|------|-----|-------|-------|
-<rows - mark each row whose `stale` flag is true in the digest's `waiting_on_rows` with a trailing " (stale)">
-
-**Next Steps:** *(from digest next_steps)*
-1. <first item>
-2. <second item>
-
-**Recent activity:** <1-2 line synthesis of digest recent_changes_last3>
-
-**Health:** <digest health_warnings, one line, only when non-empty>
-
-**Update:** MissionCache <pkg> <latest> is available - run `<command>` *(only when the update cache says so, see below)*
-```
-
-**Update notice:** read `~/.missioncache/update-check.json` (written by the dashboard and statusline with a 6h TTL - do NOT fetch anything yourself). If the file exists, `update_available` is true, and `checked_at` is less than 7 days old, add the one-line **Update** field using the file's `command` value and the outdated package names. Otherwise omit the field silently - a missing or stale cache is normal on dashboard-less installs.
-
-Waiting on renders NEXT TO Next Steps by design - both are the "what now" surface. When a Waiting-on row's external reply has arrived (the user mentions it, or you see it in the conversation), act on what it gates and resolve the row via `/missioncache:save`'s `waiting_on_resolve`. Offer the full context file ("say 'full context' for the whole file") instead of dumping it.
-
-Action items render ABOVE Waiting on: they are the commitments ledger (who promised what, by when), distinct from Waiting on (what blocks work). During the session, when the conversation shows an open action item was completed, mark it via `mcp__plugin_missioncache_pm__update_action_item(item_id=<n>, status="done", notes="<how it was resolved>")` - propose it to the user first. New commitments (yours or a colleague's, e.g. from a meeting transcript) go in via `mcp__plugin_missioncache_pm__add_action_item` with `requested_by`, `assignee`, `due_date`, and `source`.
-
-<!-- claude-code-only -->
-### Step 4: Register Session for Time Tracking
-
-Register the project against the current Claude session so the statusline picks it up, reusing the `SESSION_ID` resolved in Step 1. Silently no-ops if the dashboard and `hooks-state.db` aren't present - quick-install users don't have a statusline to update.
-
-This step is defense-in-depth: Step 1's `get_task(session_id=...)` already performs the server-side binding via the MCP tool. The bash block additionally hits the dashboard API so the dashboard list view refreshes immediately (instead of waiting for the next periodic SQLite -> DuckDB sync) and writes the per-session pointer in case the MCP binding raced.
-
-Replace `<project-name>` with the actual project name, `<SESSION_ID from Step 1>` with the value captured in Step 1, and `<task id>` with the numeric `id` from Step 1's `get_task` response (leave TASK_ID empty if you don't have it - the pointer then keeps the legacy name-only shape), then run:
-
-```bash
-PROJECT_NAME='<project-name>'
-SESSION_ID='<SESSION_ID from Step 1>'
-TASK_ID='<task id>'
-PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
-[ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
-
-# Write project_state. Dashboard API first, direct SQL fallback with parameter binding.
-if [ -n "$SESSION_ID" ]; then
-  PROJECT_JSON=$("$PY" -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"project_name":sys.argv[2]}))' "$SESSION_ID" "$PROJECT_NAME")
-  curl -s -X POST http://localhost:8787/api/hooks/project \
-    -H "Content-Type: application/json" \
-    -d "$PROJECT_JSON" \
-    --connect-timeout 1 --max-time 2 >/dev/null 2>&1 \
-  || SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" "$PY" -c '
-import os, sqlite3
-conn = sqlite3.connect(os.path.expanduser("~/.claude/hooks-state.db"))
-conn.execute(
-    "INSERT INTO project_state (session_id, project_name, updated_at) "
-    "VALUES (?, ?, datetime(\"now\", \"localtime\")) "
-    "ON CONFLICT(session_id) DO UPDATE SET project_name = excluded.project_name, "
-    "updated_at = datetime(\"now\", \"localtime\")",
-    (os.environ["SESSION_ID"], os.environ["PROJECT_NAME"]),
-)
-conn.commit()
-' 2>/dev/null
-
-  # Write per-session project pointer read by find_task_for_cwd. Without this,
-  # /missioncache:save cannot find the task when cwd is the repo root (only when
-  # cwd is under ~/.missioncache/active/<task>/). Format MUST match
-  # missioncache_db.write_session_binding (the owner of the convention);
-  # taskId is the durable identity resolution prefers - omitting it here
-  # would clobber the MCP server's richer binding with a name-only one.
-  SESSION_ID="$SESSION_ID" PROJECT_NAME="$PROJECT_NAME" TASK_ID="$TASK_ID" "$PY" -c '
-import os, json, datetime, pathlib
-projects_dir = pathlib.Path.home() / ".claude" / "hooks" / "state" / "projects"
-projects_dir.mkdir(parents=True, exist_ok=True)
-payload = {
-    "projectName": os.environ["PROJECT_NAME"],
-    "updated": datetime.datetime.now().astimezone().isoformat(),
-    "sessionId": os.environ["SESSION_ID"],
-}
-task_id = os.environ.get("TASK_ID", "").strip()
-if task_id.isdigit():
-    payload["taskId"] = int(task_id)
-(projects_dir / (os.environ["SESSION_ID"] + ".json")).write_text(json.dumps(payload))
-' 2>/dev/null
-fi
-```
-<!-- /claude-code-only -->
-
-Then record initial heartbeat:
-```
-mcp__plugin_missioncache_pm__record_heartbeat(task_id=<id>, directory="<cwd>")
-```
-
-<!-- claude-code-only -->
-**Fork marker stamp (forks only):** when Step 2 found a `parent_digest` AND the shared layer was actually consumed (it was fresh, or you read the parent digest per the fork branch), stamp this session's shared-seen marker with the mtime FROM the digest response. Every value below comes from the `parent_digest` in THIS project's own digest (Step 2), never from the parent's digest: when the parent is itself a fork, its digest carries the grandparent's `parent_digest`, and stamping that would track the wrong file. SKIP this entirely when the parent digest response carried `shared_seen_stamped: true` - the server already stamped a fresher, bytes-coupled value and this bash stamp would overwrite it with an older one. Do not stat the file here - `parent_digest.context_mtime` is coupled to the bytes the digest actually read, and a fresh stat could silently baseline a sibling's newer write. Replace the values, then run:
-
-```bash
-PARENT='<parent name from parent_digest>'
-PARENT_CTX='<parent_digest.context_file>'
-SEEN_MTIME='<parent_digest.context_mtime, verbatim from the digest response>'
-SESSION_ID='<SESSION_ID from Step 1>'
-if [ -n "$SESSION_ID" ] && [ -n "$SEEN_MTIME" ]; then
-  mkdir -p "$HOME/.claude/hooks/state/shared-seen"
-  PY=$(python3 -c "import sys; print(sys.executable)" 2>/dev/null || python -c "import sys; print(sys.executable)" 2>/dev/null || uv python find ">=3.11" 2>/dev/null)
-  [ -z "$PY" ] && echo "missioncache: no Python found (tried python3, python, uv python find) - session binding may be skipped" >&2
-  PARENT="$PARENT" PARENT_CTX="$PARENT_CTX" SEEN_MTIME="$SEEN_MTIME" SESSION_ID="$SESSION_ID" "$PY" -c '
-import json, os, pathlib, datetime
-marker = pathlib.Path.home() / ".claude" / "hooks" / "state" / "shared-seen" / (os.environ["SESSION_ID"] + ".json")
-marker.write_text(json.dumps({
-    "parent": os.environ["PARENT"],
-    "parent_context_path": os.environ["PARENT_CTX"],
-    "seen_mtime": float(os.environ["SEEN_MTIME"]),
-    "seen_at": datetime.datetime.now().astimezone().isoformat(),
-}))
-'
-fi
-```
-
-The marker stamp does not suppress stderr (matching `/missioncache:fork` and `/missioncache:save`): a persistently failing stamp - e.g. a non-float `SEEN_MTIME` - should surface, not silently disable freshness tracking. A single dropped stamp is self-correcting anyway (the next load finds no marker and re-reads the shared layer).
-<!-- /claude-code-only -->
-
-<!-- claude-code-only -->
-### Step 5: Track the Active Checklist Task (when known)
-
-If the user signals which MissionCache checklist task they want to work on
-(either by number like "let's do 54a" or by description that matches a
-``[ ]`` line in tasks.md), call ``set_active_missioncache_tasks`` so the
-statusline ``Task:`` field reflects the current focus.
-
-```
-mcp__plugin_missioncache_pm__set_active_missioncache_tasks(
-    project_name="<project-name>",
-    task_numbers=["54a"],          # or ["56", "57"] for parallel work
-    session_id="<SESSION_ID from Step 1>"
-)
-```
-
-Pass MULTIPLE numbers when the user is genuinely working on multiple
-items in parallel (e.g. ``["54a", "54b"]``). The statusline collapses
-sibling subtasks under their parent automatically. Pointer auto-clears
-on ``update_tasks_file`` when items get marked ``[x]``; call
-``clear_active_missioncache_tasks`` explicitly when focus shifts off-task
-without completing anything.
-
-If the user resumes without naming a specific task, skip this step -
-the field hides cleanly. Do NOT guess or use the first ``[ ]`` line as
-a fallback; misleading data is worse than missing data.
-<!-- /claude-code-only -->
-
-## Example Output
-
-### Selection Table
-
-```
-### This Repo (my-app)
-
-| # | Project           | JIRA      | Last Worked | Time   |
-|---|-------------------|-----------|-------------|--------|
-| 1 | auth-refactor     | PROJ-123  | 2h ago      | 1h 15m |
-| 2 | kafka-consumer-fix| PROJ-124  | 1d ago      | 8h 30m |
-
-### Other Repos
-
-| # | Project              | Repo         | JIRA      | Last Worked | Time   |
-|---|----------------------|--------------|-----------|-------------|--------|
-| 3 | docs-rewrite         | website      | -         | 3h ago      | 2h 45m |
-| 4 | login-rate-limit     | website      | -         | 1d ago      | 5h 10m |
-| 5 | api-gateway          | backend-svc  | PROJ-125  | 2d ago      | 3h 20m |
-
-Which project? (number or name)
-```
-
-Note: Omit the Repo column for "This Repo" group since it's redundant.
-
-### Resume Summary
-
-```
-## Project: kafka-consumer-fix (active, 2h 30m)
-
-**JIRA:** PROJ-12345
-**Progress:** 3/8 tasks complete (37%)
-
-**Waiting on:**
-| What | Who | Since | Gates |
-|------|-----|-------|-------|
-| Broker config review | Dana | 2026-07-02 (stale) | Retry rollout |
-
-**Next Steps:**
-1. Implement retry logic in consumer.py:145
-2. Add unit tests for retry
-
-**Recent activity:** Retry backoff shipped behind a flag; consumer tests still red on the timeout path.
-
-**Health:** context file is 112KB (> 100KB budget)
+**Action items:** <table: ID, What, From, Owner, Due, overdue marked>
+**Waiting on:** <table: What, Who, Since, Gates, stale rows marked>
+**Next Steps:** <numbered, verbatim from the digest>
+**Recent activity:** <one or two lines synthesized from the last three changes>
+**Health:** <warnings on one line>
+**Update:** <only when an update is available>
 
 Ready to continue. What would you like to work on? (say "full context" for the whole file)
 ```
 
-## MCP Tools Used
+Criteria for the fields:
 
-| Tool | Purpose |
-|------|---------|
-| `mcp__plugin_missioncache_pm__list_active_tasks` | List projects with repo prioritization |
-| `mcp__plugin_missioncache_pm__get_task` | Get full project details |
-| `mcp__plugin_missioncache_pm__get_context_digest` | Resume digest of the context file (replaces the full-file read) |
-| `mcp__plugin_missioncache_pm__get_missioncache_files` | Get file paths |
-| `mcp__plugin_missioncache_pm__get_missioncache_progress` | Get checklist progress |
-| `mcp__plugin_missioncache_pm__record_heartbeat` | Start time tracking |
-| `mcp__plugin_missioncache_pm__set_task_repo` | Reassign task to current repo when mismatch detected |
-| `mcp__plugin_missioncache_pm__set_active_missioncache_tasks` | Mark which checklist tasks are in progress (for statusline Task field) |
-| `mcp__plugin_missioncache_pm__clear_active_missioncache_tasks` | Clear the Task field when focus shifts off-task without completing |
+- **Waiting on sits next to Next Steps:** together they answer "what now".
+- **For a fork, say whether the shared layer is up to date** or was changed by a parallel session since this session last read it.
+- **Dashboard:** include `http://localhost:8787/#projects?task=<name>` only when `curl -sf --max-time 1 http://localhost:8787/health` succeeds (or `$MISSIONCACHE_DASHBOARD_URL`).
+- **Update:** read `~/.missioncache/update-check.json` and show its `command` only when `update_available` is true and `checked_at` is under 7 days old. Never fetch anything yourself.
+<!-- claude-code-only -->
+- **PreCompact warning:** when `~/.claude/hooks/state/last-precompact-error.json` exists and its `task_name` is this project or empty, show its `timestamp` and `reason` near the top, because the last automatic snapshot did not save. Then delete the file so the warning shows once.
+<!-- /claude-code-only -->
+
+## During the Session
+
+- When a Waiting-on reply arrives or an action item gets done, act on what it gates and record it at the next `/missioncache:save`. Propose closing an action item before calling `update_action_item(status="done")`.
+- Open the full context file, or one section by its line in the digest's `section_index`, only when the user asks or the task needs it. Older history is in `<name>-journal.md`: grep it, never load it.
+<!-- claude-code-only -->
+- When the user names the checklist task they are on ("let's do 54a"), call `set_active_missioncache_tasks(project_name=..., task_numbers=["54a"], session_id=...)` so the statusline shows it. Pass several numbers for parallel work. Never guess one from the first unchecked box: a wrong task is worse than none. Marking the task done clears it, and `clear_active_missioncache_tasks` clears it when focus moves on.
+<!-- /claude-code-only -->
