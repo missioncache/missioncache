@@ -3399,7 +3399,7 @@ def api_update_check():
     """MissionCache update discovery for the UI banner.
 
     Sync def on purpose: FastAPI runs it in the threadpool, and the check
-    may do network I/O (PyPI, 6h-cached in ~/.missioncache/update-check.json,
+    may do network I/O (PyPI, 1h-cached in ~/.missioncache/update-check.json,
     shared with the statusline and the /missioncache:load notice).
     """
     return update_check.get_update_status()

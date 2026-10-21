@@ -32,7 +32,7 @@ UPDATE_COMMAND = "uvx --refresh missioncache-install@latest --update"
 # MISSIONCACHE_ROOT override reaches this cache too. Stays a module constant
 # because the file is this module's own artifact and a test patches the name.
 CACHE_PATH = MISSIONCACHE_ROOT / "update-check.json"
-CACHE_TTL = 6 * 60 * 60  # seconds; PyPI is CDN-backed, be a polite client
+CACHE_TTL = 60 * 60  # seconds; a release shows within the hour, three PyPI reads an hour
 
 
 def _parse_version(version: str) -> tuple[int, ...]:

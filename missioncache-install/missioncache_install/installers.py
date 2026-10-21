@@ -1380,7 +1380,7 @@ def _invalidate_update_cache() -> None:
     """Drop the shared update-check cache after installs change anything.
 
     The statusline and dashboard serve ~/.missioncache/update-check.json for
-    up to its 6h TTL; without this, a successful update keeps showing the
+    up to its 1h TTL. Without this, a successful update keeps showing the
     pre-update "update available" answer for hours. Deleting forces the next
     render to recompute against what this run just installed. Computed at call
     time (not a module constant) so Path.home() redirection works in tests.

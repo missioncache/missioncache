@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- A new release shows in the statusline and the dashboard within an hour, instead of up to six hours later. (missioncache-dashboard)
+
 ## 2026-10-21
 
 - The reminder to tick finished tasks is one line now, instead of a block listing every unchecked task. (plugin)
