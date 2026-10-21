@@ -23,6 +23,9 @@ import missioncache_dashboard.update_check as uc
 def sandbox(tmp_path, monkeypatch):
     cache = tmp_path / "update-check.json"
     monkeypatch.setattr(uc, "CACHE_PATH", cache)
+    # Keep this machine's own plugin and mcp-missioncache installs out.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.setattr(uc.shutil, "which", lambda name: None)
     return cache
 
 
@@ -230,6 +233,81 @@ class TestEditableInstalls:
         monkeypatch.setattr(uc, "_fetch_latest", lambda pkg, timeout: "1.0.1")
         status = uc.get_update_status()
         assert status["update_available"] is True
+
+
+class TestPluginAndMcp:
+    """The two installs the PyPI loop cannot import: a release that bumps only
+    the plugin or only mcp-missioncache must still show as an update."""
+
+    def _record_plugin(self, tmp_path, plugin_id, version):
+        plugins = tmp_path / "claude" / "plugins"
+        plugins.mkdir(parents=True)
+        (plugins / "installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {plugin_id: [{"scope": "user", "version": version}]}}
+        ))
+
+    def _mcp_on_path(self, tmp_path, monkeypatch, version):
+        venv = tmp_path / "tools" / "mcp-missioncache"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "mcp-missioncache").write_text("#!/bin/sh\n")
+        dist = venv / "lib" / "python3.13" / "site-packages" / f"mcp_missioncache-{version}.dist-info"
+        dist.mkdir(parents=True)
+        (dist / "METADATA").write_text(f"Metadata-Version: 2.1\nName: mcp-missioncache\nVersion: {version}\n")
+        link = tmp_path / "bin" / "mcp-missioncache"
+        link.parent.mkdir()
+        link.symlink_to(venv / "bin" / "mcp-missioncache")
+        monkeypatch.setattr(uc.shutil, "which", lambda name: str(link))
+
+    def test_plugin_behind_its_manifest_flags_update(self, sandbox, tmp_path, monkeypatch):
+        self._record_plugin(tmp_path, uc.PLUGIN_ID, "1.0.40")
+        _install_fakes(monkeypatch, {}, {uc.PLUGIN_KEY: "1.0.41"})
+        status = uc.get_update_status()
+        assert status["update_available"] is True
+        assert status["packages"][uc.PLUGIN_KEY] == {
+            "installed": "1.0.40", "latest": "1.0.41", "outdated": True,
+        }
+
+    def test_local_marketplace_plugin_is_not_checked(self, sandbox, tmp_path, monkeypatch):
+        """missioncache@local is a maintainer checkout: no update applies."""
+        self._record_plugin(tmp_path, "missioncache@local", "1.0.40")
+        _install_fakes(monkeypatch, {}, {uc.PLUGIN_KEY: "1.0.41"})
+        assert uc.get_update_status()["packages"] == {}
+
+    def test_mcp_on_path_behind_pypi_flags_update(self, sandbox, tmp_path, monkeypatch):
+        self._mcp_on_path(tmp_path, monkeypatch, "1.0.42")
+        _install_fakes(monkeypatch, {}, {uc.MCP_DIST: "1.0.43"})
+        status = uc.get_update_status()
+        assert status["update_available"] is True
+        assert status["packages"][uc.MCP_DIST]["installed"] == "1.0.42"
+        assert status["packages"][uc.MCP_DIST]["outdated"] is True
+
+    def test_one_unreachable_host_spares_the_others(self, sandbox, tmp_path, monkeypatch):
+        """GitHub down must not freeze the PyPI answers, and the plugin keeps
+        its last known answer instead of vanishing."""
+        sandbox.write_text(json.dumps({
+            "checked_at": time.time() - uc.CACHE_TTL - 10,
+            "update_available": False,
+            "packages": {uc.PLUGIN_KEY: {"installed": "1.0.40", "latest": "1.0.40", "outdated": False}},
+            "command": uc.UPDATE_COMMAND,
+        }))
+        self._record_plugin(tmp_path, uc.PLUGIN_ID, "1.0.40")
+        _install_fakes(monkeypatch, {"missioncache-db": "1.0.36"}, {})
+
+        def fetch(pkg, timeout):
+            if pkg == uc.PLUGIN_KEY:
+                raise OSError("github unreachable")
+            return "1.0.37"
+
+        monkeypatch.setattr(uc, "_fetch_latest", fetch)
+        status = uc.get_update_status()
+        assert "error" not in status
+        assert status["update_available"] is True
+        assert status["packages"]["missioncache-db"]["latest"] == "1.0.37"
+        assert status["packages"][uc.PLUGIN_KEY]["latest"] == "1.0.40"
+
+    def test_no_mcp_on_path_adds_nothing(self, sandbox, monkeypatch):
+        _install_fakes(monkeypatch, {}, {uc.MCP_DIST: "1.0.43"})
+        assert uc.get_update_status()["packages"] == {}
 
 
 class TestEndpoint:
