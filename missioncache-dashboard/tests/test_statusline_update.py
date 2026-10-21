@@ -20,8 +20,8 @@ def test_upgrade_cell_carries_link_and_label():
     """The assembled cell (mirroring main()'s mc_update block) links the
     label to the changelog."""
     link = mod._osc8_link(
-        "https://missioncache.dev/changelog/", "MissionCache update available"
+        "https://missioncache.dev/changelog/#upgrade", "MissionCache update available"
     )
     cell = f"{mod.COLORS['upgrade']}⬆ {link}{mod.RESET}"
     assert "MissionCache update available" in cell
-    assert "https://missioncache.dev/changelog/" in cell
+    assert "https://missioncache.dev/changelog/#upgrade" in cell

@@ -2217,11 +2217,11 @@ def _run() -> None:
         else:
             line_health.append(f"{ver_color}{ICONS['version']} {ver_link}{RESET}")
     if mc_update and mc_update.get("update_available"):
-        # Zero footprint when current; when a newer MissionCache release is on
-        # PyPI, an upgrade cell linking to the changelog. The exact upgrade
-        # command lives in the dashboard banner and the runbooks.
+        # Zero footprint when current; when a newer MissionCache release is
+        # out, an upgrade cell linking to the upgrade steps on the changelog
+        # page. The dashboard banner carries the command too.
         mc_link = _osc8_link(
-            "https://missioncache.dev/changelog/", "MissionCache update available"
+            "https://missioncache.dev/changelog/#upgrade", "MissionCache update available"
         )
         line_health.append(f"{COLORS['upgrade']}\u2b06 {mc_link}{RESET}")
     for inc in health:

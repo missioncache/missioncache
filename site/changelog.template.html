@@ -86,6 +86,15 @@
   .page-head h1 { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-weight: 600; letter-spacing: -0.02em; font-size: clamp(1.7rem, 4vw, 2.4rem); margin: 14px 0 0; }
   .page-head .lede { color: var(--ink-2); margin: 14px 0 0; max-width: 66ch; }
 
+  /* ---- Upgrade box ---- */
+  .upgrade { scroll-margin-top: 80px; margin: 28px 0 0; padding: 20px 22px; border: 1px solid var(--border-2); border-left: 3px solid var(--signal); border-radius: 12px; background: var(--surface); }
+  .upgrade h2 { font-family: "SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace; font-size: 1.02rem; font-weight: 600; margin: 0 0 12px; }
+  .upgrade p { margin: 12px 0 0; color: var(--ink-2); }
+  .cmd { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--con-bg); border: 1px solid var(--con-border); color: var(--con-ink); }
+  .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 0.88rem; }
+  .cmd button { flex: none; border: 1px solid var(--con-border); background: transparent; color: var(--con-ink); border-radius: 7px; font: 500 0.75rem "SF Mono",ui-monospace,Menlo,monospace; padding: 5px 10px; cursor: pointer; }
+  .cmd button:hover, .cmd button:focus-visible { border-color: var(--signal); outline: none; }
+
   /* ---- Timeline ---- */
   .timeline { position: relative; padding: 44px 0 90px; }
   .release { position: relative; padding-left: 34px; margin-bottom: 46px; }
@@ -172,6 +181,15 @@
   <span class="eyebrow">Changelog</span>
   <h1>Every change, dated and grouped.</h1>
   <p class="lede">Newest first. Click any entry to read the detail.</p>
+
+  <section class="upgrade" id="upgrade" aria-labelledby="upgrade-title">
+    <h2 id="upgrade-title">How to upgrade</h2>
+    <p>With the full install (dashboard, statusline, missioncache-auto), run:</p>
+    <div class="cmd"><code>uvx --refresh missioncache-install@latest --update</code><button type="button" data-copy>Copy</button></div>
+    <p>With the plugin only, run:</p>
+    <div class="cmd"><code>claude plugin update missioncache@missioncache</code><button type="button" data-copy>Copy</button></div>
+    <p>Then restart your Claude Code sessions, and Codex, OpenCode or VSCode if you use them, so they load the new version.</p>
+  </section>
 </div>
 
 <main class="wrap timeline" id="timeline">
@@ -193,6 +211,13 @@
   (function () {
     'use strict';
     var root = document.documentElement;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-copy]'), function (b) {
+      b.addEventListener('click', function () {
+        var text = b.previousElementSibling.textContent;
+        var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, function () {}); }
+      });
+    });
     var btn = document.getElementById('theme');
     if (!btn) return;
     btn.addEventListener('click', function () {

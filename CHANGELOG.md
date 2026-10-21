@@ -10,6 +10,7 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 - A new release shows in the statusline and the dashboard within an hour, instead of up to six hours later. (missioncache-dashboard)
 - The update notice also covers the Claude Code plugin and the MCP server that Codex, OpenCode and VSCode run. (missioncache-dashboard)
+- The changelog page opens with how to upgrade, and the statusline update notice links straight to it. (site, missioncache-dashboard)
 
 ## 2026-10-21
 
