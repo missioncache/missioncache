@@ -1,5 +1,11 @@
 """Tests for the FastMCP application instance (app.py)."""
 
+import asyncio
+
+import pytest
+from mcp.server.mcpserver.exceptions import ToolError
+
+from mcp_missioncache import server
 from mcp_missioncache.app import INSTRUCTIONS, mcp
 
 
@@ -49,3 +55,24 @@ def test_server_instructions_carry_the_context_file_contract():
     assert "recent changes" in lowered
     assert "prepend-only" in lowered
     assert "managed by missioncache" in lowered
+
+
+def test_every_tool_rejects_an_argument_it_does_not_declare():
+    """The schema tells the client, and the server refuses the call itself."""
+    for tool in server.mcp._tool_manager.list_tools():
+        assert tool.parameters.get("additionalProperties") is False, tool.name
+
+
+def test_a_misspelled_argument_fails_instead_of_being_dropped(tmp_path):
+    """``recent_change`` for ``recent_changes`` returned success:true and wrote
+    nothing, and the session took the missing entry for a concurrent write."""
+    ctx = tmp_path / "demo-context.md"
+    ctx.write_text("# demo - Context\n")
+    with pytest.raises(ToolError, match="recent_change"):
+        asyncio.run(
+            server.mcp.call_tool(
+                "update_context_file",
+                {"context_file": str(ctx), "recent_change": "lost entry"},
+            )
+        )
+    assert ctx.read_text() == "# demo - Context\n"

@@ -481,6 +481,21 @@ async def update_context_file(
     """
     try:
         _validate_path(context_file, "context_file", must_be_under=settings.root)
+        # A call carrying no change would still report success and stamp
+        # Last Updated, which reads as a write that never happened.
+        changes = {
+            "next_steps": next_steps, "recent_changes": recent_changes,
+            "key_decisions": key_decisions, "gotchas": gotchas,
+            "key_files": key_files, "waiting_on_add": waiting_on_add,
+            "waiting_on_resolve": waiting_on_resolve,
+            "sections_remove": sections_remove, "bullets_remove": bullets_remove,
+            "imported_event": imported_event, "hub": hub,
+        }
+        if all(v is None for v in changes.values()):
+            raise ValidationError(
+                "nothing to update: pass at least one of " + ", ".join(changes),
+                field="context_file",
+            )
         if imported_event:
             _validate_imported_event(imported_event)
         if hub is not None and not _RELATED_PROJECT_RE.fullmatch(hub.strip()):

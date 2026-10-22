@@ -172,7 +172,7 @@ def test_live_sessions_key_present_with_peers(tmp_path, monkeypatch, peers):
     both branch on its presence - so it needs asserting through the tool."""
     _settings_at(monkeypatch, tmp_path)
     _resolve_to(monkeypatch, "sid-mine")
-    result = _call(_ctx(tmp_path))
+    result = _call(_ctx(tmp_path), next_steps=["a"])
     assert result["live_sessions"][0]["session_id"] == "sid-peer"
 
 
@@ -181,7 +181,7 @@ def test_live_sessions_key_absent_when_no_peers(tmp_path, monkeypatch):
     _settings_at(monkeypatch, tmp_path)
     _resolve_to(monkeypatch, "sid-mine")
     monkeypatch.setattr(missioncache_db, "live_sessions_for_project", lambda *a, **k: [])
-    assert "live_sessions" not in _call(_ctx(tmp_path))
+    assert "live_sessions" not in _call(_ctx(tmp_path), next_steps=["a"])
 
 
 def test_duplicate_event_is_reported_not_claimed(tmp_path, monkeypatch):
@@ -309,3 +309,16 @@ def test_update_context_file_carries_the_lead(monkeypatch, isolated_orbit, sampl
         context_file=str(ctx), next_steps=["1. keep going"],
     ))
     assert result.get("lead_session", {}).get("title") == "missioncache-lead"
+
+
+def test_a_call_that_changes_nothing_is_rejected(tmp_path, monkeypatch):
+    """Only context_file used to return success and stamp Last Updated, so a
+    caller whose real argument was dropped believed it had written."""
+    _settings_at(monkeypatch, tmp_path)
+    ctx = _ctx(tmp_path)
+    before = ctx.read_text()
+    result = _call(ctx)
+    assert result["error"] is True
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "nothing to update" in result["message"]
+    assert ctx.read_text() == before
