@@ -8,10 +8,14 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-23
+
 - A new release shows in the statusline and the dashboard within an hour, instead of up to six hours later. (missioncache-dashboard)
 - The update notice also covers the Claude Code plugin and the MCP server that Codex, OpenCode and VSCode run. (missioncache-dashboard)
 - The changelog page opens with how to upgrade, and the statusline update notice links straight to it. (site, missioncache-dashboard)
 - A misspelled tool argument now returns an error instead of a success that wrote nothing, which looked like a save lost to a parallel session. (mcp-missioncache)
+
+Published package versions: mcp-missioncache 1.0.44, missioncache-dashboard 1.0.27. Claude Code plugin 1.0.42. missioncache-db, missioncache-auto and missioncache-install are unchanged.
 
 ## 2026-10-21
 
