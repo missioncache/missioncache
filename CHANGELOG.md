@@ -8,7 +8,12 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-24
+
 - A statusline addon can flag its cell with a red E and make it clickable, by printing `"alert": true` and a `"link"`. (missioncache-dashboard)
+- A link cut off at the end of a narrow statusline line no longer leaves the ellipsis clickable. (missioncache-dashboard)
+
+Published package versions: missioncache-dashboard 1.0.28. Claude Code plugin 1.0.43. missioncache-db, mcp-missioncache, missioncache-auto and missioncache-install are unchanged.
 
 ## 2026-10-23
 
