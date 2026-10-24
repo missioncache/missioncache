@@ -643,6 +643,18 @@ class TestTruncateToWidth:
     def test_zero_width_returns_empty(self):
         assert _truncate_to_width("anything", 0) == ""
 
+    def test_cut_inside_a_link_closes_it(self):
+        line = "a \x1b]8;;https://h/x\x1b\\long linked text\x1b]8;;\x1b\\ tail"
+        out = _truncate_to_width(line, 8)
+        assert out.endswith("\x1b]8;;\x1b\\…" + RESET)
+        assert out.count("\x1b]8;;\x1b\\") == 1
+
+    def test_cut_after_a_closed_link_adds_no_closer(self):
+        line = "\x1b]8;;https://h/x\x1b\\ab\x1b]8;;\x1b\\ plain text that is long"
+        out = _truncate_to_width(line, 8)
+        assert out.count("\x1b]8;;\x1b\\") == 1
+        assert out.endswith(" plai…" + RESET)
+
 
 # ============ _format_last_action (session_state last-prompt formatting) ============
 

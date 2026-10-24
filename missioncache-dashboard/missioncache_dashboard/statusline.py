@@ -1627,7 +1627,9 @@ def _truncate_to_width(line: str, max_width: int, line_width: int | None = None)
     ANSI/OSC escape sequences pass through without consuming width; visible
     cells are counted with the same emoji/CJK rules as ``display_width``. When
     the line is cut, a single-cell ellipsis is appended and the line is reset
-    so nothing wraps past ``max_width`` and no color bleeds after the cut.
+    so nothing wraps past ``max_width`` and no color bleeds after the cut. A
+    hyperlink open at the cut is closed first, since the SGR reset does not
+    end it and the ellipsis would otherwise stay clickable.
 
     ``line_width`` lets a caller that already knows ``display_width(line)``
     (e.g. ``_pad_line``) pass it in, skipping the redundant full-string pass
@@ -1640,12 +1642,19 @@ def _truncate_to_width(line: str, max_width: int, line_width: int | None = None)
     limit = max_width - 1  # leave one cell for the ellipsis
     out: list[str] = []
     width = 0
+    link_open = False
     i = 0
     n = len(line)
     while i < n:
         m = _ANSI_RE.match(line, i)
         if m:
-            out.append(m.group())
+            seq = m.group()
+            if seq.startswith(f"{ESC}]8;"):
+                # ESC ] 8 ; params ; URL ST - an opener carries a URL, the
+                # closer an empty one.
+                body = seq[4:-1] if seq.endswith("\x07") else seq[4:-2]
+                link_open = bool(body.partition(";")[2])
+            out.append(seq)
             i = m.end()
             continue
         ch = line[i]
@@ -1660,6 +1669,8 @@ def _truncate_to_width(line: str, max_width: int, line_width: int | None = None)
         out.append(ch)
         width += w
         i += 1
+    if link_open:
+        out.append(f"{ESC}]8;;{ESC}\\")
     return "".join(out) + "…" + RESET
 
 
