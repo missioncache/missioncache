@@ -88,7 +88,7 @@ This one shows a number a scheduled job writes to a file:
 - `ttl`: seconds the last result is reused, 5 or more. `timeout`: 1 to 30 seconds.
 - `placement` (optional, own line by default): `"row"` gives the addon its own line, shared with addons of the same `group`. `"append"` adds the cell to the built-in line named in `target`: `location`, `project`, `metrics`, `session`, `context`, `usage`, `codex` or `vitals`.
 
-The command prints plain text, or JSON like `{"value": "3", "color": "health_ok"}` that can also set `label`, `icon` or `"hidden": true`. An addon that fails or prints nothing leaves its line blank. Keep it fast. For slow data, have a cron or launchd job write a file and read it, as above.
+The command prints plain text, or JSON like `{"value": "3", "color": "health_ok"}` that can also set `label`, `icon` or `"hidden": true`. `"alert": true` adds a red E after the cell, for a value you should not trust right now, such as data that stopped updating. `"link"` (an http, https or file URL) makes the E clickable, or the value when there is no alert. An addon that fails or prints nothing leaves its line blank. Keep it fast. For slow data, have a cron or launchd job write a file and read it, as above.
 
 ## On Windows
 

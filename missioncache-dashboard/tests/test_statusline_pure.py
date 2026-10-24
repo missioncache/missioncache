@@ -906,6 +906,29 @@ class TestParseAddonOutput:
         out = statusline._parse_addon_output('{not json')
         assert out == {"value": "{not json"}
 
+    def test_alert_and_link_kept(self):
+        out = statusline._parse_addon_output(
+            '{"value":"v","alert":true,"link":"file:///tmp/x.log"}'
+        )
+        assert out == {"value": "v", "alert": True, "link": "file:///tmp/x.log"}
+
+    def test_alert_must_be_true(self):
+        # A truthy non-bool ("true", 1) is not an alert.
+        assert "alert" not in statusline._parse_addon_output('{"value":"v","alert":"true"}')
+        assert "alert" not in statusline._parse_addon_output('{"value":"v","alert":1}')
+
+    def test_link_with_other_scheme_dropped(self):
+        for url in ("javascript:alert(1)", "data:text/html,x", "ftp://h/x", "not a url"):
+            out = statusline._parse_addon_output(json.dumps({"value": "v", "link": url}))
+            assert "link" not in out, url
+
+    def test_link_cannot_carry_an_escape(self):
+        # An ESC that would end the OSC 8 early is stripped before the URL check.
+        out = statusline._parse_addon_output(
+            json.dumps({"value": "v", "link": "https://h/x\u001b\\\u001b[31m"})
+        )
+        assert "\x1b" not in out.get("link", "")
+
 
 def _addon(**kw):
     base = {"id": "a", "enabled": True, "label": "Lbl", "icon": ">",
@@ -952,6 +975,27 @@ class TestRenderAddonCell:
         # Exactly the two framing escapes (the color prefix + RESET), no third.
         assert cell.count("\x1b") == 2
         assert cell.startswith(COLORS["version"]) and cell.endswith(RESET)
+
+    def test_alert_appends_red_marker(self):
+        cell = statusline._render_addon_cell(_addon(), {"value": "v", "alert": True})
+        assert cell.endswith(" " + statusline.ADDON_ALERT_MARK)
+        assert "\x1b]8;;" not in cell
+        # The marker is one visible column, plus the space before it.
+        plain = statusline._render_addon_cell(_addon(), {"value": "v"})
+        assert statusline.display_width(cell) == statusline.display_width(plain) + 2
+
+    def test_alert_link_wraps_the_marker_only(self):
+        cell = statusline._render_addon_cell(
+            _addon(), {"value": "v", "alert": True, "link": "file:///tmp/x.log"}
+        )
+        assert cell.endswith(
+            "\x1b]8;;file:///tmp/x.log\x1b\\" + statusline.ADDON_ALERT_MARK + "\x1b]8;;\x1b\\"
+        )
+        assert "Lbl: v" + RESET in cell
+
+    def test_link_without_alert_wraps_the_value(self):
+        cell = statusline._render_addon_cell(_addon(), {"value": "v", "link": "https://h/x"})
+        assert "Lbl: \x1b]8;;https://h/x\x1b\\v\x1b]8;;\x1b\\" in cell
 
 
 class TestLoadAddons:

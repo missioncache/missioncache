@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- A statusline addon can flag its cell with a red E and make it clickable, by printing `"alert": true` and a `"link"`. (missioncache-dashboard)
+
 ## 2026-10-23
 
 - A new release shows in the statusline and the dashboard within an hour, instead of up to six hours later. (missioncache-dashboard)

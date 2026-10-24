@@ -1756,7 +1756,12 @@ ADDON_DEFAULT_COLOR = "version"
 # used in the cache filename.
 _ADDON_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
 _ADDON_CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # C0 + DEL + C1 (\x9b is a bare CSI)
-_ADDON_OVERRIDE_KEYS = ("value", "label", "icon", "color", "hidden")
+_ADDON_OVERRIDE_KEYS = ("value", "label", "icon", "color", "hidden", "alert", "link")
+# Schemes an addon `link` may open. Anything else (javascript:, data:, ...) is
+# dropped rather than handed to the terminal.
+_ADDON_LINK_RE = re.compile(r"^(https?|file)://\S+\Z")
+# The alert marker: a bold white E on red, built here so no addon emits ANSI.
+ADDON_ALERT_MARK = f"{ESC}[1;97;41mE{RESET}"
 
 # Friendly append-target name -> the internal line list it injects a cell into.
 _ADDON_APPEND_TARGETS = {
@@ -1868,9 +1873,11 @@ def _parse_addon_output(raw: str | None) -> dict | None:
     """Command stdout -> a normalized data dict, or None when empty.
 
     Plain text becomes {"value": text}. A JSON object is read as overrides,
-    keeping only value/label/icon/color/hidden. A JSON non-object (number,
-    array, string) is treated as plain text. String fields are stripped of
-    control chars so a command cannot inject ANSI that breaks the grid.
+    keeping only value/label/icon/color/hidden/alert/link. A JSON non-object
+    (number, array, string) is treated as plain text. String fields are
+    stripped of control chars so a command cannot inject ANSI that breaks the
+    grid. `link` survives only as an http(s) or file URL, `alert` only as
+    `true`: the statusline draws both itself.
     """
     if raw is None:
         return None
@@ -1887,9 +1894,13 @@ def _parse_addon_output(raw: str | None) -> dict | None:
             data = None
     if data is None:
         data = {"value": text}
-    for k in ("value", "label", "icon", "color"):
+    for k in ("value", "label", "icon", "color", "link"):
         if isinstance(data.get(k), str):
             data[k] = _ADDON_CTRL_RE.sub("", data[k])
+    if not (isinstance(data.get("link"), str) and _ADDON_LINK_RE.match(data["link"])):
+        data.pop("link", None)
+    if data.get("alert") is not True:
+        data.pop("alert", None)
     return data
 
 
@@ -1905,7 +1916,19 @@ def _render_addon_cell(addon: dict, data: dict | None) -> str | None:
     color = data.get("color")
     if color not in ADDON_COLOR_ALLOW:
         color = addon["color"]
-    return _item(COLORS[color], icon, label, value)
+    link = data.get("link")
+    alert = data.get("alert")
+    if link and not alert:
+        value = _osc8_link(link, value)
+    cell = _item(COLORS[color], icon, label, value)
+    if not alert:
+        return cell
+    # The link goes on the marker, so the click target is the thing that asks
+    # to be clicked. _osc8_link would strip the marker's SGR codes.
+    mark = ADDON_ALERT_MARK
+    if link:
+        mark = f"{ESC}]8;;{link}{ESC}\\{mark}{ESC}]8;;{ESC}\\"
+    return f"{cell} {mark}"
 
 
 def get_addon_value(addon: dict) -> dict | None:

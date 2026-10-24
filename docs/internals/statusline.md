@@ -263,6 +263,8 @@ Fields:
 
 **Command output.** Plain text becomes the cell value. To control appearance, print a JSON object with any of `value`, `label`, `icon`, `color`, `hidden`, e.g. `{"value": "3", "color": "health_ok"}`. A missing or empty value, or `"hidden": true`, omits the cell (its line stays blank so the fixed height holds). String output is stripped of control characters, so a command cannot inject ANSI that breaks the grid.
 
+**Alert and link.** Two output keys are drawn by the statusline itself, never by the addon, so the control-char strip still covers everything an addon prints. `"alert": true` (the boolean only) appends `ADDON_ALERT_MARK`, a bold white E on red. `"link"` must match `^(https?|file)://\S+` after the strip, or it is dropped. With an alert the OSC 8 link wraps the marker, otherwise it wraps the value.
+
 **Heavy data sources.** The command runs on the render path (bounded by `timeout` plus the cache), so keep it fast. For slow or multi-source data, have a separate scheduled job (cron or launchd) write a small data file and point the addon at it, e.g. `"command": ["/bin/cat", "/absolute/path/data.json"]` where the file already holds the JSON output shape above.
 
 **Safety.** An addon that errors, times out, or returns nothing renders a blank line and never crashes the statusline. One bad addon entry is skipped, and malformed config disables the feature rather than breaking the render. The dashboard endpoint that sets addon commands is localhost-only.
