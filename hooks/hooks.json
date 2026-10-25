@@ -50,6 +50,17 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--quiet", "--no-project", "--frozen", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py"]
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

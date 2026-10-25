@@ -216,8 +216,8 @@ def write_session_pid(session_id: str) -> None:
     parallel-session warning.
 
     Best-effort: when the session process can't be resolved (e.g. Claude
-    Desktop's process shape), nothing is written and ``_session_is_alive``
-    later returns None for this sid, falling back to the mtime heuristic. The
+    Desktop's process shape), no record is left, an old one is removed, and
+    ``_session_is_alive`` later returns None for this sid, falling back to the mtime heuristic. The
     start time is recorded alongside the pid so a recycled pid (reused by an
     unrelated process after the session exits) is detected on read.
 
@@ -228,15 +228,20 @@ def write_session_pid(session_id: str) -> None:
     """
     if not _is_valid_session_id(session_id):
         return
-    pid = _resolve_session_pid()
-    if pid is None:
-        return
-
     from missioncache_db import (  # type: ignore[import-not-found]
         atomic_write_json,
         proc,
         session_pid_path,
     )
+
+    pid = _resolve_session_pid()
+    if pid is None:
+        # A resume from another launcher (Claude Desktop) keeps the session
+        # id. The record an earlier CLI process left would name a pid that
+        # dies on its own schedule, so the session would read as closed
+        # while it runs.
+        session_pid_path(session_id).unlink(missing_ok=True)
+        return
 
     atomic_write_json(
         session_pid_path(session_id),
@@ -613,6 +618,14 @@ def main():
         # _detect_parallel_sessions uses to avoid warning on a serial handoff
         # (e.g. /clear then relaunch in the same cwd).
         write_session_pid(session_id)
+        # After the pid record, which the resume row copies. A resume keeps
+        # the session id, so this also reopens a row that was closed.
+        try:
+            from missioncache_db import resume_sessions  # type: ignore[import-not-found]
+
+            resume_sessions.hook_record(session_id, os.getcwd(), transcript_path, start=True)
+        except Exception:
+            pass
         # Detect other sessions whose transcripts in this cwd were touched
         # in the last few minutes, to warn about parallel work in the same
         # codebase (statusline confusion, git conflicts, heartbeat

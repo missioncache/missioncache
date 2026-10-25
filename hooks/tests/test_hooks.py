@@ -3555,3 +3555,130 @@ class TestLeadSessionStartReminder:
         missioncache_db.set_lead_session("sid-lead")
         assert "## Lead session" not in self._run(monkeypatch, capsys, tmp_path, "sid-lead", "startup")
         assert "## Lead session" not in self._run(monkeypatch, capsys, tmp_path, "sid-other", "compact")
+
+
+# ── resume lists: the hooks that record and close a session ──────────────
+
+
+class TestResumeListHooks:
+    """Spec source: the approved session-resume plan (resume_sessions module
+    docstring): UserPromptSubmit and SessionStart record a session as seen on
+    every prompt, also when the title hook has nothing to emit, and SessionEnd
+    closes it, placing a project session in Saved. No hook ever raises."""
+
+    @staticmethod
+    def _redirect(monkeypatch, home: Path):
+        import missioncache_db  # type: ignore[import-not-found]
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        db_path = home / ".claude" / "hooks-state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", db_path)
+        monkeypatch.setattr(missioncache_db, "MISSIONCACHE_ROOT", home / ".missioncache")
+        monkeypatch.setattr(missioncache_db, "DB_PATH", home / ".missioncache" / "tasks.db")
+
+    @staticmethod
+    def _bind(home: Path, session_id: str, project: str) -> None:
+        import sqlite3 as _sqlite3
+
+        from missioncache_db import init_hooks_state_db_schema  # type: ignore[import-not-found]
+
+        conn = _sqlite3.connect(home / ".claude" / "hooks-state.db")
+        init_hooks_state_db_schema(conn)
+        conn.execute("INSERT INTO project_state (session_id, project_name) VALUES (?, ?)", (session_id, project))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def _row(session_id: str):
+        from missioncache_db import resume_sessions  # type: ignore[import-not-found]
+
+        conn = resume_sessions.hook_connect()
+        try:
+            return resume_sessions.get_session(conn, session_id)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _run(monkeypatch, module: str, payload: dict) -> None:
+        import importlib
+
+        mod = importlib.import_module(f"hooks.{module}")
+        importlib.reload(mod)
+        monkeypatch.setattr(sys, "stdin", StringIO(json.dumps(payload)))
+        mod.main()
+
+    def test_every_prompt_records_the_session_even_when_no_title_is_emitted(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        self._redirect(monkeypatch, tmp_path)
+        payload = {"session_id": "sid-a", "prompt": "hi", "cwd": "/work/repo"}
+        self._run(monkeypatch, "session_title", payload)
+        assert capsys.readouterr().out == ""  # unbound: nothing to emit
+        row = self._row("sid-a")
+        assert row is not None and row["open"] is True and row["cwd"] == "/work/repo"
+
+    def test_a_subagent_prompt_records_nothing(self, tmp_path, monkeypatch):
+        self._redirect(monkeypatch, tmp_path)
+        self._run(monkeypatch, "session_title", {"session_id": "sid-a", "agent_id": "x", "cwd": "/w"})
+        assert self._row("sid-a") is None
+
+    def test_the_prompt_hook_names_the_row_after_the_title_it_just_wrote(self, tmp_path, monkeypatch):
+        self._redirect(monkeypatch, tmp_path)
+        self._bind(tmp_path, "sid-a", "demo-proj")
+        self._run(monkeypatch, "session_title", {"session_id": "sid-a", "prompt": "hi", "cwd": "/work/repo"})
+        row = self._row("sid-a")
+        assert row["mc_title"] == "demo-proj" and row["name"] == "demo-proj"
+
+    def test_session_start_records_the_session_and_drops_a_stale_pid(self, tmp_path, monkeypatch):
+        """A resume from a launcher the hook cannot resolve keeps the id: the
+        old pid record goes, and the row stops pointing at the old process."""
+        import missioncache_db  # type: ignore[import-not-found]
+        from missioncache_db import resume_sessions  # type: ignore[import-not-found]
+
+        self._redirect(monkeypatch, tmp_path)
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        pid_file = missioncache_db.session_pid_path("sid-a")
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(json.dumps({"sessionId": "sid-a", "pid": 999999, "startTime": "T0"}))
+        conn = resume_sessions.hook_connect()
+        resume_sessions.record_seen(conn, "sid-a", str(cwd), None, start=True)
+        conn.close()
+        assert self._row("sid-a")["pid"] == 999999
+
+        monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+        _patch_stdin_payload(monkeypatch, {"session_id": "sid-a", "source": "resume"})
+        import importlib
+
+        mod = importlib.reload(importlib.import_module("hooks.session_start"))
+        monkeypatch.setattr(mod, "_resolve_session_pid", lambda: None)
+        mock_db = MagicMock()
+        mock_db.find_task_for_cwd.return_value = None
+        monkeypatch.setattr(missioncache_db, "TaskDB", lambda: mock_db)
+        mod.main()
+        assert not pid_file.exists()
+        row = self._row("sid-a")
+        assert row["open"] is True and row["pid"] is None and row["cwd"] == str(cwd)
+
+    def test_session_end_closes_a_project_session_into_saved(self, tmp_path, monkeypatch):
+        self._redirect(monkeypatch, tmp_path)
+        self._bind(tmp_path, "sid-a", "demo-proj")
+        self._run(
+            monkeypatch,
+            "session_end",
+            {"session_id": "sid-a", "cwd": "/work/repo", "reason": "prompt_input_exit"},
+        )
+        row = self._row("sid-a")
+        assert row["open"] is False
+        assert row["list"] == "saved"
+        assert row["close_reason"] == "prompt_input_exit"
+
+    def test_session_end_never_raises_on_bad_input(self, tmp_path, monkeypatch):
+        self._redirect(monkeypatch, tmp_path)
+        for raw in ("", "not json", "[]", json.dumps({"session_id": "../etc"})):
+            monkeypatch.setattr(sys, "stdin", StringIO(raw))
+            import hooks.session_end as mod
+
+            mod.main()

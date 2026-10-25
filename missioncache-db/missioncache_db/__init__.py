@@ -16,7 +16,7 @@ Usage:
     python missioncache_db.py heartbeat-auto            # Auto-detect task from cwd
     python missioncache_db.py process-heartbeats        # Aggregate heartbeats into sessions
     python missioncache_db.py task-time <task_id> [period]  # Get time spent
-    python missioncache_db.py prune [days]              # Prune old completed tasks and events older than 90 days
+    python missioncache_db.py prune [days]              # Prune old completed tasks, events older than 90 days, and dead resume entries
     python missioncache_db.py prune-sessions [--days N] [--dry-run]  # Delete state of sessions that are gone
     python missioncache_db.py complete-task <task_id>   # Mark task as completed
     python missioncache_db.py reopen-task <task_id>     # Reopen a completed task
@@ -73,6 +73,13 @@ Event log (what the write tools changed, newest first):
     python missioncache_db.py events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]
     python missioncache_db.py events prune [--days N]   # Delete events older than N days (default 90)
     python missioncache_db.py events clear <project>    # Delete one project's event history
+
+Resume lists (closed Claude Code sessions, ready to come back to):
+    python missioncache_db.py resume list [--saved|--closed] [--search Q] [--json]  # Saved first, then Closed (newest 500)
+    python missioncache_db.py resume run <ref>          # cd to the session's folder and resume it (id, 6+ char prefix, or name)
+    python missioncache_db.py resume command <ref>      # Print the command instead of running it
+    python missioncache_db.py resume keep|forget <ref>  # Move a Closed session to Saved, or delete the entry
+    python missioncache_db.py resume rename <ref> [<name>]  # Name the entry yourself (no name resets it)
 
 Calendar / agenda:
     python missioncache_db.py agenda [--date today|tomorrow|YYYY-MM-DD] [--json] [--no-cache] [--source NAME]  # Today's calendar from the configured sources
@@ -447,16 +454,21 @@ def session_is_alive(session_id: str) -> Optional[bool]:
         return None
     if not isinstance(data, dict):
         return None
-    pid = data.get("pid")
+    return pid_alive(data.get("pid"), data.get("startTime"))
+
+
+def pid_alive(pid: object, start_token: object = None) -> Optional[bool]:
+    """Whether ``pid`` still runs the process that was recorded, with the
+    same True / False / None meaning as ``session_is_alive``. A recorded
+    start token that no longer matches means the pid was recycled."""
     if not isinstance(pid, int) or pid <= 1:
         return None
     alive = proc.process_alive(pid)
     if alive is not True:
         return alive
-    recorded_start = data.get("startTime")
-    if recorded_start:
+    if start_token:
         current_start = proc.process_start_token(pid)
-        if current_start is not None and current_start != recorded_start:
+        if current_start is not None and current_start != start_token:
             return False  # pid was recycled by a different process
     return True
 
@@ -1738,6 +1750,37 @@ CREATE INDEX IF NOT EXISTS idx_plans_task_id ON plans(task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_exec_plan_agent ON agent_executions(plan_id, agent_id);
 """
 
+# Kept apart from SCHEMA_SQL because the hooks create this one table on their
+# own short-timeout connection (resume_sessions.hook_connect). A column added
+# later needs a default or must allow NULL: resume_sessions.migrate adds it to
+# an existing table with ALTER TABLE.
+RESUME_SESSIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS resume_sessions (
+    session_id TEXT PRIMARY KEY,
+    cwd TEXT NOT NULL,
+    transcript_path TEXT,
+    project_name TEXT,
+    mc_title TEXT,
+    ai_title TEXT,
+    custom_title TEXT,
+    title_offset INTEGER NOT NULL DEFAULT 0,
+    auto_name TEXT NOT NULL,
+    custom_name TEXT,
+    pid INTEGER,
+    pid_start TEXT,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    saved INTEGER NOT NULL DEFAULT 0,
+    saved_at TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    closed_at TEXT,
+    close_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_resume_saved_closed ON resume_sessions(saved, closed_at);
+CREATE INDEX IF NOT EXISTS idx_resume_project_title ON resume_sessions(project_name, mc_title);
+"""
+SCHEMA_SQL += RESUME_SESSIONS_SCHEMA
+
 
 # =============================================================================
 # Data Classes
@@ -2062,6 +2105,9 @@ class TaskDB:
             conn.execute("ALTER TABLE tasks ADD COLUMN category TEXT")
         if "due_date" not in cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
+        from missioncache_db import resume_sessions
+
+        resume_sessions.migrate(conn)
 
     def initialize(self) -> None:
         """Initialize the database schema and default config."""
@@ -6042,6 +6088,11 @@ def main():
             from missioncache_db import events
 
             print(f"Deleted {events.prune_events(db)} events older than {events.DEFAULT_RETENTION_DAYS} days")
+            from missioncache_db import resume_sessions
+
+            with db.connection() as conn:
+                resume_sessions.reconcile(conn)
+            print("Cleaned the resume lists")
 
         elif command == "prune-sessions":
             usage = "Usage: missioncache_db.py prune-sessions [--days N] [--dry-run]"
@@ -6945,6 +6996,100 @@ def main():
                     sys.exit(1)
             except ValueError as e:
                 print(f"Error: {e}\n{usage}")
+                sys.exit(1)
+
+        elif command == "resume":
+            import shutil
+            import subprocess
+
+            from missioncache_db import resume_sessions
+
+            usage = (
+                "Usage: missioncache-db resume list [--saved|--closed] [--search Q] [--json]\n"
+                "       missioncache-db resume run <ref>\n"
+                "       missioncache-db resume command <ref>\n"
+                "       missioncache-db resume keep|forget <ref>\n"
+                "       missioncache-db resume rename <ref> [<name>]\n"
+                "A <ref> is a session id, an id prefix of 6+ characters, or a name."
+            )
+            args = sys.argv[2:]
+            sub = args.pop(0) if args else "list"
+
+            def _one(ref: str) -> Dict[str, Any]:
+                with db.connection() as conn:
+                    rows = resume_sessions.find(conn, ref)
+                if not rows:
+                    raise ValueError(f"no saved or closed session matches {ref!r}")
+                if len(rows) > 1:
+                    lines = "\n".join(f"  {r['session_id']}  {r['name']}  ({r['list']})" for r in rows)
+                    raise ValueError(f"{ref!r} matches {len(rows)} sessions, use an id:\n{lines}")
+                return rows[0]
+
+            try:
+                if sub == "list":
+                    as_json = "--json" in args
+                    if as_json:
+                        args.remove("--json")
+                    which = "all"
+                    for flag, name in (("--saved", "saved"), ("--closed", "closed")):
+                        if flag in args:
+                            args.remove(flag)
+                            which = name
+                    query = _pop_flag(args, "--search")
+                    if args:
+                        raise ValueError(f"unknown argument(s): {' '.join(args)}")
+                    with db.connection() as conn:
+                        rows = resume_sessions.list_sessions(conn, which, query)
+                    if as_json:
+                        print(json.dumps(rows, indent=2))
+                    elif not rows:
+                        print("No saved or closed sessions")
+                    else:
+                        for r in rows:
+                            when = r["closed_at"] or "open"
+                            project = f"  [{r['project_name']}]" if r["project_name"] else ""
+                            gone = "  (transcript gone)" if r["transcript_gone"] else ""
+                            print(f"{r['list']:<6}  {when}  {r['session_id'][:8]}  {r['name']}{project}{gone}")
+                elif sub in ("run", "command") and len(args) == 1:
+                    row = _one(args[0])
+                    if row["open"]:
+                        raise ValueError(f"{row['name']} is still open in another terminal")
+                    if not row["argv"]:
+                        raise ValueError(f"{row['name']} cannot be resumed: its transcript is gone")
+                    if sub == "command":
+                        print(row["command"])
+                    else:
+                        if not os.path.isdir(row["cwd"]):
+                            raise ValueError(f"its directory no longer exists: {row['cwd']}")
+                        claude = shutil.which(row["argv"][0])
+                        if not claude:
+                            raise ValueError("claude is not on PATH")
+                        # exec replaces this process, so the finally that
+                        # closes the database would never run.
+                        db.close()
+                        os.chdir(row["cwd"])
+                        if os.name == "nt":
+                            # Windows has no real exec: os.execv starts a new
+                            # process and hands the prompt back to the shell
+                            # at once, so wait for claude instead.
+                            sys.exit(subprocess.run([claude, *row["argv"][1:]]).returncode)
+                        os.execv(claude, [claude, *row["argv"][1:]])
+                elif sub in ("keep", "forget") and len(args) == 1:
+                    row = _one(args[0])
+                    action = {"keep": resume_sessions.keep, "forget": resume_sessions.forget}[sub]
+                    with db.connection() as conn:
+                        action(conn, row["session_id"])
+                    print(f"{'Kept' if sub == 'keep' else 'Forgot'} {row['name']}")
+                elif sub == "rename" and len(args) in (1, 2):
+                    row = _one(args[0])
+                    with db.connection() as conn:
+                        resume_sessions.rename(conn, row["session_id"], args[1] if len(args) == 2 else "")
+                        print(f"Renamed to {resume_sessions.get_session(conn, row['session_id'])['name']}")
+                else:
+                    print(usage)
+                    sys.exit(1)
+            except ValueError as e:
+                print(f"Error: {e}")
                 sys.exit(1)
 
         elif command == "lead":

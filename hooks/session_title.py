@@ -213,6 +213,19 @@ def main() -> None:
     if not session_id or not isinstance(session_id, str):
         return
 
+    _apply_title(data, session_id)
+    # Every prompt marks the session as seen in the resume lists. Here, after
+    # the title is written, because the row is named after it, and because
+    # UserPromptSubmit hooks run in parallel so no other hook sees the title.
+    try:
+        from missioncache_db import resume_sessions  # type: ignore[import-not-found]
+
+        resume_sessions.hook_record(session_id, data.get("cwd"), data.get("transcript_path"))
+    except Exception:
+        pass
+
+
+def _apply_title(data: dict, session_id: str) -> None:
     try:
         from missioncache_db import write_session_title  # type: ignore[import-not-found]
 

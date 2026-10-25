@@ -3836,6 +3836,69 @@ def focus_lead_session(payload: LeadFocusPayload):
     return lead_board.focus_terminal(payload.session_id)
 
 
+def _resume_not_found() -> HTTPException:
+    return HTTPException(status_code=404, detail={"error": True, "code": "NOT_FOUND", "message": "No such session in the resume lists."})
+
+
+@app.get("/api/resume")
+def get_resume_sessions(list: str = "all", q: str | None = None):
+    """The resume lists: Saved first, then Closed, each row with its derived
+    resume command. Sync ``def``: reading closes sessions whose process is
+    gone, which checks pids."""
+    from missioncache_db import resume_sessions
+
+    if list not in resume_sessions.LISTS:
+        raise HTTPException(status_code=400, detail={"error": True, "code": "BAD_LIST", "message": f"list must be one of {', '.join(resume_sessions.LISTS)}"})
+    with get_sqlite_db().connection() as conn:
+        return {"sessions": resume_sessions.list_sessions(conn, list, q)}
+
+
+class ResumeRenamePayload(BaseModel):
+    name: str = ""
+
+
+@app.post("/api/resume/{session_id}/rename")
+def rename_resume_session(session_id: str, payload: ResumeRenamePayload, request: Request):
+    """Name an entry by hand. An empty name goes back to the automatic one."""
+    from missioncache_db import _is_valid_session_id, resume_sessions
+
+    _require_same_origin(request)
+    if not _is_valid_session_id(session_id):
+        raise _resume_not_found()
+    with get_sqlite_db().connection() as conn:
+        try:
+            changed = resume_sessions.rename(conn, session_id, payload.name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail={"error": True, "code": "BAD_NAME", "message": str(e)})
+        if not changed:
+            raise _resume_not_found()
+        return {"success": True, "session": resume_sessions.get_session(conn, session_id)}
+
+
+@app.post("/api/resume/{session_id}/{action}")
+def act_on_resume_session(session_id: str, action: str, request: Request):
+    """Keep, forget, pin or unpin one entry. These carry no body, so CORS
+    preflight never runs for them, and the same-origin check is what stops a
+    page on another site from sending them."""
+    from missioncache_db import _is_valid_session_id, resume_sessions
+
+    _require_same_origin(request)
+    actions = {
+        "keep": resume_sessions.keep,
+        "forget": resume_sessions.forget,
+        "pin": lambda conn, sid: resume_sessions.set_pinned(conn, sid, True),
+        "unpin": lambda conn, sid: resume_sessions.set_pinned(conn, sid, False),
+    }
+    if action not in actions:
+        raise HTTPException(status_code=404, detail={"error": True, "code": "NOT_FOUND", "message": f"Unknown action {action!r}."})
+    if not _is_valid_session_id(session_id):
+        raise _resume_not_found()
+    with get_sqlite_db().connection() as conn:
+        if not actions[action](conn, session_id):
+            raise _resume_not_found()
+        return {"success": True, "session": resume_sessions.get_session(conn, session_id)}
+
+
 @app.get("/api/agenda")
 def get_agenda(date: str | None = None):
     """Today's calendar, or ``date`` (YYYY-MM-DD). Never 500s.

@@ -246,12 +246,14 @@
 
         /* Light theme: Task Detail Modal */
         [data-theme="light"] .project-page-tabs .tab-btn,
-        [data-theme="light"] .settings-tabs .tab-btn {
+        [data-theme="light"] .settings-tabs .tab-btn,
+        [data-theme="light"] .rs-tabs .tab-btn {
             color: #555570;
         }
 
         [data-theme="light"] .project-page-tabs .tab-btn:hover,
-        [data-theme="light"] .settings-tabs .tab-btn:hover {
+        [data-theme="light"] .settings-tabs .tab-btn:hover,
+        [data-theme="light"] .rs-tabs .tab-btn:hover {
             background: rgba(0, 0, 0, 0.06);
             color: #1a1a2e;
         }
@@ -2565,6 +2567,45 @@
         /* ============================================
            Empty State - Elegant Placeholder
            ============================================ */
+        /* Sessions view: the resume lists */
+        .rs-tabs { display: flex; gap: 4px; margin: 4px 0 12px; }
+        .rs-tabs[hidden] { display: none; }
+        .rs-tabs .tab-btn:focus-visible, .rs-act:focus-visible { outline: 2px solid var(--accent-purple); outline-offset: 1px; }
+        .rs-search {
+            width: 100%; box-sizing: border-box; padding: 8px 10px; margin-bottom: 12px; border-radius: 8px;
+            border: 1px solid var(--border); background: var(--bg-card-solid); color: var(--text-primary);
+            font: 400 13px var(--font-sans);
+        }
+        .rs-list { display: flex; flex-direction: column; gap: 6px; }
+        .rs-row {
+            display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+            padding: 10px 12px; border-radius: 10px; background: var(--bg-card); border: 1px solid var(--border);
+        }
+        .rs-icon { width: 16px; height: 16px; background: var(--text-muted); }
+        .rs-icon.mc {
+            -webkit-mask: url(/static/logo_icon.png) center / contain no-repeat;
+            mask: url(/static/logo_icon.png) center / contain no-repeat;
+        }
+        .rs-icon.claude { background: none; color: var(--text-muted); }
+        .rs-main { min-width: 0; }
+        .rs-name { font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .rs-meta { font-size: 12px; color: var(--text-secondary); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+        .rs-meta .rs-path { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
+        .rs-badge { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-secondary); }
+        .rs-badge.warn { color: var(--accent-yellow); border-color: var(--accent-yellow); }
+        .rs-actions { display: flex; gap: 4px; }
+        .rs-act {
+            font: 500 12px var(--font-sans); padding: 4px 8px; border-radius: 6px; cursor: pointer;
+            border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+        }
+        .rs-act:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+        .rs-act.armed { color: var(--accent-red); border-color: var(--accent-red); }
+        .rs-act:disabled { opacity: 0.5; cursor: default; }
+        .rs-rename { font: 600 13px var(--font-sans); width: 100%; padding: 2px 6px; border-radius: 6px;
+            border: 1px solid var(--accent-purple); background: var(--bg-card-solid); color: var(--text-primary); }
+        .rs-heading { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 6px; }
+        .rs-error { color: var(--accent-red); font-size: 13px; margin-bottom: 8px; }
+
         .empty-state {
             text-align: center;
             padding: 48px 24px;
@@ -3720,7 +3761,8 @@
         }
 
         .project-page-tabs .tab-btn,
-        .settings-tabs .tab-btn {
+        .settings-tabs .tab-btn,
+        .rs-tabs .tab-btn {
             padding: 8px 16px;
             background: transparent;
             border: none;
@@ -3734,13 +3776,15 @@
         }
 
         .project-page-tabs .tab-btn:hover,
-        .settings-tabs .tab-btn:hover {
+        .settings-tabs .tab-btn:hover,
+        .rs-tabs .tab-btn:hover {
             background: var(--border);
             color: var(--text-primary);
         }
 
         .project-page-tabs .tab-btn.active,
-        .settings-tabs .tab-btn.active {
+        .settings-tabs .tab-btn.active,
+        .rs-tabs .tab-btn.active {
             background: var(--accent-purple);
             color: white;
         }
@@ -6642,6 +6686,13 @@
                     </svg>
                     Lead
                 </a>
+                <a class="nav-item" data-view="sessions" href="#sessions">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10"/>
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                    </svg>
+                    Sessions
+                </a>
                 <a class="nav-item" data-view="projects" href="#projects">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 11l3 3L22 4"/>
@@ -6744,6 +6795,26 @@
                 <span class="lb-sr" id="ldSyncSr" role="status"></span>
                 <div class="lb" id="ldRoot"><div class="lb-empty">Loading the lead board...</div></div>
             </div><!-- End Lead View -->
+
+            <!-- Sessions View -->
+            <div class="view" id="sessionsView">
+                <div class="container">
+                    <div class="page-header">
+                        <h2>Sessions</h2>
+                        <p class="page-subtitle">Every Claude Code session that closed, with the command that brings it back. Project sessions are saved on their own; everything else waits in Closed.</p>
+                    </div>
+                    <div class="rs-tabs" role="tablist" aria-label="Resume lists" id="rsTabs">
+                        <button class="tab-btn active" role="tab" aria-selected="true" data-tab="saved" onclick="rsSetTab('saved')">Saved</button>
+                        <button class="tab-btn" role="tab" aria-selected="false" data-tab="closed" onclick="rsSetTab('closed')">Closed</button>
+                    </div>
+                    <input type="search" class="rs-search" id="rsSearch" placeholder="Search by name, project or folder"
+                           aria-label="Search sessions" oninput="rsSetQuery(this.value)"
+                           onkeydown="if (event.key === 'Escape') { this.value = ''; rsSetQuery(''); }">
+                    <div class="rs-error" id="rsError" role="alert" hidden></div>
+                    <span class="lb-sr" id="rsSr" role="status"></span>
+                    <div id="rsRoot" class="rs-list"></div>
+                </div>
+            </div><!-- End Sessions View -->
 
             <!-- Projects View -->
             <div class="view" id="projectsView">
@@ -7940,6 +8011,194 @@
             document.title = LD_TITLE;
         }
 
+        // Sessions view: the resume lists. Reads /api/resume when opened and
+        // every 15 s while visible; a rename in progress holds the refresh.
+        // loadError belongs to the last read and the next read clears it.
+        // actError belongs to the last action and stays until the next one.
+        const RS_POLL_MS = 15000;
+        const rs = { tab: 'saved', q: '', rows: [], loaded: false, timer: null, armed: null, editing: null,
+                     loadError: null, actError: null };
+        const RS_CLAUDE_ICON = `<svg class="rs-icon claude" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+
+        function rsOpen() {
+            if (rs.timer) return;
+            rsLoad();
+            rs.timer = setInterval(() => { if (!document.hidden && !rs.editing) rsLoad(); }, RS_POLL_MS);
+        }
+        function rsClose() {
+            clearInterval(rs.timer);
+            rs.timer = null;
+        }
+        async function rsLoad() {
+            try {
+                const res = await fetch(API_BASE + '/api/resume?list=all');
+                if (!res.ok) throw new Error(await bdErrMsg(res, `HTTP ${res.status}`));
+                rs.rows = (await res.json()).sessions || [];
+                rs.loaded = true;
+                rs.loadError = null;
+            } catch (e) {
+                rs.loadError = `Could not load the sessions: ${e.message || e}`;
+            }
+            rsRender();
+            // Opened straight on #sessions, this view ends the initial overlay.
+            if (LoadingManager.isInitialLoad) LoadingManager.hide();
+        }
+        function rsSetTab(tab) {
+            rs.tab = tab;
+            rsRender();
+        }
+        function rsSetQuery(q) {
+            rs.q = q.trim().toLowerCase();
+            rsRender();
+        }
+        function rsShortPath(p) {
+            return String(p || '').replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~');
+        }
+        function rsMatches(r) {
+            if (!rs.q) return true;
+            return [r.name, r.mc_title, r.project_name, r.cwd].some(v => String(v || '').toLowerCase().includes(rs.q));
+        }
+        function rsRowHtml(r) {
+            const sid = escapeHtml(r.session_id);
+            const icon = r.origin === 'missioncache'
+                ? '<span class="rs-icon mc" role="img" aria-label="MissionCache project" title="MissionCache project"></span>'
+                : RS_CLAUDE_ICON;
+            const name = rs.editing === r.session_id
+                ? `<input class="rs-rename" data-sid="${sid}" data-focus="rename:${sid}" value="${escapeHtml(r.name)}" aria-label="New name, Enter saves, Escape cancels"
+                     dir="auto" maxlength="200" onkeydown="rsRenameKey(event, this)">`
+                : `<div class="rs-name">${ldBidi(r.name)}</div>`;
+            const meta = [
+                r.project_name ? `<span>${ldBidi(r.project_name)}</span>` : '',
+                `<span class="rs-path" title="${escapeHtml(r.cwd)}">${escapeHtml(rsShortPath(r.cwd))}</span>`,
+                r.open ? '<span class="rs-badge">open</span>' : `<span title="${escapeHtml(r.closed_at || '')}">${escapeHtml(ldAgoText(r.closed_at))}</span>`,
+                r.transcript_gone ? '<span class="rs-badge warn" title="Claude Code deleted the transcript">transcript gone</span>' : '',
+            ].join('');
+            const armed = rs.armed === r.session_id;
+            const actions = [
+                r.command ? `<button class="rs-act" data-act="copy" data-sid="${sid}" data-focus="copy:${sid}" title="${escapeHtml(r.command)}">Copy command</button>` : '',
+                r.list === 'closed' ? `<button class="rs-act" data-act="keep" data-sid="${sid}" data-focus="keep:${sid}">Keep</button>` : '',
+                `<button class="rs-act" data-act="rename" data-sid="${sid}" data-focus="rename:${sid}">Rename</button>`,
+                `<button class="rs-act${armed ? ' armed' : ''}" data-act="forget" data-sid="${sid}" data-focus="forget:${sid}">${armed ? 'Remove?' : 'Remove'}</button>`,
+            ].join('');
+            return `<div class="rs-row">${icon}<div class="rs-main">${name}<div class="rs-meta">${meta}</div></div><div class="rs-actions">${actions}</div></div>`;
+        }
+        function rsRender() {
+            const root = document.getElementById('rsRoot');
+            if (!root) return;
+            const err = document.getElementById('rsError');
+            const error = rs.actError || rs.loadError;
+            err.hidden = !error;
+            err.textContent = error || '';
+            const saved = rs.rows.filter(r => r.list === 'saved' && rsMatches(r));
+            const closed = rs.rows.filter(r => r.list === 'closed' && rsMatches(r));
+            const tabs = document.getElementById('rsTabs');
+            tabs.hidden = !!rs.q;
+            const counts = { saved: 0, closed: 0 };
+            rs.rows.forEach(r => { counts[r.list]++; });
+            tabs.querySelectorAll('.tab-btn').forEach(b => {
+                const on = b.dataset.tab === rs.tab;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+                b.textContent = `${b.dataset.tab === 'saved' ? 'Saved' : 'Closed'} (${counts[b.dataset.tab]})`;
+            });
+            let html;
+            if (!rs.loaded) {
+                html = rs.loadError ? '' : '<div class="empty-state"><div class="empty-state-text">Loading the sessions...</div></div>';
+            } else if (rs.q) {
+                html = (saved.length ? `<div class="rs-heading">Saved</div>${saved.map(rsRowHtml).join('')}` : '')
+                    + (closed.length ? `<div class="rs-heading">Closed</div>${closed.map(rsRowHtml).join('')}` : '');
+                if (!html) html = '<div class="empty-state"><div class="empty-state-text">No session matches.</div></div>';
+            } else {
+                const rows = rs.tab === 'saved' ? saved : closed;
+                html = rows.length ? rows.map(rsRowHtml).join('')
+                    : `<div class="empty-state"><div class="empty-state-text">${rs.tab === 'saved'
+                        ? 'Nothing saved yet. A session bound to a project goes here when it closes, and Keep moves one from Closed.'
+                        : 'No closed sessions yet. Every Claude Code session shows up here when it ends.'}</div></div>`;
+            }
+            // A render replaces every row, so it carries over what the
+            // person was doing: the focused button and a name being typed.
+            const active = document.activeElement;
+            const focusKey = root.contains(active) ? active.dataset.focus : null;
+            const typing = root.querySelector('.rs-rename');
+            const typed = typing && typing.dataset.sid === rs.editing
+                ? { value: typing.value, start: typing.selectionStart, end: typing.selectionEnd, had: active === typing } : null;
+            root.innerHTML = html;
+            const input = root.querySelector('.rs-rename');
+            if (input && typed) {
+                input.value = typed.value;
+                if (typed.had) { input.focus(); input.setSelectionRange(typed.start, typed.end); }
+            } else if (input) {
+                input.focus();
+                input.select();
+            } else if (focusKey) {
+                const again = [...root.querySelectorAll('[data-focus]')].find(el => el.dataset.focus === focusKey);
+                if (again) again.focus();
+            }
+        }
+        function rsAnnounce(text) {
+            const sr = document.getElementById('rsSr');
+            if (sr) sr.textContent = text;
+        }
+        const rsPost = (sid, action, body) => pmPost(`/api/resume/${encodeURIComponent(sid)}/${action}`, body);
+        async function rsAct(button) {
+            const sid = button.dataset.sid;
+            const row = rs.rows.find(r => r.session_id === sid);
+            if (!row) return;
+            rs.actError = null;
+            try {
+                if (button.dataset.act === 'copy') {
+                    await navigator.clipboard.writeText(row.command);
+                    button.textContent = 'Copied';
+                    rsAnnounce(`Copied the command for ${row.name}. Paste it in a terminal.`);
+                    setTimeout(() => { button.textContent = 'Copy command'; }, 1500);
+                    return;
+                }
+                if (button.dataset.act === 'rename') {
+                    rs.editing = sid;
+                    rsRender();
+                    return;
+                }
+                if (button.dataset.act === 'forget' && rs.armed !== sid) {
+                    rs.armed = sid;
+                    rsRender();
+                    setTimeout(() => { if (rs.armed === sid) { rs.armed = null; rsRender(); } }, 3000);
+                    return;
+                }
+                rs.armed = null;
+                button.disabled = true;
+                await rsPost(sid, button.dataset.act);
+                rsAnnounce(button.dataset.act === 'keep' ? `Moved ${row.name} to Saved` : `Removed ${row.name}`);
+                await rsLoad();
+            } catch (e) {
+                rs.actError = `Could not ${button.dataset.act === 'forget' ? 'remove' : button.dataset.act} ${row.name}: ${e.message || e}`;
+                rsRender();
+            }
+        }
+        function rsRenameKey(event, input) {
+            if (event.key === 'Enter') { event.preventDefault(); rsRenameDone(input, true); }
+            if (event.key === 'Escape') { event.preventDefault(); rsRenameDone(input, false); }
+        }
+        async function rsRenameDone(input, save) {
+            if (rs.editing !== input.dataset.sid) return;
+            rs.editing = null;
+            rs.actError = null;
+            if (save) {
+                try {
+                    await rsPost(input.dataset.sid, 'rename', { name: input.value });
+                    rsAnnounce('Renamed');
+                } catch (e) {
+                    rs.actError = `Could not rename: ${e.message || e}`;
+                }
+                await rsLoad();
+            } else {
+                rsRender();
+            }
+        }
+        document.addEventListener('click', e => {
+            const button = e.target.closest && e.target.closest('#rsRoot .rs-act');
+            if (button) rsAct(button);
+        });
+
         // A tab brought back to the front catches up at once.
         function ldOnVisible() {
             if (!document.hidden) ldPoll(true);
@@ -8502,6 +8761,7 @@
             // The Lead view polls only while it is on screen, and brings its own
             // sync status, so the shared toolbar and the drifting background go.
             viewId === 'lead' ? ldOpen() : ldClose();
+            viewId === 'sessions' ? rsOpen() : rsClose();
             document.body.classList.toggle('lead-mode', viewId === 'lead');
             if (viewId === 'attention') {
                 // Always refetch on entry - action items change from other
