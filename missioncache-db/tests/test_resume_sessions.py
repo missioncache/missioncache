@@ -71,6 +71,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(m.proc, "process_alive", lambda pid: alive.get(pid, (False, None))[0])
     monkeypatch.setattr(m.proc, "process_start_token", lambda pid: alive.get(pid, (None, None))[1])
     monkeypatch.setattr(m, "lead_session_id", lambda: None)
+    monkeypatch.setattr(rs, "WINDOWS", False)  # the POSIX command, on every runner
     conn = rs.hook_connect()
     yield {"home": tmp_path, "alive": alive, "conn": conn}
     conn.close()
@@ -642,6 +643,22 @@ def test_cli_run_execs_claude_resume_in_the_sessions_folder(env, monkeypatch, tm
     monkeypatch.setattr(m.os, "execv", lambda file, args: calls.setdefault("exec", (file, args)))
     _cli(monkeypatch, "run", SID_A[:8])
     assert calls == {"cwd": str(folder), "exec": ("/bin/claude", ["/bin/claude", "--resume", SID_A])}
+
+
+def test_cli_run_on_windows_waits_for_claude_and_passes_its_exit_code(env, monkeypatch, tmp_path):
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    _seen(env, SID_A, cwd=str(folder))
+    rs.close_session(env["conn"], SID_A, "other")
+    monkeypatch.setattr(rs, "WINDOWS", True)
+    monkeypatch.setattr("shutil.which", lambda name: f"C:/bin/{name}.exe")
+    monkeypatch.setattr(m.os, "chdir", lambda path: None)
+    monkeypatch.setattr(m.os, "execv", lambda *a: pytest.fail("Windows has no exec"))
+    ran = []
+    monkeypatch.setattr("subprocess.run", lambda argv: ran.append(argv) or type("R", (), {"returncode": 3})())
+    with pytest.raises(SystemExit) as e:
+        _cli(monkeypatch, "run", SID_A)
+    assert e.value.code == 3 and ran == [["C:/bin/claude.exe", "--resume", SID_A]]
 
 
 def test_cli_run_without_claude_on_path_says_so(env, monkeypatch, capsys, tmp_path):

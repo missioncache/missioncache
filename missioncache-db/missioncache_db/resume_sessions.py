@@ -51,6 +51,9 @@ _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 _TITLE_KEYS = {"ai-title": "aiTitle", "custom-title": "customTitle"}
 _STAMP = "%Y-%m-%d %H:%M:%S"
 LISTS = ("saved", "closed", "all")
+# Which terminal the resume command is written for, and how `resume run`
+# starts claude. A module constant so tests can pick the platform.
+WINDOWS = os.name == "nt"
 
 
 def _now() -> str:
@@ -491,7 +494,7 @@ def resume_command(row: Dict[str, Any], transcript: Optional[bool], windows: Opt
     argv = resume_argv(row, transcript)
     if not argv:
         return None
-    if os.name == "nt" if windows is None else windows:
+    if WINDOWS if windows is None else windows:
         return f"Set-Location -LiteralPath {_ps_literal(row['cwd'])}; {' '.join(_ps_quote(a) for a in argv)}"
     return f"cd {shlex.quote(row['cwd'])} && {shlex.join(argv)}"
 

@@ -7068,7 +7068,7 @@ def main():
                         # closes the database would never run.
                         db.close()
                         os.chdir(row["cwd"])
-                        if os.name == "nt":
+                        if resume_sessions.WINDOWS:
                             # Windows has no real exec: os.execv starts a new
                             # process and hands the prompt back to the shell
                             # at once, so wait for claude instead.

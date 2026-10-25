@@ -26,6 +26,7 @@ def sandboxed(tmp_path, monkeypatch):
     monkeypatch.setattr(missioncache_db, "DB_PATH", tmp_path / "tasks.db")
     monkeypatch.setattr(missioncache_db, "HOOKS_STATE_DB_PATH", fake_home / ".claude" / "hooks-state.db")
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setattr(resume_sessions, "WINDOWS", False)  # the POSIX command, on every runner
     conn = resume_sessions.hook_connect()
     resume_sessions.record_seen(conn, SID, "/work/repo", None)
     resume_sessions.close_session(conn, SID, "other")
