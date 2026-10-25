@@ -4,12 +4,13 @@ A local web page that shows every project you work on, what you owe, who owes yo
 
 Open **http://localhost:8787**. The full install starts it for you and keeps it running.
 
-## The four views
+## The views
 
 | View | Use it to |
 |---|---|
 | **Attention** | See what needs you today. It opens here. |
 | **Lead** | Follow every session as it works: who needs you, what each project did last, what blocks it and what is next, today's meetings and free time, and the lead session's picks for the day. A live session's "go to tab" brings its iTerm2 tab to the front on macOS. Nothing else is changed from here. |
+| **Sessions** | Go back to a Claude Code session you closed. Copy its resume command, keep it, rename it or remove it. |
 | **Projects** | Find any project, active or done, and open its files. |
 | **Activity** | See how much time you spent, per day, per project, per repo. |
 | **Auto** | Watch a `missioncache-auto` run as it happens. |
@@ -23,6 +24,17 @@ Three boxes on one screen:
 - **Projects.** Only the projects with something open, each with its next step.
 
 A project with nothing owed in either direction is not listed here. It is in **Projects**.
+
+### Sessions
+
+Claude Code sessions that closed show up here with their name, folder and a **Copy command** button. The command is `cd <folder> && claude --resume <id>` (a PowerShell line on Windows): paste it in a terminal and you are back in that conversation. A session that is still running has no command, so two terminals never write the same conversation.
+
+- **Saved** holds the sessions bound to a MissionCache project, marked with the MissionCache logo, and the ones you kept. A project keeps one entry per session name: the newest session takes the entry, with any name you gave it, and the older one moves to Closed.
+- **Closed** holds every other session, the newest 500. **Keep** moves one to Saved.
+- **Search** looks in both lists at once, by name, project or folder. Esc clears it.
+- **transcript gone** means Claude Code already deleted the conversation (after its `cleanupPeriodDays`). A Closed entry like that drops out. A project entry stays, and its command loads the project instead.
+
+A session that ends without saying so, for example when you close its tab, shows up the next time the list is read. Sessions started by MissionCache Auto are not listed.
 
 ### Projects
 

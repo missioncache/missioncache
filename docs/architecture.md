@@ -19,7 +19,7 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 |-----------|-----------|--------------|--------------|
 | MCP server | `mcp-server/` | Exposes 45 tools to Claude Code over stdio for managing projects, files, time, plans, and iteration logs | One subprocess per Claude Code session, started on demand via `uvx` |
 | missioncache-db | `missioncache-db/` | SQLite schema, data classes, and all direct DB operations. Every other component calls into this instead of opening the DB themselves | In-process library - embedded by MCP server, hooks, MissionCache Auto, and dashboard |
-| Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event. Six hooks on four events, each with a timeout budget between 5 and 30 seconds |
+| Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event. Seven hooks on five events, each with a timeout budget between 5 and 30 seconds, except SessionEnd, which gets 1.5 seconds by default |
 | Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/missioncache:<name>` |
 | missioncache-auto | `missioncache-auto/` | Standalone CLI that runs Claude in a loop over a task file, in either sequential or parallel-with-DAG mode | A long-running user-invoked process, one execution per `missioncache-auto <project>` call |
 | Dashboard | `missioncache-dashboard/` | FastAPI backend plus a single-file HTML frontend at `http://localhost:8787` for visualizing time, tasks, sessions, and MissionCache Auto runs | One persistent process, usually managed by launchd |
@@ -145,6 +145,7 @@ The canonical tables are all defined in `missioncache-db/missioncache_db/__init_
 | `config` | Key-value settings (idle timeout, assumed work seconds, prune threshold, tag keywords) | `key`, `value` |
 | `auto_executions` | One row per `missioncache-auto` run | `task_id`, `started_at`, `completed_at`, `status`, `mode`, `worker_count`, `total_subtasks`, `completed_subtasks`, `failed_subtasks` |
 | `auto_execution_logs` | Streaming log lines from MissionCache Auto workers | `execution_id`, `worker_id`, `subtask_id`, `level`, `message`, `timestamp` |
+| `resume_sessions` | One row per Claude Code session for the resume lists, written by the hooks (`missioncache_db/resume_sessions.py`). Its DDL is `RESUME_SESSIONS_SCHEMA`, kept apart so a hook can create it on a short-timeout connection | `session_id`, `cwd`, `transcript_path`, `project_name`, `auto_name`, `custom_name`, `saved`, `pinned`, `last_seen_at`, `closed_at` |
 
 Triggers keep `updated_at` fresh on every row update and set `completed_at`/`archived_at` when `status` transitions into the corresponding state. The `tasks` table has a `UNIQUE(repo_id, full_path)` constraint that matters during scan - rescanning the same repo should not produce duplicate rows.
 

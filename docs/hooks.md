@@ -1,6 +1,6 @@
 # Hooks
 
-This document covers the four lifecycle events MissionCache hooks into Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `Stop`. Together they are what makes MissionCache's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside a MissionCache-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
+This document covers the five lifecycle events MissionCache hooks into Claude Code: `SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop` and `SessionEnd`. Together they are what makes MissionCache's context preservation and time tracking work without the user having to think about them. When you open a Claude Code session inside a MissionCache-tracked repo, the plugin knows what project you are on, records your activity, saves your context before compaction, and reminds you to update your files before you walk away - all of that is hooks.
 
 It assumes you have read [`architecture.md`](./architecture.md) for the shared vocabulary (`tasks.db`, heartbeats, sessions, `hooks-state.db`, `full_path`, the `find_task_for_cwd` resolution order). If a term in this doc is not defined here, it is defined there.
 
@@ -10,7 +10,7 @@ If you are just trying to *use* MissionCache, you already are - hooks run automa
 
 ## The hook model
 
-Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers four of them via `hooks/hooks.json`, in exec form (`command` + `args`):
+Claude Code's hook API lets a plugin register shell commands to run at specific lifecycle events. The MissionCache plugin registers five of them via `hooks/hooks.json`, in exec form (`command` + `args`):
 
 ```json
 {
@@ -26,6 +26,9 @@ Claude Code's hook API lets a plugin register shell commands to run at specific 
     "PreCompact": [{"hooks": [
       {"type": "command", "command": "uv", "args": ["run", "--quiet", "--no-project", "--frozen", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py"], "timeout": 30}
     ]}],
+    "SessionEnd": [{"hooks": [
+      {"type": "command", "command": "uv", "args": ["run", "--quiet", "--no-project", "--frozen", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py"]}
+    ]}],
     "Stop": [{"hooks": [
       {"type": "command", "command": "uv", "args": ["run", "--quiet", "--no-project", "--frozen", "--python", ">=3.11", "python", "${CLAUDE_PLUGIN_ROOT}/hooks/stop.py"], "timeout": 10}
     ]}]
@@ -35,9 +38,9 @@ Claude Code's hook API lets a plugin register shell commands to run at specific 
 
 Each hook is a standalone Python script. Claude Code spawns them as subprocesses with the specified timeout, pipes event data in on stdin as JSON, and reads stdout (for context injection) and stderr (for user-visible reminders). The scripts never persist - they start, do their one job, and exit.
 
-The launcher is `uv run --quiet --no-project --frozen --python ">=3.11" python <script>` rather than a bare `python3` for three reasons. `uv` is already a hard dependency (the plugin spawns its MCP server via `uvx`), and it is a real `.exe` on Windows - a requirement of exec form, which cannot spawn `.cmd`/`.bat` shims. Exec form passes each argument verbatim with no shell tokenization, so a plugin cache path containing spaces (the default under `C:\Users\<name>\...` for some usernames) cannot break the command. And `--python ">=3.11"` guarantees a modern interpreter everywhere: uv resolves a suitable Python (downloading one on first use if the machine has none), so the hooks stop depending on a `python3` name that most Windows Python installs lack. The installer pre-warms this resolution (`missioncache-install` runs `uv run --no-project --python ">=3.11" python -V` at plugin-install time) so the one-time interpreter download never races a hook's 5-second timeout. `--frozen` does nothing beside `--no-project`: it is there because the Claude plugin directory refuses a `uv run` without `--locked` or `--frozen`. `--quiet` hides the warning uv prints about that, and leaves the hook's own stderr alone. The hooks find `missioncache_db` themselves: each script makes the plugin's bundled `missioncache-db/` directory importable - five insert it into `sys.path`, `activity_tracker.py` passes it as `PYTHONPATH` to the `missioncache_db heartbeat-auto` subprocess it spawns - so the interpreter uv picks needs nothing pip-installed.
+The launcher is `uv run --quiet --no-project --frozen --python ">=3.11" python <script>` rather than a bare `python3` for three reasons. `uv` is already a hard dependency (the plugin spawns its MCP server via `uvx`), and it is a real `.exe` on Windows - a requirement of exec form, which cannot spawn `.cmd`/`.bat` shims. Exec form passes each argument verbatim with no shell tokenization, so a plugin cache path containing spaces (the default under `C:\Users\<name>\...` for some usernames) cannot break the command. And `--python ">=3.11"` guarantees a modern interpreter everywhere: uv resolves a suitable Python (downloading one on first use if the machine has none), so the hooks stop depending on a `python3` name that most Windows Python installs lack. The installer pre-warms this resolution (`missioncache-install` runs `uv run --no-project --python ">=3.11" python -V` at plugin-install time) so the one-time interpreter download never races a hook's 5-second timeout. `--frozen` does nothing beside `--no-project`: it is there because the Claude plugin directory refuses a `uv run` without `--locked` or `--frozen`. `--quiet` hides the warning uv prints about that, and leaves the hook's own stderr alone. The hooks find `missioncache_db` themselves: each script makes the plugin's bundled `missioncache-db/` directory importable - six insert it into `sys.path`, `activity_tracker.py` passes it as `PYTHONPATH` to the `missioncache_db heartbeat-auto` subprocess it spawns - so the interpreter uv picks needs nothing pip-installed.
 
-Six hooks, four events: `UserPromptSubmit` runs *three* scripts (activity_tracker, task_tracker and session_title) in sequence because they have separate concerns but all trigger on the same event. The rest are one-to-one.
+Seven hooks, five events: `UserPromptSubmit` runs *three* scripts (activity_tracker, task_tracker and session_title) in sequence because they have separate concerns but all trigger on the same event. The rest are one-to-one.
 
 ### Event-to-hook map
 
@@ -49,6 +52,9 @@ Six hooks, four events: `UserPromptSubmit` runs *three* scripts (activity_tracke
 | `UserPromptSubmit` | `session_title.py` | 5s | Name the session after the project it is bound to, so other sessions can address it |
 | `PreCompact` | `pre_compact.py` | 30s | Save the recent turns to the journal and leave a one-line Pre-Compact Snapshot pointer in Recent Changes |
 | `Stop` | `stop.py` | 10s | If files were edited during the session, remind the user to run `/missioncache:save` |
+| `SessionEnd` | `session_end.py` | 1.5s by default, shared by every SessionEnd hook (the user can raise it with `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`, a plugin cannot) | Close the session's entry in the resume lists, into Saved or Closed |
+
+`session_start.py` and `session_title.py` also record the session as seen in the resume lists (`missioncache_db.resume_sessions`), on every start and every prompt. Sessions MissionCache Auto starts are skipped.
 
 ### The bootstrap pattern
 
@@ -237,6 +243,14 @@ Consider running `/missioncache:save` to save context before ending your session
 
 **The stop hook does not fail the stop event.** If anything inside the try block crashes, the bare `except Exception: pass` swallows it. Stop hooks that fail can apparently cause weird Claude Code behavior, and a reminder failing is not worth breaking the session over.
 
+## SessionEnd: `session_end.py`
+
+**When:** Claude Code is ending the session: `/exit`, Ctrl+D, `/clear` (for the old session), a logout, or a resume into another session. The payload carries `reason` (`clear`, `resume`, `logout`, `prompt_input_exit`, `other`).
+
+**What it does:** calls `resume_sessions.hook_record(..., close_reason=reason)`. That refreshes the row while Claude Code's own `~/.claude/sessions/<pid>.json` still exists, then closes it into Saved (a project session, or one the person kept) or Closed. One transaction on a raw connection with a 0.3 s lock timeout. A failure prints `<!-- missioncache: resume list write failed: ... -->` to stderr and never blocks the exit.
+
+**What it does not rely on:** nothing promises SessionEnd fires when a terminal tab is closed or the process is killed, and its time budget is short. `resume_sessions.reconcile`, which runs on every read of the lists, closes any row whose pid is dead or reused, whose pid now runs another session, or that has no usable pid and was not seen for 24 hours.
+
 ## State files: the full picture
 
 Hooks write to a surprising number of places. Here is the complete map:
@@ -250,7 +264,8 @@ Hooks write to a surprising number of places. Here is the complete map:
 | `~/.claude/hooks-state.db:project_state` | `get_task` and `create_missioncache_files` (with a session id), dashboard `/api/hooks/project` | statusline, `bound_project_for_session` (session_title hook), `live_sessions_for_project` | SQLite row |
 | `~/.claude/hooks/state/term-sessions/<term-id>` | session_start | statusline fallback path | Plain text |
 | `~/.claude/hooks/state/projects/<session-id>.json` | session_start, `get_task` (with a session id) | statusline, `find_task_for_cwd` | JSON file |
-| `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
+| `~/.missioncache/tasks.db:resume_sessions` | session_start, session_title, session_end (`resume_sessions.hook_record`) | dashboard `/api/resume`, `missioncache-db resume` | SQLite row |
+| `~/.claude/hooks/state/session-pids/<session-id>.json` | session_start `write_session_pid` (removes an old record when the pid cannot be resolved) | `missioncache_db.session_is_alive` (parallel-session detection, live-session lookup) | JSON file |
 | `~/.claude/hooks/state/session-title/<session-id>.json` | session_title | `missioncache_db.live_sessions_for_project`, `live_sessions_all` | JSON file |
 | `~/.claude/hooks-state.db:lead_session` | `missioncache-db lead set` (via `/missioncache:lead`) | session_title (fixed title), session_start (post-compaction reminder), every MCP write tool (`lead_session` field), `/missioncache:brief --delta` (the cursor, via `lead show` / `lead mark`), `prune-sessions` | SQLite row |
 | `~/.claude/hooks/state/shared-seen/<session-id>.json` | `/missioncache:fork` (seeds it), `/missioncache:load`, `/missioncache:save` | statusline | JSON file |
@@ -286,6 +301,7 @@ When MissionCache Auto spawns Claude CLI subprocesses, it sets `MISSIONCACHE_AUT
 
 - `~/.claude/hooks/permission-whitelist.sh` auto-approves `ExitPlanMode` transitions when `MISSIONCACHE_AUTO_MODE=1`, because autonomous runs should not block on plan approval.
 - Slash commands and skills may skip clarification questions when the variable is set.
+- The resume lists skip the session: `resume_sessions.hook_record` writes nothing, so headless iterations never fill Closed.
 
 The variable is not magic - it is a plain environment variable - but it is the contract between MissionCache Auto and the rest of the plugin ecosystem. If you want your own hook or skill to behave differently under autonomous execution, check `os.environ.get("MISSIONCACHE_AUTO_MODE") == "1"`. If you are writing a new MissionCache Auto mode, set the variable in the child environment and let downstream consumers opt in.
 

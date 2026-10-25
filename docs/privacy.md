@@ -7,6 +7,7 @@ MissionCache keeps everything on your machine. There is no account, no telemetry
 | Where | What |
 |-------|------|
 | `~/.missioncache/` | Your project files (plan, context, tasks), the SQLite database with projects, time tracking and a log of the changes MissionCache's tools made, and the dashboard's settings. |
+| `~/.missioncache/tasks.db` (resume lists) | For every Claude Code session: its name and generated title, folder, transcript path, process id and project. The conversation itself stays in Claude Code's own files. **Remove** in the Sessions view or `missioncache-db resume forget` deletes an entry. |
 | `~/.claude/rules/` | The MissionCache rule file, copied there by the `SessionStart` hook. |
 | `~/.claude/hooks-state.db`, `~/.claude/hooks/state/` | Per-session state: which project a session is bound to, context use for the statusline. |
 

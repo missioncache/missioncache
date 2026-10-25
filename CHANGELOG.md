@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- Closed Claude Code sessions are listed with the command that resumes them, in a new Sessions view and `missioncache-db resume`. Project sessions are saved automatically. (missioncache-db, missioncache-dashboard, plugin)
+
 ## 2026-10-24
 
 - A statusline addon can flag its cell with a red E and make it clickable, by printing `"alert": true` and a `"link"`. (missioncache-dashboard)

@@ -110,6 +110,24 @@ One session at a time can be the lead: the project manager that `/missioncache:l
 
 The same row carries the delta cursor: `last_event_id`, the newest change-log event the lead's `--delta` tick reported, and `last_tick_at`, when it ran. `mark` stamps both (`--latest` reads the newest event id from `tasks.db`, `--event-id` takes one, neither moves only the time) and only the designated session can stamp, so a replaced lead cannot move the new lead's cursor. `set` on the same session keeps the cursor; a new lead starts with none, and its first tick baselines itself. `show --json` returns the cursor and `is_me`, whether the designated session is the one running the command.
 
+## Resume lists
+
+```bash
+missioncache-db resume list                      # Saved first, then Closed
+missioncache-db resume list --closed --search api --json
+missioncache-db resume run billing-migration     # cd to its folder and run claude --resume <id>
+missioncache-db resume command 3f2a9c            # print the command instead (an id prefix of 6+ characters works)
+missioncache-db resume keep 3f2a9c               # move a Closed entry to Saved
+missioncache-db resume rename 3f2a9c "api retry work"
+missioncache-db resume forget 3f2a9c
+```
+
+The `resume_sessions` table in `tasks.db` holds one row per Claude Code session. Three hooks write it through `missioncache_db.resume_sessions.hook_record`, on a raw connection with a 0.3 s lock timeout: SessionStart and UserPromptSubmit record the session as seen (name, project, folder, transcript path, and the pid from `session-pids/<sid>.json`), and SessionEnd closes it. SessionEnd gets 1.5 s for all its hooks and nothing promises it fires when a tab is closed, so `reconcile` runs on every read and closes a row whose pid is dead or reused, whose pid now runs another session id (`/clear`), or that has no pid and was not seen for 24 hours.
+
+SessionStart owns the folder and the pid: later hooks keep what it recorded, and a SessionStart that cannot resolve its process clears the old pid, so a resume from another launcher is not closed when the old process exits. An unchanged open row is rewritten at most every 10 minutes, so most prompts take no write lock. Reconcile does all pid and file checks before it writes, and closes a row only if no hook saw it in the meantime. A row closed for a dead pid or a `/clear` is stamped with the time it was found. One closed by the 24-hour rule keeps its last-seen time. Sessions with `MISSIONCACHE_AUTO_MODE` set are not recorded. The lead's row is hidden from the lists while it is the lead.
+
+The name is the Claude Code `/rename` when there is one, else the MissionCache session title, else the title Claude Code generated, else its derived name, else the folder. The two Claude Code titles live only in the transcript (`custom-title` and `ai-title` records), so each hook reads the bytes appended since `title_offset`, at most 4 MB per call. A name given with `rename` wins over all of them. When a newer session takes a Saved entry, the hand-given name and pin move to it and the older row drops to Closed. A ref is a full id, an id prefix of six or more characters, or an exact name; when it matches more than one entry, the command lists them. `run` and `command` refuse an entry whose session is still open. On Windows `command` prints a PowerShell line and `run` waits for `claude` instead of replacing the process. `prune` runs the same `reconcile`. A column added to the table later must allow NULL or carry a default: `resume_sessions.migrate` adds it with `ALTER TABLE` on every connect.
+
 ## Event log
 
 ```bash

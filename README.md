@@ -216,6 +216,7 @@ That is the full lifecycle. Everything else is optional depth.
 | Project files | A plan, a living context and a task checklist per project, in plain markdown you can edit. | [forks.md](docs/forks.md) for projects that share context |
 | Survives compaction | A hook saves your state before Claude compacts the window. `missioncache-db repair` fixes a damaged context file. | [cli.md](docs/cli.md#repairing-a-damaged-context-file) |
 | The lead session | A brief across every project, a notice from each session when its project changes, and an optional check on a schedule you set. | [Commands](#commands) |
+| Session resume | Claude Code sessions you closed are listed with the command that brings them back. Project sessions are saved on their own. | [dashboard.md](docs/dashboard.md#sessions) |
 | Dashboard | What you owe, who owes you, and where your hours went, at `localhost:8787`. | [dashboard.md](docs/dashboard.md) |
 | Statusline | Project and progress, git, model, context use and usage limits, one glance up in Claude Code. | [statusline.md](docs/statusline.md) |
 | Autonomous runs | `missioncache-auto` runs tasks in parallel in dependency order and streams every step to the dashboard. | [missioncache-auto.md](docs/missioncache-auto.md) |

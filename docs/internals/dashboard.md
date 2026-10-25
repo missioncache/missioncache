@@ -19,6 +19,7 @@ The frontend's top-level views, all hash-routed:
 | `#project/<name>[?tid=<task id>]` | Project page | Full page per project: Overview (description, Definition of Done, due date, stakeholders, tickets) and Action Items tabs, plus Tasks/Structure/Context/Plan/Updates. `tid` is optional and only disambiguates duplicate project names (a fork and its parent, or a stale row left by a rename); without it the name resolves to whichever task sorts first, which is the pre-`tid` behaviour every older link still gets. |
 | `#activity` | Activity | Today's time and LOC stats, hourly timeline, and a multi-week activity history with heatmap, trends, and top projects |
 | `#auto` | Auto | Live graph of active MissionCache Auto executions (DAG visualization, worker status, per-task state) |
+| `#sessions` | Sessions | The resume lists: closed Claude Code sessions in Saved and Closed, each with a copyable resume command. [Detailed below](#sessions-view). |
 
 All data is fetched lazily on first view switch and cached in-browser for the remainder of the session (a refresh button on each card forces a re-fetch).
 
@@ -89,6 +90,14 @@ The Auto view lists active MissionCache Auto executions across all tracked repos
 This view is driven by `GET /api/auto/projects` (list with per-project task graphs parsed live from each project's `-tasks.md` and `prompts/` directory) and `GET /api/auto/executions` / `GET /api/auto/executions/{task_id}` (historical execution records from the `auto_executions` SQLite table).
 
 DAG state (task status, worker assignments, progress counts) is fetched on tab open and does not auto-refresh - reopen the tab or click the execution to get fresh state. The per-execution *log output* panel is different: once you open an execution's detail view, it subscribes to `GET /api/auto/output/{execution_id}/stream` (SSE) and new log lines appear as they are written.
+
+### Sessions view
+
+The Sessions view reads `GET /api/resume?list=all` when it opens and every 15 seconds while it is visible. A rename in progress holds the refresh, and a render carries over the focused button and any name being typed. Search filters in the browser across both lists. Errors from a read clear on the next good read. Errors from an action stay until the next action. Actions are announced in a `role="status"` region.
+
+Every read runs `resume_sessions.reconcile` first, so a session whose process died shows up without a hook. Reconcile does its pid and file checks before it writes and only commits when something changed, because this connection stays open between polls and an open write transaction would lock out the hooks. The data rules live in the `missioncache_db.resume_sessions` docstring and in [cli.md](cli.md#resume-lists).
+
+`pin` and `unpin` exist in the API with no button yet. They are for the terminal panels, which list a pinned Saved entry while its session runs.
 
 ## Time accounting in detail
 
@@ -189,6 +198,9 @@ Every dashboard endpoint lives in `missioncache-dashboard/missioncache_dashboard
 | GET | `/api/task/{id}/files` | Parsed markdown content of `-plan.md`, `-context.md`, `-tasks.md`. |
 | GET | `/api/today` | Cross-project attention, split by who owes the work: `on_me` (bucketed overdue / due-soon / other), `on_others` (commitments + Waiting-on rows, grouped by project, each row carrying `mine` and a normalized `who_primary`), counts, and per-project blocks with a derived at-risk flag, `last_worked_on` / `days_since_worked`, checklist progress (`completed_count` / `total_count` / `completion_pct` / `next_up`), `left_off` (the newest Recent Changes bullet, shown when a project has no next step), `category`, and a ticket reference. Also `user_name`, the first token of git's global `user.name`, for the greeting; `null` when git has no identity configured, which the view renders as its nameless wording. The rollup itself is `missioncache_db.portfolio.build_portfolio`, shared with the MCP server's `get_portfolio`, so the chat brief and this view cannot disagree. |
 | GET | `/api/sessions/live` | Projects with a Claude Code session whose process is still running, plus the designated lead session. Pid-based and labelled so (`method: "pid"`): one `claude` process hosts many sessions, so a closed session can stay listed until pruned. Fetched after the board paints, not folded into `/api/today` (measured 68-89ms against 26-44ms). |
+| GET | `/api/resume?list=saved\|closed\|all&q=` | The resume lists, Saved first, each row with `name`, `open`, `list`, `origin` (`missioncache` or `claude`), `transcript_gone`, and `command` / `argv` (null while the session is open, or when nothing can bring it back). Sync `def`: it checks pids. 400 on an unknown list. |
+| POST | `/api/resume/{sid}/keep\|forget\|pin\|unpin` | One entry: move to Saved, delete the entry (never the session), or pin and unpin. No body, so `_require_same_origin` guards it. 404 for an unknown or malformed id. |
+| POST | `/api/resume/{sid}/rename` | Body `{name}`. Up to 200 characters, no control or bidi characters (400). An empty name goes back to the automatic one. Registered before `/{action}` so it is not read as an action. |
 | GET | `/api/agenda?date=` | Today's calendar from the configured sources, `missioncache_db.agenda.agenda_for()`'s shape verbatim. `configured: false` means no source is set up and the view renders nothing, which is different from an error. Never 500s. |
 | PUT | `/api/settings/calendar` | Replace the calendar sources (`sources[]`, `cache_ttl_seconds`, `timezone`). A command source must start with an existing absolute path, the same rule as statusline addons, because the dashboard executes it. |
 | POST | `/api/tasks/{id}/waiting-on/resolve` | Resolve one Waiting-on row from the UI. Body `{row_index, what, outcome}`; 409 when the table shifted since the view loaded. |

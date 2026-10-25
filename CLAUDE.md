@@ -39,6 +39,8 @@
 | `hooks/activity_tracker.py` | UserPromptSubmit hook (heartbeat recording) |
 | `hooks/task_tracker.py` | UserPromptSubmit hook (missioncache task-tracking divergence reminder) |
 | `hooks/session_title.py` | UserPromptSubmit hook (names the session after its bound project, so peers can address it) |
+| `hooks/session_end.py` | SessionEnd hook (closes the session's entry in the resume lists) |
+| `missioncache-db/missioncache_db/resume_sessions.py` | Resume lists: every closed Claude Code session with its derived resume command (hooks write, dashboard and CLI read) |
 | `commands/*.md` | Slash command definitions |
 | `templates/` | File templates for missioncache project files |
 | `rules/*.md` | Claude rule files installed to `~/.claude/rules/` (via symlink) |
@@ -119,6 +121,7 @@ missioncache-db provides the `TaskDB` class with these key tables:
 - `sessions` - Aggregated work sessions
 - `auto_executions` - MissionCache Auto run records
 - `auto_execution_logs` - Execution streaming logs
+- `resume_sessions` - One row per Claude Code session for the resume lists (Saved / Closed)
 
 ## Dashboard Dual-DB Pattern
 
