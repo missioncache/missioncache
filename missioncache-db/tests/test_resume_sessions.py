@@ -612,6 +612,11 @@ def test_windows_gets_a_powershell_line():
         f"Set-Location -LiteralPath 'C:\\Users\\Robin O''Neil\\a&b'; claude --resume {SID_A}"
     )
     assert rs.resume_command(row, False, windows=True).endswith("; claude '/missioncache:load api'")
+    # PowerShell also closes a single-quoted string on the typographic quotes.
+    row["cwd"] = "C:\\w\\a\u2019; calc; \u2018"
+    assert rs.resume_command(row, True, windows=True).startswith(
+        "Set-Location -LiteralPath 'C:\\w\\a\u2019\u2019; calc; \u2018\u2018';"
+    )
 
 
 def test_only_a_uuid_goes_into_resume():

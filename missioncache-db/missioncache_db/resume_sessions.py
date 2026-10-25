@@ -472,8 +472,17 @@ def resume_argv(row: Dict[str, Any], transcript: Optional[bool]) -> Optional[Lis
     return ["claude", "--resume", row["session_id"]]
 
 
+# PowerShell ends a single-quoted string on any of these, not only on '.
+_PS_QUOTES_RE = re.compile("['\u2018\u2019\u201a\u201b]")
+
+
+def _ps_literal(text: str) -> str:
+    """``text`` as a PowerShell single-quoted string: each quote doubled."""
+    return "'" + _PS_QUOTES_RE.sub(lambda m: m.group(0) * 2, text) + "'"
+
+
 def _ps_quote(arg: str) -> str:
-    return arg if re.fullmatch(r"[A-Za-z0-9._/:=-]+", arg) else "'" + arg.replace("'", "''") + "'"
+    return arg if re.fullmatch(r"[A-Za-z0-9._/:=-]+", arg) else _ps_literal(arg)
 
 
 def resume_command(row: Dict[str, Any], transcript: Optional[bool], windows: Optional[bool] = None) -> Optional[str]:
@@ -483,8 +492,7 @@ def resume_command(row: Dict[str, Any], transcript: Optional[bool], windows: Opt
     if not argv:
         return None
     if os.name == "nt" if windows is None else windows:
-        cwd = row["cwd"].replace("'", "''")
-        return f"Set-Location -LiteralPath '{cwd}'; {' '.join(_ps_quote(a) for a in argv)}"
+        return f"Set-Location -LiteralPath {_ps_literal(row['cwd'])}; {' '.join(_ps_quote(a) for a in argv)}"
     return f"cd {shlex.quote(row['cwd'])} && {shlex.join(argv)}"
 
 
