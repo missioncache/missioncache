@@ -8,7 +8,11 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-25
+
 - Closed Claude Code sessions are listed with the command that resumes them, in a new Sessions view and `missioncache-db resume`. Project sessions are saved automatically. (missioncache-db, missioncache-dashboard, plugin)
+
+Published package versions: missioncache-db 1.0.38, mcp-missioncache 1.0.45, missioncache-dashboard 1.0.29. Claude Code plugin 1.0.44. missioncache-auto and missioncache-install are unchanged.
 
 ## 2026-10-24
 
