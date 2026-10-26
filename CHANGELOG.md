@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- Optional iTerm2 panels list your Claude sessions in the Toolbelt, with shortcuts between them. Add them with `uvx missioncache-install --iterm-panels`. (missioncache-dashboard, missioncache-install, missioncache-db)
+
 ## 2026-10-25
 
 - Closed Claude Code sessions are listed with the command that resumes them, in a new Sessions view and `missioncache-db resume`. Project sessions are saved automatically. (missioncache-db, missioncache-dashboard, plugin)

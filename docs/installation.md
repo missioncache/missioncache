@@ -33,13 +33,16 @@ uvx missioncache-install --all --yes --no-statusline  # everything but the statu
 | `--all` | Install every part without the wizard. |
 | `--plugin`, `--dashboard`, `--missioncache-auto`, `--statusline`, `--rules`, `--user-commands`, `--missioncache-db`, `--codex`, `--opencode`, `--vscode` | Install only the parts you name. |
 | `--no-<part>` | Leave a part out. Works only together with `--all` or with named parts. |
-| `--no-service` | Install the dashboard but do not start it at login. |
+| `--iterm-panels` | Add the [iTerm2 panels](terminal-panels.md) (macOS). Not part of `--all`. |
+| `--no-service` | Install the dashboard (and the iTerm2 panels) but do not start them at login. |
 | `--port N` | Run the dashboard on port `N` instead of 8787. |
 | `--yes`, `-y` | Do not ask before each file change. |
 | `--update` | Update what you installed. See [Upgrading](#upgrading). |
 | `--uninstall` | Remove parts. See [Uninstall](#uninstall). |
 
 The statusline needs the dashboard package, so asking for the statusline adds the dashboard too. Running the installer again is safe.
+
+**iTerm2 panels (optional, macOS).** Two Toolbelt panels that list your Claude sessions, and shortcuts to switch between them. The wizard offers them only when iTerm2 is installed, with a default of no. To add them to an existing install, run `uvx missioncache-install --iterm-panels`. See [iTerm2 panels](terminal-panels.md).
 
 ## Plugin only
 

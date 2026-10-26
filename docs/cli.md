@@ -34,6 +34,7 @@ Daily work goes through the slash commands and the [MCP tools](mcp-tools.md). Us
 | `due-date <task> <YYYY-MM-DD\|none>` | Set or clear the project's due date. |
 | `lead set\|mark\|show\|stop` | Manage the lead session behind `/missioncache:lead` and `/missioncache:unlead`. `mark` stamps the delta cursor the lead's `--delta` tick reads from. |
 | `resume list\|run\|command\|keep\|rename\|forget ...` | Go back to a closed Claude Code session. `resume run <name>` changes to its folder and resumes it. |
+| `resume import-iterm <dir>` | Add the entries of an older iTerm2 panel tool (its `saved.json` and `recent.json`) to the resume lists. Running it twice adds nothing twice. |
 | `events list [--since ISO] [--after-id N] [--project NAME] [--kind K[,K]] [--limit N] [--json]` | What changed in your projects, newest first. `events prune [--days N]` deletes old rows, `events clear <project>` one project's history. |
 | `agenda [--date today\|tomorrow\|YYYY-MM-DD] [--json] [--source NAME] [--no-cache]` | Print one day of your configured calendar. |
 | **Time** | |

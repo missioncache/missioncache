@@ -22,7 +22,8 @@ Everything else is either a producer (hooks write heartbeats, MCP tools create f
 | Hooks | `hooks/` | Short-lived Python scripts Claude Code invokes on session lifecycle events (prompt submitted, session started, context compacting, session stopped) | One shot per event. Seven hooks on five events, each with a timeout budget between 5 and 30 seconds, except SessionEnd, which gets 1.5 seconds by default |
 | Commands | `commands/` | Slash command markdown files that describe workflows to Claude. They do not run code - Claude reads them and decides which MCP tools to call | Parsed by Claude Code on plugin load, rendered when user types `/missioncache:<name>` |
 | missioncache-auto | `missioncache-auto/` | Standalone CLI that runs Claude in a loop over a task file, in either sequential or parallel-with-DAG mode | A long-running user-invoked process, one execution per `missioncache-auto <project>` call |
-| Dashboard | `missioncache-dashboard/` | FastAPI backend plus a single-file HTML frontend at `http://localhost:8787` for visualizing time, tasks, sessions, and MissionCache Auto runs | One persistent process, usually managed by launchd |
+| Dashboard | `missioncache-dashboard/` | FastAPI backend plus an HTML frontend (one page and a shared script) at `http://localhost:8787` for visualizing time, tasks, sessions, and MissionCache Auto runs | One persistent process, usually managed by launchd |
+| iTerm2 panels | `missioncache-dashboard/missioncache_dashboard/iterm/` | Optional macOS daemon, `missioncache-iterm`, installed with `--iterm-panels`. It serves the Recent Sessions and Saved Tabs panels on `127.0.0.1:8791`, registers them and three key-binding functions with iTerm2 over its Python API, and reads and writes the resume lists through missioncache-db | One persistent process under the `com.missioncache.iterm` LaunchAgent, restarted when iTerm2 reconnects |
 | Statusline | `missioncache-dashboard/missioncache_dashboard/statusline.py` | Python script that produces a 6-7 line ANSI status block shown at the bottom of the Claude Code TUI. Shipped inside the `missioncache-dashboard` package and exposed via the `missioncache-statusline` console entry point | Invoked by Claude Code after every message, gets JSON on stdin, must be fast (sub-200ms target) |
 | Editor extension | `missioncache-extension/` | TypeScript VS Code extension (engine `^1.96`) that shows the active project and task progress in the status bar plus a sidebar of tasks, next steps and blockers. It never opens the DB itself: it runs `missioncache-db extension-state` and `missioncache-db extension-project <task_id>` through `execFile` and renders the JSON | Refreshes on a file watcher over `~/.missioncache/**/*.md` and on window focus. No polling |
 | Rules | `rules/` | Plain markdown files describing MissionCache conventions to Claude. Auto-installed into `~/.claude/rules/` by the `SessionStart` hook using a write-if-different copy. `missioncache-install` seeds the initial copies (symlinked in `--local` mode, copied with an ownership marker otherwise); the hook replaces stale symlinks on first run | Refreshed on every `SessionStart` event |
@@ -219,6 +220,7 @@ It is easy to get confused about what is running where, because MissionCache has
 | Runs | Process type | Lifetime | Triggered by |
 |------|--------------|----------|--------------|
 | Dashboard | Long-running (launchd-managed in practice) | Until stopped | Manual start or launchd |
+| iTerm2 panels (optional) | Long-running, launchd-managed | From login, waiting for iTerm2 and reconnecting when it restarts | The `com.missioncache.iterm` LaunchAgent |
 | MCP server | Stdio subprocess | One per Claude Code session | Claude Code on plugin load |
 | Hooks (`session_start`, `pre_compact`, `stop`, `activity_tracker`, `task_tracker`, `session_title`) | Short-lived one-shot | Single event | Claude Code hook events |
 | missioncache-auto | User-invoked CLI | Until task complete or failed | Manual `missioncache-auto <project>` |
@@ -230,7 +232,7 @@ Rules and slash commands are not processes - they are files read by Claude Code.
 
 Two implications worth keeping in mind:
 
-1. **There is no MissionCache daemon.** Everything except the dashboard runs on demand. If the dashboard is down, heartbeats still accumulate in SQLite; the dashboard will just look stale until it syncs.
+1. **There is no MissionCache daemon.** Everything except the dashboard, and the optional iTerm2 panels, runs on demand. If the dashboard is down, heartbeats still accumulate in SQLite; the dashboard will just look stale until it syncs.
 2. **There is no IPC except the database.** Hooks do not call the MCP server. The statusline does not call the dashboard (well, it does fetch usage data from a separate endpoint, but that is unrelated to MissionCache state). Dashboards and MCP tools do not coordinate. All of them read and write the same SQLite file (plus, optionally, the files on disk).
 
 This shape was a deliberate choice. It makes the system easy to reason about and easy to run partially (you can skip the dashboard, skip the statusline, even skip the hooks and still have a working MissionCache), at the cost of losing some real-time-ness that a centralized daemon would give you for free.

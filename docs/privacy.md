@@ -10,6 +10,7 @@ MissionCache keeps everything on your machine. There is no account, no telemetry
 | `~/.missioncache/tasks.db` (resume lists) | For every Claude Code session: its name and generated title, folder, transcript path, process id and project. The conversation itself stays in Claude Code's own files. **Remove** in the Sessions view or `missioncache-db resume forget` deletes an entry. |
 | `~/.claude/rules/` | The MissionCache rule file, copied there by the `SessionStart` hook. |
 | `~/.claude/hooks-state.db`, `~/.claude/hooks/state/` | Per-session state: which project a session is bound to, context use for the statusline. |
+| `~/.missioncache/iterm/` | Only with the iTerm2 panels: their program, a log, and the names and folders of your open tabs with which ones you have looked at. A LaunchAgent, `com.missioncache.iterm`, starts them at login. If you let the installer add the shortcuts, it changes iTerm2's settings and keeps a copy of them in `~/.missioncache/backups/`. |
 
 Uninstalling MissionCache does not delete `~/.missioncache/`, so your projects survive a reinstall. Delete the folder yourself to remove them.
 
@@ -27,7 +28,7 @@ The change log keeps a project's history after you complete, rename or delete th
 | `fonts.googleapis.com`, `fonts.gstatic.com`, `cdn.jsdelivr.net` | When you open the dashboard in your browser | Your browser loads fonts and chart libraries, like any web page. |
 | A calendar URL you configure | The daily brief, only if you add an ICS feed | A request for that feed. |
 
-Each sign-in token goes only to the company that issued it. The dashboard listens on `127.0.0.1:8787` and never on an external interface.
+Each sign-in token goes only to the company that issued it. The dashboard listens on `127.0.0.1:8787` and never on an external interface. The iTerm2 panels listen on `127.0.0.1:8791` and talk to iTerm2 through its local Python API. They refuse requests from web pages. Other programs running as you on the same Mac can read the tab names and folders they show, as they could read the files on disk.
 
 ## Questions
 

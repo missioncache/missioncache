@@ -50,6 +50,7 @@ DOCS = [
     ("mcp-tools", "MCP Tools"),
     ("cli", "CLI Reference"),
     ("statusline", "Statusline"),
+    ("terminal-panels", "iTerm2 panels"),
     ("extension", "Editor extension"),
     ("comparison", "Comparison"),
     ("hooks", "Hooks"),

@@ -36,6 +36,8 @@ Claude Code sessions that closed show up here with their name, folder and a **Co
 
 A session that ends without saying so, for example when you close its tab, shows up the next time the list is read. Sessions started by MissionCache Auto are not listed.
 
+On a Mac with iTerm2, a card at the top shows how to get the same lists in iTerm2's Toolbelt. See [iTerm2 panels](terminal-panels.md).
+
 ### Projects
 
 Two tables, active and completed. Search, filter by category or repo, and click a row to open the project page. The page has tabs for an overview, the tasks, the context, the plan, the action items, and a graph of which tasks run by hand and which run on auto.
