@@ -22,6 +22,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 from collections import defaultdict
@@ -3851,6 +3852,35 @@ def get_resume_sessions(list: str = "all", q: str | None = None):
         raise HTTPException(status_code=400, detail={"error": True, "code": "BAD_LIST", "message": f"list must be one of {', '.join(resume_sessions.LISTS)}"})
     with get_sqlite_db().connection() as conn:
         return {"sessions": resume_sessions.list_sessions(conn, list, q)}
+
+
+# Where iTerm2 is looked for, besides ~/Applications.
+SYSTEM_APPLICATIONS = Path("/Applications")
+
+
+@app.get("/api/terminal-panels")
+def get_terminal_panels():
+    """Whether this machine can run the iTerm2 panels and whether the
+    installer put them in, for the card on the Sessions view.
+
+    The dashboard cannot import missioncache-install, so the iTerm2 check
+    and the state file path repeat ``iterm_panels.detected`` and
+    ``state.STATE_FILE`` there. Change them together."""
+    iterm = sys.platform == "darwin" and any(
+        (base / "iTerm.app").exists() for base in (SYSTEM_APPLICATIONS, Path.home() / "Applications")
+    )
+    try:
+        recorded = json.loads((Path.home() / ".claude" / "missioncache-install.state.json").read_text(encoding="utf-8"))
+        component = recorded.get("components", {}).get("iterm_panels")
+    except (OSError, ValueError, AttributeError):
+        component = None
+    return {
+        "iterm": iterm,
+        "installed": component is not None,
+        # Whether the installer wrote the key bindings. Without them the card
+        # does not show shortcuts that do nothing.
+        "shortcuts": isinstance(component, dict) and bool(component.get("key_bindings")),
+    }
 
 
 class ResumeRenamePayload(BaseModel):

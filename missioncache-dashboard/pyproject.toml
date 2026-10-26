@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-dashboard"
-version = "1.0.29"
+version = "1.0.30"
 description = "MissionCache Dashboard - Task analytics and autonomous execution monitoring for Claude Code MissionCache projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,7 +28,7 @@ dependencies = [
     # with no release on our side (how mcp 2.0.0 broke the MCP server in
     # every fresh env on 2026-07-28). Raise a cap only after testing on the
     # new major.
-    "missioncache-db>=1.0.38",
+    "missioncache-db>=1.0.39",
     "fastapi>=0.115.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "duckdb>=1.1.0,<2",
@@ -51,6 +51,7 @@ dependencies = [
 missioncache-dashboard = "missioncache_dashboard.cli:main"
 missioncache-statusline = "missioncache_dashboard.statusline:main"
 mc-dash = "missioncache_dashboard.cli:main"
+missioncache-iterm = "missioncache_dashboard.iterm.daemon:run"
 
 [project.optional-dependencies]
 rss = [
@@ -62,6 +63,11 @@ rss = [
 learn = [
     "anthropic>=0.40.0,<1",
     "python-slugify>=8.0.0,<9",
+]
+# The iTerm2 panels' daemon (missioncache-install --iterm-panels). Mac only.
+iterm2 = [
+    "iterm2>=2.30,<3; sys_platform == 'darwin'",
+    "websockets>=13; sys_platform == 'darwin'",
 ]
 dev = [
     "pytest>=7.0",

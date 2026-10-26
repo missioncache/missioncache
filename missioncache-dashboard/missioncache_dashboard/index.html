@@ -16,6 +16,7 @@
          file per unicode subset covering every weight in between, so the list
          cannot drift out of step with the CSS again. -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400..800&family=JetBrains+Mono:wght@400..700&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Rubik:wght@400..700&display=swap" rel="stylesheet">
+    <script src="/static/resume-rows.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
@@ -2605,6 +2606,12 @@
             border: 1px solid var(--accent-purple); background: var(--bg-card-solid); color: var(--text-primary); }
         .rs-heading { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 6px; }
         .rs-error { color: var(--accent-red); font-size: 13px; margin-bottom: 8px; }
+        .rs-panels { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px;
+                     border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--text-secondary); }
+        .rs-panels[hidden] { display: none; }
+        .rs-panels code, .rs-panels kbd { color: var(--text-primary); font-family: var(--font-mono, monospace); }
+        .rs-panels a { color: var(--accent-purple); }
+        .rs-panels .rs-panels-close { margin-left: auto; }
 
         .empty-state {
             text-align: center;
@@ -6803,6 +6810,7 @@
                         <h2>Sessions</h2>
                         <p class="page-subtitle">Every Claude Code session that closed, with the command that brings it back. Project sessions are saved on their own; everything else waits in Closed.</p>
                     </div>
+                    <div class="rs-panels" id="rsPanels" hidden></div>
                     <div class="rs-tabs" role="tablist" aria-label="Resume lists" id="rsTabs">
                         <button class="tab-btn active" role="tab" aria-selected="true" data-tab="saved" onclick="rsSetTab('saved')">Saved</button>
                         <button class="tab-btn" role="tab" aria-selected="false" data-tab="closed" onclick="rsSetTab('closed')">Closed</button>
@@ -8011,193 +8019,63 @@
             document.title = LD_TITLE;
         }
 
-        // Sessions view: the resume lists. Reads /api/resume when opened and
-        // every 15 s while visible; a rename in progress holds the refresh.
-        // loadError belongs to the last read and the next read clears it.
-        // actError belongs to the last action and stays until the next one.
-        const RS_POLL_MS = 15000;
-        const rs = { tab: 'saved', q: '', rows: [], loaded: false, timer: null, armed: null, editing: null,
-                     loadError: null, actError: null };
-        const RS_CLAUDE_ICON = `<svg class="rs-icon claude" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
-
-        function rsOpen() {
-            if (rs.timer) return;
-            rsLoad();
-            rs.timer = setInterval(() => { if (!document.hidden && !rs.editing) rsLoad(); }, RS_POLL_MS);
-        }
-        function rsClose() {
-            clearInterval(rs.timer);
-            rs.timer = null;
-        }
-        async function rsLoad() {
-            try {
+        // Sessions view: the resume lists, drawn by /static/resume-rows.js
+        // (shared with the iTerm2 Saved Tabs panel). Reads /api/resume when
+        // opened and every 15 s while visible.
+        const rsView = ResumeRows({
+            ids: { root: 'rsRoot', error: 'rsError', tabs: 'rsTabs', sr: 'rsSr' },
+            async fetchRows() {
                 const res = await fetch(API_BASE + '/api/resume?list=all');
                 if (!res.ok) throw new Error(await bdErrMsg(res, `HTTP ${res.status}`));
-                rs.rows = (await res.json()).sessions || [];
-                rs.loaded = true;
-                rs.loadError = null;
-            } catch (e) {
-                rs.loadError = `Could not load the sessions: ${e.message || e}`;
-            }
-            rsRender();
+                return (await res.json()).sessions || [];
+            },
+            post: (sid, action, body) => pmPost(`/api/resume/${encodeURIComponent(sid)}/${action}`, body),
             // Opened straight on #sessions, this view ends the initial overlay.
-            if (LoadingManager.isInitialLoad) LoadingManager.hide();
-        }
-        function rsSetTab(tab) {
-            rs.tab = tab;
-            rsRender();
-        }
-        function rsSetQuery(q) {
-            rs.q = q.trim().toLowerCase();
-            rsRender();
-        }
-        function rsShortPath(p) {
-            return String(p || '').replace(/^(\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~');
-        }
-        function rsMatches(r) {
-            if (!rs.q) return true;
-            return [r.name, r.mc_title, r.project_name, r.cwd].some(v => String(v || '').toLowerCase().includes(rs.q));
-        }
-        function rsRowHtml(r) {
-            const sid = escapeHtml(r.session_id);
-            const icon = r.origin === 'missioncache'
-                ? '<span class="rs-icon mc" role="img" aria-label="MissionCache project" title="MissionCache project"></span>'
-                : RS_CLAUDE_ICON;
-            const name = rs.editing === r.session_id
-                ? `<input class="rs-rename" data-sid="${sid}" data-focus="rename:${sid}" value="${escapeHtml(r.name)}" aria-label="New name, Enter saves, Escape cancels"
-                     dir="auto" maxlength="200" onkeydown="rsRenameKey(event, this)">`
-                : `<div class="rs-name">${ldBidi(r.name)}</div>`;
-            const meta = [
-                r.project_name ? `<span>${ldBidi(r.project_name)}</span>` : '',
-                `<span class="rs-path" title="${escapeHtml(r.cwd)}">${escapeHtml(rsShortPath(r.cwd))}</span>`,
-                r.open ? '<span class="rs-badge">open</span>' : `<span title="${escapeHtml(r.closed_at || '')}">${escapeHtml(ldAgoText(r.closed_at))}</span>`,
-                r.transcript_gone ? '<span class="rs-badge warn" title="Claude Code deleted the transcript">transcript gone</span>' : '',
-            ].join('');
-            const armed = rs.armed === r.session_id;
-            const actions = [
-                r.command ? `<button class="rs-act" data-act="copy" data-sid="${sid}" data-focus="copy:${sid}" title="${escapeHtml(r.command)}">Copy command</button>` : '',
-                r.list === 'closed' ? `<button class="rs-act" data-act="keep" data-sid="${sid}" data-focus="keep:${sid}">Keep</button>` : '',
-                `<button class="rs-act" data-act="rename" data-sid="${sid}" data-focus="rename:${sid}">Rename</button>`,
-                `<button class="rs-act${armed ? ' armed' : ''}" data-act="forget" data-sid="${sid}" data-focus="forget:${sid}">${armed ? 'Remove?' : 'Remove'}</button>`,
-            ].join('');
-            return `<div class="rs-row">${icon}<div class="rs-main">${name}<div class="rs-meta">${meta}</div></div><div class="rs-actions">${actions}</div></div>`;
-        }
-        function rsRender() {
-            const root = document.getElementById('rsRoot');
-            if (!root) return;
-            const err = document.getElementById('rsError');
-            const error = rs.actError || rs.loadError;
-            err.hidden = !error;
-            err.textContent = error || '';
-            const saved = rs.rows.filter(r => r.list === 'saved' && rsMatches(r));
-            const closed = rs.rows.filter(r => r.list === 'closed' && rsMatches(r));
-            const tabs = document.getElementById('rsTabs');
-            tabs.hidden = !!rs.q;
-            const counts = { saved: 0, closed: 0 };
-            rs.rows.forEach(r => { counts[r.list]++; });
-            tabs.querySelectorAll('.tab-btn').forEach(b => {
-                const on = b.dataset.tab === rs.tab;
-                b.classList.toggle('active', on);
-                b.setAttribute('aria-selected', on ? 'true' : 'false');
-                b.textContent = `${b.dataset.tab === 'saved' ? 'Saved' : 'Closed'} (${counts[b.dataset.tab]})`;
-            });
-            let html;
-            if (!rs.loaded) {
-                html = rs.loadError ? '' : '<div class="empty-state"><div class="empty-state-text">Loading the sessions...</div></div>';
-            } else if (rs.q) {
-                html = (saved.length ? `<div class="rs-heading">Saved</div>${saved.map(rsRowHtml).join('')}` : '')
-                    + (closed.length ? `<div class="rs-heading">Closed</div>${closed.map(rsRowHtml).join('')}` : '');
-                if (!html) html = '<div class="empty-state"><div class="empty-state-text">No session matches.</div></div>';
-            } else {
-                const rows = rs.tab === 'saved' ? saved : closed;
-                html = rows.length ? rows.map(rsRowHtml).join('')
-                    : `<div class="empty-state"><div class="empty-state-text">${rs.tab === 'saved'
-                        ? 'Nothing saved yet. A session bound to a project goes here when it closes, and Keep moves one from Closed.'
-                        : 'No closed sessions yet. Every Claude Code session shows up here when it ends.'}</div></div>`;
-            }
-            // A render replaces every row, so it carries over what the
-            // person was doing: the focused button and a name being typed.
-            const active = document.activeElement;
-            const focusKey = root.contains(active) ? active.dataset.focus : null;
-            const typing = root.querySelector('.rs-rename');
-            const typed = typing && typing.dataset.sid === rs.editing
-                ? { value: typing.value, start: typing.selectionStart, end: typing.selectionEnd, had: active === typing } : null;
-            root.innerHTML = html;
-            const input = root.querySelector('.rs-rename');
-            if (input && typed) {
-                input.value = typed.value;
-                if (typed.had) { input.focus(); input.setSelectionRange(typed.start, typed.end); }
-            } else if (input) {
-                input.focus();
-                input.select();
-            } else if (focusKey) {
-                const again = [...root.querySelectorAll('[data-focus]')].find(el => el.dataset.focus === focusKey);
-                if (again) again.focus();
-            }
-        }
-        function rsAnnounce(text) {
-            const sr = document.getElementById('rsSr');
-            if (sr) sr.textContent = text;
-        }
-        const rsPost = (sid, action, body) => pmPost(`/api/resume/${encodeURIComponent(sid)}/${action}`, body);
-        async function rsAct(button) {
-            const sid = button.dataset.sid;
-            const row = rs.rows.find(r => r.session_id === sid);
-            if (!row) return;
-            rs.actError = null;
-            try {
-                if (button.dataset.act === 'copy') {
-                    await navigator.clipboard.writeText(row.command);
-                    button.textContent = 'Copied';
-                    rsAnnounce(`Copied the command for ${row.name}. Paste it in a terminal.`);
-                    setTimeout(() => { button.textContent = 'Copy command'; }, 1500);
-                    return;
-                }
-                if (button.dataset.act === 'rename') {
-                    rs.editing = sid;
-                    rsRender();
-                    return;
-                }
-                if (button.dataset.act === 'forget' && rs.armed !== sid) {
-                    rs.armed = sid;
-                    rsRender();
-                    setTimeout(() => { if (rs.armed === sid) { rs.armed = null; rsRender(); } }, 3000);
-                    return;
-                }
-                rs.armed = null;
-                button.disabled = true;
-                await rsPost(sid, button.dataset.act);
-                rsAnnounce(button.dataset.act === 'keep' ? `Moved ${row.name} to Saved` : `Removed ${row.name}`);
-                await rsLoad();
-            } catch (e) {
-                rs.actError = `Could not ${button.dataset.act === 'forget' ? 'remove' : button.dataset.act} ${row.name}: ${e.message || e}`;
-                rsRender();
-            }
-        }
-        function rsRenameKey(event, input) {
-            if (event.key === 'Enter') { event.preventDefault(); rsRenameDone(input, true); }
-            if (event.key === 'Escape') { event.preventDefault(); rsRenameDone(input, false); }
-        }
-        async function rsRenameDone(input, save) {
-            if (rs.editing !== input.dataset.sid) return;
-            rs.editing = null;
-            rs.actError = null;
-            if (save) {
-                try {
-                    await rsPost(input.dataset.sid, 'rename', { name: input.value });
-                    rsAnnounce('Renamed');
-                } catch (e) {
-                    rs.actError = `Could not rename: ${e.message || e}`;
-                }
-                await rsLoad();
-            } else {
-                rsRender();
-            }
-        }
-        document.addEventListener('click', e => {
-            const button = e.target.closest && e.target.closest('#rsRoot .rs-act');
-            if (button) rsAct(button);
+            onLoaded() { if (LoadingManager.isInitialLoad) LoadingManager.hide(); },
         });
+        // The iTerm2 panels card: how to add them where iTerm2 is installed,
+        // the shortcuts once they are in. Hidden elsewhere, or once closed.
+        const RS_PANELS_KEY = 'missioncache-panels-card-closed';
+        const RS_PANELS_DOCS = 'https://github.com/missioncache/missioncache/blob/main/docs/terminal-panels.md';
+        const RS_PANELS_CMD = 'uvx missioncache-install --iterm-panels';
+        async function rsPanelsLoad() {
+            const card = document.getElementById('rsPanels');
+            let closed = false;
+            try { closed = localStorage.getItem(RS_PANELS_KEY) === '1'; } catch (e) { /* storage blocked: show it */ }
+            if (closed) { card.hidden = true; return; }
+            let info;
+            try {
+                const res = await fetch(API_BASE + '/api/terminal-panels');
+                if (!res.ok) return;
+                info = await res.json();
+            } catch (e) { return; }
+            if (!info.iterm) { card.hidden = true; return; }
+            const docs = `<a href="${RS_PANELS_DOCS}" target="_blank" rel="noopener">How it works</a>`;
+            card.innerHTML = (info.installed
+                ? (info.shortcuts
+                    ? `<span>iTerm2 panels are on. <kbd>Cmd+Shift+]</kbd> next session, <kbd>Cmd+Shift+[</kbd> previous, <kbd>Cmd+Shift+\\</kbd> the one waiting for you.</span> ${docs}`
+                    : `<span>iTerm2 panels are on. Open them from View &gt; Toolbelt in iTerm2.</span> ${docs}`)
+                : `<span>See these lists in iTerm2's Toolbelt, and switch sessions from the keyboard:</span>
+                   <code>${RS_PANELS_CMD}</code>
+                   <button class="rs-act" id="rsPanelsCopy">Copy</button> ${docs}`)
+                + '<button class="rs-act rs-panels-close" id="rsPanelsClose" aria-label="Close this card">Close</button>';
+            card.hidden = false;
+            const copy = document.getElementById('rsPanelsCopy');
+            if (copy) copy.onclick = async () => {
+                try { await navigator.clipboard.writeText(RS_PANELS_CMD); copy.textContent = 'Copied'; }
+                catch (e) { copy.textContent = 'Copy failed'; }
+                setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+            };
+            document.getElementById('rsPanelsClose').onclick = () => {
+                try { localStorage.setItem(RS_PANELS_KEY, '1'); } catch (e) { /* closes for this visit only */ }
+                card.hidden = true;
+                document.getElementById('rsSearch').focus();
+            };
+        }
+        const rsOpen = () => { rsPanelsLoad(); rsView.start(); };
+        const rsClose = () => rsView.stop();
+        const rsSetTab = tab => rsView.setTab(tab);
+        const rsSetQuery = q => rsView.setQuery(q);
 
         // A tab brought back to the front catches up at once.
         function ldOnVisible() {

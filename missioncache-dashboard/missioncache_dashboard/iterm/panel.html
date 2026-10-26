@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark light; }
+  body { margin: 0; font: 12px system-ui, sans-serif; background: #1e1e1e; color: #ddd; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #8882; }
+  .row:hover { background: #2d2d2d; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #666; }
+  .working { background: #ffaf00; } .done { background: #00d75f; } .waiting { background: #ff5f5f; } .idle { background: #5f87ff; } .error { background: #d75fd7; }
+  .main { flex: 1; min-width: 0; }
+  .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .unseen .title { font-weight: 700; }
+  .meta { color: #888; font-size: 11px; }
+  .ago { flex: none; color: #888; font-variant-numeric: tabular-nums; }
+  .unseen .ago { color: #00d75f; }
+  .auto { flex: none; width: 18px; text-align: center; }
+  .auto .mc { width: 14px; height: 14px; opacity: .45; filter: grayscale(1); }
+  .save { flex: none; background: none; border: none; color: #888; cursor: pointer; font-size: 14px; padding: 0 2px; }
+  .save:hover, .save.on { color: #ffaf00; }
+  .note { padding: 8px 10px; color: #888; }
+  .lead-live { background: #1d2a3a; border-left: 3px solid #5f87ff; padding-left: 7px; }
+  .lead-live:hover { background: #24344a; }
+  .lead-off { border-left: 3px dashed #666; padding-left: 7px; opacity: .65; }
+  /* The tab in front: a light grey pill like iTerm2's selected tab, so it
+     reads as "you are here" and not as something waiting. */
+  .row.current { background: #36373a; box-shadow: inset 0 0 0 1px #56585c; border-radius: 8px; border-bottom-color: transparent; }
+  .row.current:hover { background: #3d3e42; }
+  .current .title { color: #fff; }
+  .current .meta, .current .ago { color: #a6a6a6; }
+  @media (prefers-color-scheme: light) {
+    .row.current { background: #d6d6d8; box-shadow: inset 0 0 0 1px #b4b4b8; } .row.current:hover { background: #cdcdd0; } .current .title { color: #000; } }
+  @media (prefers-color-scheme: light) { .lead-live { background: #dde8f7; } .lead-live:hover { background: #d0def2; } }
+  .err { color: #ff5f5f; }
+  .search { padding: 6px 10px; border-bottom: 1px solid #8882; }
+  .search input { width: 100%; box-sizing: border-box; padding: 4px 6px; font: 12px system-ui, sans-serif; background: #111; color: inherit; border: 1px solid #8886; border-radius: 3px; }
+  @media (prefers-color-scheme: light) { .search input { background: #fff; } }
+  .bar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid #8882; }
+  .bar button { background: #2a2a2a; border: 1px solid #8884; border-radius: 6px; color: inherit; cursor: pointer; padding: 4px 8px; font: 12px system-ui, sans-serif; }
+  .bar .home { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .bar .home img { height: 22px; }
+  .bar .lead.live { border-color: #5f87ff; color: #9fb7ff; }
+  .bar .lead:not(.live) { border-style: dashed; color: #888; }
+  .row:focus-visible, .save:focus-visible, .bar button:focus-visible { outline: 2px solid #5f87ff; outline-offset: -2px; }
+  /* Light mode last, so it wins over the dark rules of the same weight. */
+  @media (prefers-color-scheme: light) {
+    body { background: #f5f5f5; color: #222; } .row:hover { background: #e4e4e4; }
+    .meta, .ago, .note, .save { color: #595959; } .unseen .ago { color: #00702f; } .err { color: #b00020; }
+    .bar button { background: #e8e8e8; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button class="home" title="Open the MissionCache dashboard" onclick="post('/open/dashboard')">
+    <picture><source srcset="/logo-black.png" media="(prefers-color-scheme: light)"><img src="/logo-white.png" alt="MissionCache"></picture>
+  </button>
+  <button class="lead" id="lead" title="Open the Lead view" onclick="post('/open/lead')">Lead</button>
+</div>
+<div id="err" class="note err" hidden></div>
+<div class="search"><input id="q" placeholder="Search" aria-label="Search terminal sessions" oninput="render()" onkeydown="if (event.key === 'Escape') { this.value = ''; render(); }"></div>
+<div id="list"></div>
+<script>
+let rows = [];  // the last /state, so typing filters without waiting for a refresh
+let pressing = false;  // a re-render between mousedown and mouseup would eat the click
+let current = null;   // the session in front, kept by refreshCurrent()
+document.addEventListener("pointerdown", () => pressing = true);
+document.addEventListener("pointerup", () => setTimeout(() => pressing = false, 0));
+
+function ago(t) {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - t));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h";
+  return Math.floor(s / 86400) + "d";
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+// A name with Hebrew reads right to left. Isolated, so the row stays
+// left-aligned and the badges around it keep their place.
+function bidi(s) { return /[\u0590-\u05FF]/.test(s) ? `<bdi dir="rtl">${esc(s)}</bdi>` : esc(s); }
+function showError(text) {
+  const el = document.getElementById("err");
+  el.textContent = text || "";
+  el.hidden = !text;
+}
+async function post(path, data) {
+  try {
+    const res = await fetch(path, {method: "POST", headers: {"X-Panel": "1", "Content-Type": "application/json"},
+                                   body: JSON.stringify(data || {})});
+    if (!res.ok) showError(await res.text());
+    return res.ok;
+  } catch (e) {
+    showError("Server not reachable: " + e);
+    return false;
+  }
+}
+// ☆ saves the session to Saved Tabs, ★ (already saved) takes it out again.
+async function saveLive(button, id) {
+  const saved = button.classList.contains("on");
+  if (await post(`/live/${encodeURIComponent(id)}/${saved ? "unsave" : "save"}`)) {
+    button.classList.toggle("on", !saved);
+    button.setAttribute("aria-pressed", String(!saved));
+    button.textContent = saved ? "☆" : "★";
+  }
+}
+// One listener for every row: a click or Enter goes to the tab, the star
+// saves it. Reading the id from data-id keeps it out of any script text.
+const list = document.getElementById("list");
+list.addEventListener("click", e => {
+  const row = e.target.closest(".row");
+  if (!row) return;
+  const star = e.target.closest(".save");
+  if (star) saveLive(star, row.dataset.id);
+  else post(`/focus/${encodeURIComponent(row.dataset.id)}`);
+});
+list.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("row")) {
+    e.preventDefault();
+    post(`/focus/${encodeURIComponent(e.target.dataset.id)}`);
+  }
+});
+function meta(r) {
+  if (r.lead === "live") return "lead · live · " + esc(r.status);
+  if (r.lead === "off") return "not receiving updates · run /missioncache:lead";
+  return esc(r.status || "shell") + " · " + esc((r.path || "").split(/[\\/]/).pop());  // also a Windows path
+}
+async function refresh() {
+  if (pressing) return;
+  try {
+    const res = await fetch("/state");
+    if (!res.ok) throw new Error(await res.text());
+    rows = await res.json();
+  } catch (e) {
+    showError("Not updating since " + new Date().toLocaleTimeString() + ": " + e.message);
+    return;
+  }
+  showError("");
+  render();
+}
+// Matches the name, the tab title or the directory, ignoring case.
+function render() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const shown = q ? rows.filter(r => [r.name, r.title, r.path].some(v => (v || "").toLowerCase().includes(q))) : rows;
+  // The list is rebuilt every 2s. Put the keyboard back where it was, but
+  // only while the panel has it: focus() on a row in a panel you clicked
+  // earlier pulls the keyboard out of the terminal you are typing in.
+  const active = document.activeElement;
+  const focusedRow = document.hasFocus() && list.contains(active) ? active.closest(".row")?.dataset.id : null;
+  const onStar = !!(active && active.classList.contains("save"));
+  list.innerHTML = shown.length ? shown.map(r => `
+    <div class="row ${r.unseen ? "unseen" : ""} ${r.lead ? "lead-" + r.lead : ""} ${r.id === current ? "current" : ""}" data-id="${esc(r.id)}" role="button" tabindex="0" title="${esc(r.title)} · ${esc(r.path)}">
+      <span class="dot ${esc(r.status)}"></span>
+      <div class="main">
+        <div class="title" dir="auto">${bidi(r.name)}</div>
+        <div class="meta">${meta(r)}</div>
+      </div>
+      <span class="ago">${ago(r.changed)}</span>
+      ${r.project
+        // A MissionCache session is saved by itself when it closes, so a star
+        // here would do nothing (or be undone on the next close).
+        ? `<span class="auto" title="A MissionCache project: it goes to Saved Tabs by itself when it closes"><img class="mc" src="/logo-icon.png" alt="MissionCache project"></span>`
+        : `<button class="save ${r.saved ? "on" : ""}" aria-pressed="${r.saved}" aria-label="Keep in Saved Tabs"
+              title="${r.saved ? "In Saved Tabs. Click to remove it" : "Save to Saved Tabs"}">${r.saved ? "★" : "☆"}</button>`}
+    </div>`).join("") : `<div class="note">${q ? "No match." : "No terminal sessions."}</div>`;
+  if (focusedRow) {
+    const row = [...list.querySelectorAll(".row")].find(r => r.dataset.id === focusedRow);
+    const target = row && (onStar ? row.querySelector(".save") : row);
+    if (target) target.focus();
+  }
+}
+// Moves the "you are here" frame without rebuilding the list.
+async function refreshCurrent() {
+  try {
+    const id = await (await fetch("/current")).json();
+    if (id === current) return;
+    current = id;
+    for (const row of document.querySelectorAll(".row"))
+      row.classList.toggle("current", row.dataset.id === current);
+  } catch (e) {}  // the 2s refresh shows when the server is down
+}
+// Blue while MissionCache counts a lead as live, grey and dashed when not.
+async function refreshLead() {
+  try {
+    const live = (await (await fetch("/lead")).json()).live;
+    document.getElementById("lead").classList.toggle("live", live);
+  } catch (e) {}
+}
+refresh();
+refreshLead();
+setInterval(refresh, 2000);
+setInterval(refreshLead, 15000);
+setInterval(refreshCurrent, 250);
+</script>
+</body>
+</html>

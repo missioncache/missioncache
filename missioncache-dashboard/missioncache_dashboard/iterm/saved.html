@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark light; --muted: #888; --border: #8884; --accent: #5f87ff; }
+  body { margin: 0; font: 12px system-ui, sans-serif; background: #1e1e1e; color: #ddd; }
+  .search { padding: 6px 10px 0; }
+  .search input { width: 100%; box-sizing: border-box; padding: 4px 6px; font: 12px system-ui, sans-serif; background: #111; color: inherit; border: 1px solid #8886; border-radius: 3px; }
+  .rs-tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .rs-tabs[hidden] { display: none; }
+  .tab-btn { background: none; border: 1px solid transparent; border-radius: 4px; color: var(--muted); font-size: 11px; padding: 2px 7px; cursor: pointer; }
+  .tab-btn.active { background: #3a3a3a; border-color: var(--border); color: inherit; }
+  .rs-error { color: #ff5f5f; padding: 4px 10px; }
+  .rs-error[hidden] { display: none; }
+  .rs-list { display: flex; flex-direction: column; }
+  .rs-row { display: grid; grid-template-columns: 16px 1fr; gap: 6px 8px; padding: 6px 10px; border-bottom: 1px solid #8882; }
+  .rs-row.clickable { cursor: pointer; }
+  .rs-row:hover { background: #2d2d2d; }
+  .rs-icon { width: 14px; height: 14px; margin-top: 1px; opacity: .45; }
+  .rs-icon.mc { background: currentColor; -webkit-mask: url(/logo-icon.png) center / contain no-repeat; mask: url(/logo-icon.png) center / contain no-repeat; }
+  .rs-main { min-width: 0; }
+  .rs-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rs-pin { font-size: 10px; margin-right: 4px; }
+  .rs-meta { color: var(--muted); font-size: 11px; display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .rs-path { font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .rs-badge { font-size: 10px; font-weight: 600; color: #1e1e1e; background: #00d75f; border-radius: 3px; padding: 0 4px; }
+  .rs-badge.warn { background: #ffaf00; }
+  /* The actions show on hover or focus, so the name gets the full width.
+     Hidden by clipping, not display:none, so Tab still reaches them. */
+  .rs-actions { grid-column: 2; display: flex; gap: 4px; flex-wrap: wrap; }
+  .rs-row:not(:hover):not(:focus-within) .rs-actions { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .rs-act { background: #3a3a3a; color: inherit; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; padding: 2px 7px; cursor: pointer; }
+  .rs-act.primary { background: #2d5a2d; }
+  .rs-act.armed { color: #ff8787; border-color: #ff8787; }
+  .rs-act:focus-visible, .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .rs-rename { width: 100%; box-sizing: border-box; font: 600 12px system-ui, sans-serif; padding: 2px 5px; background: #111; color: inherit; border: 1px solid #8886; border-radius: 3px; }
+  .rs-heading { margin: 10px 10px 2px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+  .empty-state { padding: 10px; color: var(--muted); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* Light mode last, so it wins over the dark rules of the same weight. */
+  @media (prefers-color-scheme: light) {
+    :root { --muted: #595959; } body { background: #f5f5f5; color: #222; } .rs-row:hover { background: #e4e4e4; }
+    .rs-error { color: #b00020; } .rs-act.armed { color: #b00020; border-color: #b00020; }
+    .search input, .rs-rename { background: #fff; } .tab-btn.active, .rs-act { background: #e0e0e0; } .rs-act.primary { background: #bfe3bf; } }
+</style>
+<script src="/resume-rows.js"></script>
+</head>
+<body>
+<div class="search"><input id="q" placeholder="Search" aria-label="Search sessions"
+  oninput="view.setQuery(this.value)" onkeydown="if (event.key === 'Escape') { this.value = ''; view.setQuery(''); }"></div>
+<div class="rs-tabs" id="tabs" role="tablist" aria-label="Resume lists">
+  <button class="tab-btn active" role="tab" data-tab="saved" onclick="view.setTab('saved')">Saved</button>
+  <button class="tab-btn" role="tab" data-tab="closed" onclick="view.setTab('closed')">Closed</button>
+</div>
+<div class="rs-error" id="err" role="alert" hidden></div>
+<span class="sr" id="sr" role="status"></span>
+<div class="rs-list" id="list"></div>
+<script>
+// The same lists as the dashboard's Sessions view, read and changed through
+// this panel's daemon, which also opens a session in a new iTerm2 tab.
+async function send(path, body) {
+  const res = await fetch(path, {method: "POST", headers: {"X-Panel": "1", "Content-Type": "application/json"},
+                                 body: JSON.stringify(body || {})});
+  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+}
+const view = ResumeRows({
+  ids: {root: "list", error: "err", tabs: "tabs", sr: "sr"},
+  async fetchRows() {
+    const res = await fetch("/resume?list=all");
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+    return (await res.json()).sessions;
+  },
+  post: (sid, action, body) => send(`/resume/${encodeURIComponent(sid)}/${action}`, body),
+  openRow: row => send(`/resume/${encodeURIComponent(row.session_id)}/open`),
+  pin: true,
+  pollMs: 3000,  // picks up sessions saved from Recent Sessions
+});
+view.start();
+</script>
+</body>
+</html>
