@@ -157,6 +157,11 @@ def _ours(entry: object, function: str) -> bool:
     )
 
 
+def _all_bound(prefs: dict) -> bool:
+    keymap = prefs.get("GlobalKeyMap") or {}
+    return all(_ours(keymap.get(k), f) for k, (_, f) in KEY_BINDINGS.items())
+
+
 def _print_manual_bindings() -> None:
     ui.detail("To bind the shortcuts yourself: iTerm2 Settings > Keys > Key Bindings > +,")
     ui.detail("action \"Invoke Script Function\", and one of:")
@@ -186,7 +191,6 @@ def _offer_key_bindings(prefs: dict) -> dict | None:
     if not agnostic:
         ui.detail("  Turn on \"keys keep their meaning in any keyboard layout\"")
     if not ui.ask_yn("Write these key bindings?", default=False):
-        _print_manual_bindings()
         return None
 
     backup_dir = Path.home() / ".missioncache" / "backups"
@@ -204,7 +208,7 @@ def _offer_key_bindings(prefs: dict) -> dict | None:
     return {"keys": sorted(missing), "language_agnostic_set": not agnostic}
 
 
-def _print_prerequisites(prefs: dict, bindings_written: bool) -> None:
+def _print_prerequisites(prefs: dict) -> None:
     if not prefs.get("EnableAPIServer"):
         ui.warn(
             "iTerm2's Python API is off, so the panels cannot connect. Turn it on in "
@@ -212,7 +216,7 @@ def _print_prerequisites(prefs: dict, bindings_written: bool) -> None:
         )
     ui.detail("Open the panels: View > Toolbelt, then tick Recent Sessions and Saved Tabs.")
     ui.detail("Session states (working, waiting, done) need iTerm2 3.7+ and its Claude Code integration.")
-    if not bindings_written:
+    if not _all_bound(prefs):
         _print_manual_bindings()
 
 
@@ -254,7 +258,8 @@ def install(ctx) -> None:
             "language_agnostic_set": bool(before.get("language_agnostic_set") or written["language_agnostic_set"]),
         }
         state.record_component(COMPONENT, info)
-    _print_prerequisites(prefs, bindings_written="key_bindings" in info)
+    # Read again: the bindings may have been written a moment ago.
+    _print_prerequisites(_read_prefs())
     ui.success("iTerm2 panels installed")
 
 

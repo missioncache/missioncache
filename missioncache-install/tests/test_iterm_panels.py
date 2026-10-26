@@ -274,6 +274,24 @@ def test_yes_writes_the_bindings_after_a_backup(
     assert recorded == {"keys": sorted(iterm_panels.KEY_BINDINGS), "language_agnostic_set": True}
 
 
+def test_the_manual_steps_show_only_while_a_binding_is_missing(
+    system: FakeSystem, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    printed: list[str] = []
+    monkeypatch.setattr(iterm_panels.ui, "detail", printed.append)
+    _answer(monkeypatch, False)
+    iterm_panels.install(_ctx())
+    assert sum("Invoke Script Function" in line for line in printed) == 1
+
+    printed.clear()
+    system.prefs["GlobalKeyMap"] = {
+        k: {"Action": 60, "Text": f} for k, (_, f) in iterm_panels.KEY_BINDINGS.items()
+    }
+    system.prefs["LanguageAgnosticKeyBindings"] = True  # all set, as they were by hand
+    iterm_panels.install(_ctx())
+    assert not any("Invoke Script Function" in line for line in printed)
+
+
 def test_bindings_already_set_are_not_asked_again(
     system: FakeSystem, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

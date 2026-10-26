@@ -8,6 +8,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+- `--iterm-panels` no longer prints how to bind the shortcuts when they are already bound. (missioncache-install)
+
 ## 2026-10-26
 
 - Optional iTerm2 panels list your Claude sessions in the Toolbelt, with shortcuts between them. Add them with `uvx missioncache-install --iterm-panels`. (missioncache-dashboard, missioncache-install, missioncache-db)
