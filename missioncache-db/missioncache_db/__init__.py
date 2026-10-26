@@ -7010,6 +7010,7 @@ def main():
                 "       missioncache-db resume command <ref>\n"
                 "       missioncache-db resume keep|forget <ref>\n"
                 "       missioncache-db resume rename <ref> [<name>]\n"
+                "       missioncache-db resume import-iterm <dir>\n"
                 "A <ref> is a session id, an id prefix of 6+ characters, or a name."
             )
             args = sys.argv[2:]
@@ -7085,6 +7086,12 @@ def main():
                     with db.connection() as conn:
                         resume_sessions.rename(conn, row["session_id"], args[1] if len(args) == 2 else "")
                         print(f"Renamed to {resume_sessions.get_session(conn, row['session_id'])['name']}")
+                elif sub == "import-iterm" and len(args) == 1:
+                    with db.connection() as conn:
+                        result = resume_sessions.import_folder(conn, Path(args[0]).expanduser())
+                    print(f"Imported {result['imported']}, merged {result['merged']} into sessions already listed")
+                    for item in result["skipped"]:
+                        print(f"Skipped (no claude --resume command): {item.get('name', '?')}  {item.get('cwd', '')}")
                 else:
                     print(usage)
                     sys.exit(1)

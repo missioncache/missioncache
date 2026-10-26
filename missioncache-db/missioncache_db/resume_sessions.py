@@ -312,6 +312,31 @@ def hook_record(
         print(f"<!-- missioncache: resume list write failed: {e} -->", file=sys.stderr)
 
 
+def _saved_peers(conn: sqlite3.Connection, project: str, title: str,
+                 exclude: Optional[str] = None) -> List[sqlite3.Row]:
+    """The closed Saved rows of one project and MissionCache title, newest
+    first. Saved keeps one of them: the others hand it their name and pin."""
+    return conn.execute(
+        "SELECT session_id, custom_name, pinned FROM resume_sessions "
+        "WHERE saved = 1 AND closed_at IS NOT NULL AND project_name = ? AND mc_title = ? "
+        "AND session_id IS NOT ? ORDER BY saved_at DESC",
+        (project, title, exclude),
+    ).fetchall()
+
+
+def _handed_over(peers: List[sqlite3.Row]) -> tuple:
+    """The name and pin the replaced rows hand to the one Saved keeps."""
+    return next((p[1] for p in peers if p[1]), None), int(any(p[2] for p in peers))
+
+
+def _demote(conn: sqlite3.Connection, peers: List[sqlite3.Row]) -> None:
+    """Move replaced rows to Closed, as plain history."""
+    conn.executemany(
+        "UPDATE resume_sessions SET saved = 0, pinned = 0, custom_name = NULL WHERE session_id = ?",
+        [(p[0],) for p in peers],
+    )
+
+
 def close_session(
     conn: sqlite3.Connection,
     session_id: str,
@@ -342,16 +367,8 @@ def close_session(
     project, mc_title, saved = row[0], row[1], row[2]
     saved = 1 if saved or _project_ok(project) else 0
     now = _now()
-    peers: List[sqlite3.Row] = []
-    if saved and project and mc_title:
-        peers = conn.execute(
-            "SELECT session_id, custom_name, pinned FROM resume_sessions "
-            "WHERE saved = 1 AND closed_at IS NOT NULL AND project_name = ? AND mc_title = ? "
-            "AND session_id != ? ORDER BY saved_at DESC",
-            (project, mc_title, session_id),
-        ).fetchall()
-    custom_name = next((p[1] for p in peers if p[1]), None)
-    pinned = int(any(p[2] for p in peers))
+    peers = _saved_peers(conn, project, mc_title, session_id) if saved and project and mc_title else []
+    custom_name, pinned = _handed_over(peers)
     closed = conn.execute(
         """
         UPDATE resume_sessions SET closed_at = ?, close_reason = ?, saved = ?,
@@ -363,10 +380,7 @@ def close_session(
          expect_seen, expect_seen),
     ).rowcount > 0
     if closed and peers:
-        conn.executemany(
-            "UPDATE resume_sessions SET saved = 0, pinned = 0, custom_name = NULL WHERE session_id = ?",
-            [(p[0],) for p in peers],
-        )
+        _demote(conn, peers)
     if commit:
         conn.commit()
     return closed
@@ -490,9 +504,14 @@ def _ps_quote(arg: str) -> str:
 
 def resume_command(row: Dict[str, Any], transcript: Optional[bool], windows: Optional[bool] = None) -> Optional[str]:
     """``resume_argv`` as one line to paste in a terminal, with the change of
-    directory in front: POSIX shell, or PowerShell on Windows."""
+    directory in front: POSIX shell, or PowerShell on Windows.
+
+    None for a folder name with a control character. Quoting keeps those
+    bytes, and the iTerm2 panels type this line into a terminal, where a
+    Ctrl+U and a carriage return in the name would erase the ``cd`` and run
+    the rest of the name as a command."""
     argv = resume_argv(row, transcript)
-    if not argv:
+    if not argv or _CONTROL_RE.search(row["cwd"] or ""):
         return None
     if WINDOWS if windows is None else windows:
         return f"Set-Location -LiteralPath {_ps_literal(row['cwd'])}; {' '.join(_ps_quote(a) for a in argv)}"
@@ -621,3 +640,128 @@ def rename(conn: sqlite3.Connection, session_id: str, name: Optional[str]) -> bo
 def forget(conn: sqlite3.Connection, session_id: str) -> bool:
     """Delete a row. The session itself is untouched."""
     return _update(conn, "DELETE FROM resume_sessions WHERE session_id = ?", (session_id,))
+
+
+def unsave(conn: sqlite3.Connection, session_id: str) -> bool:
+    """Take a row out of Saved without deleting it. A closed row drops to
+    Closed. A project session goes back to Saved when it next closes."""
+    return _update(conn, "UPDATE resume_sessions SET saved = 0, pinned = 0 WHERE session_id = ?",
+                   (session_id,))
+
+
+_IMPORT_RESUME_RE = re.compile(r"^claude --resume ([0-9a-fA-F-]{36})$")
+
+
+def _stamp_from_epoch(value: object) -> Optional[str]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return datetime.fromtimestamp(value).strftime(_STAMP)
+
+
+def _import_row(item: Dict[str, Any], saved: bool, now: str) -> Optional[Dict[str, Any]]:
+    """The row an item from the iTerm2 panels' lists becomes, or None when it
+    names no Claude Code session."""
+    found = _IMPORT_RESUME_RE.match(str(item.get("command") or "").strip())
+    if not found or not _UUID_RE.match(found[1]):
+        return None
+    sid = found[1].lower()
+    project = _clean(item.get("project"))
+    project = project if _project_ok(project) else None
+    name, auto = _clean(item.get("name")), _clean(item.get("auto_name"))
+    title = auto or name
+    when = _stamp_from_epoch(item.get("saved_at" if saved else "closed")) or now
+    cwd = _clean(item.get("cwd")) or str(Path.home())
+    transcript = next(iter((Path.home() / ".claude" / "projects").glob(f"*/{sid}.jsonl")), None)
+    return {
+        "session_id": sid, "cwd": os.path.expanduser(cwd),
+        "transcript_path": str(transcript) if transcript else None,
+        "project_name": project, "mc_title": title if project else None,
+        "auto_name": title or Path(cwd).name or sid,
+        "custom_name": name if auto and name else None,
+        "pinned": int(bool(item.get("pinned"))) if saved else 0,
+        "saved": int(saved), "saved_at": when if saved else None,
+        "first_seen_at": when, "last_seen_at": when, "closed_at": when,
+        "close_reason": "import",
+    }
+
+
+def import_items(
+    conn: sqlite3.Connection, saved: List[Dict[str, Any]], recent: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Bring the iTerm2 panels' saved and recently closed tabs into the resume
+    lists. A session the hooks already recorded keeps what the hooks wrote,
+    and only takes the saved state, hand-given name and pin. A tab with no
+    `claude --resume <id>` command names no session and is skipped. Running
+    it twice changes nothing the second time."""
+    now = _now()
+    imported, merged, skipped = 0, 0, []
+    columns = None
+    touched = set()
+    for items, is_saved in ((saved, True), (recent, False)):
+        for item in items:
+            row = _import_row(item, is_saved, now) if isinstance(item, dict) else None
+            if row is None:
+                skipped.append(item if isinstance(item, dict) else {"name": repr(item)})
+                continue
+            columns = columns or list(row)
+            existing = conn.execute("SELECT saved FROM resume_sessions WHERE session_id = ?",
+                                    (row["session_id"],)).fetchone()
+            if existing is None:
+                conn.execute(
+                    f"INSERT INTO resume_sessions ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+                    [row[c] for c in columns])
+                imported += 1
+            elif is_saved:
+                conn.execute(
+                    "UPDATE resume_sessions SET saved = 1, saved_at = COALESCE(saved_at, ?), "
+                    "custom_name = COALESCE(custom_name, ?), pinned = MAX(pinned, ?) WHERE session_id = ?",
+                    (row["saved_at"], row["custom_name"], row["pinned"], row["session_id"]))
+                merged += 1
+            else:
+                continue
+            if is_saved:
+                touched.add(tuple(conn.execute(
+                    "SELECT project_name, mc_title FROM resume_sessions WHERE session_id = ?",
+                    (row["session_id"],)).fetchone()))
+    # The panels kept one saved tab per project and title, and so does
+    # close_session. Apply the same rule to the groups this import added to,
+    # newest saved_at wins. Saved rows it did not touch stay as they are.
+    for project, title in sorted(t for t in touched if t[0] and t[1]):
+        newest, *older = _saved_peers(conn, project, title)
+        if not older:
+            continue
+        conn.execute(
+            "UPDATE resume_sessions SET custom_name = COALESCE(custom_name, ?), pinned = MAX(pinned, ?) "
+            "WHERE session_id = ?",
+            (*_handed_over(older), newest[0]))
+        _demote(conn, older)
+    conn.commit()
+    return {"imported": imported, "merged": merged, "skipped": skipped}
+
+
+def import_folder(conn: sqlite3.Connection, folder: Path) -> Dict[str, Any]:
+    """``import_items`` from the ``saved.json`` and ``recent.json`` in
+    ``folder``. Both are read before anything is written, so a file that does
+    not parse imports nothing. One of the two may be missing, but not both:
+    that is a wrong folder, not an empty one."""
+    lists = []
+    for name in ("saved.json", "recent.json"):
+        path = folder / name
+        try:
+            items = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            items = None
+        except (OSError, ValueError) as e:
+            raise ValueError(f"cannot read {path}: {e}") from e
+        if items is not None and not isinstance(items, list):
+            raise ValueError(f"{path} is not a list")
+        lists.append(items)
+    if lists == [None, None]:
+        raise ValueError(f"no saved.json or recent.json in {folder}")
+    return import_items(conn, lists[0] or [], lists[1] or [])
+
+
+def saved_ids(conn: sqlite3.Connection) -> set:
+    """The ids of every Saved row, open or closed. The iTerm2 panel polls
+    this to fill in the star on a running session."""
+    return {r[0] for r in conn.execute("SELECT session_id FROM resume_sessions WHERE saved = 1")}
