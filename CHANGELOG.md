@@ -8,7 +8,11 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 
 ## Unreleased
 
+## 2026-10-26
+
 - Optional iTerm2 panels list your Claude sessions in the Toolbelt, with shortcuts between them. Add them with `uvx missioncache-install --iterm-panels`. (missioncache-dashboard, missioncache-install, missioncache-db)
+
+Published package versions: missioncache-db 1.0.39, mcp-missioncache 1.0.46, missioncache-dashboard 1.0.30, missioncache-install 1.0.27. Claude Code plugin 1.0.45. missioncache-auto is unchanged.
 
 ## 2026-10-25
 
