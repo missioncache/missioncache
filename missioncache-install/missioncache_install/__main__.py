@@ -5,6 +5,7 @@ Invocation patterns:
     uvx missioncache-install --all                 # install all components non-interactively
     uvx missioncache-install --dashboard           # install only the dashboard
     uvx missioncache-install --all --no-statusline # install everything except the statusline
+    uvx missioncache-install --iterm-panels        # add the iTerm2 panels (macOS, opt-in)
     uvx missioncache-install --update              # refresh whatever is in state.json
     uvx missioncache-install --uninstall           # interactive uninstall wizard (TTY only)
     uvx missioncache-install --uninstall --all     # uninstall every tracked component
@@ -12,6 +13,7 @@ Invocation patterns:
     uvx missioncache-install --local               # maintainer mode: editable installs from clone
 
 Project data and DBs at `~/.missioncache/` are never touched by any uninstall flow.
+The one exception is `~/.missioncache/iterm/`, the iTerm2 panels' own program and state.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, installers, state, ui, wizard
-from .wizard import COMMAND_IMPLIES
+from .wizard import COMMAND_IMPLIES, OPT_IN_ONLY
 
 
 DEFAULT_PORT = 8787
@@ -67,7 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
              "(requires TTY). Pass a comma-separated component list (e.g. "
              "`--uninstall codex,vscode`) for non-interactive removal of "
              "specific components. Combine with `--all` to remove everything "
-             "tracked. Project data at ~/.missioncache/ is never touched.",
+             "tracked. Project data at ~/.missioncache/ is never touched "
+             "(the iTerm2 panels remove their own ~/.missioncache/iterm/).",
     )
 
     # Per-component opt-in flags. Any of these triggers non-interactive mode
@@ -93,6 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
         ("--vscode-commands", "vscode_commands"),
     ):
         opt_in.add_argument(flag, dest=dest, action="store_true")
+    opt_in.add_argument(
+        "--iterm-panels", dest="iterm_panels", action="store_true",
+        help="iTerm2 Toolbelt panels and session shortcuts (macOS). Not part of --all.",
+    )
 
     opt_out = p.add_argument_group(
         "component opt-out",
@@ -404,7 +411,10 @@ def main() -> int:
     excluded = _excluded_components(args)
 
     if args.all or explicit:
-        base = list(installers.ALL_COMPONENTS) if args.all else explicit
+        if args.all:
+            base = [c for c in installers.ALL_COMPONENTS if c not in OPT_IN_ONLY or c in explicit]
+        else:
+            base = explicit
         selected = [c for c in base if c not in excluded]
         selected = _expand_implies(selected, excluded)
         # statusline needs the missioncache-statusline entry point, which ships in the

@@ -23,7 +23,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal
 
-from . import command_clients, mcp_clients, settings, state, subprocess_utils, ui
+from . import command_clients, iterm_panels, mcp_clients, settings, state, subprocess_utils, ui
 
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
@@ -1248,6 +1248,7 @@ ALL_COMPONENTS: tuple[str, ...] = (
     "opencode_commands",
     "vscode",
     "vscode_commands",
+    "iterm_panels",
 )
 
 _INSTALLERS = {
@@ -1264,6 +1265,7 @@ _INSTALLERS = {
     "opencode_commands": command_clients.install_opencode_commands,
     "vscode": mcp_clients.install_vscode,
     "vscode_commands": command_clients.install_vscode_commands,
+    "iterm_panels": iterm_panels.install,
 }
 
 _UNINSTALLERS = {
@@ -1280,6 +1282,7 @@ _UNINSTALLERS = {
     "opencode_commands": command_clients.uninstall_opencode_commands,
     "vscode": mcp_clients.uninstall_vscode,
     "vscode_commands": command_clients.uninstall_vscode_commands,
+    "iterm_panels": iterm_panels.uninstall,
 }
 
 

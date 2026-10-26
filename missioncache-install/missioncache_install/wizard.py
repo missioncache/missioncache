@@ -20,7 +20,7 @@ from __future__ import annotations
 import shutil
 import sys
 
-from . import installers, mcp_clients, prereqs, state, ui
+from . import installers, iterm_panels, mcp_clients, prereqs, state, ui
 
 
 # Human-facing descriptions shown next to each y/N prompt.
@@ -73,6 +73,13 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "install /missioncache-load, /missioncache-save, ... as user-level prompt files "
         "(macOS only).",
     ),
+    "iterm_panels": (
+        "iTerm2 panels",
+        "Recent Sessions and Saved Tabs in iTerm2's Toolbelt, plus shortcuts to move "
+        "between Claude sessions and jump to one waiting for you. Adds a LaunchAgent, "
+        "needs iTerm2's Python API turned on, and offers to write three key bindings "
+        "to iTerm2's settings (asks first, backs them up).",
+    ),
 }
 
 
@@ -95,7 +102,12 @@ _TOOL_DETECTORS = {
     "codex": lambda: shutil.which("codex") is not None,
     "opencode": mcp_clients._opencode_detected,
     "vscode": lambda: sys.platform == "darwin" and mcp_clients._vscode_detected(),
+    "iterm_panels": iterm_panels.detected,
 }
+
+# Components that change another app's setup, so the wizard asks with a
+# default of no, and `--all` leaves them out unless named.
+OPT_IN_ONLY: frozenset[str] = frozenset({"iterm_panels"})
 
 
 def run(ctx: installers.InstallContext) -> int:
@@ -160,7 +172,7 @@ def _select_components() -> list[str]:
         label, desc = _COMPONENT_DESCRIPTIONS[name]
         print(f"  {label}")
         print(f"    {desc}")
-        if ui.ask_yn(f"  Install {label}?", default=True):
+        if ui.ask_yn(f"  Install {label}?", default=name not in OPT_IN_ONLY):
             selected.append(name)
             child = COMMAND_IMPLIES.get(name)
             if child is not None:
@@ -274,6 +286,8 @@ def _print_next_steps(selected: list[str]) -> None:
     ui.detail("Resume work:       /missioncache:load")
     if "dashboard" in selected:
         ui.detail("Dashboard:         http://localhost:8787")
+    if "iterm_panels" not in selected and iterm_panels.detected():
+        ui.detail("iTerm2 panels:     uvx missioncache-install --iterm-panels")
     ui.detail("Docs:              https://github.com/missioncache/missioncache")
     print()
     ui.detail("Update later:  uvx missioncache-install --update")
