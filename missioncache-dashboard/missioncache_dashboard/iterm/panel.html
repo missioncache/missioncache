@@ -39,6 +39,9 @@
   .bar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid #8882; }
   .bar button { background: #2a2a2a; border: 1px solid #8884; border-radius: 6px; color: inherit; cursor: pointer; padding: 4px 8px; font: 12px system-ui, sans-serif; }
   .bar .home { flex: 1; display: flex; align-items: center; justify-content: center; }
+  /* block, not inline: an inline image sits on the text baseline, which left
+     it a pixel above the middle of the button. */
+  .bar .home picture, .bar .home img { display: block; }
   .bar .home img { height: 22px; }
   .bar .lead.live { border-color: #5f87ff; color: #9fb7ff; }
   .bar .lead:not(.live) { border-style: dashed; color: #888; }
