@@ -20,6 +20,7 @@ import missioncache_db  # noqa: E402
 from missioncache_db import resume_sessions  # noqa: E402
 
 from missioncache_dashboard.iterm import daemon  # noqa: E402
+from missioncache_dashboard.panels import server  # noqa: E402
 
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
 
@@ -79,27 +80,24 @@ def sandboxed(tmp_path, monkeypatch):
     resume_sessions.record_seen(conn, SID, str(repo), None)
     resume_sessions.close_session(conn, SID, "other")
     conn.close()
-    monkeypatch.setattr(daemon, "state", {})
-    monkeypatch.setattr(daemon, "opening", {})
-    monkeypatch.setattr(daemon, "open_lock", asyncio.Lock())
-    # call() points these at a free port; this restores them afterwards.
-    monkeypatch.setattr(daemon, "PORT", daemon.PORT)
-    monkeypatch.setattr(daemon, "HOST", daemon.HOST)
     focused: list = []
 
-    async def focus(session) -> None:
-        focused.append(session)
+    async def focus(self, row_id: str) -> None:
+        focused.append(row_id)
 
-    monkeypatch.setattr(daemon, "focus", focus)
-    return {"repo": repo, "focused": focused, "app": FakeApp()}
+    monkeypatch.setattr(daemon.ITerm, "focus", focus)
+    app = FakeApp()
+    # call() points the port at a free one.
+    panels = server.Panels(daemon.ITerm(None, app), tmp_path / "iterm", 0)
+    return {"repo": repo, "focused": focused, "app": app, "panels": panels}
 
 
 def _row(list_name: str = "all") -> dict:
-    [row] = daemon.with_db(lambda conn: resume_sessions.list_sessions(conn, list_name, None))
+    [row] = server.with_db(lambda conn: resume_sessions.list_sessions(conn, list_name, None))
     return row
 
 
-def call(app, method: str, path: str, *, host: str | None = None,
+def call(panels, method: str, path: str, *, host: str | None = None,
          panel: bool = True, body: dict | None = None) -> tuple[int, dict, bytes]:
     """One request to a server started for it on a free port."""
 
@@ -108,12 +106,12 @@ def call(app, method: str, path: str, *, host: str | None = None,
         port = server.sockets[0].getsockname()[1]
         server.close()
         await server.wait_closed()
-        daemon.PORT, daemon.HOST = port, f"127.0.0.1:{port}"
-        server = await daemon.serve(None, app)
+        panels.port = port
+        server = await panels.serve()
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             raw = json.dumps(body).encode() if body is not None else b""
-            head = [f"{method} {path} HTTP/1.1", f"Host: {host or daemon.HOST}",
+            head = [f"{method} {path} HTTP/1.1", f"Host: {host or panels.host}",
                     f"Content-Length: {len(raw)}"]
             if panel:
                 head.append("X-Panel: 1")
@@ -133,37 +131,37 @@ def call(app, method: str, path: str, *, host: str | None = None,
 
 
 def test_a_foreign_host_is_refused(sandboxed):
-    status, _, _ = call(sandboxed["app"], "GET", "/resume?list=all", host="evil.example:8791")
+    status, _, _ = call(sandboxed["panels"], "GET", "/resume?list=all", host="evil.example:8791")
     assert status == 403
 
 
 def test_a_write_without_the_panel_header_does_nothing(sandboxed):
-    status, _, _ = call(sandboxed["app"], "POST", f"/resume/{SID}/keep", panel=False)
+    status, _, _ = call(sandboxed["panels"], "POST", f"/resume/{SID}/keep", panel=False)
     assert status == 403
     assert _row()["list"] == "closed"
 
 
 def test_no_cors_and_no_framing(sandboxed):
-    status, headers, _ = call(sandboxed["app"], "GET", "/resume?list=all")
+    status, headers, _ = call(sandboxed["panels"], "GET", "/resume?list=all")
     assert status == 200
     assert "Access-Control-Allow-Origin" not in headers
     assert headers["X-Frame-Options"] == "DENY"
 
 
 def test_keep_and_unsave(sandboxed):
-    assert call(sandboxed["app"], "POST", f"/resume/{SID}/keep")[0] == 200
+    assert call(sandboxed["panels"], "POST", f"/resume/{SID}/keep")[0] == 200
     assert _row()["list"] == "saved"
-    assert call(sandboxed["app"], "POST", f"/resume/{SID}/unsave")[0] == 200
+    assert call(sandboxed["panels"], "POST", f"/resume/{SID}/unsave")[0] == 200
     assert _row()["list"] == "closed"
 
 
 def test_a_malformed_id_is_refused(sandboxed):
-    status, _, body = call(sandboxed["app"], "POST", "/resume/..%2F..%2Fx/keep")
+    status, _, body = call(sandboxed["panels"], "POST", "/resume/..%2F..%2Fx/keep")
     assert (status, body) == (400, b"not a session id")
 
 
 def test_open_types_the_resume_command_in_a_named_tab(sandboxed):
-    status, _, _ = call(sandboxed["app"], "POST", f"/resume/{SID}/open")
+    status, _, _ = call(sandboxed["panels"], "POST", f"/resume/{SID}/open")
     assert status == 200
     [tab] = sandboxed["app"].current_terminal_window.tabs
     row = _row()
@@ -173,31 +171,39 @@ def test_open_types_the_resume_command_in_a_named_tab(sandboxed):
 
 
 def test_open_goes_to_the_tab_already_running_it(sandboxed):
-    daemon.state["w0t0p0"] = {"claude": SID}
-    status, _, _ = call(sandboxed["app"], "POST", f"/resume/{SID}/open")
+    sandboxed["panels"].state["w0t0p0"] = {"claude": SID}
+    status, _, _ = call(sandboxed["panels"], "POST", f"/resume/{SID}/open")
     assert status == 200
-    assert sandboxed["focused"] == [sandboxed["app"].sessions["w0t0p0"]]
+    assert sandboxed["focused"] == ["w0t0p0"]
     assert sandboxed["app"].current_terminal_window.tabs == []
+
+
+def test_open_resumes_in_a_new_tab_when_its_tab_has_closed(sandboxed):
+    sandboxed["panels"].state["w0t5p0"] = {"claude": SID}  # not in the app any more
+    status, _, _ = call(sandboxed["panels"], "POST", f"/resume/{SID}/open")
+    assert status == 200
+    assert sandboxed["focused"] == []
+    assert len(sandboxed["app"].current_terminal_window.tabs) == 1
 
 
 def test_open_refuses_a_missing_directory(sandboxed):
     sandboxed["repo"].rmdir()
-    status, _, body = call(sandboxed["app"], "POST", f"/resume/{SID}/open")
+    status, _, body = call(sandboxed["panels"], "POST", f"/resume/{SID}/open")
     assert status == 400
     assert b"does not exist" in body
     assert sandboxed["app"].current_terminal_window.tabs == []
 
 
 def test_the_star_saves_the_session_in_that_tab(sandboxed):
-    daemon.state["w0t0p0"] = {"claude": SID}
-    assert call(sandboxed["app"], "POST", "/live/w0t0p0/save")[0] == 200
+    sandboxed["panels"].state["w0t0p0"] = {"claude": SID}
+    assert call(sandboxed["panels"], "POST", "/live/w0t0p0/save")[0] == 200
     assert _row()["list"] == "saved"
-    assert call(sandboxed["app"], "POST", "/live/w0t0p0/unsave")[0] == 200
+    assert call(sandboxed["panels"], "POST", "/live/w0t0p0/unsave")[0] == 200
     assert _row()["list"] == "closed"
 
 
 def test_the_star_on_a_tab_without_claude_is_refused(sandboxed):
-    status, _, body = call(sandboxed["app"], "POST", "/live/w9t9p9/save")
+    status, _, body = call(sandboxed["panels"], "POST", "/live/w9t9p9/save")
     assert (status, body) == (400, b"no Claude Code session in that tab")
     assert _row()["list"] == "closed"
 
@@ -220,12 +226,13 @@ def test_two_opens_at_once_resume_the_session_once(sandboxed):
     app.current_terminal_window.async_create_tab = create_tab
 
     async def both():
-        await asyncio.gather(daemon.open_row(None, app, SID), daemon.open_row(None, app, SID))
+        panels = sandboxed["panels"]
+        await asyncio.gather(panels.open_row(SID), panels.open_row(SID))
 
     asyncio.run(both())
     assert len(created) == 1
     assert sum(len(t.current_session.sent) for t in created) == 1
-    assert sandboxed["focused"] == [created[0].current_session]
+    assert sandboxed["focused"] == [created[0].current_session.session_id]
 
 
 def test_no_tab_for_a_folder_with_a_control_character(sandboxed):
@@ -237,6 +244,6 @@ def test_no_tab_for_a_folder_with_a_control_character(sandboxed):
     conn.execute("UPDATE resume_sessions SET cwd = ? WHERE session_id = ?", (str(hostile), SID))
     conn.commit()
     conn.close()
-    status, _, body = call(sandboxed["app"], "POST", f"/resume/{SID}/open")
+    status, _, body = call(sandboxed["panels"], "POST", f"/resume/{SID}/open")
     assert status == 400
     assert sandboxed["app"].current_terminal_window.tabs == []

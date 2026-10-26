@@ -1,4 +1,4 @@
-"""The parts of the iTerm2 panels that need no iTerm2: when a session counts
+"""The parts of the terminal panels that need no terminal: when a session counts
 as changed, what a row is called, the row order and stepping through it.
 
 Activity in a Claude Code session is a change in the status iTerm2's Claude

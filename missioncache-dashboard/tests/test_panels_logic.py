@@ -1,6 +1,6 @@
-"""The iTerm2 panels' rules that need no iTerm2: activity, unseen, names, order, stepping."""
+"""The panels' rules that need no terminal: activity, unseen, names, order, stepping."""
 
-from missioncache_dashboard.iterm import logic
+from missioncache_dashboard.panels import logic
 
 
 def test_a_shell_at_its_prompt_counts_only_input() -> None:
