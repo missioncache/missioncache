@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Recent Sessions</title>
+<style>
+  :root { color-scheme: dark light; --bar: #2a2a2a; --line: #8886; --label: #aaa; }
+  @media (prefers-color-scheme: light) { :root { --bar: #e6e6e6; --label: #555; } }
+  html, body { margin: 0; height: 100%; background: #1e1e1e; overflow: hidden; }
+  @media (prefers-color-scheme: light) { html, body { background: #f5f5f5; } }
+  body { display: flex; flex-direction: column; font: 600 12px "Segoe UI", sans-serif; }
+  iframe { border: 0; width: 100%; min-height: 0; display: block; }
+  #recent { flex: none; }
+  #saved { flex: 1; }
+  /* The Saved Tabs heading is also the handle that moves the split. */
+  #split { flex: none; padding: 5px 10px; background: var(--bar); color: var(--label);
+           border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+           cursor: row-resize; user-select: none; text-transform: uppercase; letter-spacing: .04em; }
+  #split::after { content: "⋯"; float: right; }
+  /* While dragging, the frames would take the mouse events. */
+  body.dragging iframe { pointer-events: none; }
+</style>
+</head>
+<body>
+<!-- Both panels in one window, beside Windows Terminal: the two panels the
+     iTerm2 version shows in its Toolbelt. zoom= makes their 12px text bigger. -->
+<iframe id="recent" src="/?zoom=1.25" title="Recent Sessions"></iframe>
+<div id="split" title="Drag to resize">Saved Tabs</div>
+<iframe id="saved" src="/saved-page?zoom=1.25" title="Saved Tabs"></iframe>
+<script>
+// The share of the height Recent Sessions takes, remembered per viewer.
+// Storage can be missing, so it is optional.
+let share = 0.6;
+try { share = Math.min(0.9, Math.max(0.1, Number(localStorage.getItem("split")) || share)); } catch (e) {}
+const recent = document.getElementById("recent"), split = document.getElementById("split");
+function apply() { recent.style.height = Math.round(share * (innerHeight - split.offsetHeight)) + "px"; }
+split.addEventListener("pointerdown", e => {
+  split.setPointerCapture(e.pointerId);
+  document.body.classList.add("dragging");
+});
+split.addEventListener("pointermove", e => {
+  if (!split.hasPointerCapture(e.pointerId)) return;
+  share = Math.min(0.9, Math.max(0.1, e.clientY / innerHeight));
+  apply();
+});
+split.addEventListener("pointerup", () => {
+  document.body.classList.remove("dragging");
+  try { localStorage.setItem("split", share); } catch (e) {}
+});
+addEventListener("resize", apply);
+apply();
+</script>
+</body>
+</html>

@@ -1,7 +1,8 @@
-"""/api/terminal-panels, behind the iTerm2 card on the Sessions view.
+"""/api/terminal-panels, behind the terminal panels card on the Sessions view.
 
-Spec: the phase 2 plan. It reports whether iTerm2 is there (macOS only), and
-whether the installer recorded the iterm_panels component. A missing or broken
+Spec: the phase 2 and phase 3 plans. It reports whether iTerm2 (macOS only)
+or Windows Terminal (Windows only) is there, and whether the installer
+recorded that terminal's panels, with their shortcuts. A missing or broken
 installer state means not installed, never an error.
 """
 
@@ -58,4 +59,28 @@ def test_not_macos_has_no_iterm(home, monkeypatch):
     (home / "Applications" / "iTerm.app").mkdir(parents=True)
     monkeypatch.setattr(server.sys, "platform", "linux")
     out = server.get_terminal_panels()
-    assert out == {"iterm": False, "installed": False, "shortcuts": False}
+    assert out == {"iterm": False, "wt": False, "installed": False, "shortcuts": False}
+
+
+def _windows_terminal(home, monkeypatch) -> None:
+    monkeypatch.setattr(server.sys, "platform", "win32")
+    apps = home / "local" / "Microsoft" / "WindowsApps" / "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe"
+    apps.mkdir(parents=True)
+    (apps / "wt.exe").touch()
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
+
+
+def test_windows_terminal_and_its_panels(home, monkeypatch):
+    _windows_terminal(home, monkeypatch)
+    _state(home, json.dumps({"components": {"iterm_panels": {"key_bindings": {"keys": ["k"]}}}}))
+    assert server.get_terminal_panels() == {"iterm": False, "wt": True, "installed": False, "shortcuts": False}
+    _state(home, json.dumps({"components": {"wt_panels": {"keys": False}}}))
+    assert (server.get_terminal_panels()["installed"], server.get_terminal_panels()["shortcuts"]) == (True, False)
+    _state(home, json.dumps({"components": {"wt_panels": {"keys": True}}}))
+    assert server.get_terminal_panels()["shortcuts"] is True
+
+
+def test_windows_without_windows_terminal(home, monkeypatch):
+    monkeypatch.setattr(server.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "local"))
+    assert server.get_terminal_panels()["wt"] is False

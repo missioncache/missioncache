@@ -1,6 +1,6 @@
 [project]
 name = "missioncache-dashboard"
-version = "1.0.30"
+version = "1.0.31"
 description = "MissionCache Dashboard - Task analytics and autonomous execution monitoring for Claude Code MissionCache projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -52,6 +52,7 @@ missioncache-dashboard = "missioncache_dashboard.cli:main"
 missioncache-statusline = "missioncache_dashboard.statusline:main"
 mc-dash = "missioncache_dashboard.cli:main"
 missioncache-iterm = "missioncache_dashboard.iterm.daemon:run"
+missioncache-wt = "missioncache_dashboard.wt.daemon:run"
 
 [project.optional-dependencies]
 rss = [
@@ -68,6 +69,10 @@ learn = [
 iterm2 = [
     "iterm2>=2.30,<3; sys_platform == 'darwin'",
     "websockets>=13; sys_platform == 'darwin'",
+]
+# The Windows Terminal panels' daemon (missioncache-install --wt-panels). Windows only.
+wt = [
+    "uiautomation>=2.0.20,<3; sys_platform == 'win32'",
 ]
 dev = [
     "pytest>=7.0",

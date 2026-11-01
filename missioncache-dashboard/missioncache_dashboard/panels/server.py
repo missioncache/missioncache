@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -38,6 +39,12 @@ from . import logic
 
 DASHBOARD_URL = f"http://127.0.0.1:{_env_port()}/"
 REQUEST_TIMEOUT = 5
+# Opening a tab waits for the terminal to show it, which takes longer than
+# any other request. It must outlast every terminal's open_tab.
+OPEN_TIMEOUT = 45
+# After an Open, the session's new tab may take this long to be joined. A
+# second Open meanwhile would resume the transcript in a second process.
+OPEN_HOLD_SECONDS = 30
 MAX_BODY = 64 * 1024
 # Bindings and the lead change over minutes, and finding live sessions checks
 # every pid, so MissionCache is asked less often than the terminal.
@@ -53,6 +60,10 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
 SECURITY_HEADERS = ("X-Frame-Options: DENY\r\n"
                     "Content-Security-Policy: frame-ancestors 'none'\r\n"
                     "X-Content-Type-Options: nosniff\r\n")
+# For a terminal whose window is a page of ours framing both panels.
+FRAMED_HEADERS = ("X-Frame-Options: SAMEORIGIN\r\n"
+                  "Content-Security-Policy: frame-ancestors 'self'\r\n"
+                  "X-Content-Type-Options: nosniff\r\n")
 
 
 class Rejected(Exception):
@@ -60,7 +71,15 @@ class Rejected(Exception):
 
 
 class NotFound(Exception):
-    """A request naming a session, tab or route that is not there."""
+    """A request naming a session or tab that is not there."""
+
+
+class NotOpened(NotFound):
+    """The terminal opened nothing, so another Open may try at once."""
+
+
+class NoRoute(Exception):
+    """A request for a path this server does not serve."""
 
 
 class Terminal(Protocol):
@@ -79,7 +98,8 @@ class Terminal(Protocol):
 
     async def open_tab(self, row: dict[str, Any]) -> str:
         """Open a tab named after a resume row that runs its command, and
-        return the new tab's row id. NotFound when the terminal could not."""
+        return the new tab's row id. NotOpened when nothing was opened,
+        NotFound when a tab may be there but was not seen."""
         ...
 
     def current(self) -> str | None:
@@ -103,17 +123,26 @@ def read_json(path: Path, default: Any) -> Any:
         return default
 
 
-def open_in_browser(fragment: str) -> None:
+def open_in_browser(url: str) -> None:
     # A fixed address, never one from the request.
-    subprocess.run(["open", DASHBOARD_URL + fragment], check=False)
+    if sys.platform == "win32":
+        os.startfile(url)  # the default browser
+    else:
+        subprocess.run(["open", url], check=False)
 
 
 class Panels:
-    def __init__(self, terminal: Terminal, data_dir: Path, port: int) -> None:
+    def __init__(self, terminal: Terminal, data_dir: Path, port: int, *,
+                 pages: dict[str, Path] | None = None, framed: bool = False,
+                 dashboard_url: str = DASHBOARD_URL) -> None:
         self.terminal = terminal
+        self.dashboard_url = dashboard_url
         self.data_dir = data_dir
         self.state_file = data_dir / "state.json"
         self.port = port
+        # A terminal can add pages, and a page of its own may frame the panels.
+        self.pages = {**PAGES, **(pages or {})}
+        self.security_headers = FRAMED_HEADERS if framed else SECURITY_HEADERS
         # Row id -> {"status", "changed", "focused", "title", "path", "name",
         #            "project", "claude"}
         self.state: dict[str, dict[str, Any]] = {}
@@ -123,10 +152,11 @@ class Panels:
         self.lead_title: str | None = None
         # Claude Code session ids in Saved, for the star on a running session.
         self.saved: set[str] = set()
-        # Claude Code session id -> the row of a tab opened to resume it, until
-        # the poll sees Claude Code running there. Opens run one at a time, so
-        # a second click on Open goes to that tab instead of resuming twice.
-        self.opening: dict[str, str] = {}
+        # Claude Code session id -> (the row of a tab opened to resume it, or
+        # None while it opens or when opening failed late, and when the Open
+        # started). Opens run one at a time, so a second click on Open goes
+        # to that tab, or waits, instead of resuming twice.
+        self.opening: dict[str, tuple[str | None, float]] = {}
         self.open_lock = asyncio.Lock()
 
     @property
@@ -213,10 +243,19 @@ class Panels:
     async def open_row(self, claude_id: str) -> None:
         """Go to the tab running this session, or open a tab that resumes it."""
         async with self.open_lock:
-            rid = self.row_for(claude_id) or self.opening.get(claude_id)
+            if (rid := self.row_for(claude_id)) and self.terminal.exists(rid):
+                self.opening.pop(claude_id, None)  # joined: the poll found it
+                await self.focus(rid)
+                return
+            rid, started = self.opening.get(claude_id, (None, 0.0))
             if rid and self.terminal.exists(rid):
                 await self.focus(rid)
                 return
+            # A failure after the terminal was asked can still leave a tab
+            # that resumes the session, so the hold stays until it expires.
+            if time.monotonic() - started < OPEN_HOLD_SECONDS:
+                raise NotFound("a tab for this session was opened a moment ago. "
+                               "Wait for it, or try again in half a minute")
             self.opening.pop(claude_id, None)
             await self.resume_in_new_tab(claude_id)
 
@@ -231,7 +270,15 @@ class Panels:
                            "or its folder name has a control character")
         if not os.path.isdir(row["cwd"]):
             raise NotFound(f"directory {row['cwd']} does not exist")
-        self.opening[claude_id] = await self.terminal.open_tab(row)
+        # Held before the terminal is asked: a timeout or a late failure
+        # cancels this call after the tab may already be there.
+        started = time.monotonic()
+        self.opening[claude_id] = (None, started)
+        try:
+            self.opening[claude_id] = (await self.terminal.open_tab(row), started)
+        except NotOpened:
+            del self.opening[claude_id]
+            raise
 
     def act_on_row(self, claude_id: str, action: str, data: dict[str, Any]) -> None:
         actions = {
@@ -270,16 +317,19 @@ class Panels:
             else:
                 await asyncio.to_thread(self.act_on_row, parts[1], parts[2], data)
         elif parts in (["open", "dashboard"], ["open", "lead"]):
-            await asyncio.to_thread(open_in_browser, "#lead" if parts[1] == "lead" else "")
+            await asyncio.to_thread(open_in_browser, self.dashboard_url + ("#lead" if parts[1] == "lead" else ""))
         else:
-            raise NotFound(f"no route {path}")
+            raise NoRoute(path)
         return b"{}", "application/json"
 
     async def handle_get(self, path: str) -> tuple:
-        if path in PAGES:
-            return await asyncio.to_thread(PAGES[path].read_bytes), CONTENT_TYPES[PAGES[path].suffix]
+        if path in self.pages:
+            page = self.pages[path]
+            return await asyncio.to_thread(page.read_bytes), CONTENT_TYPES[page.suffix]
         if path == "/resume":
             return json.dumps(await self.resume_lists()).encode(), "application/json"
+        # No GET may change anything: a page on another site can send a GET
+        # here without the panel's header, and only the Host check stops it.
         # These read only what the event loop keeps, so they run on it.
         routes = {
             "/state": self.rows,
@@ -289,7 +339,7 @@ class Panels:
             "/current": self.terminal.current,
         }
         if path not in routes:
-            raise FileNotFoundError(path)
+            raise NoRoute(path)
         return json.dumps(routes[path]()).encode(), "application/json"
 
     async def serve(self) -> asyncio.Server:
@@ -319,24 +369,26 @@ class Panels:
                             raise ValueError(f"body of {length} bytes")
                         raw = await reader.readexactly(length)
                 url = urlsplit(target)
-                if method == "POST":
-                    body, ctype = await self.handle_post(url.path, raw)
-                elif method == "GET":
-                    body, ctype = await self.handle_get(url.path)
-                else:
-                    status = "405 Method Not Allowed"
+                opens = method == "POST" and url.path.endswith("/open")
+                async with asyncio.timeout(OPEN_TIMEOUT if opens else REQUEST_TIMEOUT):
+                    if method == "POST":
+                        body, ctype = await self.handle_post(url.path, raw)
+                    elif method == "GET":
+                        body, ctype = await self.handle_get(url.path)
+                    else:
+                        status = "405 Method Not Allowed"
             except Rejected as e:
                 status, body = "403 Forbidden", str(e).encode()
-            except FileNotFoundError:
+            except NoRoute:
                 status = "404 Not Found"
             except (NotFound, ValueError, asyncio.IncompleteReadError, TimeoutError) as e:
                 print(f"{method} {target} failed: {e!r}", flush=True)
-                status, body = "400 Bad Request", str(e).encode()
+                status, body = "400 Bad Request", (str(e) or type(e).__name__).encode()
             except Exception as e:  # noqa: BLE001 - a request must always get an answer
                 traceback.print_exc()
                 status, body = "500 Internal Server Error", repr(e).encode()
             try:
-                writer.write(f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\n{SECURITY_HEADERS}"
+                writer.write(f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\n{self.security_headers}"
                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
                 await writer.drain()
             except ConnectionError:

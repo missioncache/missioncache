@@ -21,7 +21,7 @@ import websockets
 from missioncache_db import MISSIONCACHE_ROOT, resume_sessions
 
 from ..panels import logic
-from ..panels.server import NotFound, Panels, start_holding, stop_holding
+from ..panels.server import NotFound, NotOpened, Panels, start_holding, stop_holding
 
 PORT = int(os.environ.get("MISSIONCACHE_ITERM_PORT", "8791"))
 POLL_SECONDS = 4
@@ -71,7 +71,7 @@ class ITerm:
             window = await iterm2.Window.async_create(self.connection)
             tab = window.current_tab if window else None
         if not tab or not tab.current_session:
-            raise NotFound("iTerm2 did not create the tab")
+            raise NotOpened("iTerm2 did not create the tab")
         await tab.async_set_title(row["name"])
         # The command is derived from the row and quoted, and resume_sessions
         # gives none for a folder name with a control character, so typing it

@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+// ?zoom= makes the 12px text bigger where the panel is a window of its own.
+const zoom = Number(new URLSearchParams(location.search).get("zoom"));
+if (zoom >= 0.5 && zoom <= 3) document.documentElement.style.zoom = zoom;
+</script>
 <style>
   :root { color-scheme: dark light; }
   body { margin: 0; font: 12px system-ui, sans-serif; background: #1e1e1e; color: #ddd; }

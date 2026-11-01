@@ -594,8 +594,9 @@ def _hide_own_console_window() -> None:
         pass
 
 
-def _redirect_output_to_log() -> None:
-    """Point this process's stdout/stderr at the Windows autostart log file.
+def _redirect_output_to_log(path: Path | None = None) -> None:
+    """Point this process's stdout/stderr at the Windows autostart log file,
+    or at ``path``.
 
     Called when serving --hidden: the schtasks/Run-key command lines have no
     shell to redirect with, and the console is hidden, so uvicorn's output
@@ -607,14 +608,15 @@ def _redirect_output_to_log() -> None:
     """
     if sys.platform != "win32":
         return
+    log = path or windows_log_path()
     try:
-        log_dir().mkdir(parents=True, exist_ok=True)
+        log.parent.mkdir(parents=True, exist_ok=True)
         # Flush first: after the dup2 below, whatever is still sitting in the
         # console buffers can no longer reach the handle it was filled for.
         for stream in (sys.stdout, sys.stderr):
             if stream is not None:
                 stream.flush()
-        fd = os.open(str(windows_log_path()), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        fd = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         os.dup2(fd, 1)
         os.dup2(fd, 2)
         os.close(fd)
@@ -628,7 +630,7 @@ def _redirect_output_to_log() -> None:
     except OSError as exc:
         # Never silent: the streams may be unusable, so go straight to the file.
         try:
-            with open(windows_log_path(), "a", encoding="utf-8") as fh:
+            with open(log, "a", encoding="utf-8") as fh:
                 fh.write(f"[{datetime.now().astimezone():%Y-%m-%d %H:%M:%S}] output redirect failed: {exc!r}\n")
         except OSError:
             pass

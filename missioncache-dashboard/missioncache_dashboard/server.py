@@ -41,6 +41,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__, update_check
 from .statusline import ADDON_COLOR_ALLOW
+from .wt import WT_EXE_GLOB
 
 from missioncache_dashboard.lib import config
 from missioncache_dashboard.lib.analytics_db import (
@@ -3860,26 +3861,32 @@ SYSTEM_APPLICATIONS = Path("/Applications")
 
 @app.get("/api/terminal-panels")
 def get_terminal_panels():
-    """Whether this machine can run the iTerm2 panels and whether the
-    installer put them in, for the card on the Sessions view.
+    """Whether this machine can run the iTerm2 or the Windows Terminal panels
+    and whether the installer put them in, for the card on the Sessions view.
 
-    The dashboard cannot import missioncache-install, so the iTerm2 check
-    and the state file path repeat ``iterm_panels.detected`` and
-    ``state.STATE_FILE`` there. Change them together."""
+    The dashboard cannot import missioncache-install, so the terminal checks
+    and the state file path repeat ``iterm_panels.detected``,
+    ``wt_panels.detected`` and ``state.STATE_FILE`` there. Change them
+    together."""
     iterm = sys.platform == "darwin" and any(
         (base / "iTerm.app").exists() for base in (SYSTEM_APPLICATIONS, Path.home() / "Applications")
     )
+    wt = sys.platform == "win32" and any(
+        (Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps")
+        .glob(WT_EXE_GLOB)
+    )
     try:
         recorded = json.loads((Path.home() / ".claude" / "missioncache-install.state.json").read_text(encoding="utf-8"))
-        component = recorded.get("components", {}).get("iterm_panels")
+        component = recorded.get("components", {}).get("wt_panels" if wt else "iterm_panels")
     except (OSError, ValueError, AttributeError):
         component = None
     return {
         "iterm": iterm,
+        "wt": wt,
         "installed": component is not None,
-        # Whether the installer wrote the key bindings. Without them the card
-        # does not show shortcuts that do nothing.
-        "shortcuts": isinstance(component, dict) and bool(component.get("key_bindings")),
+        # Whether the installer wrote the key bindings, or turned on the keys.
+        # Without them the card does not show shortcuts that do nothing.
+        "shortcuts": isinstance(component, dict) and bool(component.get("key_bindings") or component.get("keys")),
     }
 
 

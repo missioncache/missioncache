@@ -8033,11 +8033,11 @@
             // Opened straight on #sessions, this view ends the initial overlay.
             onLoaded() { if (LoadingManager.isInitialLoad) LoadingManager.hide(); },
         });
-        // The iTerm2 panels card: how to add them where iTerm2 is installed,
-        // the shortcuts once they are in. Hidden elsewhere, or once closed.
+        // The terminal panels card: how to add them where iTerm2 or Windows
+        // Terminal is installed, the shortcuts once they are in. Hidden
+        // elsewhere, or once closed.
         const RS_PANELS_KEY = 'missioncache-panels-card-closed';
         const RS_PANELS_DOCS = 'https://github.com/missioncache/missioncache/blob/main/docs/terminal-panels.md';
-        const RS_PANELS_CMD = 'uvx missioncache-install --iterm-panels';
         async function rsPanelsLoad() {
             const card = document.getElementById('rsPanels');
             let closed = false;
@@ -8049,20 +8049,25 @@
                 if (!res.ok) return;
                 info = await res.json();
             } catch (e) { return; }
-            if (!info.iterm) { card.hidden = true; return; }
+            if (!info.iterm && !info.wt) { card.hidden = true; return; }
+            const t = info.wt
+                ? {name: 'Windows Terminal', mod: 'Ctrl', cmd: 'uvx missioncache-install --wt-panels',
+                   open: 'Open them from the Start menu: MissionCache Panels.', where: 'beside Windows Terminal'}
+                : {name: 'iTerm2', mod: 'Cmd', cmd: 'uvx missioncache-install --iterm-panels',
+                   open: 'Open them from View &gt; Toolbelt in iTerm2.', where: "in iTerm2's Toolbelt"};
             const docs = `<a href="${RS_PANELS_DOCS}" target="_blank" rel="noopener">How it works</a>`;
             card.innerHTML = (info.installed
                 ? (info.shortcuts
-                    ? `<span>iTerm2 panels are on. <kbd>Cmd+Shift+]</kbd> next session, <kbd>Cmd+Shift+[</kbd> previous, <kbd>Cmd+Shift+\\</kbd> the one waiting for you.</span> ${docs}`
-                    : `<span>iTerm2 panels are on. Open them from View &gt; Toolbelt in iTerm2.</span> ${docs}`)
-                : `<span>See these lists in iTerm2's Toolbelt, and switch sessions from the keyboard:</span>
-                   <code>${RS_PANELS_CMD}</code>
+                    ? `<span>${t.name} panels are on. <kbd>${t.mod}+Shift+]</kbd> next session, <kbd>${t.mod}+Shift+[</kbd> previous, <kbd>${t.mod}+Shift+\\</kbd> the one waiting for you.</span> ${docs}`
+                    : `<span>${t.name} panels are on. ${t.open}</span> ${docs}`)
+                : `<span>See these lists ${t.where}, and switch sessions from the keyboard:</span>
+                   <code>${t.cmd}</code>
                    <button class="rs-act" id="rsPanelsCopy">Copy</button> ${docs}`)
                 + '<button class="rs-act rs-panels-close" id="rsPanelsClose" aria-label="Close this card">Close</button>';
             card.hidden = false;
             const copy = document.getElementById('rsPanelsCopy');
             if (copy) copy.onclick = async () => {
-                try { await navigator.clipboard.writeText(RS_PANELS_CMD); copy.textContent = 'Copied'; }
+                try { await navigator.clipboard.writeText(t.cmd); copy.textContent = 'Copied'; }
                 catch (e) { copy.textContent = 'Copy failed'; }
                 setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
             };
