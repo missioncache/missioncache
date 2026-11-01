@@ -11,6 +11,7 @@ MissionCache keeps everything on your machine. There is no account, no telemetry
 | `~/.claude/rules/` | The MissionCache rule file, copied there by the `SessionStart` hook. |
 | `~/.claude/hooks-state.db`, `~/.claude/hooks/state/` | Per-session state: which project a session is bound to, context use for the statusline. |
 | `~/.missioncache/iterm/` | Only with the iTerm2 panels: their program, a log, and the names and folders of your open tabs with which ones you have looked at. A LaunchAgent, `com.missioncache.iterm`, starts them at login. If you let the installer add the shortcuts, it changes iTerm2's settings and keeps a copy of them in `~/.missioncache/backups/`. |
+| `~/.missioncache/wt/` | Only with the Windows Terminal panels: their program, a log, and the names and folders of your open tabs with which ones you have looked at. A Task Scheduler task, `MissionCacheWtPanels`, starts them at logon (or an entry of the same name under the HKCU Run key), and a Start menu shortcut opens them. They read session titles from Claude Code's files under `~/.claude`. If you turn the shortcuts on, a keyboard hook runs while the panels do. Windows passes it every key press. It looks only for `Ctrl+Shift+[`, `]` and `\` while Windows Terminal is in front, and stores and sends nothing. |
 
 Uninstalling MissionCache does not delete `~/.missioncache/`, so your projects survive a reinstall. Delete the folder yourself to remove them.
 
@@ -28,7 +29,7 @@ The change log keeps a project's history after you complete, rename or delete th
 | `fonts.googleapis.com`, `fonts.gstatic.com`, `cdn.jsdelivr.net` | When you open the dashboard in your browser | Your browser loads fonts and chart libraries, like any web page. |
 | A calendar URL you configure | The daily brief, only if you add an ICS feed | A request for that feed. |
 
-Each sign-in token goes only to the company that issued it. The dashboard listens on `127.0.0.1:8787` and never on an external interface. The iTerm2 panels listen on `127.0.0.1:8791` and talk to iTerm2 through its local Python API. They refuse requests from web pages. Other programs running as you on the same Mac can read the tab names and folders they show, as they could read the files on disk.
+Each sign-in token goes only to the company that issued it. The dashboard listens on `127.0.0.1:8787` and never on an external interface. The terminal panels listen on `127.0.0.1:8791`. They talk to iTerm2 through its local Python API, and read Windows Terminal's tabs through Windows UI Automation. They refuse requests from web pages. Other programs running as you on the same computer can read the tab names and folders they show, as they could read the files on disk.
 
 ## Questions
 

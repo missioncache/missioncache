@@ -34,7 +34,8 @@ uvx missioncache-install --all --yes --no-statusline  # everything but the statu
 | `--plugin`, `--dashboard`, `--missioncache-auto`, `--statusline`, `--rules`, `--user-commands`, `--missioncache-db`, `--codex`, `--opencode`, `--vscode` | Install only the parts you name. |
 | `--no-<part>` | Leave a part out. Works only together with `--all` or with named parts. |
 | `--iterm-panels` | Add the [iTerm2 panels](terminal-panels.md) (macOS). Not part of `--all`. |
-| `--no-service` | Install the dashboard (and the iTerm2 panels) but do not start them at login. |
+| `--wt-panels` | Add the [Windows Terminal panels](terminal-panels.md) (Windows). Not part of `--all`. |
+| `--no-service` | Install the dashboard (and the terminal panels) but do not start them at login. |
 | `--port N` | Run the dashboard on port `N` instead of 8787. |
 | `--yes`, `-y` | Do not ask before each file change. |
 | `--update` | Update what you installed. See [Upgrading](#upgrading). |
@@ -42,7 +43,7 @@ uvx missioncache-install --all --yes --no-statusline  # everything but the statu
 
 The statusline needs the dashboard package, so asking for the statusline adds the dashboard too. Running the installer again is safe.
 
-**iTerm2 panels (optional, macOS).** Two Toolbelt panels that list your Claude sessions, and shortcuts to switch between them. The wizard offers them only when iTerm2 is installed, with a default of no. To add them to an existing install, run `uvx missioncache-install --iterm-panels`. See [iTerm2 panels](terminal-panels.md).
+**Terminal panels (optional).** Two panels that list your Claude sessions, and shortcuts to switch between them: in iTerm2's Toolbelt on macOS, or in a window beside Windows Terminal on Windows. The wizard offers them only when the terminal is installed, with a default of no. To add them to an existing install, run `uvx missioncache-install --iterm-panels` or `--wt-panels`. See [Terminal panels](terminal-panels.md).
 
 ## Plugin only
 
@@ -88,6 +89,7 @@ Install MissionCache where Claude Code runs. If you use the Windows app, install
 - The hooks need **Claude Code 2.1.139 or newer**. With an older client they do not run.
 - If a hook times out once on a new machine, run `uv python install` and try again.
 - The dashboard starts at login as a Task Scheduler task. Its log is `~/.claude/logs/missioncache-dashboard-windows.log`.
+- The optional Windows Terminal panels start at login the same way. Their log is `~/.missioncache/wt/run.log`.
 - VSCode is not added on Windows. Codex and OpenCode are.
 - You can import a shared project on Windows, but you cannot export one from Windows.
 - If `--update` says the dashboard files are in use, close the processes it names (or reboot) and run `--update` again.

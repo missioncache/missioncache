@@ -36,7 +36,7 @@ Claude Code sessions that closed show up here with their name, folder and a **Co
 
 A session that ends without saying so, for example when you close its tab, shows up the next time the list is read. Sessions started by MissionCache Auto are not listed.
 
-On a Mac with iTerm2, a card at the top shows how to get the same lists in iTerm2's Toolbelt. See [iTerm2 panels](terminal-panels.md).
+On a Mac with iTerm2, or on Windows with Windows Terminal, a card at the top shows how to get the same lists beside your terminal. See [Terminal panels](terminal-panels.md).
 
 ### Projects
 

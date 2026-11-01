@@ -9,6 +9,8 @@ All notable changes to MissionCache, newest first. Entries dated before the 2026
 ## Unreleased
 
 - `--iterm-panels` no longer prints how to bind the shortcuts when they are already bound. (missioncache-install)
+- Optional Windows Terminal panels list your Claude sessions in a window beside the terminal. Add them with `uvx missioncache-install --wt-panels`. (missioncache-dashboard, missioncache-install)
+- Clicking Open twice in the iTerm2 panels no longer risks resuming the same session in two tabs. (missioncache-dashboard)
 
 ## 2026-10-26
 
