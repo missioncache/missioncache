@@ -70,6 +70,7 @@ _COMPONENT_LABELS: dict[str, str] = {
     "vscode": "VSCode MCP",
     "vscode_commands": "VSCode slash commands",
     "iterm_panels": "iTerm2 panels",
+    "wt_panels": "Windows Terminal panels",
 }
 
 # Brand gradient, approximately matching the logo's purple→blue:

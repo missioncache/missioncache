@@ -1,9 +1,7 @@
 """iTerm2 panels: the `missioncache-iterm` daemon as a LaunchAgent (macOS only).
 
-The daemon ships as the `iterm2` extra of missioncache-dashboard. It gets a venv
-of its own under ~/.missioncache/iterm/venv rather than riding in the
-dashboard's tool venv: `--update` reinstalls the dashboard with `--force` and
-no extras, which would strip the iterm2 dependency from under a running daemon.
+The daemon ships as the `iterm2` extra of missioncache-dashboard, in a venv of
+its own under ~/.missioncache/iterm/venv (see daemon_venv).
 
 Key bindings are opt-in and default to no, because they change iTerm2's own
 settings. They are written in keycode form with LanguageAgnosticKeyBindings on,
@@ -21,8 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import state, subprocess_utils, ui
-
+from . import daemon_venv, state, subprocess_utils, ui
 
 COMPONENT = "iterm_panels"
 LABEL = "com.missioncache.iterm"
@@ -93,36 +90,6 @@ def render_plist(dashboard_port: int = 8787) -> bytes:
         "StandardOutPath": log,
         "StandardErrorPath": log,
     })
-
-
-def _install_packages(repo_root: Path | None) -> None:
-    """Create the venv if missing, then install or upgrade the daemon into it:
-    editable from the clone at ``repo_root``, or from PyPI when it is None."""
-    python = _venv_python()
-    uv = shutil.which("uv")
-    if not python.exists():
-        venv = str(python.parent.parent)
-        if uv:
-            cmd = [uv, "venv", "--python", ">=3.11", venv]
-        else:
-            cmd = [sys.executable, "-m", "venv", venv]
-        ui.detail(f"Running: {' '.join(cmd)}")
-        subprocess_utils.run_streaming(cmd)
-    if repo_root is not None:
-        packages = [
-            "-e", str(repo_root / "missioncache-db"),
-            "-e", f"{repo_root / 'missioncache-dashboard'}[iterm2]",
-        ]
-    else:
-        packages = ["--upgrade", "missioncache-dashboard[iterm2]"]
-    if uv:
-        cmd = [uv, "pip", "install", "--python", str(python), *packages]
-        if repo_root is None:
-            cmd.append("--refresh")
-    else:
-        cmd = [str(python), "-m", "pip", "install", "--quiet", *packages]
-    ui.detail(f"Running: {' '.join(cmd)}")
-    subprocess_utils.run_streaming(cmd)
 
 
 def _load_service(dashboard_port: int) -> None:
@@ -237,7 +204,8 @@ def install(ctx) -> None:
     data_dir = _data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(data_dir, 0o700)
-    _install_packages(installers._require_repo(ctx) if mode == "local" else None)
+    daemon_venv.install_packages(_venv_python(), "iterm2",
+                                 installers._require_repo(ctx) if mode == "local" else None)
     components = state.load().get("components", {})
     prior = components.get(COMPONENT, {})
     info = {"mode": mode, "service": installers._service_kind(ctx.skip_service)}

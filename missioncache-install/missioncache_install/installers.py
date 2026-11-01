@@ -23,7 +23,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal
 
-from . import command_clients, iterm_panels, mcp_clients, settings, state, subprocess_utils, ui
+from . import command_clients, iterm_panels, mcp_clients, settings, state, subprocess_utils, ui, wt_panels
 
 
 MARKETPLACE_DIR = Path.home() / ".claude" / "plugins" / "local-marketplace"
@@ -349,7 +349,9 @@ def _dashboard_tool_roots() -> list[str]:
     return [root.rstrip("\\/") + os.sep for root in roots]
 
 
-def _windows_tool_processes(*, quiet: bool = False) -> list[tuple[int, str]] | None:
+def _windows_tool_processes(
+    *, quiet: bool = False, roots: list[str] | None = None
+) -> list[tuple[int, str]] | None:
     """PIDs whose executable runs from a dashboard tool root, or None if unknown.
 
     Windows refuses to delete a directory that holds a running executable, so
@@ -369,15 +371,13 @@ def _windows_tool_processes(*, quiet: bool = False) -> list[tuple[int, str]] | N
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", _PROBE_SCRIPT],
             check=True,
             timeout=20,
-            extra_env={_ROOTS_ENV: ";".join(_dashboard_tool_roots())},
+            extra_env={_ROOTS_ENV: ";".join(_dashboard_tool_roots() if roots is None else roots)},
         )
     except subprocess_utils.CommandFailed as e:
         if not quiet:
             detail = (e.stderr or e.stdout or "").strip() or f"exit {e.returncode}"
-            ui.warn(
-                "Could not check what is running from the dashboard's install "
-                f"directory: {detail}"
-            )
+            where = "the dashboard's install directory" if roots is None else ", ".join(roots)
+            ui.warn(f"Could not check what is running from {where}: {detail}")
         return None
     found: list[tuple[int, str]] = []
     for line in (result.stdout or "").splitlines():
@@ -394,9 +394,10 @@ def _describe_processes(processes: list[tuple[int, str]]) -> str:
 
 
 def _clear_dashboard_processes(
-    *, poll_attempts: int = 20, poll_interval: float = 0.5
+    *, poll_attempts: int = 20, poll_interval: float = 0.5, roots: list[str] | None = None
 ) -> tuple[_ClearState, list[tuple[int, str]]]:
-    """Stop everything running from the dashboard tool roots, and verify.
+    """Stop everything running from the dashboard tool roots (or `roots`,
+    each with a trailing separator), and verify.
 
     Returns (state, processes):
       ("clear", stopped)  - nothing runs there any more; `stopped` is what was killed
@@ -413,7 +414,7 @@ def _clear_dashboard_processes(
     """
     if sys.platform != "win32":
         return ("clear", [])
-    processes = _windows_tool_processes()
+    processes = _windows_tool_processes(roots=roots)
     if processes is None:
         return ("unknown", [])
     if not processes:
@@ -427,7 +428,7 @@ def _clear_dashboard_processes(
             ui.warn(f"Could not stop {name} (pid {pid}): {reason}")
     remaining: list[tuple[int, str]] | None = processes
     for _ in range(poll_attempts):
-        remaining = _windows_tool_processes(quiet=True)
+        remaining = _windows_tool_processes(quiet=True, roots=roots)
         if remaining is None:
             # We killed everything we could see and can no longer verify.
             return ("unknown", processes)
@@ -1249,6 +1250,7 @@ ALL_COMPONENTS: tuple[str, ...] = (
     "vscode",
     "vscode_commands",
     "iterm_panels",
+    "wt_panels",
 )
 
 _INSTALLERS = {
@@ -1266,6 +1268,7 @@ _INSTALLERS = {
     "vscode": mcp_clients.install_vscode,
     "vscode_commands": command_clients.install_vscode_commands,
     "iterm_panels": iterm_panels.install,
+    "wt_panels": wt_panels.install,
 }
 
 _UNINSTALLERS = {
@@ -1283,6 +1286,7 @@ _UNINSTALLERS = {
     "vscode": mcp_clients.uninstall_vscode,
     "vscode_commands": command_clients.uninstall_vscode_commands,
     "iterm_panels": iterm_panels.uninstall,
+    "wt_panels": wt_panels.uninstall,
 }
 
 

@@ -6,6 +6,7 @@ Invocation patterns:
     uvx missioncache-install --dashboard           # install only the dashboard
     uvx missioncache-install --all --no-statusline # install everything except the statusline
     uvx missioncache-install --iterm-panels        # add the iTerm2 panels (macOS, opt-in)
+    uvx missioncache-install --wt-panels           # add the Windows Terminal panels (Windows, opt-in)
     uvx missioncache-install --update              # refresh whatever is in state.json
     uvx missioncache-install --uninstall           # interactive uninstall wizard (TTY only)
     uvx missioncache-install --uninstall --all     # uninstall every tracked component
@@ -13,7 +14,8 @@ Invocation patterns:
     uvx missioncache-install --local               # maintainer mode: editable installs from clone
 
 Project data and DBs at `~/.missioncache/` are never touched by any uninstall flow.
-The one exception is `~/.missioncache/iterm/`, the iTerm2 panels' own program and state.
+The exceptions are `~/.missioncache/iterm/` and `~/.missioncache/wt/`, the terminal panels'
+own program and state.
 """
 
 from __future__ import annotations
@@ -99,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
     opt_in.add_argument(
         "--iterm-panels", dest="iterm_panels", action="store_true",
         help="iTerm2 Toolbelt panels and session shortcuts (macOS). Not part of --all.",
+    )
+    opt_in.add_argument(
+        "--wt-panels", dest="wt_panels", action="store_true",
+        help="Windows Terminal panels and, if you choose, session shortcuts (Windows). Not part of --all.",
     )
 
     opt_out = p.add_argument_group(

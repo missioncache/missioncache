@@ -20,7 +20,7 @@ from __future__ import annotations
 import shutil
 import sys
 
-from . import installers, iterm_panels, mcp_clients, prereqs, state, ui
+from . import installers, iterm_panels, mcp_clients, prereqs, state, ui, wt_panels
 
 
 # Human-facing descriptions shown next to each y/N prompt.
@@ -80,6 +80,12 @@ _COMPONENT_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "needs iTerm2's Python API turned on, and offers to write three key bindings "
         "to iTerm2's settings (asks first, backs them up).",
     ),
+    "wt_panels": (
+        "Windows Terminal panels",
+        "Recent Sessions and Saved Tabs in a window beside Windows Terminal, opened from "
+        "the Start menu. Adds a logon task, and asks whether to turn on three shortcuts "
+        "to move between Claude sessions (they need a keyboard hook).",
+    ),
 }
 
 
@@ -103,11 +109,12 @@ _TOOL_DETECTORS = {
     "opencode": mcp_clients._opencode_detected,
     "vscode": lambda: sys.platform == "darwin" and mcp_clients._vscode_detected(),
     "iterm_panels": iterm_panels.detected,
+    "wt_panels": wt_panels.detected,
 }
 
 # Components that change another app's setup, so the wizard asks with a
 # default of no, and `--all` leaves them out unless named.
-OPT_IN_ONLY: frozenset[str] = frozenset({"iterm_panels"})
+OPT_IN_ONLY: frozenset[str] = frozenset({"iterm_panels", "wt_panels"})
 
 
 def run(ctx: installers.InstallContext) -> int:
@@ -288,6 +295,8 @@ def _print_next_steps(selected: list[str]) -> None:
         ui.detail("Dashboard:         http://localhost:8787")
     if "iterm_panels" not in selected and iterm_panels.detected():
         ui.detail("iTerm2 panels:     uvx missioncache-install --iterm-panels")
+    if "wt_panels" not in selected and wt_panels.detected():
+        ui.detail("Terminal panels:   uvx missioncache-install --wt-panels")
     ui.detail("Docs:              https://github.com/missioncache/missioncache")
     print()
     ui.detail("Update later:  uvx missioncache-install --update")
