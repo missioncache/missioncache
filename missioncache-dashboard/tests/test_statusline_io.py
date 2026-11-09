@@ -6,6 +6,7 @@ Tests use tmp_path and monkeypatch to isolate filesystem operations.
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import time
 
@@ -829,3 +830,34 @@ class TestMainCrashGuard:
         monkeypatch.setattr(mod, "_run", lambda: None)
         mod.main()
         assert not (tmp_path / ".claude" / "logs" / "statusline-errors.log").exists()
+
+
+# ── get_git_info ─────────────────────────────────────────────────────────
+
+
+class TestGetGitInfo:
+    def test_status_does_not_take_the_index_lock(self, monkeypatch):
+        """The status call must opt out of optional locks, or every render
+        holds .git/index.lock and collides with the user's own git commands."""
+        calls = []
+
+        def fake(cmd, timeout=5):
+            calls.append(cmd)
+            return "/tmp/repo" if "--show-toplevel" in cmd else "x"
+
+        monkeypatch.setattr(mod, "run_cmd", fake)
+        mod.get_git_info()
+        status = [c for c in calls if "status" in c]
+        assert status == [["git", "--no-optional-locks", "status", "--porcelain"]]
+
+    def test_reports_repo_branch_and_dirty_state(self, tmp_path, monkeypatch):
+        def git(*args):
+            subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+        git("init", "-q", "-b", "main")
+        git("-c", "user.name=t", "-c", "user.email=t@example.com",
+            "commit", "-q", "--allow-empty", "-m", "init")
+        monkeypatch.chdir(tmp_path)
+        assert mod.get_git_info() == (tmp_path.name, "main", False)
+        (tmp_path / "new.txt").write_text("x")
+        assert mod.get_git_info() == (tmp_path.name, "main", True)

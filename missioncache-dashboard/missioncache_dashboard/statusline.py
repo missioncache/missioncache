@@ -1028,7 +1028,11 @@ def get_git_info() -> tuple[str, str, bool]:
     branch = run_cmd(["git", "branch", "--show-current"]) or ""
     if not branch:
         branch = run_cmd(["git", "rev-parse", "--short", "HEAD"]) or ""
-    porcelain = run_cmd(["git", "status", "--porcelain"])
+    # --no-optional-locks: a plain `git status` takes .git/index.lock to refresh
+    # the index, for nearly its whole run. In a large repo that is seconds per
+    # render, and any git command the user runs meanwhile fails with
+    # "Unable to create index.lock". A read-only status needs no lock.
+    porcelain = run_cmd(["git", "--no-optional-locks", "status", "--porcelain"])
     return repo_name, branch, bool(porcelain)
 
 
