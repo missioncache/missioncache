@@ -2672,5 +2672,31 @@
       "title": "/blob/main/docs/missioncache-auto.md",
       "uniques": 1
     }
+  ],
+  "2026-11-12": [
+    {
+      "count": 3,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 3
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/commands/rename.md",
+      "title": "/blob/main/commands/rename.md",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/commands/save.md",
+      "title": "/blob/main/commands/save.md",
+      "uniques": 1
+    },
+    {
+      "count": 1,
+      "path": "/missioncache/missioncache/blob/main/docs/missioncache-auto.md",
+      "title": "/blob/main/docs/missioncache-auto.md",
+      "uniques": 1
+    }
   ]
 }
