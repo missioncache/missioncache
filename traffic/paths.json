@@ -2898,5 +2898,19 @@
       "title": "/commits",
       "uniques": 1
     }
+  ],
+  "2026-11-23": [
+    {
+      "count": 7,
+      "path": "/missioncache/missioncache",
+      "title": "Overview",
+      "uniques": 7
+    },
+    {
+      "count": 2,
+      "path": "/missioncache/missioncache/commits",
+      "title": "/commits",
+      "uniques": 1
+    }
   ]
 }
